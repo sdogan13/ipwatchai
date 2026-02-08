@@ -60,17 +60,27 @@ class AuthSettings(BaseSettings):
     """Authentication Configuration"""
     secret_key: str = Field(default="your-super-secret-key-change-in-production", env="AUTH_SECRET_KEY")
     algorithm: str = Field(default="HS256", env="AUTH_ALGORITHM")
-    
+
     # Token expiry
     access_token_expire_minutes: int = Field(default=30, env="ACCESS_TOKEN_EXPIRE_MINUTES")
     refresh_token_expire_days: int = Field(default=7, env="REFRESH_TOKEN_EXPIRE_DAYS")
-    
+
     # Password requirements
     password_min_length: int = Field(default=8, env="PASSWORD_MIN_LENGTH")
-    
+
     # Rate limiting
     login_rate_limit: int = Field(default=5, env="LOGIN_RATE_LIMIT")  # per minute
     api_rate_limit: int = Field(default=100, env="API_RATE_LIMIT")  # per minute
+
+    @validator("secret_key")
+    def validate_secret_key(cls, v):
+        if v == "your-super-secret-key-change-in-production":
+            if os.getenv("ENVIRONMENT", "development") == "production":
+                raise ValueError(
+                    "FATAL: You must set a unique AUTH_SECRET_KEY in production. "
+                    "The default secret key is not allowed when ENVIRONMENT=production."
+                )
+        return v
 
 
 class AISettings(BaseSettings):
