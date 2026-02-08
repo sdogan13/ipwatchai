@@ -22,7 +22,7 @@ from openpyxl.styles import Font, PatternFill, Alignment
 from config.settings import settings
 from auth.authentication import (
     CurrentUser, TokenPair, UserLogin, UserRegister, PasswordChange,
-    get_current_user, require_role, create_token_pair,
+    get_current_user, require_role, create_token_pair, decode_token,
     hash_password, verify_password, generate_verification_token
 )
 from models.schemas import (
@@ -208,13 +208,62 @@ async def login(request: Request, data: UserLogin):
         )
 
 
+class RefreshTokenRequest(PydanticBaseModel):
+    refresh_token: str
+
+
 @auth_router.post("/refresh", response_model=TokenPair)
-async def refresh_token(current_user: CurrentUser = Depends(get_current_user)):
-    """Refresh access token"""
+@limiter.limit(f"{settings.auth.login_rate_limit}/minute")
+async def refresh_token(request: Request, data: RefreshTokenRequest):
+    """
+    Refresh access token using a valid refresh token.
+    Does NOT require the Authorization header — the refresh token is sent in the body.
+    """
+    from psycopg2.extras import RealDictCursor
+
+    payload = decode_token(data.refresh_token)
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token"
+        )
+
+    if payload.type != "refresh":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token type — expected refresh token"
+        )
+
+    # Verify user still exists and is active
+    with Database() as db:
+        cur = db.cursor()
+        cur.execute(
+            "SELECT id, role, is_active FROM users WHERE id = %s",
+            (payload.sub,)
+        )
+        user = cur.fetchone()
+        if user is None or not user['is_active']:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found or deactivated"
+            )
+
+        # Verify org is active
+        cur.execute(
+            "SELECT id, is_active FROM organizations WHERE id = %s",
+            (payload.org,)
+        )
+        org = cur.fetchone()
+        if org is None or not org['is_active']:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Organization is deactivated"
+            )
+
     return create_token_pair(
-        str(current_user.id),
-        str(current_user.organization_id),
-        current_user.role
+        payload.sub,
+        payload.org,
+        user['role']
     )
 
 
