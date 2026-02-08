@@ -229,6 +229,7 @@ def check_live_search_eligibility(db, user_id: str) -> Tuple[bool, str, dict]:
     monthly_limit = plan['monthly_limit']
 
     if not can_use:
+        logger.info(f"Feature denied: user={user_id} plan={plan_name} feature=live_search reason=upgrade_required")
         return False, "upgrade_required", {
             "error": "upgrade_required",
             "current_plan": plan_name,
@@ -241,6 +242,7 @@ def check_live_search_eligibility(db, user_id: str) -> Tuple[bool, str, dict]:
     current_usage = get_live_search_usage(db, user_id)
 
     if current_usage >= monthly_limit:
+        logger.info(f"Plan limit reached: user={user_id} plan={plan_name} feature=live_search limit={monthly_limit}")
         return False, "limit_exceeded", {
             "error": "limit_exceeded",
             "current_plan": plan_name,
@@ -310,6 +312,7 @@ def check_quick_search_eligibility(db, user_id: str) -> Tuple[bool, str, dict]:
     used_today = get_daily_quick_searches(db, user_id)
 
     if used_today >= daily_limit:
+        logger.info(f"Plan limit reached: user={user_id} plan={plan_name} feature=quick_search limit={daily_limit}")
         return False, "daily_limit_exceeded", {
             "error": "daily_limit_exceeded",
             "current_plan": plan_name,
@@ -321,6 +324,11 @@ def check_quick_search_eligibility(db, user_id: str) -> Tuple[bool, str, dict]:
         }
 
     remaining = daily_limit - used_today
+
+    # Abuse indicator: 80% of daily cap consumed
+    if daily_limit > 0 and used_today >= daily_limit * 0.8:
+        logger.info(f"High usage: user={user_id} plan={plan_name} feature=quick_search used={used_today}/{daily_limit}")
+
     return True, "ok", {
         "current_plan": plan_name,
         "daily_limit": daily_limit,
@@ -488,6 +496,7 @@ def check_name_generation_eligibility(db, org_id: str, session_count: int) -> Tu
     monthly_used = get_monthly_name_generations(db, org_id)
 
     if monthly_used >= monthly_limit:
+        logger.info(f"Plan limit reached: org={org_id} plan={plan_name} feature=name_generation limit={monthly_limit}")
         return False, "monthly_limit_exceeded", {
             "error": "credits_exhausted",
             "current_plan": plan_name,

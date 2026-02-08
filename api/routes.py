@@ -163,12 +163,14 @@ async def register(request: Request, data: UserRegister):
             ))
             
             # Generate tokens
+            ip = request.client.host if request.client else "unknown"
+            logger.info(f"New registration: user={user['id']} email={data.email} org={user['organization_id']} IP={ip}")
             return create_token_pair(
                 str(user['id']),
                 str(user['organization_id']),
                 user['role']
             )
-            
+
         except ValueError as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
@@ -177,30 +179,35 @@ async def register(request: Request, data: UserRegister):
 @limiter.limit(f"{settings.auth.login_rate_limit}/minute")
 async def login(request: Request, data: UserLogin):
     """Login with email and password"""
+    ip = request.client.host if request.client else "unknown"
     with Database() as db:
         user = UserCRUD.get_by_email(db, data.email)
-        
+
         if not user:
+            logger.warning(f"Failed login: email={data.email} IP={ip} reason=user_not_found")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials"
             )
-        
+
         if not user['is_active']:
+            logger.warning(f"Failed login: email={data.email} IP={ip} reason=account_deactivated")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Account is deactivated"
             )
-        
+
         if not verify_password(data.password, user['password_hash']):
+            logger.warning(f"Failed login: email={data.email} IP={ip} reason=wrong_password")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials"
             )
-        
+
         # Update last login
         UserCRUD.update_login(db, UUID(user['id']))
-        
+
+        logger.info(f"Successful login: user={user['id']} email={data.email} IP={ip}")
         return create_token_pair(
             str(user['id']),
             str(user['organization_id']),
@@ -260,6 +267,7 @@ async def refresh_token(request: Request, data: RefreshTokenRequest):
                 detail="Organization is deactivated"
             )
 
+    logger.info(f"Token refresh: user={payload.sub}")
     return create_token_pair(
         payload.sub,
         payload.org,

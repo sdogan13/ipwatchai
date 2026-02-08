@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from pathlib import Path
@@ -184,7 +184,17 @@ limiter = Limiter(
     default_limits=[f"{settings.auth.api_rate_limit}/minute"]
 )
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+async def _custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    """Log rate limit hits before returning 429."""
+    ident = getattr(request.state, "_rate_limit_key", None)
+    ip = request.client.host if request.client else "unknown"
+    logger.warning(f"Rate limit hit: ident={ident} endpoint={request.url.path} IP={ip} limit={exc.detail}")
+    return JSONResponse(
+        status_code=429,
+        content={"detail": {"message": "Rate limit exceeded", "limit": str(exc.detail)}},
+    )
+
+app.add_exception_handler(RateLimitExceeded, _custom_rate_limit_handler)
 
 
 # Global exception handler

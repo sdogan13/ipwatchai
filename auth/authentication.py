@@ -2,12 +2,15 @@
 Authentication Module
 JWT-based authentication with password hashing
 """
+import logging
 import secrets
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
 from uuid import UUID
 
 import bcrypt
+
+logger = logging.getLogger(__name__)
 from jose import JWTError, jwt
 from pydantic import BaseModel, EmailStr, Field, validator
 from fastapi import Depends, HTTPException, status
@@ -253,6 +256,7 @@ async def get_current_user(
         )
         user = cur.fetchone()
         if user is None or not user['is_active']:
+            logger.warning(f"Blocked auth: user={payload.sub} reason=inactive_or_missing")
             raise credentials_exception
 
         # Verify organization is active
@@ -262,6 +266,7 @@ async def get_current_user(
         )
         org = cur.fetchone()
         if org is None or not org['is_active']:
+            logger.warning(f"Blocked auth: user={payload.sub} org={payload.org} reason=org_deactivated")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Organization is deactivated"
