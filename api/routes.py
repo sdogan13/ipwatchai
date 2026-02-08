@@ -936,7 +936,10 @@ async def download_template():
 
 
 @watchlist_router.post("/upload/detect-columns", response_model=ColumnDetectionResponse)
-async def detect_columns(file: UploadFile = File(...)):
+async def detect_columns(
+    file: UploadFile = File(...),
+    current_user: CurrentUser = Depends(get_current_user)
+):
     """Read file and return column names for mapping UI."""
     contents = await file.read()
     filename = file.filename.lower() if file.filename else ""
@@ -2065,7 +2068,7 @@ async def get_dashboard_stats(current_user: CurrentUser = Depends(get_current_us
 # ==========================================
 
 @admin_router.get("/idf-stats")
-async def get_idf_stats(user: CurrentUser = Depends(get_current_user)):
+async def get_idf_stats(user: CurrentUser = Depends(require_role(["owner", "admin"]))):
     """
     Get IDF scoring system statistics.
     Shows cache status, word counts, and top generic words.
@@ -2087,7 +2090,7 @@ async def get_idf_stats(user: CurrentUser = Depends(get_current_user)):
 @admin_router.get("/idf-analyze")
 async def analyze_word(
     word: str = Query(..., description="Word to analyze"),
-    user: CurrentUser = Depends(get_current_user)
+    user: CurrentUser = Depends(require_role(["owner", "admin"]))
 ):
     """
     Analyze a specific word's IDF classification.
@@ -2109,7 +2112,7 @@ async def analyze_word(
 @admin_router.get("/idf-query-analysis")
 async def analyze_query(
     q: str = Query(..., description="Query to analyze"),
-    user: CurrentUser = Depends(get_current_user)
+    user: CurrentUser = Depends(require_role(["owner", "admin"]))
 ):
     """
     Analyze a search query and show word importance breakdown.
@@ -2124,7 +2127,7 @@ async def analyze_query(
 async def test_similarity(
     query: str = Query(..., description="Search query"),
     target: str = Query(..., description="Target trademark name"),
-    user: CurrentUser = Depends(get_current_user)
+    user: CurrentUser = Depends(require_role(["owner", "admin"]))
 ):
     """
     Test IDF-weighted similarity between two texts.
