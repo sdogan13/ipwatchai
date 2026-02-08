@@ -190,26 +190,6 @@ def generate_reset_token() -> str:
     return secrets.token_urlsafe(32)
 
 
-def generate_api_key() -> Tuple[str, str]:
-    """
-    Generate API key
-    Returns: (full_key, key_prefix)
-    """
-    key = secrets.token_urlsafe(32)
-    prefix = key[:8]
-    return key, prefix
-
-
-def hash_api_key(key: str) -> str:
-    """Hash API key for storage"""
-    return hash_password(key)
-
-
-def verify_api_key(key: str, key_hash: str) -> bool:
-    """Verify API key against hash"""
-    return verify_password(key, key_hash)
-
-
 # ==========================================
 # FastAPI Dependencies
 # ==========================================

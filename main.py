@@ -22,7 +22,7 @@ import tempfile
 import os
 import torch
 
-from auth.authentication import CurrentUser, get_current_user
+from auth.authentication import CurrentUser, get_current_user, require_role
 from config.settings import settings
 # CENTRALIZED IDF SCORING - consistent across the entire system
 from utils.idf_scoring import (
@@ -2210,7 +2210,10 @@ class TestScoringResponse(BaseModel):
 
 
 @app.post("/api/admin/test-scoring", response_model=TestScoringResponse, tags=["Admin"])
-async def test_scoring(request: TestScoringRequest):
+async def test_scoring(
+    request: TestScoringRequest,
+    current_user: CurrentUser = Depends(require_role(["owner", "admin"]))
+):
     """
     Test the multi-factor scoring system with any two trademark names.
 
