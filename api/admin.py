@@ -734,3 +734,163 @@ async def bulk_credit_adjustment(
         db.commit()
 
     return {"status": "ok", "affected_organizations": affected}
+
+
+# ============ DISCOUNT CODES ============
+
+
+@router.get("/discount-codes")
+async def list_discount_codes(
+    current_user: CurrentUser = Depends(require_superadmin()),
+    is_active: bool = Query(None),
+):
+    """List all discount codes."""
+    with Database() as db:
+        cur = db.cursor()
+        query = "SELECT * FROM discount_codes WHERE 1=1"
+        params = []
+        if is_active is not None:
+            query += " AND is_active = %s"
+            params.append(is_active)
+        query += " ORDER BY created_at DESC"
+        cur.execute(query, params)
+        codes = [dict(row) for row in cur.fetchall()]
+    return {"discount_codes": codes}
+
+
+@router.post("/discount-codes")
+async def create_discount_code(
+    payload: dict = Body(...),
+    current_user: CurrentUser = Depends(require_superadmin()),
+):
+    """
+    Create a new discount code.
+    Body: {
+        "code": "LAUNCH20",
+        "description": "Launch promotion 20% off",
+        "discount_type": "percentage" or "fixed",
+        "discount_value": 20.0,
+        "applies_to_plan": "professional" (null for all),
+        "max_uses": 100 (null for unlimited),
+        "valid_from": "2026-01-01T00:00:00" (optional),
+        "valid_until": "2026-12-31T23:59:59" (null for no expiry)
+    }
+    """
+    code = payload.get("code", "").strip().upper()
+    if not code:
+        raise HTTPException(status_code=400, detail="'code' is required")
+
+    discount_type = payload.get("discount_type", "percentage")
+    if discount_type not in ("percentage", "fixed"):
+        raise HTTPException(status_code=400, detail="discount_type must be 'percentage' or 'fixed'")
+
+    discount_value = payload.get("discount_value")
+    if discount_value is None or discount_value <= 0:
+        raise HTTPException(status_code=400, detail="discount_value must be positive")
+
+    if discount_type == "percentage" and discount_value > 100:
+        raise HTTPException(status_code=400, detail="Percentage discount cannot exceed 100")
+
+    with Database() as db:
+        cur = db.cursor()
+
+        cur.execute("SELECT id FROM discount_codes WHERE code = %s", (code,))
+        if cur.fetchone():
+            raise HTTPException(status_code=409, detail=f"Code '{code}' already exists")
+
+        cur.execute("""
+            INSERT INTO discount_codes
+                (code, description, discount_type, discount_value,
+                 applies_to_plan, max_uses, valid_from, valid_until, created_by)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            code,
+            payload.get("description"),
+            discount_type,
+            discount_value,
+            payload.get("applies_to_plan"),
+            payload.get("max_uses"),
+            payload.get("valid_from"),
+            payload.get("valid_until"),
+            str(current_user.id),
+        ))
+
+        _audit_log(db, str(current_user.id), "discount_code_created", {
+            "code": code,
+            "discount_type": discount_type,
+            "discount_value": float(discount_value),
+        })
+        db.commit()
+
+    return {"status": "ok", "code": code}
+
+
+@router.put("/discount-codes/{code_id}")
+async def update_discount_code(
+    code_id: str,
+    payload: dict = Body(...),
+    current_user: CurrentUser = Depends(require_superadmin()),
+):
+    """Update a discount code (description, max_uses, valid_until, is_active, discount_value)."""
+    allowed_fields = {"description", "max_uses", "valid_until", "is_active", "discount_value"}
+    updates = {k: v for k, v in payload.items() if k in allowed_fields}
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+
+    with Database() as db:
+        cur = db.cursor()
+
+        set_clauses = ", ".join([f"{k} = %s" for k in updates])
+        values = list(updates.values()) + [code_id]
+
+        cur.execute(
+            f"UPDATE discount_codes SET {set_clauses}, updated_at = NOW() WHERE id = %s",
+            values,
+        )
+
+        _audit_log(db, str(current_user.id), "discount_code_updated", {
+            "code_id": code_id,
+            "changes": {k: str(v) for k, v in updates.items()},
+        })
+        db.commit()
+
+    return {"status": "ok", "code_id": code_id}
+
+
+@router.delete("/discount-codes/{code_id}")
+async def deactivate_discount_code(
+    code_id: str,
+    current_user: CurrentUser = Depends(require_superadmin()),
+):
+    """Deactivate a discount code (soft delete)."""
+    with Database() as db:
+        cur = db.cursor()
+        cur.execute(
+            "UPDATE discount_codes SET is_active = FALSE, updated_at = NOW() WHERE id = %s",
+            (code_id,),
+        )
+        _audit_log(db, str(current_user.id), "discount_code_deactivated", {"code_id": code_id})
+        db.commit()
+
+    return {"status": "ok", "code_id": code_id}
+
+
+@router.get("/discount-codes/{code_id}/usage")
+async def get_discount_code_usage(
+    code_id: str,
+    current_user: CurrentUser = Depends(require_superadmin()),
+):
+    """View usage history for a discount code."""
+    with Database() as db:
+        cur = db.cursor()
+        cur.execute("""
+            SELECT dcu.*, o.name as org_name, o.email as org_email
+            FROM discount_code_usage dcu
+            JOIN organizations o ON dcu.organization_id = o.id
+            WHERE dcu.discount_code_id = %s
+            ORDER BY dcu.applied_at DESC
+        """, (code_id,))
+        usage = [dict(row) for row in cur.fetchall()]
+
+    return {"usage": usage, "total_uses": len(usage)}
