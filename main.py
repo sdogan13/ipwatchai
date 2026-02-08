@@ -539,15 +539,12 @@ async def search_by_image(
                 pass
 
         # Get DB connection
-        db_host = os.getenv('DB_HOST', '127.0.0.1')
-        db_port = int(os.getenv('DB_PORT', '5432'))
-        db_name = os.getenv('DB_NAME', 'trademark_db')
-        db_user = os.getenv('DB_USER', 'turk_patent')
-        db_password = os.getenv('DB_PASSWORD', 'Dogan.1996')
-
         conn = psycopg2.connect(
-            host=db_host, port=db_port, database=db_name,
-            user=db_user, password=db_password
+            host=settings.database.host,
+            port=settings.database.port,
+            database=settings.database.name,
+            user=settings.database.user,
+            password=settings.database.password
         )
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
@@ -798,20 +795,13 @@ async def simple_search(
     import psycopg2
     import psycopg2.extras
 
-    # Get DB config from environment (for Docker compatibility)
-    db_host = os.getenv('DB_HOST', '127.0.0.1')
-    db_port = int(os.getenv('DB_PORT', '5432'))
-    db_name = os.getenv('DB_NAME', 'trademark_db')
-    db_user = os.getenv('DB_USER', 'turk_patent')
-    db_password = os.getenv('DB_PASSWORD', 'Dogan.1996')
-
     try:
         conn = psycopg2.connect(
-            host=db_host,
-            port=db_port,
-            database=db_name,
-            user=db_user,
-            password=db_password
+            host=settings.database.host,
+            port=settings.database.port,
+            database=settings.database.name,
+            user=settings.database.user,
+            password=settings.database.password
         )
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
@@ -1035,15 +1025,12 @@ async def unified_search(
         # =========================================================
         # DATABASE SEARCH
         # =========================================================
-        db_host = os.getenv('DB_HOST', '127.0.0.1')
-        db_port = int(os.getenv('DB_PORT', '5432'))
-        db_name = os.getenv('DB_NAME', 'trademark_db')
-        db_user = os.getenv('DB_USER', 'turk_patent')
-        db_password = os.getenv('DB_PASSWORD', 'Dogan.1996')
-
         conn = psycopg2.connect(
-            host=db_host, port=db_port, database=db_name,
-            user=db_user, password=db_password
+            host=settings.database.host,
+            port=settings.database.port,
+            database=settings.database.name,
+            user=settings.database.user,
+            password=settings.database.password
         )
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
@@ -1546,15 +1533,12 @@ def get_class_suggestions_internal(goods_description: str, trademark_name: str =
     try:
         query_embedding = get_text_embedding_cached(query_text)
 
-        db_host = os.getenv('DB_HOST', '127.0.0.1')
-        db_port = int(os.getenv('DB_PORT', '5432'))
-        db_name = os.getenv('DB_NAME', 'trademark_db')
-        db_user = os.getenv('DB_USER', 'turk_patent')
-        db_password = os.getenv('DB_PASSWORD', 'Dogan.1996')
-
         conn = psycopg2.connect(
-            host=db_host, port=db_port, database=db_name,
-            user=db_user, password=db_password
+            host=settings.database.host,
+            port=settings.database.port,
+            database=settings.database.name,
+            user=settings.database.user,
+            password=settings.database.password
         )
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
@@ -1666,16 +1650,13 @@ async def enhanced_search(request: SearchRequest):
     # =========================================================
     # TRADEMARK SEARCH LOGIC
     # =========================================================
-    db_host = os.getenv('DB_HOST', '127.0.0.1')
-    db_port = int(os.getenv('DB_PORT', '5432'))
-    db_name = os.getenv('DB_NAME', 'trademark_db')
-    db_user = os.getenv('DB_USER', 'turk_patent')
-    db_password = os.getenv('DB_PASSWORD', 'Dogan.1996')
-
     try:
         conn = psycopg2.connect(
-            host=db_host, port=db_port, database=db_name,
-            user=db_user, password=db_password
+            host=settings.database.host,
+            port=settings.database.port,
+            database=settings.database.name,
+            user=settings.database.user,
+            password=settings.database.password
         )
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
@@ -2102,13 +2083,6 @@ async def suggest_nice_classes(request: ClassSuggestionRequest):
 
     start_time = time.time()
 
-    # Get DB config
-    db_host = os.getenv('DB_HOST', '127.0.0.1')
-    db_port = int(os.getenv('DB_PORT', '5432'))
-    db_name = os.getenv('DB_NAME', 'trademark_db')
-    db_user = os.getenv('DB_USER', 'turk_patent')
-    db_password = os.getenv('DB_PASSWORD', 'Dogan.1996')
-
     try:
         # Generate embedding for input description
         from ai import get_text_embedding_cached
@@ -2116,11 +2090,11 @@ async def suggest_nice_classes(request: ClassSuggestionRequest):
 
         # Connect to database
         conn = psycopg2.connect(
-            host=db_host,
-            port=db_port,
-            database=db_name,
-            user=db_user,
-            password=db_password
+            host=settings.database.host,
+            port=settings.database.port,
+            database=settings.database.name,
+            user=settings.database.user,
+            password=settings.database.password
         )
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
