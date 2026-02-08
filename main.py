@@ -11,6 +11,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from pathlib import Path
 from typing import Optional
 from PIL import Image
@@ -159,6 +162,28 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Rate Limiting
+def _get_rate_limit_key(request: Request) -> str:
+    """Use authenticated user_id if available, otherwise IP address."""
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        try:
+            from auth.authentication import decode_token
+            payload = decode_token(auth_header[7:])
+            if payload and payload.sub:
+                return f"user:{payload.sub}"
+        except Exception:
+            pass
+    return get_remote_address(request)
+
+limiter = Limiter(
+    key_func=_get_rate_limit_key,
+    default_limits=[f"{settings.auth.api_rate_limit}/minute"]
+)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 # Global exception handler
@@ -504,7 +529,9 @@ def get_image_embedding_for_search(image_path: str) -> list:
 
 
 @app.post("/api/search-by-image", tags=["Image Search"])
+@limiter.limit("10/minute")
 async def search_by_image(
+    request: Request,
     image: UploadFile = File(..., description="Aranacak logo/marka gorseli"),
     classes: Optional[str] = Form(None, description="Nice siniflari (virgülle ayrilmis, orn: 9,35,42)"),
     limit: int = Form(MAX_RESULTS, description=f"Maksimum sonuc sayisi (max {MAX_RESULTS})")
@@ -783,7 +810,9 @@ from typing import Optional, List
 from pydantic import BaseModel, Field
 
 @app.get("/api/search/simple", tags=["Public Search"])
+@limiter.limit("10/minute")
 async def simple_search(
+    request: Request,
     q: str = Query(..., description="Trademark name to search"),
     limit: int = Query(MAX_RESULTS, ge=1, le=MAX_RESULTS, description="Number of results (max 10)")
 ):
@@ -903,7 +932,9 @@ async def simple_search(
 # ==========================================
 
 @app.post("/api/search/unified", tags=["Unified Search"])
+@limiter.limit("10/minute")
 async def unified_search(
+    request: Request,
     name: Optional[str] = Form(None),
     image: Optional[UploadFile] = File(None),
     classes: Optional[str] = Form(None),
@@ -1570,7 +1601,8 @@ def get_class_suggestions_internal(goods_description: str, trademark_name: str =
 
 
 @app.post("/api/search", response_model=EnhancedSearchResponse, tags=["Enhanced Search"])
-async def enhanced_search(request: SearchRequest):
+@limiter.limit(f"{settings.auth.api_rate_limit}/minute")
+async def enhanced_search(request: Request, search_request: SearchRequest):
     """
     Enhanced trademark search with auto class suggestion.
 
@@ -1603,7 +1635,7 @@ async def enhanced_search(request: SearchRequest):
 
     start_time = time.time()
 
-    search_classes = request.classes or []
+    search_classes = search_request.classes or []
     auto_suggested = []
     classes_were_auto_suggested = False
     suggestion_query = None
@@ -1611,14 +1643,14 @@ async def enhanced_search(request: SearchRequest):
     # =========================================================
     # AUTO CLASS SUGGESTION LOGIC
     # =========================================================
-    if not search_classes and request.goods_description and request.auto_suggest_classes:
-        logger.info(f"Auto-suggesting classes for: {request.goods_description[:50]}...")
+    if not search_classes and search_request.goods_description and search_request.auto_suggest_classes:
+        logger.info(f"Auto-suggesting classes for: {search_request.goods_description[:50]}...")
 
         try:
             # Get suggestions internally
             suggestions = get_class_suggestions_internal(
-                goods_description=request.goods_description,
-                trademark_name=request.name,
+                goods_description=search_request.goods_description,
+                trademark_name=search_request.name,
                 limit=5
             )
 
@@ -1628,7 +1660,7 @@ async def enhanced_search(request: SearchRequest):
             if top_suggestions:
                 search_classes = [s['class_number'] for s in top_suggestions]
                 classes_were_auto_suggested = True
-                suggestion_query = f"{request.name}: {request.goods_description}"
+                suggestion_query = f"{search_request.name}: {search_request.goods_description}"
 
                 auto_suggested = [
                     AutoSuggestedClass(
@@ -1661,7 +1693,7 @@ async def enhanced_search(request: SearchRequest):
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
         # Normalize query for Turkish character matching
-        name_normalized = normalize_turkish(request.name)
+        name_normalized = normalize_turkish(search_request.name)
 
         # SQL function to normalize Turkish characters in database names
         normalize_sql = """
@@ -1711,9 +1743,9 @@ async def enhanced_search(request: SearchRequest):
                     AND (t.nice_class_numbers && %s::integer[] OR 99 = ANY(t.nice_class_numbers))
                 ORDER BY score DESC, t.name
                 LIMIT 100
-            """, (request.name, name_normalized, f'%{request.name}%', f'%{name_normalized}%',
-                  request.name, name_normalized,
-                  f'%{request.name}%', f'%{name_normalized}%', request.name, name_normalized,
+            """, (search_request.name, name_normalized, f'%{search_request.name}%', f'%{name_normalized}%',
+                  search_request.name, name_normalized,
+                  f'%{search_request.name}%', f'%{name_normalized}%', search_request.name, name_normalized,
                   search_classes))
         else:
             # No class filtering - search all
@@ -1725,9 +1757,9 @@ async def enhanced_search(request: SearchRequest):
                     OR similarity({normalize_sql}, LOWER(%s)) > 0.2
                 ORDER BY score DESC, t.name
                 LIMIT 100
-            """, (request.name, name_normalized, f'%{request.name}%', f'%{name_normalized}%',
-                  request.name, name_normalized,
-                  f'%{request.name}%', f'%{name_normalized}%', request.name, name_normalized))
+            """, (search_request.name, name_normalized, f'%{search_request.name}%', f'%{name_normalized}%',
+                  search_request.name, name_normalized,
+                  f'%{search_request.name}%', f'%{name_normalized}%', search_request.name, name_normalized))
 
         rows = cur.fetchall()
         cur.close()
@@ -1751,7 +1783,7 @@ async def enhanced_search(request: SearchRequest):
             # - "dogan patent" vs "erdogan patent ofisi" = LOW (prefix mismatch)
             # - "dogan patent" vs "d.p dogan patent" = HIGH (distinctive word match)
             target_name = row['name'] or ""
-            scoring = calculate_comprehensive_score(request.name, target_name)
+            scoring = calculate_comprehensive_score(search_request.name, target_name)
             score = scoring['final_score']
             similarity_pct = round(score * 100, 1)
 
@@ -1789,9 +1821,9 @@ async def enhanced_search(request: SearchRequest):
         # BUILD SEARCH CONTEXT
         # =========================================================
         search_context = SearchContext(
-            searched_name=request.name,
+            searched_name=search_request.name,
             searched_classes=search_classes,
-            goods_description=request.goods_description,
+            goods_description=search_request.goods_description,
             total_results=len(results),
             search_time_ms=round(search_time, 2)
         )
@@ -1803,13 +1835,13 @@ async def enhanced_search(request: SearchRequest):
             results=results,
             search_context=search_context,
             # Backward compatibility fields
-            query=request.name,
+            query=search_request.name,
             total_results=len(results),
             search_time_ms=round(search_time, 2),
             search_classes=search_classes,
             classes_were_auto_suggested=classes_were_auto_suggested,
-            auto_suggested_classes=auto_suggested if request.include_suggested_in_response and auto_suggested else None,
-            suggestion_query=suggestion_query if request.include_suggested_in_response else None
+            auto_suggested_classes=auto_suggested if search_request.include_suggested_in_response and auto_suggested else None,
+            suggestion_query=suggestion_query if search_request.include_suggested_in_response else None
         )
 
     except Exception as e:

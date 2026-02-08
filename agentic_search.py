@@ -560,9 +560,11 @@ class AgenticTrademarkSearch:
 # FASTAPI ROUTER
 # ============================================
 import tempfile
-from fastapi import APIRouter, Query, HTTPException, Depends, UploadFile, File, Form
+from fastapi import APIRouter, Query, HTTPException, Depends, UploadFile, File, Form, Request
 from pydantic import BaseModel
 from typing import Optional
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from auth.authentication import CurrentUser, get_current_user
 from database.crud import Database
@@ -572,6 +574,8 @@ from utils.subscription import (
     get_user_plan,
     get_live_search_usage,
 )
+
+_search_limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(prefix="/api/v1/search", tags=["Agentic Search"])
 
@@ -626,7 +630,9 @@ async def get_search_credits(
 
 
 @router.get("/quick")
+@_search_limiter.limit("60/minute")
 async def quick_search(
+    request: Request,
     query: str = Query(..., description="Trademark name to search"),
     classes: Optional[str] = Query(None, description="Nice classes (comma-separated)"),
     page: int = Query(1, ge=1, description="Page number"),
@@ -661,7 +667,9 @@ async def quick_search(
 
 
 @router.get("/intelligent")
+@_search_limiter.limit("10/minute")
 async def intelligent_search(
+    request: Request,
     query: str = Query(..., description="Trademark name to search"),
     classes: Optional[str] = Query(None, description="Nice classes (comma-separated)"),
     threshold: float = Query(0.75, description="Confidence threshold for live scraping"),
@@ -737,7 +745,9 @@ async def intelligent_search(
 
 
 @router.post("/intelligent")
+@_search_limiter.limit("10/minute")
 async def intelligent_search_with_image(
+    request: Request,
     query: str = Form(..., description="Trademark name to search"),
     image: Optional[UploadFile] = File(None, description="Optional logo image for visual scoring"),
     classes: Optional[str] = Form(None, description="Nice classes (comma-separated)"),
