@@ -2155,7 +2155,7 @@ async def test_similarity(
 
 @admin_router.post("/idf-refresh")
 async def refresh_idf_cache(
-    user: CurrentUser = Depends(require_role(UserRole.ADMIN))
+    user: CurrentUser = Depends(require_role(["admin"]))
 ):
     """
     Refresh IDF cache from database.
