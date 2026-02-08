@@ -1,0 +1,159 @@
+/**
+ * score-badge.js - Shared risk score color/badge rendering
+ * Single source of truth for all score-related UI
+ */
+window.AppComponents = window.AppComponents || {};
+
+// ============================================
+// A) getScoreColor - Single source of truth for risk color thresholds
+//    Matches backend RISK_THRESHOLDS exactly (5 levels):
+//    critical >= 90, very_high >= 80, high >= 70, medium >= 50, low < 50
+// ============================================
+window.AppComponents.getScoreColor = function(pct) {
+    if (pct >= 90) return 'bg-red-100 text-red-800 border-red-200';
+    if (pct >= 80) return 'bg-orange-100 text-orange-800 border-orange-200';
+    if (pct >= 70) return 'bg-amber-100 text-amber-800 border-amber-200';
+    if (pct >= 50) return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+    return 'bg-green-100 text-green-800 border-green-200';
+};
+
+window.AppComponents.getRiskColorClass = function(riskLevel) {
+    riskLevel = (riskLevel || '').toUpperCase();
+    if (riskLevel === 'CRITICAL') return 'text-red-600';
+    if (riskLevel === 'VERY_HIGH') return 'text-orange-600';
+    if (riskLevel === 'HIGH') return 'text-amber-600';
+    if (riskLevel === 'MEDIUM') return 'text-yellow-600';
+    return 'text-green-600';
+};
+
+window.AppComponents.getRiskBadgeColor = function(riskLevel) {
+    riskLevel = (riskLevel || '').toUpperCase();
+    if (riskLevel === 'CRITICAL') return 'bg-red-100 text-red-700 border-red-200';
+    if (riskLevel === 'VERY_HIGH') return 'bg-orange-100 text-orange-700 border-orange-200';
+    if (riskLevel === 'HIGH') return 'bg-amber-100 text-amber-700 border-amber-200';
+    if (riskLevel === 'MEDIUM') return 'bg-yellow-100 text-yellow-700 border-yellow-200';
+    return 'bg-green-100 text-green-700 border-green-200';
+};
+
+window.AppComponents.getRiskBadgeSmall = function(riskLevel) {
+    riskLevel = (riskLevel || '').toUpperCase();
+    if (riskLevel === 'CRITICAL') return 'bg-red-100 text-red-700';
+    if (riskLevel === 'VERY_HIGH') return 'bg-orange-100 text-orange-700';
+    if (riskLevel === 'HIGH') return 'bg-amber-100 text-amber-700';
+    return 'bg-yellow-100 text-yellow-700';
+};
+
+// ============================================
+// B) renderScoreBadge - Color-coded score badge HTML
+// ============================================
+window.AppComponents.renderScoreBadge = function(score, label) {
+    var pct = Math.round(score);
+    var color = window.AppComponents.getScoreColor(pct);
+    var html = '<div class="flex-shrink-0 ' + color + ' font-bold px-3 py-1.5 rounded-lg text-lg border">';
+    if (label) {
+        html += '<span class="text-xs font-normal block leading-none">' + label + '</span>';
+    }
+    html += pct + '%</div>';
+    return html;
+};
+
+// ============================================
+// C) renderSimilarityBadges - 4-component score breakdown badges
+//    Accepts scores as 0-1 floats: { text_similarity, semantic_similarity, visual_similarity, translation_similarity }
+//    Only shows badges where score > 30%
+// ============================================
+window.AppComponents.renderSimilarityBadges = function(scores) {
+    if (!scores) return '';
+    var html = '<div class="flex gap-2 mt-1.5 flex-wrap">';
+    var hasBadge = false;
+
+    var textVal = scores.text_similarity;
+    if (textVal != null && textVal > 0.3) {
+        html += '<span class="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">Metin ' + Math.round(textVal * 100) + '%</span>';
+        hasBadge = true;
+    }
+
+    var semVal = scores.semantic_similarity;
+    if (semVal != null && semVal > 0.3) {
+        html += '<span class="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">Anlamsal ' + Math.round(semVal * 100) + '%</span>';
+        hasBadge = true;
+    }
+
+    var visVal = scores.visual_similarity;
+    if (visVal != null && visVal > 0.3) {
+        html += '<span class="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">Gorsel ' + Math.round(visVal * 100) + '%</span>';
+        hasBadge = true;
+    }
+
+    var transVal = scores.translation_similarity;
+    if (transVal != null && transVal > 0.3) {
+        html += '<span class="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">Ceviri ' + Math.round(transVal * 100) + '%</span>';
+        hasBadge = true;
+    }
+
+    html += '</div>';
+    return hasBadge ? html : '';
+};
+
+// ============================================
+// D) renderCardShell - Common card wrapper
+// ============================================
+window.AppComponents.renderCardShell = function(innerHtml, opts) {
+    opts = opts || {};
+    var onclick = opts.onclick ? ' onclick="' + opts.onclick + '"' : '';
+    var cursor = opts.onclick ? ' cursor-pointer' : '';
+    var mb = opts.noMargin ? '' : ' mb-2';
+    return '<div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 hover:border-indigo-300 hover:shadow-md transition-all' + cursor + mb + '"'
+        + onclick + '>'
+        + innerHtml
+        + '</div>';
+};
+
+// ============================================
+// Image thumbnail placeholder SVG
+// ============================================
+window.AppComponents.IMG_PLACEHOLDER_SVG = '<svg class="w-6 h-6 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">'
+    + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>'
+    + '</svg>';
+
+// Render a thumbnail image with fallback
+window.AppComponents.renderThumbnail = function(imagePath, bulletinNo, size) {
+    size = size || 'w-12 h-12';
+    var placeholder = '<div class="' + size + ' bg-gray-50 rounded border border-gray-200 flex items-center justify-center flex-shrink-0">'
+        + window.AppComponents.IMG_PLACEHOLDER_SVG + '</div>';
+
+    if (!imagePath) return placeholder;
+
+    var url = '/api/trademark-image/' + encodeURIComponent(imagePath);
+
+    return '<div class="' + size + ' bg-gray-50 rounded border border-gray-200 flex items-center justify-center flex-shrink-0 overflow-hidden">'
+        + '<img src="' + url + '" alt="" class="w-full h-full object-contain"'
+        + ' onerror="this.style.display=\'none\'; this.parentElement.innerHTML=\'' + window.AppComponents.IMG_PLACEHOLDER_SVG.replace(/'/g, "\\'") + '\';">'
+        + '</div>';
+};
+
+// ============================================
+// F) renderTurkpatentButton - TURKPATENT Dosya Takibi copy+link
+//    Shows copy-to-clipboard button + link to TURKPATENT login
+// ============================================
+window.AppComponents.renderTurkpatentButton = function(applicationNo) {
+    if (!applicationNo) return '';
+    var safeNo = (applicationNo || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    var btnId = 'tp-' + safeNo.replace(/[^a-zA-Z0-9]/g, '');
+    return '<div class="inline-flex items-center gap-1 mt-1">'
+        + '<button onclick="event.stopPropagation(); navigator.clipboard.writeText(\'' + safeNo + '\'); '
+        + 'var el=document.getElementById(\'' + btnId + '\'); if(el){el.textContent=\'Kopyalandi!\'; setTimeout(function(){el.textContent=\'' + safeNo + '\';},2000);}" '
+        + 'class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 cursor-pointer transition-colors" '
+        + 'title="Basvuru numarasini kopyala">'
+        + '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>'
+        + '<span id="' + btnId + '">' + escapeHtml(applicationNo) + '</span>'
+        + '</button>'
+        + '<a href="https://opts.turkpatent.gov.tr/login" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();" '
+        + 'class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100 hover:text-gray-800 transition-colors" '
+        + 'title="Basvuru numarasini kopyalayin, TURKPATENT&#39;e tiklayin, e-Devlet ile giris yapin ve numarayi yapistirarak dosyayi goruntuleyin.">'
+        + 'TURKPATENT'
+        + '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>'
+        + '</a>'
+        + '</div>';
+};
+var renderTurkpatentButton = window.AppComponents.renderTurkpatentButton;
