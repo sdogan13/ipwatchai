@@ -894,3 +894,80 @@ async def get_discount_code_usage(
         usage = [dict(row) for row in cur.fetchall()]
 
     return {"usage": usage, "total_uses": len(usage)}
+
+
+# ============ PRICING MANAGEMENT ============
+
+
+@router.get("/plans")
+async def list_plans(current_user: CurrentUser = Depends(require_superadmin())):
+    """List all subscription plans with their DB values and code defaults."""
+    from utils.subscription import PLAN_FEATURES
+
+    with Database() as db:
+        cur = db.cursor()
+        cur.execute("SELECT * FROM subscription_plans ORDER BY price_monthly ASC NULLS FIRST")
+        db_plans = [dict(row) for row in cur.fetchall()]
+
+    # Get all plan_limits overrides from settings
+    overrides = settings_manager.get_category("plan_limits")
+
+    result = []
+    for db_plan in db_plans:
+        plan_name = db_plan["name"]
+        code_defaults = PLAN_FEATURES.get(plan_name, {})
+
+        plan_overrides = {
+            k.replace(f"plan.{plan_name}.", ""): v["value"]
+            for k, v in overrides.items()
+            if k.startswith(f"plan.{plan_name}.")
+        }
+
+        result.append({
+            "db_record": db_plan,
+            "code_defaults": code_defaults,
+            "active_overrides": plan_overrides,
+        })
+
+    return {"plans": result}
+
+
+@router.put("/plans/{plan_name}/pricing")
+async def update_plan_pricing(
+    plan_name: str,
+    payload: dict = Body(...),
+    current_user: CurrentUser = Depends(require_superadmin()),
+):
+    """
+    Update plan pricing in the DB.
+    Body: {"price_monthly": 999.00, "description": "Professional plan", "is_active": true}
+    """
+    allowed = {"price_monthly", "description", "is_active"}
+    updates = {k: v for k, v in payload.items() if k in allowed}
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+
+    with Database() as db:
+        cur = db.cursor()
+
+        cur.execute("SELECT * FROM subscription_plans WHERE name = %s", (plan_name,))
+        old = cur.fetchone()
+        if not old:
+            raise HTTPException(status_code=404, detail=f"Plan '{plan_name}' not found")
+
+        set_clauses = ", ".join([f"{k} = %s" for k in updates])
+        values = list(updates.values()) + [plan_name]
+
+        cur.execute(
+            f"UPDATE subscription_plans SET {set_clauses} WHERE name = %s",
+            values,
+        )
+
+        _audit_log(db, str(current_user.id), "plan_pricing_updated", {
+            "plan": plan_name,
+            "changes": {k: str(v) for k, v in updates.items()},
+        })
+        db.commit()
+
+    return {"status": "ok", "plan": plan_name}
