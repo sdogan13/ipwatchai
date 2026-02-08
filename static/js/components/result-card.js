@@ -67,6 +67,31 @@ window.AppComponents.renderResultCard = function(r) {
         studioCta += '</div>';
     }
 
+    // Watchlist add/status button
+    var watchlistBtnHtml = '';
+    if (r.application_no) {
+        if (typeof isInWatchlist === 'function' && isInWatchlist(r.application_no)) {
+            watchlistBtnHtml = '<span class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-green-700 bg-green-50 rounded mt-1.5">'
+                + '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>'
+                + 'Takip Ediliyor</span>';
+        } else {
+            var wlData = JSON.stringify({
+                name: r.name || '',
+                application_no: r.application_no || '',
+                classes: r.classes || [],
+                image_path: r.image_path || '',
+                holder_name: r.holder_name || '',
+                bulletin_no: r.bulletin_no || ''
+            }).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+            watchlistBtnHtml = '<button data-watchlist-appno="' + escapeHtml(r.application_no) + '" '
+                + 'onclick="event.stopPropagation(); openQuickWatchlistAdd(JSON.parse(this.getAttribute(\'data-wl-payload\')))" '
+                + 'data-wl-payload="' + wlData + '" '
+                + 'class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded transition mt-1.5">'
+                + '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>'
+                + 'Takip Listesine Ekle</button>';
+        }
+    }
+
     // Extracted goods indicator
     var extractedGoodsHtml = '';
     if (r.has_extracted_goods) {
@@ -91,6 +116,7 @@ window.AppComponents.renderResultCard = function(r) {
         + window.AppComponents.renderTurkpatentButton(r.application_no)
         + window.AppComponents.renderHolderLink(r.holder_name, r.holder_tpe_client_id)
         + breakdownHtml
+        + watchlistBtnHtml
         + extractedGoodsHtml
         + studioCta
         + '</div>'
