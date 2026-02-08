@@ -87,6 +87,7 @@ window.AppComponents.renderResultCard = function(r) {
         + '<div class="flex-1 min-w-0">'
         + '<div class="font-semibold text-gray-900 truncate">' + (r.name || 'N/A') + '</div>'
         + '<div class="text-sm text-gray-500">' + (r.status || 'N/A') + '</div>'
+        + window.AppComponents.renderNiceClassBadges(r.classes)
         + window.AppComponents.renderTurkpatentButton(r.application_no)
         + window.AppComponents.renderHolderLink(r.holder_name, r.holder_tpe_client_id)
         + breakdownHtml

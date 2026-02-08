@@ -110,6 +110,35 @@ window.AppComponents.renderCardShell = function(innerHtml, opts) {
 };
 
 // ============================================
+// D) renderNiceClassBadges - Nice class number badges with smart truncation
+// ============================================
+window.AppComponents.renderNiceClassBadges = function(classes, maxShow) {
+    if (!classes || classes.length === 0) return '';
+    maxShow = maxShow || 5;
+
+    var sorted = classes.slice().sort(function(a, b) { return a - b; });
+    var visible = sorted.slice(0, maxShow);
+    var remaining = sorted.length - maxShow;
+
+    var html = '<div class="flex flex-wrap gap-1 mt-1">';
+    visible.forEach(function(cls) {
+        html += '<span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-indigo-50 text-indigo-600">' + cls + '</span>';
+    });
+
+    if (remaining > 0) {
+        var extraBadges = sorted.slice(maxShow).map(function(cls) {
+            return '<span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-indigo-50 text-indigo-600">' + cls + '</span>';
+        }).join('');
+        html += '<span class="cursor-pointer text-xs text-blue-600 hover:text-blue-800 px-1" '
+            + 'onclick="this.outerHTML=\'' + extraBadges.replace(/'/g, "\\'") + '\'">+' + remaining + ' daha</span>';
+    }
+
+    html += '</div>';
+    return html;
+};
+var renderNiceClassBadges = window.AppComponents.renderNiceClassBadges;
+
+// ============================================
 // Image thumbnail placeholder SVG
 // ============================================
 window.AppComponents.IMG_PLACEHOLDER_SVG = '<svg class="w-6 h-6 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">'

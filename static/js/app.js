@@ -226,7 +226,7 @@ function dashboard() {
                 var overlappingHtml = '';
                 if (alert.overlapping_classes && alert.overlapping_classes.length > 0) {
                     overlappingHtml = '<div class="mt-3"><span class="text-xs font-medium text-gray-500">Ortak Siniflar:</span> '
-                        + alert.overlapping_classes.map(function(cl) { return '<span class="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">' + cl + '</span>'; }).join(' ')
+                        + window.AppComponents.renderNiceClassBadges(alert.overlapping_classes)
                         + '</div>';
                 }
 
@@ -790,8 +790,8 @@ function renderHolderTrademarks(trademarks) {
             + egIndicator + '</div>'
             + '<div class="flex-shrink-0"><span class="' + getStatusBadgeClass(tm.status) + ' px-2 py-1 rounded text-xs font-medium">'
             + getStatusText(tm.status) + '</span></div>'
-            + '<div class="text-sm text-gray-500 flex-shrink-0 hidden sm:block">'
-            + (tm.classes && tm.classes.length > 0 ? 'Sinif: ' + tm.classes.slice(0, 3).join(', ') + (tm.classes.length > 3 ? '...' : '') : '')
+            + '<div class="flex-shrink-0 hidden sm:block">'
+            + window.AppComponents.renderNiceClassBadges(tm.classes, 3)
             + '</div></div>';
     });
     container.innerHTML = html;
@@ -1672,9 +1672,7 @@ function renderPortfolioGrid(items) {
 
     grid.innerHTML = items.map(function(item) {
         var esc = window.AppUtils.escapeHtml;
-        var classes = (item.nice_class_numbers || []).map(function(c) {
-            return '<span class="text-xs bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded">' + c + '</span>';
-        }).join(' ');
+        var classes = window.AppComponents.renderNiceClassBadges(item.nice_class_numbers, 4);
 
         var logoHtml;
         if (item.has_logo) {
@@ -1711,7 +1709,7 @@ function renderPortfolioGrid(items) {
             + '<span class="font-medium text-gray-900 text-sm truncate">' + esc(item.brand_name) + '</span>'
             + alertBadge
             + '</div>'
-            + '<div class="flex gap-1 mt-1 flex-wrap">' + classes + '</div>'
+            + classes
             + conflictBadges
             + '</div>'
             + '<div class="flex-shrink-0 text-xs text-gray-400">'

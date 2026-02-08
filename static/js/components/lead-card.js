@@ -19,8 +19,7 @@ window.AppComponents.renderLeadCard = function(lead) {
     if (lead.lead_status === 'viewed') statusHtml = '<span class="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full font-medium ml-1">Goruntulendi</span>';
     else if (lead.lead_status === 'contacted') statusHtml = '<span class="bg-purple-100 text-purple-700 text-xs px-2 py-0.5 rounded-full font-medium ml-1">Iletisim</span>';
 
-    var classesHtml = lead.overlapping_classes && lead.overlapping_classes.length
-        ? '<span class="text-gray-400">Siniflar: ' + lead.overlapping_classes.join(', ') + '</span>' : '';
+    var classesHtml = window.AppComponents.renderNiceClassBadges(lead.overlapping_classes, 4);
 
     // Thumbnails for both parties
     var newMarkThumb = window.AppComponents.renderThumbnail(lead.new_mark_image, lead.bulletin_no, 'w-10 h-10');
