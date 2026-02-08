@@ -22,8 +22,8 @@ window.AppComponents.renderLeadCard = function(lead) {
     var classesHtml = window.AppComponents.renderNiceClassBadges(lead.overlapping_classes, 4);
 
     // Thumbnails for both parties
-    var newMarkThumb = window.AppComponents.renderThumbnail(lead.new_mark_image, lead.bulletin_no, 'w-10 h-10');
-    var existMarkThumb = window.AppComponents.renderThumbnail(lead.existing_mark_image, lead.bulletin_no, 'w-10 h-10');
+    var newMarkThumb = window.AppComponents.renderThumbnail(lead.new_mark_image, lead.new_mark_name, lead.new_mark_app_no, 'w-10 h-10');
+    var existMarkThumb = window.AppComponents.renderThumbnail(lead.existing_mark_image, lead.existing_mark_name, lead.existing_mark_app_no, 'w-10 h-10');
 
     // 4-component score breakdown (Feature 3)
     var breakdownScores = {

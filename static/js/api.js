@@ -250,7 +250,9 @@ window.AppAPI.showLeadDetail = async function(leadId) {
             + '<div class="text-gray-500 text-sm">Benzerlik Skoru</div>'
             + '<span class="inline-block mt-1 text-xs font-medium px-2.5 py-0.5 rounded-full '
             + window.AppComponents.getRiskBadgeSmall(lead.risk_level)
-            + '">' + lead.risk_level + ' Risk</span></div>'
+            + '">' + lead.risk_level + ' Risk</span>'
+            + '<div class="flex justify-center mt-2">' + window.AppComponents.renderSimilarityBadges(lead) + '</div>'
+            + '</div>'
             + '<div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-center">'
             + '<div class="text-amber-700 font-semibold text-sm">Itiraz Suresi</div>'
             + '<div class="text-2xl font-bold text-gray-900">' + lead.days_until_deadline + ' gun kaldi</div>'
@@ -258,28 +260,32 @@ window.AppAPI.showLeadDetail = async function(leadId) {
             + '<div class="grid grid-cols-2 gap-3">'
             + '<div class="bg-red-50 rounded-xl p-4 border border-red-100">'
             + '<div class="text-red-600 font-semibold text-sm mb-2">Yeni Basvuru</div>'
-            + '<div class="space-y-1 text-sm">'
+            + '<div class="flex items-start gap-3">'
+            + window.AppComponents.renderThumbnail(lead.new_mark_image, lead.new_mark_name, lead.new_mark_app_no, 'w-14 h-14')
+            + '<div class="flex-1 min-w-0 space-y-1 text-sm">'
             + '<div><span class="text-gray-500">Marka:</span> <span class="text-gray-900 font-medium">' + (lead.new_mark_name || 'N/A') + '</span></div>'
             + '<div><span class="text-gray-500">No:</span> <span class="text-gray-900">' + (lead.new_mark_app_no || 'N/A') + '</span></div>'
             + '<div><span class="text-gray-500">Sahip:</span> <span class="text-gray-900">' + (lead.new_mark_holder_name || 'Bilinmiyor') + '</span></div>'
-            + '<div><span class="text-gray-500">Siniflar:</span> <span class="text-gray-900">' + (lead.new_mark_nice_classes ? lead.new_mark_nice_classes.join(', ') : 'N/A') + '</span></div>'
+            + '<div><span class="text-gray-500">Siniflar:</span> ' + window.AppComponents.renderNiceClassBadges(lead.new_mark_nice_classes, 4) + '</div>'
             + (lead.new_mark_has_extracted_goods
                 ? '<div class="mt-2"><button onclick="showExtractedGoods(\'' + (lead.new_mark_app_no || '').replace(/\'/g, "\\'") + '\', this)" '
                   + 'class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-200 cursor-pointer">'
                   + 'CIKARILMIS URUN: <span class="underline">EVET</span></button></div>' : '')
-            + '</div></div>'
+            + '</div></div></div>'
             + '<div class="bg-green-50 rounded-xl p-4 border border-green-100">'
             + '<div class="text-green-600 font-semibold text-sm mb-2">Potansiyel Musteri</div>'
-            + '<div class="space-y-1 text-sm">'
+            + '<div class="flex items-start gap-3">'
+            + window.AppComponents.renderThumbnail(lead.existing_mark_image, lead.existing_mark_name, lead.existing_mark_app_no, 'w-14 h-14')
+            + '<div class="flex-1 min-w-0 space-y-1 text-sm">'
             + '<div><span class="text-gray-500">Marka:</span> <span class="text-gray-900 font-medium">' + (lead.existing_mark_name || 'N/A') + '</span></div>'
             + '<div><span class="text-gray-500">No:</span> <span class="text-gray-900">' + (lead.existing_mark_app_no || 'N/A') + '</span></div>'
             + '<div><span class="text-gray-500">Sahip:</span> <span class="text-gray-900 font-semibold">' + (lead.existing_mark_holder_name || 'Bilinmiyor') + '</span></div>'
-            + '<div><span class="text-gray-500">Siniflar:</span> <span class="text-gray-900">' + (lead.existing_mark_nice_classes ? lead.existing_mark_nice_classes.join(', ') : 'N/A') + '</span></div>'
+            + '<div><span class="text-gray-500">Siniflar:</span> ' + window.AppComponents.renderNiceClassBadges(lead.existing_mark_nice_classes, 4) + '</div>'
             + (lead.existing_mark_has_extracted_goods
                 ? '<div class="mt-2"><button onclick="showExtractedGoods(\'' + (lead.existing_mark_app_no || '').replace(/\'/g, "\\'") + '\', this)" '
                   + 'class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-200 cursor-pointer">'
                   + 'CIKARILMIS URUN: <span class="underline">EVET</span></button></div>' : '')
-            + '</div></div></div>'
+            + '</div></div></div></div>'
             + reasonsHtml
             + '<div class="text-sm text-gray-400 text-center">'
             + 'Bulten: ' + (lead.bulletin_no || 'N/A') + ' &bull; Tarih: ' + (lead.bulletin_date || 'N/A') + ' &bull; Tip: ' + lead.conflict_type

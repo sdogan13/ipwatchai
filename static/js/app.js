@@ -90,6 +90,7 @@ function dashboard() {
                             alert_id: a.id,
                             conflicting_brand: c.name || 'N/A',
                             conflicting_app_no: c.application_no || '',
+                            conflicting_image_path: c.image_path || '',
                             brand_watched: a.watched_brand_name || '',
                             risk_score: Math.round((sc.total || 0) * 100),
                             scores: sc,
@@ -219,9 +220,7 @@ function dashboard() {
 
                 var badgesHtml = window.AppComponents.renderSimilarityBadges(s);
 
-                var imageHtml = c.image_path
-                    ? '<img src="/api/trademark-image/' + encodeURIComponent(c.image_path) + '" class="w-20 h-20 object-contain rounded border" onerror="this.style.display=\'none\'">'
-                    : '<div class="w-20 h-20 bg-gray-100 rounded border flex items-center justify-center text-gray-400 text-2xl">&#x1f4cb;</div>';
+                var imageHtml = window.AppComponents.renderThumbnail(c.image_path, c.name, c.application_no, 'w-20 h-20');
 
                 var overlappingHtml = '';
                 if (alert.overlapping_classes && alert.overlapping_classes.length > 0) {
@@ -778,11 +777,7 @@ function renderHolderTrademarks(trademarks) {
             + 'CIKARILMIS URUN: <span class="underline">EVET</span></button>';
     }
     html += '<div class="flex items-center gap-4 p-4 bg-gray-50 hover:bg-gray-100 rounded-xl transition-colors">'
-            + '<div class="w-12 h-12 bg-white rounded-lg border flex items-center justify-center overflow-hidden flex-shrink-0">'
-            + (tm.image_path
-                ? '<img src="/api/trademark-image/' + encodeURIComponent(escapeHtml(tm.image_path)) + '" alt="" class="w-full h-full object-contain" onerror="this.style.display=\'none\'; this.parentElement.innerHTML=\'&#x1f4cb;\';\">'
-                : '<span class="text-gray-400 text-xl">&#x1f4cb;</span>')
-            + '</div>'
+            + window.AppComponents.renderThumbnail(tm.image_path, tm.name, tm.application_no, 'w-12 h-12')
             + '<div class="flex-1 min-w-0">'
             + '<div class="font-semibold text-gray-900 truncate">' + (escapeHtml(tm.name) || 'Isimsiz') + '</div>'
             + (tm.application_date ? '<div class="text-xs text-gray-400">' + formatHolderDate(tm.application_date) + '</div>' : '')

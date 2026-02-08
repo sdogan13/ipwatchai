@@ -1,0 +1,350 @@
+<!-- ============================================ -->
+<!-- ALERT DETAIL MODAL                           -->
+<!-- ============================================ -->
+<div id="alert-detail-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden shadow-xl border border-gray-200">
+        <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+            <h3 class="text-lg font-bold text-gray-900">Uyari Detayi</h3>
+            <button onclick="hideAlertDetailModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+        </div>
+        <div class="p-6 overflow-y-auto max-h-[60vh]" id="alert-detail-content"></div>
+        <div class="px-6 py-4 border-t border-gray-200 flex gap-3 flex-wrap" id="alert-detail-actions">
+            <button onclick="acknowledgeAlert()" class="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg flex items-center justify-center gap-2 text-sm font-medium">
+                Onayla
+            </button>
+            <button onclick="resolveAlert()" class="flex-1 px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center justify-center gap-2 text-sm font-medium">
+                Cozuldu
+            </button>
+            <button onclick="dismissAlert()" class="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-sm font-medium border border-gray-200">
+                Reddet
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================ -->
+<!-- OPPOSITION FILING MODAL                      -->
+<!-- ============================================ -->
+<div id="opposition-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-hidden shadow-xl border border-orange-200">
+        <div class="px-6 py-4 border-b border-orange-200 bg-orange-50 flex items-center justify-between">
+            <h3 class="text-lg font-bold text-orange-800">Itiraz Basvurusu</h3>
+            <button onclick="hideOppositionModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+        </div>
+        <div class="p-6 overflow-y-auto max-h-[65vh]" id="opposition-content"></div>
+    </div>
+</div>
+
+<!-- ============================================ -->
+<!-- LEAD DETAIL MODAL                            -->
+<!-- ============================================ -->
+<div id="lead-detail-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden shadow-xl border border-gray-200">
+        <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+            <h3 class="text-lg font-bold text-gray-900">Lead Detayi</h3>
+            <button onclick="hideLeadDetailModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+        </div>
+        <div class="p-6 overflow-y-auto max-h-[60vh]" id="lead-detail-content"></div>
+        <div class="px-6 py-4 border-t border-gray-200 flex gap-3">
+            <button onclick="markLeadContacted()" class="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg flex items-center justify-center gap-2 text-sm font-medium">
+                Iletisime Gecildi
+            </button>
+            <button onclick="markLeadConverted()" class="flex-1 px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center justify-center gap-2 text-sm font-medium">
+                Musteri Oldu
+            </button>
+            <button onclick="dismissLead()" class="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-sm font-medium border border-gray-200">
+                Reddet
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================ -->
+<!-- AGENTIC SEARCH LOADING MODAL                -->
+<!-- ============================================ -->
+<div id="agentic-loading-modal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
+    <div class="bg-gray-900 rounded-2xl p-6 max-w-lg w-full mx-4 border border-amber-500/30 shadow-2xl">
+        <div class="flex items-center gap-3 mb-4">
+            <div class="animate-pulse text-3xl">&#x1f575;&#xfe0f;</div>
+            <div>
+                <h3 class="text-xl font-bold text-amber-400">Canli Arastirma</h3>
+                <p class="text-sm text-gray-400">TurkPatent portali taraniyor...</p>
+            </div>
+        </div>
+        <div id="agentic-log" class="bg-black rounded-xl p-4 font-mono text-sm text-green-400 h-56 overflow-y-auto border border-gray-800">
+            <div class="log-line opacity-70">&gt; Ajan baslatiliyor...</div>
+        </div>
+        <div class="mt-4 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+            <div id="agentic-progress" class="h-full bg-gradient-to-r from-amber-500 to-orange-500 rounded-full transition-all duration-500" style="width: 0%"></div>
+        </div>
+        <div class="mt-4 text-center">
+            <button onclick="cancelAgenticSearch()" class="text-gray-400 hover:text-white text-sm">Iptal Et</button>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================ -->
+<!-- UPGRADE MODAL (403)                          -->
+<!-- ============================================ -->
+<div id="upgrade-modal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
+    <div class="bg-gray-900 rounded-2xl p-8 max-w-md w-full mx-4 border border-purple-500/30 shadow-2xl">
+        <div class="text-center">
+            <div class="w-20 h-20 bg-purple-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                <span class="text-4xl">&#x1f680;</span>
+            </div>
+            <h3 class="text-2xl font-bold text-white mb-2">Gercek Zamanli Veri</h3>
+            <p class="text-gray-400 mb-6">
+                Standart arama bulten verilerini kullanir (15 gune kadar eski olabilir).
+                <span class="text-purple-400 font-semibold">Professional</span> plana yukselterek
+                TurkPatent portalindan anlik veri cekebilirsiniz.
+            </p>
+            <div class="bg-gray-800/50 rounded-xl p-5 mb-6 border border-purple-500/20">
+                <div class="text-purple-400 font-bold text-lg">Professional Plan</div>
+                <div class="text-3xl font-bold text-white my-2">&#8378;999<span class="text-lg text-gray-400">/ay</span></div>
+                <ul class="text-sm text-gray-400 text-left space-y-2 mt-4">
+                    <li class="flex items-center gap-2"><span class="text-green-400">&#x2713;</span> Ayda 50 canli arama</li>
+                    <li class="flex items-center gap-2"><span class="text-green-400">&#x2713;</span> Gercek zamanli portal erisimi</li>
+                    <li class="flex items-center gap-2"><span class="text-green-400">&#x2713;</span> Oncelikli destek</li>
+                    <li class="flex items-center gap-2"><span class="text-green-400">&#x2713;</span> Gelismis risk raporlari</li>
+                </ul>
+            </div>
+            <div class="flex gap-3">
+                <button onclick="hideUpgradeModal()" class="flex-1 px-4 py-3 bg-gray-700 text-white rounded-xl hover:bg-gray-600 transition-colors">Belki Sonra</button>
+                <button onclick="redirectToUpgrade()" class="flex-1 px-4 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-xl hover:from-purple-600 hover:to-pink-600 transition-all font-semibold">Yukselt</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================ -->
+<!-- CREDITS EXHAUSTED MODAL (402)                -->
+<!-- ============================================ -->
+<div id="credits-modal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
+    <div class="bg-gray-900 rounded-2xl p-8 max-w-md w-full mx-4 border border-amber-500/30 shadow-2xl">
+        <div class="text-center">
+            <div class="w-20 h-20 bg-amber-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                <span class="text-4xl">&#x26a1;</span>
+            </div>
+            <h3 class="text-2xl font-bold text-white mb-2">Arama Hakki Tukendi</h3>
+            <p class="text-gray-400 mb-6" id="credits-message">Bu ay icin tum canli arama haklarinizi kullandiniz.</p>
+            <p class="text-sm text-gray-500 mb-4">Ek kredi satin almak icin satis ekibimizle iletisime gecin.</p>
+            <div class="space-y-3 mb-6">
+                <a href="mailto:sales@ipwatchdog.com.tr?subject=Kredi%20Satin%20Alma%20Talebi"
+                   class="block w-full px-4 py-3 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl hover:from-amber-600 hover:to-orange-600 transition-all font-semibold text-center">
+                    Satis Ekibi ile Iletisime Gec
+                </a>
+                <a href="/pricing" class="block w-full px-4 py-3 bg-gray-800 hover:bg-gray-700 text-white rounded-xl transition-colors text-center text-sm">
+                    Planlari Incele
+                </a>
+            </div>
+            <button onclick="hideCreditsModal()" class="w-full px-4 py-3 bg-gray-700 text-white rounded-xl hover:bg-gray-600 transition-colors">Kapat</button>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================ -->
+<!-- TRADEMARK IMAGE LIGHTBOX                    -->
+<!-- ============================================ -->
+<div x-data="{ open: false, imageSrc: '', imageTitle: '', imageSubtitle: '' }"
+     @open-lightbox.window="imageSrc = $event.detail.src; imageTitle = $event.detail.title || ''; imageSubtitle = $event.detail.subtitle || ''; open = true;"
+     x-show="open"
+     x-cloak
+     x-transition:enter="transition ease-out duration-200"
+     x-transition:enter-start="opacity-0"
+     x-transition:enter-end="opacity-100"
+     x-transition:leave="transition ease-in duration-150"
+     x-transition:leave-start="opacity-100"
+     x-transition:leave-end="opacity-0"
+     class="fixed inset-0 z-50 flex items-center justify-center p-4"
+     @click.self="open = false"
+     @keydown.escape.window="if (open) { open = false; }"
+     style="display: none; background-color: rgba(0,0,0,0.75);">
+
+    <div class="relative bg-white rounded-lg shadow-xl max-w-2xl w-full p-4" @click.stop>
+        <!-- Close button -->
+        <button @click="open = false"
+                class="absolute -top-3 -right-3 w-8 h-8 bg-white rounded-full shadow-lg flex items-center justify-center text-gray-500 hover:text-gray-700 z-10">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+        </button>
+
+        <!-- Image -->
+        <div class="flex items-center justify-center min-h-[200px]">
+            <img :src="imageSrc"
+                 class="max-w-full max-h-[70vh] object-contain rounded"
+                 @error="$el.src='/static/img/no-image.svg'">
+        </div>
+
+        <!-- Caption -->
+        <div class="mt-3 text-center" x-show="imageTitle">
+            <p class="font-semibold text-gray-900" x-text="imageTitle"></p>
+            <p class="text-sm text-gray-500" x-text="imageSubtitle"></p>
+        </div>
+    </div>
+</div>
+
+<!-- Holder Portfolio Modal -->
+<div id="holderPortfolioModal"
+     class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4"
+     onclick="if(event.target === this) closeHolderPortfolio()">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+
+        <!-- Modal Header -->
+        <div class="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-4 flex-shrink-0">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h2 class="text-xl font-bold" id="holderModalTitle">Marka Portfolyu</h2>
+                    <p class="text-blue-100 text-sm mt-1" id="holderModalSubtitle">Yukleniyor...</p>
+                </div>
+                <button onclick="closeHolderPortfolio()"
+                        class="text-white hover:bg-white/20 rounded-full p-2 transition-colors">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Holder Search Bar -->
+        <div id="holderSearchBar" class="px-6 py-3 border-b border-gray-200 bg-gray-50">
+            <div class="flex gap-2">
+                <input type="text" id="holderSearchInput"
+                       placeholder="Marka sahibi ara (min 2 karakter)..."
+                       class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                       onkeydown="handleHolderSearchKeydown(event)">
+                <button id="holderSearchBtn" onclick="performHolderSearch()"
+                        class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors">
+                    Ara
+                </button>
+                <button id="holderSearchClearBtn" onclick="clearHolderSearch()"
+                        class="px-4 py-2 bg-gray-200 text-gray-700 text-sm rounded-lg hover:bg-gray-300 transition-colors hidden">
+                    &larr; Geri
+                </button>
+            </div>
+        </div>
+        <!-- Holder Search Results (replaces trademark list when active) -->
+        <div id="holderSearchResults" class="hidden p-6"></div>
+
+        <!-- Modal Body -->
+        <div class="flex-1 overflow-y-auto p-6" id="holderPortfolioBody">
+
+            <!-- Loading State -->
+            <div id="holderPortfolioLoading" class="flex flex-col items-center justify-center py-12">
+                <div class="animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent"></div>
+                <p class="text-gray-500 mt-4">Portfolio yukleniyor...</p>
+            </div>
+
+            <!-- Results -->
+            <div id="holderPortfolioResults" class="hidden">
+
+                <!-- Stats Bar -->
+                <div class="flex items-center gap-6 mb-6 p-4 bg-gray-50 rounded-xl">
+                    <div class="text-center">
+                        <div class="text-2xl font-bold text-blue-600" id="holderTotalCount">0</div>
+                        <div class="text-xs text-gray-500">Toplam Marka</div>
+                    </div>
+                    <div class="h-10 w-px bg-gray-200"></div>
+                    <div class="text-center">
+                        <div class="text-2xl font-bold text-green-600" id="holderRegisteredCount">0</div>
+                        <div class="text-xs text-gray-500">Tescilli</div>
+                    </div>
+                    <div class="h-10 w-px bg-gray-200"></div>
+                    <div class="text-center">
+                        <div class="text-2xl font-bold text-yellow-600" id="holderPendingCount">0</div>
+                        <div class="text-xs text-gray-500">Beklemede</div>
+                    </div>
+                </div>
+
+                <!-- Trademark List -->
+                <div id="holderTrademarksList" class="space-y-3"></div>
+
+                <!-- Pagination -->
+                <div id="holderPagination" class="flex items-center justify-center gap-2 mt-6"></div>
+            </div>
+
+            <!-- Error State -->
+            <div id="holderPortfolioError" class="hidden text-center py-12">
+                <div class="text-5xl mb-4">&#x26a0;&#xfe0f;</div>
+                <p class="text-gray-600" id="holderErrorMessage">Bir hata olustu</p>
+                <button onclick="closeHolderPortfolio()" class="mt-4 px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300">
+                    Kapat
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================ -->
+<!-- REPORT GENERATION MODAL                      -->
+<!-- ============================================ -->
+<div id="report-generate-modal"
+     class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4"
+     onclick="if(event.target===this) hideReportGenerateModal()">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+
+        <!-- Header -->
+        <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+            <h3 class="text-lg font-bold text-gray-900">Yeni Rapor Olustur</h3>
+            <button onclick="hideReportGenerateModal()"
+                    class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+        </div>
+
+        <!-- Body -->
+        <div class="p-6 space-y-4">
+            <!-- Report Type -->
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Rapor Turu</label>
+                <select id="reportTypeSelect" class="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                    <option value="watchlist_summary">Haftalik Ozet</option>
+                    <option value="alert_digest">Aylik Ozet</option>
+                    <option value="portfolio_status">Portfoy Durumu</option>
+                    <option value="risk_assessment">Tekli Marka Raporu</option>
+                    <option value="competitor_analysis">Tam Portfoy Raporu</option>
+                </select>
+            </div>
+
+            <!-- Title -->
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Baslik</label>
+                <input type="text" id="reportTitleInput" placeholder="Rapor basligi (opsiyonel)"
+                       class="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+            </div>
+
+            <!-- Format -->
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Format</label>
+                <select id="reportFormatSelect" class="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                    <option value="pdf">PDF</option>
+                    <option value="xlsx">Excel</option>
+                </select>
+            </div>
+
+            <!-- Date Range -->
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Baslangic Tarihi</label>
+                    <input type="date" id="reportStartDate"
+                           class="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Bitis Tarihi</label>
+                    <input type="date" id="reportEndDate"
+                           class="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="px-6 py-4 border-t border-gray-200 flex gap-3 justify-end">
+            <button onclick="hideReportGenerateModal()"
+                    class="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-sm font-medium border border-gray-200">
+                Iptal
+            </button>
+            <button id="reportSubmitBtn" onclick="submitReportGeneration()"
+                    class="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors">
+                Olustur
+            </button>
+        </div>
+    </div>
+</div>

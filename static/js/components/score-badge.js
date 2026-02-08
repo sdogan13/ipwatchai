@@ -145,8 +145,12 @@ window.AppComponents.IMG_PLACEHOLDER_SVG = '<svg class="w-6 h-6 text-gray-300" f
     + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>'
     + '</svg>';
 
-// Render a thumbnail image with fallback
-window.AppComponents.renderThumbnail = function(imagePath, bulletinNo, size) {
+// Render a clickable thumbnail that opens lightbox, with fallback
+// @param imagePath - image_path from API
+// @param name - trademark name (lightbox title)
+// @param appNo - application number (lightbox subtitle)
+// @param size - Tailwind size class (default: 'w-12 h-12')
+window.AppComponents.renderThumbnail = function(imagePath, name, appNo, size) {
     size = size || 'w-12 h-12';
     var placeholder = '<div class="' + size + ' bg-gray-50 rounded border border-gray-200 flex items-center justify-center flex-shrink-0">'
         + window.AppComponents.IMG_PLACEHOLDER_SVG + '</div>';
@@ -154,10 +158,14 @@ window.AppComponents.renderThumbnail = function(imagePath, bulletinNo, size) {
     if (!imagePath) return placeholder;
 
     var url = '/api/trademark-image/' + encodeURIComponent(imagePath);
+    var escapedName = (name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    var escapedAppNo = (appNo || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    var placeholderEscaped = window.AppComponents.IMG_PLACEHOLDER_SVG.replace(/'/g, "\\'");
 
-    return '<div class="' + size + ' bg-gray-50 rounded border border-gray-200 flex items-center justify-center flex-shrink-0 overflow-hidden">'
-        + '<img src="' + url + '" alt="" class="w-full h-full object-contain"'
-        + ' onerror="this.style.display=\'none\'; this.parentElement.innerHTML=\'' + window.AppComponents.IMG_PLACEHOLDER_SVG.replace(/'/g, "\\'") + '\';">'
+    return '<div class="' + size + ' bg-gray-50 rounded border border-gray-200 flex items-center justify-center flex-shrink-0 overflow-hidden cursor-pointer hover:ring-2 hover:ring-blue-300 transition" '
+        + 'onclick="window.dispatchEvent(new CustomEvent(\'open-lightbox\', { detail: { src: \'' + url.replace(/'/g, "\\'") + '\', title: \'' + escapedName + '\', subtitle: \'' + escapedAppNo + '\' } }))">'
+        + '<img src="' + url + '" alt="' + (name || '').replace(/"/g, '&quot;') + '" class="w-full h-full object-contain"'
+        + ' onerror="this.style.display=\'none\'; this.parentElement.innerHTML=\'' + placeholderEscaped + '\'; this.parentElement.style.cursor=\'default\'; this.parentElement.onclick=null;">'
         + '</div>';
 };
 

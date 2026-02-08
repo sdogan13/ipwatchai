@@ -40,7 +40,7 @@ window.AppComponents.renderResultCard = function(r) {
     // Use shared helpers
     var scoreBadge = window.AppComponents.renderScoreBadge(pct);
     var breakdownHtml = window.AppComponents.renderSimilarityBadges(r.scores);
-    var thumbnail = window.AppComponents.renderThumbnail(r.image_path, r.bulletin_no);
+    var thumbnail = window.AppComponents.renderThumbnail(r.image_path, r.name, r.application_no);
 
     // AI Studio conversion CTAs for high-risk results
     var studioCta = '';
