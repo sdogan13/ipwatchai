@@ -971,3 +971,121 @@ async def update_plan_pricing(
         db.commit()
 
     return {"status": "ok", "plan": plan_name}
+
+
+# ============ USAGE ANALYTICS ============
+
+
+@router.get("/analytics/usage")
+async def usage_analytics(
+    current_user: CurrentUser = Depends(require_superadmin()),
+    days: int = Query(30, ge=1, le=365),
+):
+    """API usage analytics over the last N days."""
+    with Database() as db:
+        cur = db.cursor()
+
+        # Daily usage aggregates from api_usage table
+        cur.execute("""
+            SELECT usage_date as date,
+                   COUNT(DISTINCT user_id) as unique_users,
+                   COALESCE(SUM(quick_searches), 0) as quick_searches,
+                   COALESCE(SUM(live_searches), 0) as live_searches,
+                   COALESCE(SUM(name_generations), 0) as name_generations
+            FROM api_usage
+            WHERE usage_date >= CURRENT_DATE - %s * INTERVAL '1 day'
+            GROUP BY usage_date
+            ORDER BY usage_date DESC
+        """, (days,))
+        daily = [dict(row) for row in cur.fetchall()]
+
+        # Usage by plan
+        cur.execute("""
+            SELECT COALESCE(sp.name, 'free') as plan,
+                   COALESCE(SUM(au.quick_searches), 0) + COALESCE(SUM(au.live_searches), 0) as total_searches
+            FROM api_usage au
+            JOIN users u ON au.user_id = u.id
+            JOIN organizations o ON u.organization_id = o.id
+            LEFT JOIN subscription_plans sp ON o.subscription_plan_id = sp.id
+            WHERE au.usage_date >= CURRENT_DATE - %s * INTERVAL '1 day'
+            GROUP BY sp.name
+        """, (days,))
+        by_plan = {row["plan"]: row["total_searches"] for row in cur.fetchall()}
+
+        # Top users by search volume
+        cur.execute("""
+            SELECT u.email, u.first_name, u.last_name, o.name as org_name,
+                   COALESCE(SUM(au.quick_searches), 0) + COALESCE(SUM(au.live_searches), 0) as total_searches
+            FROM api_usage au
+            JOIN users u ON au.user_id = u.id
+            JOIN organizations o ON u.organization_id = o.id
+            WHERE au.usage_date >= CURRENT_DATE - %s * INTERVAL '1 day'
+            GROUP BY u.id, u.email, u.first_name, u.last_name, o.name
+            ORDER BY total_searches DESC
+            LIMIT 20
+        """, (days,))
+        top_users = [dict(row) for row in cur.fetchall()]
+
+        # Cost-bearing actions from generation_logs
+        cur.execute("""
+            SELECT
+                COUNT(*) FILTER (WHERE feature_type = 'LOGO') as logo_generations,
+                COUNT(*) FILTER (WHERE feature_type = 'NAME') as name_generations
+            FROM generation_logs
+            WHERE created_at >= CURRENT_DATE - %s * INTERVAL '1 day'
+        """, (days,))
+        costs = dict(cur.fetchone()) if cur.rowcount else {}
+
+    return {
+        "period_days": days,
+        "daily_usage": daily,
+        "usage_by_plan": by_plan,
+        "top_users": top_users,
+        "cost_bearing_actions": costs,
+    }
+
+
+@router.get("/analytics/export")
+async def export_usage_csv(
+    current_user: CurrentUser = Depends(require_superadmin()),
+    days: int = Query(30, ge=1, le=365),
+):
+    """Export usage data as CSV."""
+    import csv
+    import io
+    from fastapi.responses import StreamingResponse
+
+    with Database() as db:
+        cur = db.cursor()
+        cur.execute("""
+            SELECT au.usage_date, u.email as user_email, o.name as org_name,
+                   COALESCE(sp.name, 'free') as plan,
+                   COALESCE(au.quick_searches, 0) as quick_searches,
+                   COALESCE(au.live_searches, 0) as live_searches,
+                   COALESCE(au.name_generations, 0) as name_generations
+            FROM api_usage au
+            LEFT JOIN users u ON au.user_id = u.id
+            LEFT JOIN organizations o ON au.organization_id = o.id
+            LEFT JOIN subscription_plans sp ON o.subscription_plan_id = sp.id
+            WHERE au.usage_date >= CURRENT_DATE - %s * INTERVAL '1 day'
+            ORDER BY au.usage_date DESC, u.email
+        """, (days,))
+        rows = cur.fetchall()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["date", "user_email", "org_name", "plan",
+                     "quick_searches", "live_searches", "name_generations"])
+    for row in rows:
+        writer.writerow([
+            row["usage_date"], row["user_email"], row["org_name"],
+            row["plan"], row["quick_searches"], row["live_searches"],
+            row["name_generations"],
+        ])
+
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=usage_export_{days}d.csv"},
+    )
