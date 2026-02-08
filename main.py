@@ -299,8 +299,12 @@ async def serve_dashboard(request: Request):
 
 @app.get("/pricing", response_class=HTMLResponse, tags=["Root"])
 async def serve_pricing(request: Request):
-    """Serve the pricing page"""
-    return templates.TemplateResponse("pricing.html", {"request": request})
+    """Serve the pricing page — renders limits dynamically from PLAN_FEATURES"""
+    from utils.subscription import PLAN_FEATURES
+    return templates.TemplateResponse("pricing.html", {
+        "request": request,
+        "plans": PLAN_FEATURES,
+    })
 
 
 @app.get("/api/info", tags=["Root"])

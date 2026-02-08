@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Planlar - IP Watchdog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>body { font-family: 'Inter', sans-serif; }</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+    <!-- Header -->
+    <nav class="bg-white border-b border-gray-200">
+        <div class="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+            <a href="/dashboard" class="flex items-center gap-2 text-gray-600 hover:text-gray-900 text-sm font-medium">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                Dashboard'a Don
+            </a>
+            <div class="flex items-center gap-2">
+                <div class="bg-indigo-600 p-1.5 rounded-lg">
+                    <svg class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                </div>
+                <span class="font-bold text-gray-900">IP Watchdog</span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Content -->
+    <div class="max-w-6xl mx-auto px-4 py-12">
+        <div class="text-center mb-10">
+            <h1 class="text-3xl font-bold text-gray-900 mb-2">Planlar ve Fiyatlandirma</h1>
+            <p class="text-gray-500">Isletmenize uygun plani secin</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+
+            <!-- Free Plan -->
+            <div class="bg-white rounded-2xl border border-gray-200 p-6 flex flex-col">
+                <div class="mb-6">
+                    <h2 class="text-lg font-bold text-gray-900">Ucretsiz</h2>
+                    <div class="mt-2">
+                        <span class="text-3xl font-bold text-gray-900">&#8378;0</span>
+                        <span class="text-gray-500">/ay</span>
+                    </div>
+                    <p class="text-sm text-gray-500 mt-2">Baslangic icin ideal</p>
+                </div>
+                <ul class="space-y-3 text-sm text-gray-700 flex-1">
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> {{ plans.free.max_watchlist_items }} marka izleme</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Gunluk {{ plans.free.max_daily_quick_searches }} hizli arama</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Temel risk analizi</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> {{ plans.free.name_suggestions_per_session }} isim onerisi/oturum</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ayda {{ plans.free.monthly_name_generations }} isim olusturma</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ayda {{ plans.free.monthly_logo_runs }} logo olusturma</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ayda {{ plans.free.monthly_reports }} rapor</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> {{ plans.free.max_users }} kullanici</li>
+                    <li class="flex items-start gap-2"><span class="text-gray-300 mt-0.5">&#x2717;</span><span class="text-gray-400">Canli arama</span></li>
+                    <li class="flex items-start gap-2"><span class="text-gray-300 mt-0.5">&#x2717;</span><span class="text-gray-400">Opposition Radar</span></li>
+                    <li class="flex items-start gap-2"><span class="text-gray-300 mt-0.5">&#x2717;</span><span class="text-gray-400">Otomatik tarama</span></li>
+                </ul>
+                <div class="mt-6">
+                    <span class="block text-center px-4 py-2.5 bg-gray-100 text-gray-500 rounded-xl text-sm font-medium">Mevcut Plan</span>
+                </div>
+            </div>
+
+            <!-- Starter Plan -->
+            <div class="bg-white rounded-2xl border border-gray-200 p-6 flex flex-col">
+                <div class="mb-6">
+                    <h2 class="text-lg font-bold text-gray-900">Starter</h2>
+                    <div class="mt-2">
+                        <span class="text-3xl font-bold text-gray-900">&#8378;299</span>
+                        <span class="text-gray-500">/ay</span>
+                    </div>
+                    <p class="text-sm text-gray-500 mt-2">Bireysel vekiller icin</p>
+                </div>
+                <ul class="space-y-3 text-sm text-gray-700 flex-1">
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> {{ plans.starter.max_watchlist_items }} marka izleme</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Gunluk {{ plans.starter.max_daily_quick_searches }} hizli arama</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Gelismis risk analizi</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> {{ plans.starter.name_suggestions_per_session }} isim onerisi/oturum</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ayda {{ plans.starter.monthly_name_generations }} isim olusturma</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ayda {{ plans.starter.monthly_logo_runs }} logo olusturma</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ayda {{ plans.starter.monthly_reports }} rapor</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Rapor indirme</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> {{ plans.starter.max_users }} kullanici</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Haftalik otomatik tarama ({{ plans.starter.auto_scan_max_items }} marka)</li>
+                    <li class="flex items-start gap-2"><span class="text-gray-300 mt-0.5">&#x2717;</span><span class="text-gray-400">Canli arama</span></li>
+                    <li class="flex items-start gap-2"><span class="text-gray-300 mt-0.5">&#x2717;</span><span class="text-gray-400">Opposition Radar</span></li>
+                </ul>
+                <div class="mt-6">
+                    <a href="mailto:sales@ipwatchdog.com.tr?subject=Starter%20Plan%20Basvurusu"
+                       class="block text-center px-4 py-2.5 bg-gray-900 hover:bg-gray-800 text-white rounded-xl text-sm font-medium transition-colors">
+                        Iletisime Gec
+                    </a>
+                </div>
+            </div>
+
+            <!-- Professional Plan -->
+            <div class="bg-white rounded-2xl border-2 border-indigo-500 p-6 flex flex-col relative shadow-lg">
+                <div class="absolute -top-3 left-1/2 -translate-x-1/2 bg-indigo-600 text-white text-xs font-bold px-3 py-1 rounded-full">POPULER</div>
+                <div class="mb-6">
+                    <h2 class="text-lg font-bold text-gray-900">Professional</h2>
+                    <div class="mt-2">
+                        <span class="text-3xl font-bold text-gray-900">&#8378;999</span>
+                        <span class="text-gray-500">/ay</span>
+                    </div>
+                    <p class="text-sm text-gray-500 mt-2">Marka vekilleri icin</p>
+                </div>
+                <ul class="space-y-3 text-sm text-gray-700 flex-1">
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> {{ plans.professional.max_watchlist_items }} marka izleme</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Gunluk {{ plans.professional.max_daily_quick_searches }} hizli arama</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ayda {{ plans.professional.monthly_live_searches }} canli arama</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Gelismis risk analizi</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> {{ plans.professional.name_suggestions_per_session }} isim onerisi/oturum</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ayda {{ plans.professional.monthly_name_generations }} isim olusturma</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ayda {{ plans.professional.monthly_logo_runs }} logo olusturma</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ayda {{ plans.professional.monthly_reports }} rapor + indirme</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> {{ plans.professional.max_users }} kullanici</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Opposition Radar ({{ plans.professional.daily_lead_views }} lead/gun)</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Sahip portfolyosu</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Gunluk otomatik tarama ({{ plans.professional.auto_scan_max_items }} marka)</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Oncelikli destek</li>
+                </ul>
+                <div class="mt-6">
+                    <a href="mailto:sales@ipwatchdog.com.tr?subject=Professional%20Plan%20Basvurusu"
+                       class="block text-center px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-medium transition-colors">
+                        Iletisime Gec
+                    </a>
+                </div>
+            </div>
+
+            <!-- Enterprise Plan -->
+            <div class="bg-white rounded-2xl border border-gray-200 p-6 flex flex-col">
+                <div class="mb-6">
+                    <h2 class="text-lg font-bold text-gray-900">Enterprise</h2>
+                    <div class="mt-2">
+                        <span class="text-3xl font-bold text-gray-900">&#8378;2,499</span>
+                        <span class="text-gray-500">/ay</span>
+                    </div>
+                    <p class="text-sm text-gray-500 mt-2">Buyuk firmalar icin</p>
+                </div>
+                <ul class="space-y-3 text-sm text-gray-700 flex-1">
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> {{ plans.enterprise.max_watchlist_items }} marka izleme</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Sinirsiz hizli arama</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ayda {{ plans.enterprise.monthly_live_searches }} canli arama</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Gelismis risk analizi + raporlama</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Sinirsiz isim onerisi</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ayda {{ plans.enterprise.monthly_name_generations }} isim olusturma</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ayda {{ plans.enterprise.monthly_logo_runs }} logo olusturma</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ayda {{ plans.enterprise.monthly_reports }} rapor + indirme</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> {{ plans.enterprise.max_users }} kullanici</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Opposition Radar (sinirsiz)</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Sahip portfolyosu</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> CSV export</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Gunluk otomatik tarama ({{ plans.enterprise.auto_scan_max_items }} marka)</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ozel entegrasyon + API</li>
+                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ozel musteri temsilcisi</li>
+                </ul>
+                <div class="mt-6">
+                    <a href="mailto:sales@ipwatchdog.com.tr?subject=Enterprise%20Plan%20Basvurusu"
+                       class="block text-center px-4 py-2.5 bg-gray-900 hover:bg-gray-800 text-white rounded-xl text-sm font-medium transition-colors">
+                        Iletisime Gec
+                    </a>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="text-center mt-10 text-sm text-gray-400">
+            Tum planlar KDV haric fiyatlandirilmistir. Yillik odeme ile %20 indirim.
+        </div>
+    </div>
+
+</body>
+</html>
