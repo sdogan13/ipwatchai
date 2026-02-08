@@ -96,6 +96,7 @@ class CurrentUser(BaseModel):
     first_name: Optional[str]
     last_name: Optional[str]
     role: str
+    is_superadmin: bool = False
     permissions: list
 
 
@@ -230,7 +231,8 @@ async def get_current_user(
         cur = conn.cursor(cursor_factory=RealDictCursor)
 
         cur.execute(
-            "SELECT id, email, first_name, last_name, role, is_active "
+            "SELECT id, email, first_name, last_name, role, is_active, "
+            "COALESCE(is_superadmin, FALSE) as is_superadmin "
             "FROM users WHERE id = %s",
             (payload.sub,)
         )
@@ -261,6 +263,7 @@ async def get_current_user(
             first_name=user.get('first_name'),
             last_name=user.get('last_name'),
             role=user['role'],
+            is_superadmin=user.get('is_superadmin', False),
             permissions=[]
         )
     except HTTPException:
@@ -292,6 +295,21 @@ def require_role(allowed_roles: list):
             )
         return current_user
     return role_checker
+
+
+def require_superadmin():
+    """
+    Dependency factory that requires superadmin access.
+    Use for all /admin endpoints. Independent from org-level require_role().
+    """
+    async def superadmin_checker(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+        if not current_user.is_superadmin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Superadmin access required"
+            )
+        return current_user
+    return superadmin_checker
 
 
 def require_permission(permission: str):
