@@ -130,6 +130,15 @@ async def admin_overview(current_user: CurrentUser = Depends(require_superadmin(
         """)
         stats["new_users_7d"] = cur.fetchone()["cnt"]
 
+        cur.execute("SELECT COUNT(*) as cnt FROM alerts_mt WHERE status NOT IN ('resolved', 'dismissed')")
+        stats["total_alerts"] = cur.fetchone()["cnt"]
+
+        cur.execute("""
+            SELECT COALESCE(SUM(quick_searches), 0) + COALESCE(SUM(live_searches), 0) as cnt
+            FROM api_usage WHERE usage_date = CURRENT_DATE
+        """)
+        stats["api_calls_today"] = cur.fetchone()["cnt"]
+
     return stats
 
 
