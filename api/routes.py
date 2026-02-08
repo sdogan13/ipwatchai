@@ -69,6 +69,7 @@ reports_router = APIRouter(prefix="/reports", tags=["Reports"])
 dashboard_router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 admin_router = APIRouter(prefix="/admin", tags=["Admin"])
 trademark_router = APIRouter(prefix="/trademark", tags=["Trademark"])
+usage_router = APIRouter(prefix="/usage", tags=["Usage"])
 
 
 # ==========================================
@@ -2211,6 +2212,69 @@ async def get_extracted_goods(
         "extracted_goods": extracted,
         "nice_classes": row.get("nice_class_numbers"),
         "total_items": len(extracted) if isinstance(extracted, list) else 0
+    }
+
+
+# ==========================================
+# Usage Summary
+# ==========================================
+
+@usage_router.get("/summary")
+async def get_usage_summary(current_user: CurrentUser = Depends(get_current_user)):
+    """
+    Unified credits/usage endpoint.
+    Returns all usage counters and plan limits for the current user.
+    """
+    from utils.subscription import (
+        get_user_plan, get_plan_limit,
+        get_daily_quick_searches, get_live_search_usage,
+        get_monthly_name_generations, get_org_plan,
+        check_logo_generation_eligibility,
+    )
+
+    with Database() as db:
+        user_id = str(current_user.id)
+        org_id = str(current_user.organization_id)
+        plan = get_user_plan(db, user_id)
+        plan_name = plan['plan_name']
+
+        # Daily quick searches
+        qs_used = get_daily_quick_searches(db, user_id)
+        qs_limit = get_plan_limit(plan_name, 'max_daily_quick_searches')
+
+        # Monthly live searches
+        ls_used = get_live_search_usage(db, user_id)
+        ls_limit = get_plan_limit(plan_name, 'monthly_live_searches')
+
+        # Monthly name generations (org-level)
+        ng_used = get_monthly_name_generations(db, org_id)
+        ng_limit = get_plan_limit(plan_name, 'monthly_name_generations')
+
+        # Logo credits (org-level)
+        logo_ok, _, logo_details = check_logo_generation_eligibility(db, org_id)
+        logo_remaining = logo_details.get('total_remaining', 0)
+        logo_limit = get_plan_limit(plan_name, 'monthly_logo_runs')
+
+        # Watchlist items count
+        cur = db.cursor()
+        cur.execute(
+            "SELECT COUNT(*) as cnt FROM watchlist_mt WHERE organization_id = %s AND is_active = TRUE",
+            (org_id,)
+        )
+        wl_row = cur.fetchone()
+        wl_count = wl_row['cnt'] if wl_row else 0
+        wl_limit = get_plan_limit(plan_name, 'max_watchlist_items')
+
+    return {
+        "plan": plan_name,
+        "display_name": plan['display_name'],
+        "usage": {
+            "daily_quick_searches": {"used": qs_used, "limit": qs_limit},
+            "monthly_live_searches": {"used": ls_used, "limit": ls_limit},
+            "monthly_name_generations": {"used": ng_used, "limit": ng_limit},
+            "logo_credits": {"remaining": logo_remaining, "limit": logo_limit},
+            "watchlist_items": {"used": wl_count, "limit": wl_limit},
+        },
     }
 
 

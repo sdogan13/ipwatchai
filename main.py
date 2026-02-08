@@ -218,7 +218,8 @@ from api.routes import (
     org_router,
     watchlist_router,
     alerts_router,
-    dashboard_router
+    dashboard_router,
+    usage_router,
 )
 from api.reports import router as reports_router
 from api.upload import router as upload_router
@@ -241,6 +242,7 @@ app.include_router(reports_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(leads_router, prefix="/api/v1")
 app.include_router(holders_router, prefix="/api/v1")
+app.include_router(usage_router, prefix="/api/v1")
 
 # File upload routes
 app.include_router(upload_router)
