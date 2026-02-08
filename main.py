@@ -122,6 +122,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"   Settings manager init failed (non-fatal): {e}")
 
+    # Seed default settings into app_settings (idempotent, won't overwrite)
+    from utils.seed_settings import seed_default_settings
+    try:
+        seed_default_settings()
+    except Exception as e:
+        logger.warning(f"   Default settings seed failed (non-fatal): {e}")
+
     # Seed superadmin user (idempotent)
     from utils.superadmin import seed_superadmin
     try:
