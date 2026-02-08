@@ -100,7 +100,18 @@ PLAN_FEATURES = {
 
 
 def get_plan_limit(plan_name: str, feature: str):
-    """Single function to get any limit for any plan."""
+    """
+    Get a plan limit. Checks DB override first (via settings_manager),
+    then falls back to code default in PLAN_FEATURES.
+    DB key format: plan.{plan_name}.{feature}
+    """
+    from utils.settings_manager import settings_manager
+    db_key = f"plan.{plan_name}.{feature}"
+    db_value = settings_manager.get(db_key)
+    if db_value is not None:
+        return db_value
+
+    # Fall back to code default
     plan = PLAN_FEATURES.get(plan_name, PLAN_FEATURES["free"])
     return plan.get(feature, PLAN_FEATURES["free"].get(feature, 0))
 
