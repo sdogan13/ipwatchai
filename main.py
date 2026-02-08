@@ -112,6 +112,16 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"   Reports table check failed (non-fatal): {e}")
 
+    # Initialize settings manager (in-memory cache for app_settings table)
+    from utils.settings_manager import settings_manager
+    try:
+        from migrations.run_add_app_settings import ensure_app_settings_table
+        ensure_app_settings_table()
+        settings_manager.init()
+        logger.info("   Settings manager ready")
+    except Exception as e:
+        logger.warning(f"   Settings manager init failed (non-fatal): {e}")
+
     # Seed superadmin user (idempotent)
     from utils.superadmin import seed_superadmin
     try:
