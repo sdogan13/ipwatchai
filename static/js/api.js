@@ -554,6 +554,25 @@ window.AppAPI.getWatchlistItems = async function(page, pageSize) {
     return await res.json();
 };
 
+window.AppAPI.addWatchlistItem = async function(data) {
+    var res = await fetch('/api/v1/watchlist', {
+        method: 'POST',
+        headers: {
+            'Authorization': 'Bearer ' + getAuthToken(),
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(data)
+    });
+    var body = await res.json().catch(function() { return {}; });
+    if (!res.ok) {
+        var err = new Error(body.detail || 'Takip listesine eklenemedi');
+        err.status = res.status;
+        err.data = body;
+        throw err;
+    }
+    return body;
+};
+
 // ============================================
 // HOLDER SEARCH
 // ============================================

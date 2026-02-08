@@ -24,6 +24,9 @@ var currentSearchTotalPages = 1;
 var currentSearchTotal = 0;
 var currentSearchType = 'quick';
 
+// Watchlist cache — tracks which application_nos are already monitored
+var userWatchlistAppNos = {};  // using object as Set for IE compat
+
 // ============================================
 // ALPINE.JS DASHBOARD COMPONENT
 // ============================================
@@ -1606,6 +1609,35 @@ function pollPipelineStatus() {
 }
 
 // ============================================
+// WATCHLIST CACHE — tracks which app_nos are already monitored
+// ============================================
+function isInWatchlist(applicationNo) {
+    return applicationNo && userWatchlistAppNos.hasOwnProperty(applicationNo);
+}
+
+function loadWatchlistCache() {
+    AppAPI.getWatchlistItems(1, 2000).then(function(data) {
+        var items = data.items || [];
+        userWatchlistAppNos = {};
+        items.forEach(function(item) {
+            if (item.application_no) {
+                userWatchlistAppNos[item.application_no] = true;
+            }
+        });
+    }).catch(function() { /* silent */ });
+}
+
+function refreshWatchlistButtons() {
+    document.querySelectorAll('[data-watchlist-appno]').forEach(function(el) {
+        if (isInWatchlist(el.getAttribute('data-watchlist-appno'))) {
+            el.outerHTML = '<span class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-green-700 bg-green-50 rounded">'
+                + '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>'
+                + 'Takip Ediliyor</span>';
+        }
+    });
+}
+
+// ============================================
 // PORTFOLIO / WATCHLIST WITH LOGO UPLOAD
 // ============================================
 function loadPortfolio() {
@@ -1614,6 +1646,13 @@ function loadPortfolio() {
         var total = data.total || items.length;
         var countEl = document.getElementById('portfolio-count');
         if (countEl) countEl.textContent = total + ' marka';
+        // Build watchlist cache from the same data
+        userWatchlistAppNos = {};
+        items.forEach(function(item) {
+            if (item.application_no) {
+                userWatchlistAppNos[item.application_no] = true;
+            }
+        });
         renderPortfolioGrid(items);
     }).catch(function(e) {
         var grid = document.getElementById('portfolio-grid');
