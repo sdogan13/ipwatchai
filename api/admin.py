@@ -529,3 +529,208 @@ async def get_audit_log(
         entries = [dict(row) for row in cur.fetchall()]
 
     return {"entries": entries, "limit": limit, "offset": offset}
+
+
+# ============ CREDIT MANAGEMENT ============
+
+
+@router.get("/organizations/{org_id}/credits")
+async def get_org_credits(
+    org_id: str,
+    current_user: CurrentUser = Depends(require_superadmin()),
+):
+    """Get current credit balances for an organization."""
+    with Database() as db:
+        cur = db.cursor()
+
+        cur.execute("""
+            SELECT o.logo_credits_monthly, o.logo_credits_purchased, o.name_credits_purchased,
+                   o.logo_credits_reset_at,
+                   COALESCE(sp.name, 'free') as plan_name,
+                   COALESCE(sp.logo_runs_per_month, 1) as plan_logo_monthly
+            FROM organizations o
+            LEFT JOIN subscription_plans sp ON o.subscription_plan_id = sp.id
+            WHERE o.id = %s
+        """, (org_id,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Organization not found")
+
+        cur.execute("""
+            SELECT
+                COUNT(*) FILTER (WHERE feature_type = 'LOGO') as logo_generations_this_month,
+                COUNT(*) FILTER (WHERE feature_type = 'NAME') as name_generations_this_month
+            FROM generation_logs
+            WHERE org_id = %s
+            AND created_at >= DATE_TRUNC('month', CURRENT_DATE)
+        """, (org_id,))
+        usage = cur.fetchone()
+
+    return {
+        "organization_id": org_id,
+        "plan": row["plan_name"],
+        "logo_credits": {
+            "monthly_remaining": row["logo_credits_monthly"] or 0,
+            "purchased": row["logo_credits_purchased"] or 0,
+            "plan_default": row["plan_logo_monthly"] or 0,
+            "used_this_month": usage["logo_generations_this_month"] if usage else 0,
+            "reset_at": str(row["logo_credits_reset_at"]) if row["logo_credits_reset_at"] else None,
+        },
+        "name_credits": {
+            "purchased": row["name_credits_purchased"] or 0,
+            "used_this_month": usage["name_generations_this_month"] if usage else 0,
+        },
+    }
+
+
+@router.put("/organizations/{org_id}/credits")
+async def adjust_org_credits(
+    org_id: str,
+    payload: dict = Body(...),
+    current_user: CurrentUser = Depends(require_superadmin()),
+):
+    """
+    Adjust credits for an organization.
+    Body: {
+        "credit_type": "logo_purchased" | "logo_monthly" | "name_purchased",
+        "operation": "set" | "add" | "subtract",
+        "amount": 10,
+        "reason": "Manual adjustment - customer complaint"
+    }
+    """
+    credit_type = payload.get("credit_type")
+    operation = payload.get("operation", "set")
+    amount = payload.get("amount")
+    reason = payload.get("reason", "")
+
+    valid_types = {
+        "logo_purchased": "logo_credits_purchased",
+        "logo_monthly": "logo_credits_monthly",
+        "name_purchased": "name_credits_purchased",
+    }
+
+    if credit_type not in valid_types:
+        raise HTTPException(status_code=400, detail=f"credit_type must be one of: {list(valid_types.keys())}")
+    if amount is None or not isinstance(amount, (int, float)):
+        raise HTTPException(status_code=400, detail="'amount' must be a number")
+    if operation not in ("set", "add", "subtract"):
+        raise HTTPException(status_code=400, detail="operation must be 'set', 'add', or 'subtract'")
+
+    column = valid_types[credit_type]
+
+    with Database() as db:
+        cur = db.cursor()
+
+        cur.execute(f"SELECT {column} FROM organizations WHERE id = %s", (org_id,))
+        old = cur.fetchone()
+        if not old:
+            raise HTTPException(status_code=404, detail="Organization not found")
+        old_value = old[column] or 0
+
+        if operation == "set":
+            new_value = int(amount)
+            cur.execute(f"UPDATE organizations SET {column} = %s WHERE id = %s", (new_value, org_id))
+        elif operation == "add":
+            new_value = old_value + int(amount)
+            cur.execute(f"UPDATE organizations SET {column} = {column} + %s WHERE id = %s", (int(amount), org_id))
+        else:  # subtract
+            new_value = max(0, old_value - int(amount))
+            cur.execute(f"UPDATE organizations SET {column} = GREATEST(0, {column} - %s) WHERE id = %s", (int(amount), org_id))
+
+        _audit_log(db, str(current_user.id), "credit_adjustment", {
+            "organization_id": org_id,
+            "credit_type": credit_type,
+            "operation": operation,
+            "amount": amount,
+            "old_value": old_value,
+            "new_value": new_value,
+            "reason": reason,
+        })
+        db.commit()
+
+    return {
+        "status": "ok",
+        "organization_id": org_id,
+        "credit_type": credit_type,
+        "old_value": old_value,
+        "new_value": new_value,
+    }
+
+
+@router.post("/credits/bulk")
+async def bulk_credit_adjustment(
+    payload: dict = Body(...),
+    current_user: CurrentUser = Depends(require_superadmin()),
+):
+    """
+    Bulk credit operation across orgs by plan.
+    Body: {
+        "plan_filter": "professional" or "all",
+        "credit_type": "logo_purchased",
+        "operation": "add" or "set",
+        "amount": 10,
+        "reason": "Q1 bonus credits"
+    }
+    """
+    plan_filter = payload.get("plan_filter", "all")
+    credit_type = payload.get("credit_type")
+    operation = payload.get("operation")
+    amount = payload.get("amount")
+    reason = payload.get("reason", "")
+
+    valid_types = {
+        "logo_purchased": "logo_credits_purchased",
+        "logo_monthly": "logo_credits_monthly",
+        "name_purchased": "name_credits_purchased",
+    }
+
+    if credit_type not in valid_types:
+        raise HTTPException(status_code=400, detail=f"credit_type must be one of: {list(valid_types.keys())}")
+    if operation not in ("add", "set"):
+        raise HTTPException(status_code=400, detail="Bulk operation only supports 'add' or 'set'")
+
+    column = valid_types[credit_type]
+
+    with Database() as db:
+        cur = db.cursor()
+
+        where = "WHERE o.is_active = TRUE"
+        params = []
+        if plan_filter != "all":
+            where += " AND COALESCE(sp.name, 'free') = %s"
+            params.append(plan_filter)
+
+        if operation == "add":
+            sql = f"""
+                UPDATE organizations SET {column} = {column} + %s
+                WHERE id IN (
+                    SELECT o.id FROM organizations o
+                    LEFT JOIN subscription_plans sp ON o.subscription_plan_id = sp.id
+                    {where}
+                )
+            """
+            cur.execute(sql, [int(amount)] + params)
+        else:  # set
+            sql = f"""
+                UPDATE organizations SET {column} = %s
+                WHERE id IN (
+                    SELECT o.id FROM organizations o
+                    LEFT JOIN subscription_plans sp ON o.subscription_plan_id = sp.id
+                    {where}
+                )
+            """
+            cur.execute(sql, [int(amount)] + params)
+
+        affected = cur.rowcount
+
+        _audit_log(db, str(current_user.id), "bulk_credit_adjustment", {
+            "plan_filter": plan_filter,
+            "credit_type": credit_type,
+            "operation": operation,
+            "amount": amount,
+            "affected_orgs": affected,
+            "reason": reason,
+        })
+        db.commit()
+
+    return {"status": "ok", "affected_organizations": affected}
