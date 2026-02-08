@@ -324,46 +324,5 @@ def require_permission(permission: str):
     return permission_checker
 
 
-# ==========================================
-# API Key Authentication (Alternative)
-# ==========================================
-
-from fastapi.security import APIKeyHeader
-
-api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
-
-
-async def get_api_key_user(
-    api_key: Optional[str] = Depends(api_key_header)
-) -> Optional[CurrentUser]:
-    """
-    Authenticate via API key header.
-    Returns None if no API key provided (allows fallback to JWT).
-    """
-    if not api_key:
-        return None
-    
-    # In production, lookup API key in database
-    # Verify key hash, check scopes, rate limits, etc.
-    
-    # Placeholder - would return user associated with API key
-    return None
-
-
-async def get_current_user_or_api_key(
-    jwt_user: Optional[CurrentUser] = Depends(get_current_user),
-    api_key_user: Optional[CurrentUser] = Depends(get_api_key_user)
-) -> CurrentUser:
-    """
-    Authenticate via JWT or API key.
-    JWT takes precedence.
-    """
-    if jwt_user:
-        return jwt_user
-    if api_key_user:
-        return api_key_user
-    
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Authentication required"
-    )
+# TODO: Implement API key authentication when needed.
+# Should support X-API-Key header with keys stored in api_keys table.
