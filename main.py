@@ -244,6 +244,7 @@ from api.leads import router as leads_router
 from api.holders import router as holders_router
 from api.creative import router as creative_router
 from api.pipeline import router as pipeline_router
+from api.admin import router as admin_router
 from agentic_search import router as agentic_router
 
 # Public routes (no auth required for some endpoints)
@@ -269,6 +270,9 @@ app.include_router(creative_router)
 
 # Pipeline Management (admin-only)
 app.include_router(pipeline_router)
+
+# Superadmin panel (is_superadmin required)
+app.include_router(admin_router)
 
 # Agentic search (includes its own /api/v1/search prefix)
 app.include_router(agentic_router)
