@@ -17,7 +17,36 @@
                         Admin
                     </a>
                 </template>
-                <span class="text-sm bg-gray-100 px-3 py-1 rounded-full text-gray-600">Client: <b x-text="userId"></b></span>
+                <!-- Language Toggle -->
+                <div x-data="{ langOpen: false }" class="relative">
+                    <button @click="langOpen = !langOpen" @click.outside="langOpen = false"
+                            class="flex items-center gap-1 px-2.5 py-1.5 text-sm text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors"
+                            title="Language">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129"/>
+                        </svg>
+                        <span x-text="(window.AppI18n && window.AppI18n.getLocale() || 'tr').toUpperCase()" class="font-medium text-xs"></span>
+                    </button>
+                    <div x-show="langOpen" x-cloak x-transition
+                         class="absolute right-0 mt-1 w-36 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
+                        <button @click="window.AppI18n.setLocale('tr'); langOpen = false"
+                                class="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2"
+                                :class="(window.AppI18n && window.AppI18n.getLocale()) === 'tr' ? 'text-indigo-600 font-semibold bg-indigo-50' : 'text-gray-700'">
+                            <span>TR</span> <span class="text-gray-400">Turkce</span>
+                        </button>
+                        <button @click="window.AppI18n.setLocale('en'); langOpen = false"
+                                class="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2"
+                                :class="(window.AppI18n && window.AppI18n.getLocale()) === 'en' ? 'text-indigo-600 font-semibold bg-indigo-50' : 'text-gray-700'">
+                            <span>EN</span> <span class="text-gray-400">English</span>
+                        </button>
+                        <button @click="window.AppI18n.setLocale('ar'); langOpen = false"
+                                class="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2"
+                                :class="(window.AppI18n && window.AppI18n.getLocale()) === 'ar' ? 'text-indigo-600 font-semibold bg-indigo-50' : 'text-gray-700'">
+                            <span>AR</span> <span class="text-gray-400">العربية</span>
+                        </button>
+                    </div>
+                </div>
+                <span class="text-sm bg-gray-100 px-3 py-1 rounded-full text-gray-600"><span x-text="t('nav.client')"></span>: <b x-text="userId"></b></span>
                 <button @click="loadData()" class="p-2 rounded-full hover:bg-gray-100 text-gray-500 transition">
                     <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />

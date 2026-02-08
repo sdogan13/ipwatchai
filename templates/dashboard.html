@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="tr" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trademark Intelligence Dashboard</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Alpine.js (Logic) -->
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.3/dist/cdn.min.js"></script>
+    <!-- Chart.js (Visuals) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        [x-cloak] { display: none !important; }
+
+        /* Agentic search terminal animation */
+        #agentic-log .log-line {
+            animation: typeIn 0.3s ease-out;
+        }
+        @keyframes typeIn {
+            from { opacity: 0; transform: translateX(-10px); }
+            to   { opacity: 1; transform: translateX(0); }
+        }
+        #agentic-log::-webkit-scrollbar { width: 6px; }
+        #agentic-log::-webkit-scrollbar-track { background: #1a1a1a; }
+        #agentic-log::-webkit-scrollbar-thumb { background: #4a4a4a; border-radius: 3px; }
+
+        /* RTL support */
+        html.rtl { direction: rtl; text-align: right; }
+        html.rtl .space-x-4 > :not([hidden]) ~ :not([hidden]) { margin-left: 0; margin-right: 1rem; }
+        html.rtl .ml-4 { margin-left: 0; margin-right: 1rem; }
+        html.rtl .mr-4 { margin-right: 0; margin-left: 1rem; }
+        html.rtl .pl-10 { padding-left: 0; padding-right: 2.5rem; }
+        html.rtl .pr-10 { padding-right: 0; padding-left: 2.5rem; }
+        html.rtl .left-3 { left: auto; right: 0.75rem; }
+        html.rtl .right-3 { right: auto; left: 0.75rem; }
+        html.rtl .ml-auto { margin-left: 0; margin-right: auto; }
+        html.rtl .text-left { text-align: right; }
+        html.rtl .text-right { text-align: left; }
+        html.rtl .border-l-4 { border-left: 0; border-right-width: 4px; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800" x-data="dashboard()">
+
+    {% include 'partials/_navbar.html' %}
+
+    {% include 'partials/_search_panel.html' %}
+
+    {% include 'partials/_results_panel.html' %}
+
+    {% include 'partials/_leads_panel.html' %}
+
+    {% include 'partials/_ai_studio_panel.html' %}
+
+    {% include 'partials/_reports_panel.html' %}
+
+    {% include 'partials/_modals.html' %}
+
+    <!-- i18n (must load first, before other scripts use t()) -->
+    <script src="/static/js/utils/i18n.js"></script>
+
+    <!-- Utilities first -->
+    <script src="/static/js/utils/helpers.js"></script>
+    <script src="/static/js/utils/auth.js"></script>
+    <script src="/static/js/utils/toast.js"></script>
+
+    <!-- Components -->
+    <script src="/static/js/components/score-badge.js"></script>
+    <script src="/static/js/components/result-card.js"></script>
+    <script src="/static/js/components/lead-card.js"></script>
+    <script src="/static/js/components/studio-card.js"></script>
+
+    <!-- API layer -->
+    <script src="/static/js/api.js"></script>
+
+    <!-- App init last -->
+    <script src="/static/js/app.js"></script>
+
+</body>
+</html>
