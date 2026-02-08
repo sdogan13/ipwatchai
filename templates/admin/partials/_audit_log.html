@@ -1,0 +1,82 @@
+<h2 class="text-lg font-semibold text-gray-900 mb-4">Audit Log</h2>
+
+<!-- Filters -->
+<div class="bg-white rounded-lg border border-gray-200 p-4 mb-4 flex flex-wrap gap-3 items-end">
+    <div>
+        <label class="text-xs font-medium text-gray-500 block mb-1">Action Type</label>
+        <select x-model="actionFilter" @change="page=0; load()" class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+            <option value="">All Actions</option>
+            <option value="setting_changed">Setting Changed</option>
+            <option value="setting_deleted">Setting Deleted</option>
+            <option value="plan_changed">Plan Changed</option>
+            <option value="org_status_changed">Org Status Changed</option>
+            <option value="user_role_changed">User Role Changed</option>
+            <option value="superadmin_toggled">Superadmin Toggled</option>
+            <option value="user_status_changed">User Status Changed</option>
+            <option value="credit_adjustment">Credit Adjustment</option>
+            <option value="bulk_credit_adjustment">Bulk Credit Adjustment</option>
+            <option value="discount_code_created">Discount Created</option>
+            <option value="discount_code_updated">Discount Updated</option>
+            <option value="discount_code_deactivated">Discount Deactivated</option>
+            <option value="plan_pricing_updated">Plan Pricing Updated</option>
+        </select>
+    </div>
+</div>
+
+<template x-if="loading">
+    <div class="flex items-center gap-2 text-gray-500 py-8">
+        <svg class="animate-spin h-5 w-5" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+        Loading...
+    </div>
+</template>
+
+<template x-if="!loading">
+    <div>
+        <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
+            <table class="w-full text-sm">
+                <thead class="bg-gray-50 text-left">
+                    <tr>
+                        <th class="px-4 py-3 font-medium text-gray-600">Timestamp</th>
+                        <th class="px-4 py-3 font-medium text-gray-600">User</th>
+                        <th class="px-4 py-3 font-medium text-gray-600">Action</th>
+                        <th class="px-4 py-3 font-medium text-gray-600">Details</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                    <template x-for="entry in entries" :key="entry.id">
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-4 py-3 text-xs text-gray-500 whitespace-nowrap" x-text="entry.created_at ? new Date(entry.created_at).toLocaleString() : '-'"></td>
+                            <td class="px-4 py-3">
+                                <div class="text-xs" x-text="entry.user_email || entry.user_id"></div>
+                                <div class="text-[10px] text-gray-400" x-text="(entry.first_name || '') + ' ' + (entry.last_name || '')"></div>
+                            </td>
+                            <td class="px-4 py-3">
+                                <span class="px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-700" x-text="entry.action?.replace(/_/g, ' ')"></span>
+                            </td>
+                            <td class="px-4 py-3">
+                                <button @click="entry._expanded = !entry._expanded" class="text-xs text-indigo-600 hover:text-indigo-700">
+                                    <span x-text="entry._expanded ? 'Hide' : 'Show'"></span>
+                                </button>
+                                <div x-show="entry._expanded" x-cloak class="mt-1">
+                                    <pre class="text-[10px] bg-gray-50 p-2 rounded overflow-auto max-h-32 text-gray-600" x-text="JSON.stringify(typeof entry.metadata === 'string' ? JSON.parse(entry.metadata) : entry.metadata, null, 2)"></pre>
+                                </div>
+                            </td>
+                        </tr>
+                    </template>
+                    <template x-if="entries.length === 0">
+                        <tr><td colspan="4" class="px-4 py-8 text-center text-gray-500">No audit entries found</td></tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        <div class="flex items-center justify-between mt-4">
+            <div class="text-sm text-gray-500" x-text="'Showing ' + entries.length + ' entries'"></div>
+            <div class="flex gap-2">
+                <button @click="prevPage()" :disabled="page === 0" class="px-3 py-1 text-sm border rounded disabled:opacity-50">Prev</button>
+                <button @click="nextPage()" :disabled="entries.length < limit" class="px-3 py-1 text-sm border rounded disabled:opacity-50">Next</button>
+            </div>
+        </div>
+    </div>
+</template>

@@ -1,0 +1,157 @@
+<h2 class="text-lg font-semibold text-gray-900 mb-4">Organizations</h2>
+
+<!-- Filters -->
+<div class="bg-white rounded-lg border border-gray-200 p-4 mb-4 flex flex-wrap gap-3 items-end">
+    <div class="flex-1 min-w-[200px]">
+        <label class="text-xs font-medium text-gray-500 block mb-1">Search</label>
+        <input type="text" x-model.debounce.300ms="search" @input="page=0; load()"
+               placeholder="Name, email, slug..."
+               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+    </div>
+    <div>
+        <label class="text-xs font-medium text-gray-500 block mb-1">Plan</label>
+        <select x-model="planFilter" @change="page=0; load()" class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+            <option value="">All Plans</option>
+            <option value="free">Free</option>
+            <option value="starter">Starter</option>
+            <option value="professional">Professional</option>
+            <option value="enterprise">Enterprise</option>
+        </select>
+    </div>
+    <div>
+        <label class="text-xs font-medium text-gray-500 block mb-1">Status</label>
+        <select x-model="activeFilter" @change="page=0; load()" class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+            <option value="">All</option>
+            <option value="true">Active</option>
+            <option value="false">Inactive</option>
+        </select>
+    </div>
+</div>
+
+<!-- Loading -->
+<template x-if="loading">
+    <div class="flex items-center gap-2 text-gray-500 py-8">
+        <svg class="animate-spin h-5 w-5" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+        Loading...
+    </div>
+</template>
+
+<!-- Table -->
+<template x-if="!loading">
+    <div>
+        <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
+            <table class="w-full text-sm">
+                <thead class="bg-gray-50 text-left">
+                    <tr>
+                        <th class="px-4 py-3 font-medium text-gray-600">Organization</th>
+                        <th class="px-4 py-3 font-medium text-gray-600">Plan</th>
+                        <th class="px-4 py-3 font-medium text-gray-600 text-center">Users</th>
+                        <th class="px-4 py-3 font-medium text-gray-600 text-center">Watchlist</th>
+                        <th class="px-4 py-3 font-medium text-gray-600">Created</th>
+                        <th class="px-4 py-3 font-medium text-gray-600 text-center">Status</th>
+                        <th class="px-4 py-3 font-medium text-gray-600">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                    <template x-for="org in orgs" :key="org.id">
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-4 py-3">
+                                <div class="font-medium text-gray-900" x-text="org.name"></div>
+                                <div class="text-xs text-gray-500" x-text="org.email"></div>
+                            </td>
+                            <td class="px-4 py-3">
+                                <span class="px-2 py-1 text-xs font-medium rounded"
+                                      :class="{
+                                          'bg-gray-100 text-gray-700': org.plan_name === 'free',
+                                          'bg-blue-100 text-blue-700': org.plan_name === 'starter',
+                                          'bg-purple-100 text-purple-700': org.plan_name === 'professional',
+                                          'bg-amber-100 text-amber-700': org.plan_name === 'enterprise',
+                                      }"
+                                      x-text="org.plan_name"></span>
+                            </td>
+                            <td class="px-4 py-3 text-center" x-text="org.user_count"></td>
+                            <td class="px-4 py-3 text-center" x-text="org.watchlist_count"></td>
+                            <td class="px-4 py-3 text-gray-500 text-xs" x-text="org.created_at ? new Date(org.created_at).toLocaleDateString() : '-'"></td>
+                            <td class="px-4 py-3 text-center">
+                                <span class="px-2 py-0.5 text-xs rounded-full"
+                                      :class="org.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'"
+                                      x-text="org.is_active ? 'Active' : 'Inactive'"></span>
+                            </td>
+                            <td class="px-4 py-3">
+                                <div class="flex gap-1">
+                                    <button @click="showDetail(org)" class="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded text-gray-700">View</button>
+                                    <select @change="changePlan(org.id, $event.target.value); $event.target.value = ''"
+                                            class="px-1 py-1 text-xs border border-gray-300 rounded">
+                                        <option value="">Plan...</option>
+                                        <option value="free">Free</option>
+                                        <option value="starter">Starter</option>
+                                        <option value="professional">Professional</option>
+                                        <option value="enterprise">Enterprise</option>
+                                    </select>
+                                    <button @click="toggleStatus(org.id, !org.is_active)"
+                                            class="px-2 py-1 text-xs rounded"
+                                            :class="org.is_active ? 'bg-red-50 hover:bg-red-100 text-red-700' : 'bg-green-50 hover:bg-green-100 text-green-700'"
+                                            x-text="org.is_active ? 'Disable' : 'Enable'"></button>
+                                </div>
+                            </td>
+                        </tr>
+                    </template>
+                    <template x-if="orgs.length === 0">
+                        <tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">No organizations found</td></tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        <div class="flex items-center justify-between mt-4">
+            <div class="text-sm text-gray-500" x-text="'Showing ' + (page * limit + 1) + '-' + Math.min((page + 1) * limit, total) + ' of ' + total"></div>
+            <div class="flex gap-2">
+                <button @click="prevPage()" :disabled="page === 0" class="px-3 py-1 text-sm border rounded disabled:opacity-50">Prev</button>
+                <button @click="nextPage()" :disabled="page >= totalPages - 1" class="px-3 py-1 text-sm border rounded disabled:opacity-50">Next</button>
+            </div>
+        </div>
+
+        <!-- Detail Modal -->
+        <template x-if="detailOrg">
+            <div class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" @click.self="detailOrg = null">
+                <div class="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-auto p-6">
+                    <div class="flex justify-between items-start mb-4">
+                        <h3 class="text-lg font-semibold" x-text="detailOrg.name"></h3>
+                        <button @click="detailOrg = null" class="text-gray-400 hover:text-gray-600">&times;</button>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4 text-sm mb-4">
+                        <div><span class="text-gray-500">Email:</span> <span x-text="detailOrg.email"></span></div>
+                        <div><span class="text-gray-500">Plan:</span> <span x-text="detailOrg.plan_name"></span></div>
+                        <div><span class="text-gray-500">Created:</span> <span x-text="detailOrg.created_at ? new Date(detailOrg.created_at).toLocaleDateString() : '-'"></span></div>
+                        <div><span class="text-gray-500">Active:</span> <span x-text="detailOrg.is_active ? 'Yes' : 'No'"></span></div>
+                    </div>
+                    <template x-if="detailOrg.users && detailOrg.users.length">
+                        <div>
+                            <h4 class="font-medium text-gray-700 mb-2">Users</h4>
+                            <table class="w-full text-xs">
+                                <thead class="bg-gray-50"><tr>
+                                    <th class="px-3 py-2 text-left">Email</th><th class="px-3 py-2 text-left">Role</th>
+                                    <th class="px-3 py-2 text-left">Status</th><th class="px-3 py-2 text-left">Last Login</th>
+                                </tr></thead>
+                                <tbody class="divide-y">
+                                    <template x-for="u in detailOrg.users" :key="u.id">
+                                        <tr>
+                                            <td class="px-3 py-2" x-text="u.email"></td>
+                                            <td class="px-3 py-2" x-text="u.role"></td>
+                                            <td class="px-3 py-2">
+                                                <span :class="u.is_active ? 'text-green-600' : 'text-red-600'" x-text="u.is_active ? 'Active' : 'Inactive'"></span>
+                                                <span x-show="u.is_superadmin" class="ml-1 px-1 bg-red-100 text-red-700 text-[10px] rounded">SA</span>
+                                            </td>
+                                            <td class="px-3 py-2 text-gray-500" x-text="u.last_login_at ? new Date(u.last_login_at).toLocaleDateString() : 'Never'"></td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </template>
+    </div>
+</template>

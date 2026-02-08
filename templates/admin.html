@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel - IP Watchdog</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.3/dist/cdn.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        [x-cloak] { display: none !important; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen" x-data="adminPanel()" x-init="init()">
+
+    <!-- Top bar -->
+    <header class="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between sticky top-0 z-50">
+        <div class="flex items-center gap-4">
+            <a href="/dashboard" class="text-gray-500 hover:text-gray-700 text-sm flex items-center gap-1">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                Dashboard
+            </a>
+            <div class="flex items-center gap-2">
+                <div class="bg-indigo-600 p-1.5 rounded-lg">
+                    <svg class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                    </svg>
+                </div>
+                <h1 class="text-lg font-bold text-gray-900">Admin Panel</h1>
+            </div>
+        </div>
+        <div class="flex items-center gap-3">
+            <span class="text-sm text-gray-500" x-text="currentUser?.email"></span>
+            <span class="px-2 py-1 bg-red-100 text-red-700 text-xs font-medium rounded">SUPERADMIN</span>
+        </div>
+    </header>
+
+    <div class="flex min-h-[calc(100vh-57px)]">
+
+        <!-- Sidebar Navigation -->
+        <nav class="w-56 bg-white border-r border-gray-200 p-4 flex-shrink-0">
+            <ul class="space-y-1">
+                <template x-for="tab in tabs" :key="tab.id">
+                    <li>
+                        <button
+                            @click="activeTab = tab.id"
+                            :class="activeTab === tab.id
+                                ? 'bg-indigo-50 text-indigo-700 font-medium'
+                                : 'text-gray-600 hover:bg-gray-50'"
+                            class="w-full text-left px-3 py-2 rounded-lg text-sm flex items-center gap-2 transition"
+                        >
+                            <span x-text="tab.icon" class="w-5 text-center"></span>
+                            <span x-text="tab.label"></span>
+                        </button>
+                    </li>
+                </template>
+            </ul>
+        </nav>
+
+        <!-- Main Content Area -->
+        <main class="flex-1 p-6 overflow-auto">
+
+            <div x-show="!authorized" x-cloak class="flex items-center justify-center h-64">
+                <div class="text-gray-500">Verifying access...</div>
+            </div>
+
+            <template x-if="authorized">
+                <div>
+                    <!-- Overview -->
+                    <div x-show="activeTab === 'overview'" x-cloak>
+                        <div x-data="adminOverview()" x-init="load()">
+                            {% include 'admin/partials/_overview.html' %}
+                        </div>
+                    </div>
+
+                    <!-- Organizations -->
+                    <div x-show="activeTab === 'organizations'" x-cloak>
+                        <div x-data="adminOrganizations()" x-init="load()">
+                            {% include 'admin/partials/_organizations.html' %}
+                        </div>
+                    </div>
+
+                    <!-- Users -->
+                    <div x-show="activeTab === 'users'" x-cloak>
+                        <div x-data="adminUsers()" x-init="load()">
+                            {% include 'admin/partials/_users.html' %}
+                        </div>
+                    </div>
+
+                    <!-- Plans & Limits -->
+                    <div x-show="activeTab === 'plans'" x-cloak>
+                        <div x-data="adminPlans()" x-init="load()">
+                            {% include 'admin/partials/_plans.html' %}
+                        </div>
+                    </div>
+
+                    <!-- Credits -->
+                    <div x-show="activeTab === 'credits'" x-cloak>
+                        <div x-data="adminCredits()" x-init="load()">
+                            {% include 'admin/partials/_credits.html' %}
+                        </div>
+                    </div>
+
+                    <!-- Discount Codes -->
+                    <div x-show="activeTab === 'discounts'" x-cloak>
+                        <div x-data="adminDiscounts()" x-init="load()">
+                            {% include 'admin/partials/_discounts.html' %}
+                        </div>
+                    </div>
+
+                    <!-- Rate Limits -->
+                    <div x-show="activeTab === 'rate_limits'" x-cloak>
+                        <div x-data="adminRateLimits()" x-init="load()">
+                            {% include 'admin/partials/_rate_limits.html' %}
+                        </div>
+                    </div>
+
+                    <!-- Feature Flags -->
+                    <div x-show="activeTab === 'features'" x-cloak>
+                        <div x-data="adminFeatures()" x-init="load()">
+                            {% include 'admin/partials/_features.html' %}
+                        </div>
+                    </div>
+
+                    <!-- Analytics -->
+                    <div x-show="activeTab === 'analytics'" x-cloak>
+                        <div x-data="adminAnalytics()" x-init="load()">
+                            {% include 'admin/partials/_analytics.html' %}
+                        </div>
+                    </div>
+
+                    <!-- Audit Log -->
+                    <div x-show="activeTab === 'audit'" x-cloak>
+                        <div x-data="adminAuditLog()" x-init="load()">
+                            {% include 'admin/partials/_audit_log.html' %}
+                        </div>
+                    </div>
+
+                    <!-- Settings -->
+                    <div x-show="activeTab === 'settings'" x-cloak>
+                        <div x-data="adminSettings()" x-init="load()">
+                            {% include 'admin/partials/_settings.html' %}
+                        </div>
+                    </div>
+                </div>
+            </template>
+
+        </main>
+    </div>
+
+    <!-- Toast container -->
+    <div id="admin-toast-container" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2"></div>
+
+    <script src="/static/js/admin.js"></script>
+</body>
+</html>

@@ -341,6 +341,12 @@ async def serve_dashboard(request: Request):
     return templates.TemplateResponse("dashboard.html", {"request": request})
 
 
+@app.get("/admin", response_class=HTMLResponse, tags=["Root"])
+async def serve_admin(request: Request):
+    """Serve admin panel. Full auth enforced client-side + API-side."""
+    return templates.TemplateResponse("admin.html", {"request": request})
+
+
 @app.get("/pricing", response_class=HTMLResponse, tags=["Root"])
 async def serve_pricing(request: Request):
     """Serve the pricing page — renders limits dynamically from PLAN_FEATURES"""

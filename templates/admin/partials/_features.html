@@ -1,0 +1,31 @@
+<h2 class="text-lg font-semibold text-gray-900 mb-4">Feature Flags</h2>
+<p class="text-sm text-gray-500 mb-4">Enable or disable features system-wide. Changes take effect within 60 seconds.</p>
+
+<template x-if="loading">
+    <div class="flex items-center gap-2 text-gray-500 py-8">
+        <svg class="animate-spin h-5 w-5" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+        Loading...
+    </div>
+</template>
+
+<template x-if="!loading">
+    <div class="bg-white rounded-lg border border-gray-200 divide-y">
+        <template x-for="item in items" :key="item.key">
+            <div class="flex items-center justify-between px-4 py-4 hover:bg-gray-50">
+                <div>
+                    <div class="text-sm font-medium text-gray-900" x-text="item.key.replace('feature.', '').replace(/_/g, ' ')"></div>
+                    <div class="text-xs text-gray-500" x-text="item.description || item.key"></div>
+                </div>
+                <button @click="toggleFeature(item)"
+                        class="w-12 h-6 rounded-full transition-colors relative flex-shrink-0"
+                        :class="item.value ? 'bg-green-500' : 'bg-gray-300'">
+                    <span class="block w-5 h-5 bg-white rounded-full shadow absolute top-0.5 transition-transform"
+                          :class="item.value ? 'translate-x-6' : 'translate-x-0.5'"></span>
+                </button>
+            </div>
+        </template>
+        <template x-if="items.length === 0">
+            <div class="px-4 py-8 text-center text-gray-500">No feature flags configured</div>
+        </template>
+    </div>
+</template>

@@ -1,0 +1,120 @@
+<h2 class="text-lg font-semibold text-gray-900 mb-4">Users</h2>
+
+<!-- Filters -->
+<div class="bg-white rounded-lg border border-gray-200 p-4 mb-4 flex flex-wrap gap-3 items-end">
+    <div class="flex-1 min-w-[200px]">
+        <label class="text-xs font-medium text-gray-500 block mb-1">Search</label>
+        <input type="text" x-model.debounce.300ms="search" @input="page=0; load()"
+               placeholder="Email, name..."
+               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+    </div>
+    <div>
+        <label class="text-xs font-medium text-gray-500 block mb-1">Role</label>
+        <select x-model="roleFilter" @change="page=0; load()" class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+            <option value="">All Roles</option>
+            <option value="owner">Owner</option>
+            <option value="admin">Admin</option>
+            <option value="member">Member</option>
+            <option value="viewer">Viewer</option>
+        </select>
+    </div>
+    <div>
+        <label class="text-xs font-medium text-gray-500 block mb-1">Status</label>
+        <select x-model="activeFilter" @change="page=0; load()" class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+            <option value="">All</option>
+            <option value="true">Active</option>
+            <option value="false">Inactive</option>
+        </select>
+    </div>
+</div>
+
+<template x-if="loading">
+    <div class="flex items-center gap-2 text-gray-500 py-8">
+        <svg class="animate-spin h-5 w-5" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+        Loading...
+    </div>
+</template>
+
+<template x-if="!loading">
+    <div>
+        <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
+            <table class="w-full text-sm">
+                <thead class="bg-gray-50 text-left">
+                    <tr>
+                        <th class="px-4 py-3 font-medium text-gray-600">User</th>
+                        <th class="px-4 py-3 font-medium text-gray-600">Organization</th>
+                        <th class="px-4 py-3 font-medium text-gray-600">Role</th>
+                        <th class="px-4 py-3 font-medium text-gray-600">Last Login</th>
+                        <th class="px-4 py-3 font-medium text-gray-600 text-center">Status</th>
+                        <th class="px-4 py-3 font-medium text-gray-600 text-center">SA</th>
+                        <th class="px-4 py-3 font-medium text-gray-600">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                    <template x-for="u in users" :key="u.id">
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-4 py-3">
+                                <div class="font-medium text-gray-900" x-text="(u.first_name || '') + ' ' + (u.last_name || '')"></div>
+                                <div class="text-xs text-gray-500" x-text="u.email"></div>
+                            </td>
+                            <td class="px-4 py-3">
+                                <div class="text-gray-700 text-xs" x-text="u.org_name"></div>
+                                <span class="text-[10px] px-1.5 py-0.5 rounded"
+                                      :class="{
+                                          'bg-gray-100 text-gray-600': u.plan_name === 'free',
+                                          'bg-blue-100 text-blue-600': u.plan_name === 'starter',
+                                          'bg-purple-100 text-purple-600': u.plan_name === 'professional',
+                                          'bg-amber-100 text-amber-600': u.plan_name === 'enterprise',
+                                      }"
+                                      x-text="u.plan_name"></span>
+                            </td>
+                            <td class="px-4 py-3">
+                                <select @change="changeRole(u.id, $event.target.value)"
+                                        :value="u.role"
+                                        class="px-2 py-1 text-xs border border-gray-300 rounded">
+                                    <option value="owner">Owner</option>
+                                    <option value="admin">Admin</option>
+                                    <option value="member">Member</option>
+                                    <option value="viewer">Viewer</option>
+                                </select>
+                            </td>
+                            <td class="px-4 py-3 text-xs text-gray-500" x-text="u.last_login_at ? new Date(u.last_login_at).toLocaleDateString() : 'Never'"></td>
+                            <td class="px-4 py-3 text-center">
+                                <button @click="toggleActive(u.id, !u.is_active)"
+                                        class="px-2 py-0.5 text-xs rounded-full"
+                                        :class="u.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'"
+                                        x-text="u.is_active ? 'Active' : 'Inactive'"></button>
+                            </td>
+                            <td class="px-4 py-3 text-center">
+                                <button @click="toggleSuperadmin(u.id, !u.is_superadmin, u.email)"
+                                        class="w-8 h-5 rounded-full transition-colors relative"
+                                        :class="u.is_superadmin ? 'bg-red-500' : 'bg-gray-300'">
+                                    <span class="block w-3.5 h-3.5 bg-white rounded-full shadow absolute top-0.5 transition-transform"
+                                          :class="u.is_superadmin ? 'translate-x-3.5' : 'translate-x-0.5'"></span>
+                                </button>
+                            </td>
+                            <td class="px-4 py-3">
+                                <button @click="toggleActive(u.id, !u.is_active)"
+                                        class="px-2 py-1 text-xs rounded"
+                                        :class="u.is_active ? 'bg-red-50 hover:bg-red-100 text-red-700' : 'bg-green-50 hover:bg-green-100 text-green-700'"
+                                        x-text="u.is_active ? 'Disable' : 'Enable'"></button>
+                            </td>
+                        </tr>
+                    </template>
+                    <template x-if="users.length === 0">
+                        <tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">No users found</td></tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        <div class="flex items-center justify-between mt-4">
+            <div class="text-sm text-gray-500" x-text="'Showing ' + (page * limit + 1) + '-' + Math.min((page + 1) * limit, total) + ' of ' + total"></div>
+            <div class="flex gap-2">
+                <button @click="prevPage()" :disabled="page === 0" class="px-3 py-1 text-sm border rounded disabled:opacity-50">Prev</button>
+                <button @click="nextPage()" :disabled="page >= totalPages - 1" class="px-3 py-1 text-sm border rounded disabled:opacity-50">Next</button>
+            </div>
+        </div>
+    </div>
+</template>

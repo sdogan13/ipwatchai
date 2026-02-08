@@ -1,0 +1,64 @@
+<h2 class="text-lg font-semibold text-gray-900 mb-4">Dashboard Overview</h2>
+
+<template x-if="loading">
+    <div class="flex items-center gap-2 text-gray-500 py-8">
+        <svg class="animate-spin h-5 w-5" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+        Loading...
+    </div>
+</template>
+
+<template x-if="!loading && stats">
+    <div>
+        <!-- Stat cards -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            <div class="bg-white rounded-lg border border-gray-200 p-4">
+                <div class="text-sm text-gray-500">Active Users</div>
+                <div class="text-2xl font-bold text-gray-900" x-text="stats.total_active_users ?? 0"></div>
+            </div>
+            <div class="bg-white rounded-lg border border-gray-200 p-4">
+                <div class="text-sm text-gray-500">Active Orgs</div>
+                <div class="text-2xl font-bold text-gray-900" x-text="stats.total_active_orgs ?? 0"></div>
+            </div>
+            <div class="bg-white rounded-lg border border-gray-200 p-4">
+                <div class="text-sm text-gray-500">New Users (7d)</div>
+                <div class="text-2xl font-bold text-gray-900" x-text="stats.new_users_7d ?? 0"></div>
+            </div>
+            <div class="bg-white rounded-lg border border-gray-200 p-4">
+                <div class="text-sm text-gray-500">Watchlist Items</div>
+                <div class="text-2xl font-bold text-gray-900" x-text="(stats.total_watchlist_items ?? 0).toLocaleString()"></div>
+            </div>
+        </div>
+
+        <!-- Orgs by plan -->
+        <div class="bg-white rounded-lg border border-gray-200 p-4 mb-8">
+            <h3 class="text-sm font-medium text-gray-700 mb-3">Organizations by Plan</h3>
+            <div class="flex flex-wrap gap-4">
+                <template x-for="plan in Object.keys(stats.orgs_by_plan || {})" :key="plan">
+                    <div class="flex items-center gap-2">
+                        <span class="px-2 py-1 text-xs font-medium rounded"
+                              :class="{
+                                  'bg-gray-100 text-gray-700': plan === 'free',
+                                  'bg-blue-100 text-blue-700': plan === 'starter',
+                                  'bg-purple-100 text-purple-700': plan === 'professional',
+                                  'bg-amber-100 text-amber-700': plan === 'enterprise',
+                              }"
+                              x-text="plan"></span>
+                        <span class="text-sm font-medium" x-text="stats.orgs_by_plan[plan]"></span>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <!-- Bottom stats -->
+        <div class="grid grid-cols-2 gap-4">
+            <div class="bg-white rounded-lg border border-gray-200 p-4">
+                <div class="text-sm text-gray-500">Total Trademarks</div>
+                <div class="text-xl font-bold text-gray-900" x-text="(stats.total_trademarks ?? 0).toLocaleString()"></div>
+            </div>
+            <div class="bg-white rounded-lg border border-gray-200 p-4">
+                <div class="text-sm text-gray-500">Active Alerts</div>
+                <div class="text-xl font-bold text-gray-900" x-text="(stats.total_alerts ?? 0).toLocaleString()"></div>
+            </div>
+        </div>
+    </div>
+</template>
