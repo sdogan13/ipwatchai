@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, HTTPException, File, UploadFile, Form
+from fastapi import FastAPI, Request, HTTPException, File, UploadFile, Form, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -22,6 +22,7 @@ import tempfile
 import os
 import torch
 
+from auth.authentication import CurrentUser, get_current_user
 from config.settings import settings
 # CENTRALIZED IDF SCORING - consistent across the entire system
 from utils.idf_scoring import (
@@ -809,16 +810,18 @@ from fastapi import Query
 from typing import Optional, List
 from pydantic import BaseModel, Field
 
-@app.get("/api/search/simple", tags=["Public Search"])
+@app.get("/api/search/simple", tags=["Search"])
 @limiter.limit("10/minute")
 async def simple_search(
     request: Request,
     q: str = Query(..., description="Trademark name to search"),
-    limit: int = Query(MAX_RESULTS, ge=1, le=MAX_RESULTS, description="Number of results (max 10)")
+    limit: int = Query(MAX_RESULTS, ge=1, le=MAX_RESULTS, description="Number of results (max 10)"),
+    current_user: CurrentUser = Depends(get_current_user)
 ):
     """
-    Simple trademark search for landing page.
+    Simple trademark search.
     Returns similar trademarks from database.
+    Requires authentication.
     """
     import os
     import psycopg2
