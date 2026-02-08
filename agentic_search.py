@@ -570,7 +570,9 @@ from auth.authentication import CurrentUser, get_current_user
 from database.crud import Database
 from utils.subscription import (
     check_live_search_eligibility,
+    check_quick_search_eligibility,
     increment_live_search_usage,
+    increment_quick_search_usage,
     get_user_plan,
     get_live_search_usage,
 )
@@ -642,8 +644,16 @@ async def quick_search(
     """
     Quick database-only search (no live scraping).
     Returns results from local database only.
-    Available to all plans.
+    Subject to daily search cap per plan.
     """
+    # Daily search cap check
+    with Database() as db:
+        can_search, reason, details = check_quick_search_eligibility(
+            db, str(current_user.id)
+        )
+        if not can_search:
+            raise HTTPException(status_code=429, detail=details)
+
     nice_classes = []
     if classes:
         nice_classes = [int(c.strip()) for c in classes.split(",") if c.strip().isdigit()]
@@ -660,7 +670,16 @@ async def quick_search(
                 page=page,
                 per_page=per_page
             )
+
+        # Increment daily counter after successful search
+        with Database() as db:
+            increment_quick_search_usage(
+                db, str(current_user.id), str(current_user.organization_id)
+            )
+
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Quick search failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))

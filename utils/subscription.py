@@ -262,6 +262,73 @@ def check_live_search_eligibility(db, user_id: str) -> Tuple[bool, str, dict]:
     }
 
 
+def get_daily_quick_searches(db, user_id: str) -> int:
+    """Get today's quick search count for a user."""
+    cur = db.cursor(cursor_factory=RealDictCursor)
+    today = date.today()
+
+    cur.execute("""
+        SELECT COALESCE(quick_searches, 0) as total
+        FROM api_usage
+        WHERE user_id = %s AND usage_date = %s
+    """, (user_id, today))
+
+    row = cur.fetchone()
+    return row['total'] if row else 0
+
+
+def increment_quick_search_usage(db, user_id: str, org_id: str = None) -> int:
+    """Increment quick search counter for today. Returns new count."""
+    cur = db.cursor(cursor_factory=RealDictCursor)
+    today = date.today()
+
+    cur.execute("""
+        INSERT INTO api_usage (user_id, organization_id, usage_date, quick_searches)
+        VALUES (%s, %s, %s, 1)
+        ON CONFLICT (user_id, usage_date)
+        DO UPDATE SET
+            quick_searches = api_usage.quick_searches + 1,
+            updated_at = CURRENT_TIMESTAMP
+        RETURNING quick_searches
+    """, (user_id, org_id, today))
+
+    db.commit()
+    row = cur.fetchone()
+    return row['quick_searches'] if row else 1
+
+
+def check_quick_search_eligibility(db, user_id: str) -> Tuple[bool, str, dict]:
+    """
+    Check if user can perform a quick search today.
+
+    Returns:
+        (can_search, reason, details)
+    """
+    plan = get_user_plan(db, user_id)
+    plan_name = plan['plan_name']
+    daily_limit = get_plan_limit(plan_name, 'max_daily_quick_searches')
+    used_today = get_daily_quick_searches(db, user_id)
+
+    if used_today >= daily_limit:
+        return False, "daily_limit_exceeded", {
+            "error": "daily_limit_exceeded",
+            "current_plan": plan_name,
+            "daily_limit": daily_limit,
+            "used_today": used_today,
+            "remaining": 0,
+            "message": f"Gunluk {daily_limit} arama limitinize ulastiniz. Yarin tekrar deneyebilirsiniz.",
+            "message_en": f"You've reached your daily limit of {daily_limit} searches. Try again tomorrow.",
+        }
+
+    remaining = daily_limit - used_today
+    return True, "ok", {
+        "current_plan": plan_name,
+        "daily_limit": daily_limit,
+        "used_today": used_today,
+        "remaining": remaining,
+    }
+
+
 def get_lead_access(db, user_id: str) -> dict:
     """
     Get user's lead access permissions and remaining daily credits.
