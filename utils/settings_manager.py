@@ -222,3 +222,17 @@ class SettingsManager:
 
 # Singleton instance
 settings_manager = SettingsManager()
+
+
+def get_rate_limit_value(key: str, default: str) -> str:
+    """
+    Sync read from settings cache for slowapi rate limit callables.
+    Returns a string like "60/minute" for use in @limiter.limit(lambda: ...).
+
+    Usage:
+        @limiter.limit(lambda: get_rate_limit_value("rate_limit.login", "5/minute"))
+    """
+    value = settings_manager.get(key)
+    if value is not None:
+        return f"{value}/minute"
+    return default

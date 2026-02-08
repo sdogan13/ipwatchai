@@ -16,6 +16,7 @@ from pydantic import BaseModel as PydanticBaseModel
 from fastapi.responses import FileResponse, StreamingResponse
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+from utils.settings_manager import get_rate_limit_value
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 
@@ -113,7 +114,7 @@ class OrganizationProfileUpdate(PydanticBaseModel):
 # ==========================================
 
 @auth_router.post("/register", response_model=TokenPair)
-@limiter.limit(f"{settings.auth.login_rate_limit}/minute")
+@limiter.limit(lambda: get_rate_limit_value("rate_limit.register", "5/minute"))
 async def register(request: Request, data: UserRegister):
     """
     Register new user and organization.
@@ -177,7 +178,7 @@ async def register(request: Request, data: UserRegister):
 
 
 @auth_router.post("/login", response_model=TokenPair)
-@limiter.limit(f"{settings.auth.login_rate_limit}/minute")
+@limiter.limit(lambda: get_rate_limit_value("rate_limit.login", "5/minute"))
 async def login(request: Request, data: UserLogin):
     """Login with email and password"""
     ip = request.client.host if request.client else "unknown"
@@ -221,7 +222,7 @@ class RefreshTokenRequest(PydanticBaseModel):
 
 
 @auth_router.post("/refresh", response_model=TokenPair)
-@limiter.limit(f"{settings.auth.login_rate_limit}/minute")
+@limiter.limit(lambda: get_rate_limit_value("rate_limit.login", "5/minute"))
 async def refresh_token(request: Request, data: RefreshTokenRequest):
     """
     Refresh access token using a valid refresh token.

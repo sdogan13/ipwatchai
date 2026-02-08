@@ -568,6 +568,7 @@ from slowapi.util import get_remote_address
 
 from auth.authentication import CurrentUser, get_current_user
 from database.crud import Database
+from utils.settings_manager import get_rate_limit_value
 from utils.subscription import (
     check_live_search_eligibility,
     check_quick_search_eligibility,
@@ -632,7 +633,7 @@ async def get_search_credits(
 
 
 @router.get("/quick")
-@_search_limiter.limit("60/minute")
+@_search_limiter.limit(lambda: get_rate_limit_value("rate_limit.quick_search", "60/minute"))
 async def quick_search(
     request: Request,
     query: str = Query(..., description="Trademark name to search"),
@@ -686,7 +687,7 @@ async def quick_search(
 
 
 @router.get("/intelligent")
-@_search_limiter.limit("10/minute")
+@_search_limiter.limit(lambda: get_rate_limit_value("rate_limit.intelligent_search", "10/minute"))
 async def intelligent_search(
     request: Request,
     query: str = Query(..., description="Trademark name to search"),
@@ -764,7 +765,7 @@ async def intelligent_search(
 
 
 @router.post("/intelligent")
-@_search_limiter.limit("10/minute")
+@_search_limiter.limit(lambda: get_rate_limit_value("rate_limit.intelligent_search", "10/minute"))
 async def intelligent_search_with_image(
     request: Request,
     query: str = Form(..., description="Trademark name to search"),

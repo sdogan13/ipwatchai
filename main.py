@@ -577,8 +577,10 @@ def get_image_embedding_for_search(image_path: str) -> list:
         raise HTTPException(status_code=500, detail=f"Embedding olusturulamadi: {str(e)}")
 
 
+from utils.settings_manager import get_rate_limit_value as _get_rl_value
+
 @app.post("/api/search-by-image", tags=["Image Search"])
-@limiter.limit("10/minute")
+@limiter.limit(lambda: _get_rl_value("rate_limit.public_search", "10/minute"))
 async def search_by_image(
     request: Request,
     image: UploadFile = File(..., description="Aranacak logo/marka gorseli"),
@@ -859,7 +861,7 @@ from typing import Optional, List
 from pydantic import BaseModel, Field
 
 @app.get("/api/search/simple", tags=["Search"])
-@limiter.limit("10/minute")
+@limiter.limit(lambda: _get_rl_value("rate_limit.public_search", "10/minute"))
 async def simple_search(
     request: Request,
     q: str = Query(..., description="Trademark name to search"),
@@ -983,7 +985,7 @@ async def simple_search(
 # ==========================================
 
 @app.post("/api/search/unified", tags=["Unified Search"])
-@limiter.limit("10/minute")
+@limiter.limit(lambda: _get_rl_value("rate_limit.public_search", "10/minute"))
 async def unified_search(
     request: Request,
     name: Optional[str] = Form(None),
