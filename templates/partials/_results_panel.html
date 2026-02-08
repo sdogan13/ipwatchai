@@ -1,0 +1,269 @@
+<!-- Tab: Overview (existing dashboard) -->
+<main id="tab-content-overview" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+    <!-- Pipeline Status — admin/owner only -->
+    <div id="pipeline-status-panel" class="mb-6 hidden">
+        <div class="bg-white rounded-xl shadow-sm border p-5">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-semibold text-gray-800">Veri Hatti Durumu</h3>
+                <div class="flex gap-2">
+                    <button onclick="triggerPipeline(false)"
+                            id="pipeline-btn-full"
+                            class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                            disabled>
+                        Tam Calistir
+                    </button>
+                    <button onclick="triggerPipeline(true)"
+                            id="pipeline-btn-skip"
+                            class="px-3 py-1.5 bg-gray-200 text-gray-700 text-sm rounded-lg hover:bg-gray-300 disabled:opacity-50"
+                            disabled>
+                        Indirme Atla
+                    </button>
+                </div>
+            </div>
+
+            <!-- 5-step progress indicator -->
+            <div class="grid grid-cols-5 gap-3 mb-4">
+                <!-- Step 1: Download -->
+                <div id="pipeline-step-download" class="text-center p-3 rounded-lg bg-gray-50">
+                    <div class="text-xs text-gray-500 mb-1">1. Indirme</div>
+                    <div class="font-bold text-lg" id="pipeline-count-download">-</div>
+                    <div class="text-xs text-gray-400" id="pipeline-status-download"></div>
+                </div>
+                <!-- Step 2: Extract -->
+                <div id="pipeline-step-extract" class="text-center p-3 rounded-lg bg-gray-50">
+                    <div class="text-xs text-gray-500 mb-1">2. Cikarma</div>
+                    <div class="font-bold text-lg" id="pipeline-count-extract">-</div>
+                    <div class="text-xs text-gray-400" id="pipeline-status-extract"></div>
+                </div>
+                <!-- Step 3: Metadata -->
+                <div id="pipeline-step-metadata" class="text-center p-3 rounded-lg bg-gray-50">
+                    <div class="text-xs text-gray-500 mb-1">3. Metadata</div>
+                    <div class="font-bold text-lg" id="pipeline-count-metadata">-</div>
+                    <div class="text-xs text-gray-400" id="pipeline-status-metadata"></div>
+                </div>
+                <!-- Step 4: Embeddings -->
+                <div id="pipeline-step-embeddings" class="text-center p-3 rounded-lg bg-gray-50">
+                    <div class="text-xs text-gray-500 mb-1">4. Yapay Zeka</div>
+                    <div class="font-bold text-lg" id="pipeline-count-embeddings">-</div>
+                    <div class="text-xs text-gray-400" id="pipeline-status-embeddings"></div>
+                </div>
+                <!-- Step 5: Ingest -->
+                <div id="pipeline-step-ingest" class="text-center p-3 rounded-lg bg-gray-50">
+                    <div class="text-xs text-gray-500 mb-1">5. Yukleme</div>
+                    <div class="font-bold text-lg" id="pipeline-count-ingest">-</div>
+                    <div class="text-xs text-gray-400" id="pipeline-status-ingest"></div>
+                </div>
+            </div>
+
+            <!-- Currently running indicator -->
+            <div id="pipeline-running-indicator" class="mb-3 p-2 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700 items-center gap-2 hidden">
+                <svg class="animate-spin h-4 w-4 inline-block" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+                <span>Calisiyor: <strong id="pipeline-running-step">...</strong></span>
+            </div>
+
+            <!-- Status footer -->
+            <div class="flex items-center justify-between text-sm text-gray-500">
+                <span id="pipeline-last-run-info">Henuz calistirilmadi</span>
+                <span id="pipeline-next-run-info"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- KPI Cards -->
+    <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4 mb-8">
+        <!-- Watched Brands -->
+        <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+            <div class="flex items-center">
+                <div class="p-3 rounded-full bg-indigo-50 text-indigo-600">
+                    <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path></svg>
+                </div>
+                <div class="ml-4">
+                    <h2 class="text-sm font-medium text-gray-500">Portfolio Size</h2>
+                    <p class="text-2xl font-bold text-gray-900" x-text="stats.total_watched || 0"></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Critical Risk -->
+        <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+            <div class="flex items-center">
+                <div class="p-3 rounded-full bg-red-50 text-red-600">
+                    <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                </div>
+                <div class="ml-4">
+                    <h2 class="text-sm font-medium text-gray-500">Critical Risks</h2>
+                    <p class="text-2xl font-bold text-gray-900" x-text="stats.high_risk_count || 0"></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Active Deadlines -->
+        <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100 relative overflow-hidden">
+            <div class="flex items-center">
+                <div class="p-3 rounded-full bg-orange-50 text-orange-600 z-10">
+                    <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                </div>
+                <div class="ml-4 z-10">
+                    <h2 class="text-sm font-medium text-gray-500">Aktif Itiraz Sureleri</h2>
+                    <p class="text-2xl font-bold text-gray-900" x-text="stats.pending_deadlines || 0"></p>
+                </div>
+            </div>
+            <!-- Urgent indicator -->
+            <div x-show="stats.pending_deadlines > 0" class="absolute right-0 top-0 h-full w-1 bg-orange-500"></div>
+        </div>
+
+        <!-- Activity -->
+        <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+            <div class="flex items-center">
+                <div class="p-3 rounded-full bg-green-50 text-green-600">
+                    <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
+                </div>
+                <div class="ml-4">
+                    <h2 class="text-sm font-medium text-gray-500">7-Day Activity</h2>
+                    <p class="text-2xl font-bold text-gray-900" x-text="stats.recent_activity_count || 0"></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pre-publication early warning banner -->
+    <div x-show="stats.pre_publication_count > 0" class="mb-8 p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center gap-3">
+        <svg class="w-5 h-5 text-blue-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        <div class="text-sm text-blue-800">
+            <strong x-text="stats.pre_publication_count"></strong> erken uyari: Henuz yayinlanmamis basvurular tespit edildi. Bulten yayinlandiginda itiraz sureniz baslayacak.
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+
+        <!-- Left Column: Alerts & Chart -->
+        <div class="lg:col-span-2 space-y-8">
+
+            <!-- Chart Section -->
+            <div class="bg-white shadow-sm rounded-xl p-6 border border-gray-100">
+                <h3 class="text-lg font-semibold text-gray-900 mb-4">Risk Distribution</h3>
+                <div class="relative h-64 w-full">
+                    <canvas id="riskChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Recent Alerts List -->
+            <div>
+                <div id="alert-list-header" class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-semibold text-gray-900">Son Tehditler</h3>
+                </div>
+                <div class="bg-white shadow-sm rounded-xl border border-gray-100 divide-y divide-gray-100">
+                    <template x-for="alert in alerts" :key="alert.alert_id">
+                        <div class="p-6 hover:bg-gray-50 transition duration-150 ease-in-out">
+                            <div class="flex items-start justify-between">
+                                <div class="flex gap-4">
+                                    <!-- Risk Score Badge -->
+                                    <div class="flex-shrink-0 flex flex-col items-center justify-center h-16 w-16 rounded-lg font-bold text-xl border-2"
+                                         :class="getScoreColor(alert.risk_score)">
+                                        <span x-text="Math.round(alert.risk_score)"></span>
+                                        <span class="text-xs font-normal opacity-75">%</span>
+                                    </div>
+
+                                    <div>
+                                        <div class="flex items-center gap-2">
+                                            <h4 class="text-lg font-bold text-gray-900" x-text="alert.conflicting_brand"></h4>
+                                            <span class="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-600" x-text="alert.conflicting_app_no"></span>
+                                        </div>
+                                        <!-- Deadline Status Badge -->
+                                        <div x-show="alert.deadline_status" class="mt-1" x-html="renderDeadlineStatusBadge(alert)"></div>
+                                        <p class="text-sm text-gray-600 mt-1">
+                                            <strong class="text-indigo-600" x-text="alert.brand_watched"></strong> ile cakisma
+                                        </p>
+                                        <!-- Score Breakdown (3-bucket: Metin, Gorsel, Ceviri) -->
+                                        <div class="mt-2" x-show="alert.scores" x-html="window.AppComponents.renderSimilarityBadges(alert.scores)"></div>
+                                        <!-- Extracted goods indicator -->
+                                        <div x-show="alert.has_extracted_goods" class="mt-2">
+                                            <button @click.stop="showExtractedGoods(alert.conflicting_app_no, $event.currentTarget)"
+                                                    class="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-200 cursor-pointer transition-colors">
+                                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/>
+                                                </svg>
+                                                CIKARILMIS URUN: <span class="underline">EVET</span>
+                                            </button>
+                                        </div>
+                                        <!-- Pre-publication banner inline -->
+                                        <div x-show="alert.deadline_status === 'pre_publication'" class="mt-2 p-1.5 bg-blue-50 border border-blue-200 rounded text-xs text-blue-800">
+                                            <span class="font-semibold">Erken Tespit:</span> Henuz yayinlanmadi. Itiraz suresi bulten yayinlandiginda baslayacak.
+                                        </div>
+                                        <p class="text-xs text-gray-400 mt-2" x-text="alert.date"></p>
+                                    </div>
+                                </div>
+                                <button @click="showAlertDetail(alert.alert_id)" class="text-sm font-medium text-indigo-600 hover:text-indigo-800">
+                                    Analiz &rarr;
+                                </button>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: Deadlines & Portfolio -->
+        <div class="space-y-8">
+
+            <!-- Deadlines Widget -->
+            <div class="bg-white shadow-sm rounded-xl border border-gray-100 overflow-hidden">
+                <div class="bg-orange-50 px-6 py-4 border-b border-orange-100 flex justify-between items-center">
+                    <h3 class="text-orange-800 font-semibold">Action Required</h3>
+                    <span class="bg-orange-200 text-orange-800 text-xs px-2 py-1 rounded-full font-bold">Opposition</span>
+                </div>
+                <div class="divide-y divide-gray-100 max-h-96 overflow-y-auto">
+                    <template x-for="d in deadlines" :key="d.alert_id">
+                        <div class="p-4 hover:bg-gray-50 border-l-4"
+                             :class="d.days_left < 10 ? 'border-red-500 bg-red-50' : 'border-orange-300'">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="font-semibold text-gray-900" x-text="d.conflicting_brand"></p>
+                                    <p class="text-xs text-gray-500">App No: <span x-text="d.app_no"></span></p>
+                                </div>
+                                <div class="text-right">
+                                    <span class="block text-xl font-bold"
+                                          :class="d.days_left < 10 ? 'text-red-600' : 'text-orange-600'"
+                                          x-text="d.days_left + ' Days'"></span>
+                                    <span class="text-xs text-gray-500">Left</span>
+                                </div>
+                            </div>
+                            <div class="mt-2 flex justify-between items-center">
+                                <span class="text-xs text-gray-400">Deadline: <span x-text="d.appeal_deadline"></span></span>
+                                <button @click="showOppositionModal(d)" class="text-xs bg-white border border-gray-300 px-2 py-1 rounded shadow-sm hover:bg-gray-50">Itiraz Basvurusu</button>
+                            </div>
+                        </div>
+                    </template>
+                    <template x-if="deadlines.length === 0">
+                        <div class="p-6 text-center text-gray-500 text-sm">
+                            Aktif itiraz suresi yok.
+                        </div>
+                    </template>
+                </div>
+                <!-- Pre-publication note in deadline widget -->
+                <div x-show="stats.pre_publication_count > 0" class="p-3 bg-blue-50 border-t border-blue-200 text-xs text-blue-800">
+                    <strong x-text="stats.pre_publication_count"></strong> erken uyari: Henuz yayinlanmamis basvurular tespit edildi.
+                </div>
+            </div>
+
+            <!-- Portfolio with Logo Upload -->
+            <div class="bg-white shadow-sm rounded-xl border border-gray-100 p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-semibold text-gray-900">Izleme Listesi</h3>
+                    <span id="portfolio-count" class="text-sm text-gray-400"></span>
+                </div>
+                <div id="portfolio-grid" class="space-y-2">
+                    <div class="text-sm text-gray-400 text-center py-4">Yukleniyor...</div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</main>

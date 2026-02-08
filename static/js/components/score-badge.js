@@ -58,36 +58,36 @@ window.AppComponents.renderScoreBadge = function(score, label) {
 };
 
 // ============================================
-// C) renderSimilarityBadges - 4-component score breakdown badges
-//    Accepts scores as 0-1 floats: { text_similarity, semantic_similarity, visual_similarity, translation_similarity }
+// C) renderSimilarityBadges - 3-bucket score breakdown badges
+//    Metin = max(text_similarity, semantic_similarity) — all text-based signals
+//    Gorsel = visual_similarity (CLIP+DINOv2+color+OCR composite)
+//    Ceviri = translation_similarity
+//    Normalizes field names: accepts scores.X or data.X directly
 //    Only shows badges where score > 30%
 // ============================================
-window.AppComponents.renderSimilarityBadges = function(scores) {
-    if (!scores) return '';
+window.AppComponents.renderSimilarityBadges = function(data) {
+    if (!data) return '';
+    var scores = data.scores || data;
+
+    var textScore = Math.max(scores.text_similarity || 0, scores.semantic_similarity || 0);
+    var visualScore = scores.visual_similarity || 0;
+    var translationScore = scores.translation_similarity || 0;
+
     var html = '<div class="flex gap-2 mt-1.5 flex-wrap">';
     var hasBadge = false;
 
-    var textVal = scores.text_similarity;
-    if (textVal != null && textVal > 0.3) {
-        html += '<span class="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">Metin ' + Math.round(textVal * 100) + '%</span>';
+    if (textScore > 0.3) {
+        html += '<span class="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">Metin ' + Math.round(textScore * 100) + '%</span>';
         hasBadge = true;
     }
 
-    var semVal = scores.semantic_similarity;
-    if (semVal != null && semVal > 0.3) {
-        html += '<span class="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">Anlamsal ' + Math.round(semVal * 100) + '%</span>';
+    if (visualScore > 0.3) {
+        html += '<span class="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">Gorsel ' + Math.round(visualScore * 100) + '%</span>';
         hasBadge = true;
     }
 
-    var visVal = scores.visual_similarity;
-    if (visVal != null && visVal > 0.3) {
-        html += '<span class="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">Gorsel ' + Math.round(visVal * 100) + '%</span>';
-        hasBadge = true;
-    }
-
-    var transVal = scores.translation_similarity;
-    if (transVal != null && transVal > 0.3) {
-        html += '<span class="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">Ceviri ' + Math.round(transVal * 100) + '%</span>';
+    if (translationScore > 0.3) {
+        html += '<span class="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">Ceviri ' + Math.round(translationScore * 100) + '%</span>';
         hasBadge = true;
     }
 

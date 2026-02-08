@@ -217,11 +217,7 @@ function dashboard() {
                 var c = alert.conflicting || {};
                 var s = alert.scores || {};
 
-                var badgesHtml = '';
-                if (s.text_similarity != null) badgesHtml += '<span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">Metin ' + Math.round(s.text_similarity * 100) + '%</span> ';
-                if (s.semantic_similarity != null) badgesHtml += '<span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">Anlamsal ' + Math.round(s.semantic_similarity * 100) + '%</span> ';
-                if (s.visual_similarity != null) badgesHtml += '<span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">Gorsel ' + Math.round(s.visual_similarity * 100) + '%</span> ';
-                if (s.translation_similarity && s.translation_similarity > 0.3) badgesHtml += '<span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-medium">Ceviri ' + Math.round(s.translation_similarity * 100) + '%</span> ';
+                var badgesHtml = window.AppComponents.renderSimilarityBadges(s);
 
                 var imageHtml = c.image_path
                     ? '<img src="/api/trademark-image/' + encodeURIComponent(c.image_path) + '" class="w-20 h-20 object-contain rounded border" onerror="this.style.display=\'none\'">'
@@ -243,7 +239,7 @@ function dashboard() {
                     + '<div class="inline-flex flex-col items-center justify-center h-20 w-20 rounded-xl font-bold text-2xl border-2 mx-auto ' + scoreColor + '">'
                     + scorePercent + '<span class="text-xs font-normal opacity-75">%</span></div>'
                     + '<div class="text-gray-500 text-sm mt-1">Genel Risk Skoru</div>'
-                    + '<div class="flex gap-1 justify-center mt-2 flex-wrap">' + badgesHtml + '</div></div>'
+                    + '<div class="flex justify-center mt-2">' + badgesHtml + '</div></div>'
                     + '<div class="grid grid-cols-2 gap-4">'
                     + '<div class="bg-indigo-50 rounded-xl p-4 border border-indigo-100">'
                     + '<div class="text-indigo-600 font-semibold text-sm mb-2">Izlenen Marka</div>'
