@@ -349,9 +349,55 @@ def get_org_plan(db, org_id: str) -> dict:
     return dict(row)
 
 
+def get_monthly_name_generations(db, org_id: str) -> int:
+    """
+    Get current month's name generation count for an organization.
+    Sums api_usage.name_generations for all users in the org this month.
+    """
+    cur = db.cursor(cursor_factory=RealDictCursor)
+    today = date.today()
+    month_start = today.replace(day=1)
+
+    cur.execute("""
+        SELECT COALESCE(SUM(name_generations), 0) as total
+        FROM api_usage
+        WHERE organization_id = %s AND usage_date >= %s
+    """, (org_id, month_start))
+
+    row = cur.fetchone()
+    return row['total'] if row else 0
+
+
+def increment_name_generation_usage(db, user_id: str, org_id: str) -> int:
+    """
+    Increment name generation counter for today.
+    Uses upsert on (user_id, usage_date).
+
+    Returns:
+        Today's new name_generations count for this user.
+    """
+    cur = db.cursor(cursor_factory=RealDictCursor)
+    today = date.today()
+
+    cur.execute("""
+        INSERT INTO api_usage (user_id, organization_id, usage_date, name_generations)
+        VALUES (%s, %s, %s, 1)
+        ON CONFLICT (user_id, usage_date)
+        DO UPDATE SET
+            name_generations = api_usage.name_generations + 1,
+            updated_at = CURRENT_TIMESTAMP
+        RETURNING name_generations
+    """, (user_id, org_id, today))
+
+    db.commit()
+    row = cur.fetchone()
+    return row['name_generations'] if row else 1
+
+
 def check_name_generation_eligibility(db, org_id: str, session_count: int) -> Tuple[bool, str, dict]:
     """
-    Check if an organization can generate more name suggestions in a session.
+    Check if an organization can generate more name suggestions.
+    Enforces BOTH a monthly hard cap and a per-session soft cap.
 
     Args:
         db: Database context manager instance
@@ -363,35 +409,58 @@ def check_name_generation_eligibility(db, org_id: str, session_count: int) -> Tu
 
     Reasons:
         - "ok": Can generate more names
+        - "monthly_limit_exceeded": Monthly cap reached
         - "upgrade_required": Session limit reached, no purchased credits
         - "credits_exhausted": Session limit reached and purchased credits depleted
     """
     plan = get_org_plan(db, org_id)
     plan_name = plan['plan_name']
-    session_limit = plan['name_suggestions_per_session']
 
-    # Unlimited plan
-    if session_limit == -1:
-        return True, "ok", {
+    # --- Monthly hard cap (prevents session bypass) ---
+    monthly_limit = get_plan_limit(plan_name, 'monthly_name_generations')
+    monthly_used = get_monthly_name_generations(db, org_id)
+
+    if monthly_used >= monthly_limit:
+        return False, "monthly_limit_exceeded", {
+            "error": "credits_exhausted",
             "current_plan": plan_name,
             "display_name": plan['display_name'],
-            "session_limit": -1,
-            "session_count": session_count,
-            "remaining": -1,
+            "monthly_limit": monthly_limit,
+            "monthly_used": monthly_used,
+            "remaining": 0,
+            "message": f"Bu ay {monthly_limit} isim olusturma hakkinin tamamini kullandiniz.",
+            "message_en": f"You've used all {monthly_limit} name generation credits this month.",
         }
 
-    # Within plan limit
-    if session_count < session_limit:
-        remaining = session_limit - session_count
+    # --- Per-session soft cap (UX) ---
+    session_limit = get_plan_limit(plan_name, 'name_suggestions_per_session')
+
+    # Unlimited session (enterprise)
+    if session_limit >= 999999:
         return True, "ok", {
             "current_plan": plan_name,
             "display_name": plan['display_name'],
             "session_limit": session_limit,
             "session_count": session_count,
+            "monthly_limit": monthly_limit,
+            "monthly_used": monthly_used,
+            "remaining": monthly_limit - monthly_used,
+        }
+
+    # Within session limit
+    if session_count < session_limit:
+        remaining = min(session_limit - session_count, monthly_limit - monthly_used)
+        return True, "ok", {
+            "current_plan": plan_name,
+            "display_name": plan['display_name'],
+            "session_limit": session_limit,
+            "session_count": session_count,
+            "monthly_limit": monthly_limit,
+            "monthly_used": monthly_used,
             "remaining": remaining,
         }
 
-    # Over plan limit — check purchased credits
+    # Over session limit — check purchased credits
     cur = db.cursor(cursor_factory=RealDictCursor)
     cur.execute("""
         SELECT COALESCE(name_credits_purchased, 0) as name_credits_purchased
@@ -406,6 +475,8 @@ def check_name_generation_eligibility(db, org_id: str, session_count: int) -> Tu
             "display_name": plan['display_name'],
             "session_limit": session_limit,
             "session_count": session_count,
+            "monthly_limit": monthly_limit,
+            "monthly_used": monthly_used,
             "remaining": purchased,
             "using_purchased_credits": True,
         }
