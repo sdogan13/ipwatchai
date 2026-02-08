@@ -253,6 +253,9 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: List[str] = Field(default=["http://localhost:3000", "http://localhost:8080"], env="CORS_ORIGINS")
 
+    # Superadmin
+    superadmin_email: Optional[str] = Field(default=None, env="SUPERADMIN_EMAIL")
+
     # Sub-settings
     database: DatabaseSettings = DatabaseSettings()
     redis: RedisSettings = RedisSettings()

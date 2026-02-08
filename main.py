@@ -112,6 +112,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"   Reports table check failed (non-fatal): {e}")
 
+    # Seed superadmin user (idempotent)
+    from utils.superadmin import seed_superadmin
+    try:
+        seed_superadmin()
+    except Exception as e:
+        logger.warning(f"   Superadmin seed failed (non-fatal): {e}")
+
     # Start APScheduler for daily watchlist auto-scan
     from workers.scheduler import start_scheduler, shutdown_scheduler
     try:
