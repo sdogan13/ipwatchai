@@ -1615,6 +1615,14 @@ function isInWatchlist(applicationNo) {
     return applicationNo && userWatchlistAppNos.hasOwnProperty(applicationNo);
 }
 
+function openQuickWatchlistAdd(data) {
+    if (isInWatchlist(data.application_no)) {
+        showToast('Bu marka zaten takip listenizde.', 'info');
+        return;
+    }
+    window.dispatchEvent(new CustomEvent('open-quick-watchlist', { detail: data }));
+}
+
 function loadWatchlistCache() {
     AppAPI.getWatchlistItems(1, 2000).then(function(data) {
         var items = data.items || [];
