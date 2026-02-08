@@ -1414,10 +1414,19 @@ async def creative_suite_status():
     Used by the frontend to enable/disable AI Studio features gracefully.
     No auth required so the UI can check before user interacts.
     """
+    from utils.feature_flags import is_feature_enabled
+
     status = {
         "name_generator": {"available": False, "reason": ""},
         "logo_studio": {"available": False, "reason": ""},
     }
+
+    # Feature flag kill switch
+    if not is_feature_enabled("ai_studio_enabled"):
+        reason = "AI Studio gecici olarak devre disi birakildi"
+        status["name_generator"]["reason"] = reason
+        status["logo_studio"]["reason"] = reason
+        return status
 
     # Check Gemini client availability
     try:

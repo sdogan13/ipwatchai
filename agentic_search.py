@@ -569,6 +569,7 @@ from slowapi.util import get_remote_address
 from auth.authentication import CurrentUser, get_current_user
 from database.crud import Database
 from utils.settings_manager import get_rate_limit_value
+from utils.feature_flags import is_feature_enabled
 from utils.subscription import (
     check_live_search_eligibility,
     check_quick_search_eligibility,
@@ -715,6 +716,10 @@ async def intelligent_search(
     - 402: Monthly limit exceeded
     - 403: Plan doesn't include live search
     """
+    # Feature flag kill switch
+    if not is_feature_enabled("live_scraping_enabled"):
+        raise HTTPException(status_code=503, detail="Live scraping is temporarily disabled")
+
     nice_classes = []
     if classes:
         nice_classes = [int(c.strip()) for c in classes.split(",") if c.strip().isdigit()]
@@ -785,6 +790,10 @@ async def intelligent_search_with_image(
 
     Requires: Professional or Enterprise plan for live scraping.
     """
+    # Feature flag kill switch
+    if not is_feature_enabled("live_scraping_enabled"):
+        raise HTTPException(status_code=503, detail="Live scraping is temporarily disabled")
+
     nice_classes = []
     if classes:
         nice_classes = [int(c.strip()) for c in classes.split(",") if c.strip().isdigit()]
