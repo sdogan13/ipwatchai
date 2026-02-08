@@ -6,6 +6,7 @@ window.AppAuth = window.AppAuth || {};
 window.AppAuth.currentUserPlan = 'free';
 window.AppAuth.currentUserRole = '';
 window.AppAuth.currentUserName = '';
+window.AppAuth.currentUserIsSuperadmin = false;
 window.AppAuth.usage = null; // populated by fetchUsageSummary
 
 window.AppAuth.getAuthToken = function() {
@@ -27,6 +28,7 @@ window.AppAuth.fetchUserPlan = function() {
             window.AppAuth.currentUserRole = profile.role || '';
             currentUserRole = window.AppAuth.currentUserRole;
             window.AppAuth.currentUserName = profile.first_name || profile.email || 'User';
+            window.AppAuth.currentUserIsSuperadmin = !!profile.is_superadmin;
             // Initialize admin-only features
             if (currentUserRole === 'admin' || currentUserRole === 'owner') {
                 initPipelineStatus();

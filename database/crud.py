@@ -251,7 +251,8 @@ class UserCRUD:
         cur = db.cursor()
         cur.execute("""
             SELECT id, organization_id, email, first_name, last_name, phone, role,
-                   is_active, is_email_verified, last_login_at, created_at,
+                   is_active, is_email_verified, COALESCE(is_superadmin, FALSE) as is_superadmin,
+                   last_login_at, created_at,
                    avatar_url, title, department, linkedin
             FROM users WHERE id = %s
         """, (str(user_id),))
