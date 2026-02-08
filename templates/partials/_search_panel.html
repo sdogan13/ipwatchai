@@ -1,0 +1,111 @@
+<!-- ============================================ -->
+<!-- SEARCH SECTION                              -->
+<!-- ============================================ -->
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-2">
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+        <div class="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+            <!-- Search Input -->
+            <div class="flex-1 relative">
+                <svg class="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                </svg>
+                <input id="search-input" type="text" placeholder="Marka adı girin... (ör: Nike, Apple, Samsung)"
+                       class="w-full pl-10 pr-10 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-900"
+                       onkeydown="if(event.key==='Enter') handleQuickSearch()">
+                <button type="button" id="clear-search-btn"
+                        onclick="clearSearchInput()"
+                        class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 hidden"
+                        title="Temizle">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Nice Class Filter -->
+            <div class="relative">
+                <select id="nice-class-select" multiple
+                        class="border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-700 focus:ring-2 focus:ring-indigo-500 min-w-[140px] h-[42px]"
+                        title="Nice sınıfı seçin">
+                    <option value="" disabled selected>Nice Sınıfı</option>
+                </select>
+            </div>
+
+            <!-- Regular Search Button -->
+            <div class="flex flex-col items-center gap-1">
+                <button onclick="handleQuickSearch()"
+                        class="px-5 py-2.5 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors flex items-center gap-2 whitespace-nowrap">
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                    Ara
+                </button>
+                <span id="quick-search-credits-badge" class="hidden text-xs text-gray-500" title="Kalan gunluk arama hakki"></span>
+            </div>
+
+            <!-- Live Search (PRO) Button -->
+            <div class="flex flex-col items-center gap-1">
+                <button id="agentic-search-btn" onclick="handleAgenticSearch()"
+                        class="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg font-medium hover:from-amber-600 hover:to-orange-600 transition-all duration-200 shadow-lg flex items-center gap-2 whitespace-nowrap"
+                        title="TurkPatent portalindan canli veri cek">
+                    <span class="text-lg">&#x1f575;&#xfe0f;</span>
+                    <span>Canli Arama</span>
+                    <span class="text-xs bg-white/20 px-1.5 py-0.5 rounded font-bold">PRO</span>
+                </button>
+                <span id="live-search-credits-badge" class="hidden text-xs text-gray-500" title="Kalan aylik canli arama hakki"></span>
+            </div>
+        </div>
+
+        <!-- Logo Upload (Optional) -->
+        <div class="flex items-center gap-3 mt-3">
+            <label for="search-image" class="flex items-center gap-2 px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors text-sm text-gray-600">
+                <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                </svg>
+                <span>Logo Ekle</span>
+                <span class="text-xs text-gray-400">(opsiyonel)</span>
+            </label>
+            <input type="file" id="search-image" accept="image/png,image/jpeg,image/webp"
+                   class="hidden" onchange="onSearchImageSelected(this)">
+            <div id="search-image-preview-wrapper" class="hidden flex items-center gap-2">
+                <img id="search-image-preview" class="h-9 w-9 object-contain rounded border border-gray-200" alt="Logo">
+                <span id="search-image-name" class="text-xs text-gray-500 max-w-[120px] truncate"></span>
+                <button type="button" onclick="clearSearchImage()" class="text-gray-400 hover:text-red-500 transition-colors" title="Logoyu kaldir">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <p id="search-image-hint" class="text-xs text-gray-400 ml-auto">PNG, JPG veya WEBP &mdash; gorsel benzerlik analizi icin</p>
+        </div>
+
+        <!-- Search Results Container -->
+        <div id="search-results" class="mt-4 hidden"></div>
+    </div>
+</div>
+
+<!-- Tab Navigation -->
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4">
+    <div class="flex items-center gap-1 bg-white rounded-xl shadow-sm border border-gray-100 p-1.5">
+        <button onclick="showDashboardTab('overview')" id="tab-btn-overview"
+                class="dashboard-tab-btn px-5 py-2 rounded-lg text-sm font-medium transition-all bg-indigo-600 text-white">
+            Genel Bakis
+        </button>
+        <button onclick="showDashboardTab('opposition-radar')" id="tab-btn-opposition-radar"
+                class="dashboard-tab-btn px-5 py-2 rounded-lg text-sm font-medium transition-all text-gray-500 hover:text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+            <span>Opposition Radar</span>
+            <span class="text-xs bg-gradient-to-r from-amber-500 to-orange-500 text-white px-1.5 py-0.5 rounded font-bold">PRO</span>
+        </button>
+        <button onclick="showDashboardTab('ai-studio')" id="tab-btn-ai-studio"
+                class="dashboard-tab-btn px-5 py-2 rounded-lg text-sm font-medium transition-all text-gray-500 hover:text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            <span>AI Studio</span>
+            <span class="text-xs bg-gradient-to-r from-violet-500 to-purple-500 text-white px-1.5 py-0.5 rounded font-bold">YENI</span>
+        </button>
+        <button onclick="showDashboardTab('reports')" id="tab-btn-reports"
+                class="dashboard-tab-btn px-5 py-2 rounded-lg text-sm font-medium transition-all text-gray-500 hover:text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+            </svg>
+            <span>Raporlar</span>
+        </button>
+    </div>
+</div>

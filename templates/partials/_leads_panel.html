@@ -1,0 +1,177 @@
+<!-- ============================================ -->
+<!-- Tab: Opposition Radar                        -->
+<!-- ============================================ -->
+<div id="tab-content-opposition-radar" class="hidden max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+    <!-- Header with Stats -->
+    <div class="mb-6">
+        <div class="flex items-center justify-between mb-4">
+            <div>
+                <h2 class="text-2xl font-bold text-gray-900 flex items-center gap-3">
+                    Opposition Radar
+                </h2>
+                <p class="text-gray-500 mt-1">Potansiyel musteriler - Itiraz hizmeti firsatlari</p>
+            </div>
+            <div class="flex items-center gap-3">
+                <div class="bg-gray-50 border border-gray-200 rounded-lg px-4 py-2 text-sm">
+                    <span class="text-gray-500">Gunluk Hak:</span>
+                    <span id="lead-credits-remaining" class="text-amber-600 font-bold ml-1">-</span>
+                </div>
+                <div class="relative">
+                    <button onclick="exportLeadsCSV()" id="export-leads-btn"
+                            class="hidden px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg flex items-center gap-2 border border-gray-200 text-sm font-medium">
+                        CSV Indir
+                        <span id="csv-enterprise-badge" class="hidden text-xs bg-gray-800 text-white px-1.5 py-0.5 rounded font-bold">Enterprise</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stats Cards -->
+        <div id="lead-stats-cards" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div class="bg-white rounded-xl p-5 border border-gray-100 shadow-sm">
+                <div class="flex items-center gap-3">
+                    <div class="p-2.5 rounded-full bg-red-50 text-red-600">
+                        <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                    </div>
+                    <div>
+                        <div id="stat-critical" class="text-2xl font-bold text-gray-900">0</div>
+                        <div class="text-xs text-gray-500">Kritik (&le;7 gun)</div>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-white rounded-xl p-5 border border-gray-100 shadow-sm">
+                <div class="flex items-center gap-3">
+                    <div class="p-2.5 rounded-full bg-orange-50 text-orange-600">
+                        <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    </div>
+                    <div>
+                        <div id="stat-urgent" class="text-2xl font-bold text-gray-900">0</div>
+                        <div class="text-xs text-gray-500">Acil (&le;14 gun)</div>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-white rounded-xl p-5 border border-gray-100 shadow-sm">
+                <div class="flex items-center gap-3">
+                    <div class="p-2.5 rounded-full bg-blue-50 text-blue-600">
+                        <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
+                    </div>
+                    <div>
+                        <div id="stat-total" class="text-2xl font-bold text-gray-900">0</div>
+                        <div class="text-xs text-gray-500">Toplam Lead</div>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-white rounded-xl p-5 border border-gray-100 shadow-sm">
+                <div class="flex items-center gap-3">
+                    <div class="p-2.5 rounded-full bg-green-50 text-green-600">
+                        <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    </div>
+                    <div>
+                        <div id="stat-converted" class="text-2xl font-bold text-gray-900">0</div>
+                        <div class="text-xs text-gray-500">Donusturulen</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6 flex flex-wrap items-center gap-4">
+        <div class="flex items-center gap-2">
+            <label class="text-gray-500 text-sm">Aciliyet:</label>
+            <select id="filter-urgency" onchange="loadLeadFeed()" class="border border-gray-300 text-gray-700 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500">
+                <option value="">Tumu</option>
+                <option value="critical">Kritik (&le;7 gun)</option>
+                <option value="urgent">Acil (&le;14 gun)</option>
+                <option value="soon">Yakinda (&le;30 gun)</option>
+            </select>
+        </div>
+        <div class="flex items-center gap-2">
+            <label class="text-gray-500 text-sm">Risk:</label>
+            <select id="filter-risk" onchange="loadLeadFeed()" class="border border-gray-300 text-gray-700 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500">
+                <option value="">Tumu</option>
+                <option value="CRITICAL">Kritik (&ge;90%)</option>
+                <option value="HIGH">Yuksek (&ge;80%)</option>
+                <option value="MEDIUM">Orta (&ge;70%)</option>
+            </select>
+        </div>
+        <div class="flex items-center gap-2">
+            <label class="text-gray-500 text-sm">Sinif:</label>
+            <select id="filter-nice-class" onchange="loadLeadFeed()" class="border border-gray-300 text-gray-700 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500">
+                <option value="">Tum Siniflar</option>
+                <option value="25">25 - Giyim</option>
+                <option value="35">35 - Reklamcilik</option>
+                <option value="9">9 - Elektronik</option>
+                <option value="42">42 - Yazilim</option>
+                <option value="43">43 - Yiyecek/Icecek</option>
+            </select>
+        </div>
+        <div class="flex items-center gap-2">
+            <label class="text-gray-500 text-sm">Durum:</label>
+            <select id="filter-status" onchange="loadLeadFeed()" class="border border-gray-300 text-gray-700 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500">
+                <option value="new">Yeni</option>
+                <option value="viewed">Goruntulenen</option>
+                <option value="all">Tumu</option>
+            </select>
+        </div>
+        <button onclick="loadLeadFeed()" class="ml-auto px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg flex items-center gap-2 text-sm font-medium">
+            Yenile
+        </button>
+    </div>
+
+    <!-- Lead Feed List -->
+    <div id="lead-feed-container">
+        <!-- Loading -->
+        <div id="lead-feed-loading" class="text-center py-16">
+            <div class="animate-spin inline-block w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full mb-4"></div>
+            <p class="text-gray-400">Leadler yukleniyor...</p>
+        </div>
+        <!-- Empty -->
+        <div id="lead-feed-empty" class="hidden text-center py-16">
+            <svg class="mx-auto h-12 w-12 text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+            <p class="text-gray-400 mb-1">Henuz lead bulunamadi.</p>
+            <p class="text-sm text-gray-300">Yeni bulten tarandiginda leadler burada gorunecek.</p>
+        </div>
+        <!-- Cards -->
+        <div id="lead-feed-list" class="space-y-3"></div>
+    </div>
+
+    <!-- Pagination -->
+    <div id="lead-pagination" class="hidden flex items-center justify-center gap-4 mt-6">
+        <button onclick="loadLeadFeed(currentLeadPage - 1)" id="lead-prev-btn"
+                class="px-4 py-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg disabled:opacity-50 text-sm">
+            &larr; Onceki
+        </button>
+        <span id="lead-page-info" class="text-gray-500 text-sm">Sayfa 1</span>
+        <button onclick="loadLeadFeed(currentLeadPage + 1)" id="lead-next-btn"
+                class="px-4 py-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg disabled:opacity-50 text-sm">
+            Sonraki &rarr;
+        </button>
+    </div>
+
+    <!-- Upgrade Prompt (for non-Pro users) -->
+    <div id="lead-upgrade-prompt" class="hidden text-center py-16">
+        <div class="bg-white rounded-2xl p-8 max-w-lg mx-auto border border-gray-200 shadow-sm">
+            <div class="w-16 h-16 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg class="h-8 w-8 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            </div>
+            <h3 class="text-2xl font-bold text-gray-900 mb-2">Opposition Radar</h3>
+            <p class="text-gray-500 mb-6">
+                Potansiyel musterileri kesfedin. Yeni basvuru sahipleriyle mevcut marka sahipleri arasindaki
+                cakismalari otomatik olarak tespit edin.
+            </p>
+            <div class="bg-gray-50 rounded-xl p-4 mb-6 text-left">
+                <ul class="space-y-2 text-sm text-gray-600">
+                    <li class="flex items-center gap-2"><span class="text-green-500">&#x2713;</span> Gunluk lead akisi</li>
+                    <li class="flex items-center gap-2"><span class="text-green-500">&#x2713;</span> Itiraz sureleri takibi</li>
+                    <li class="flex items-center gap-2"><span class="text-green-500">&#x2713;</span> Risk analizi</li>
+                    <li class="flex items-center gap-2"><span class="text-green-500">&#x2713;</span> CSV export (Enterprise)</li>
+                </ul>
+            </div>
+            <button onclick="redirectToUpgrade()" class="w-full px-6 py-3 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl font-semibold hover:from-amber-600 hover:to-orange-600">
+                Professional'a Yukselt
+            </button>
+        </div>
+    </div>
+</div>
