@@ -283,7 +283,6 @@ def _dynamic_combine(
     text_idf_score: float,
     visual_sim: float,
     translation_sim: float,
-    phonetic_sim: float,
 ) -> dict:
     """
     Combine all scoring signals with dynamic confidence-based weighting.
@@ -293,20 +292,22 @@ def _dynamic_combine(
     with score=0 get weight=0 (dead signals don't dilute active ones). Weights
     are normalized to sum to 1.0.
 
+    Phonetic similarity is NOT a separate signal here — it is already incorporated
+    inside compute_idf_weighted_score() as part of `base = max(text_sim, semantic_sim,
+    phonetic_sim)` in Cases B-F. Adding it here would double-count it.
+
     Args:
-        text_idf_score: IDF-weighted text score from Cases A-F
+        text_idf_score: IDF-weighted text score from Cases A-F (includes phonetic)
         visual_sim: Combined CLIP+DINOv2+color+OCR visual similarity
         translation_sim: Cross-language translation similarity
-        phonetic_sim: Phonetic match (0.0 or 1.0 from dmetaphone)
 
     Returns:
         dict with 'total' and 'dynamic_weights'
     """
     BASE_WEIGHTS = {
-        "text":        0.55,
+        "text":        0.60,
         "visual":      0.25,
         "translation": 0.15,
-        "phonetic":    0.05,
     }
 
     STEEPNESS = 4.0
@@ -315,7 +316,6 @@ def _dynamic_combine(
         "text":        text_idf_score,
         "visual":      visual_sim,
         "translation": translation_sim,
-        "phonetic":    phonetic_sim,
     }
 
     boosted_weights = {}
@@ -407,11 +407,11 @@ def score_pair(query_name, candidate_name,
     breakdown['translation_similarity'] = trans_sim
 
     # 5. Dynamic confidence-weighted combination of ALL signals
+    #    Phonetic is already inside _idf_total via compute_idf_weighted_score()
     combined = _dynamic_combine(
         text_idf_score=_idf_total,
         visual_sim=visual_sim,
         translation_sim=trans_sim,
-        phonetic_sim=phonetic_sim,
     )
 
     breakdown['total'] = combined['total']

@@ -210,7 +210,6 @@ class TestTranslationScoreFloor:
             text_idf_score=0.0,
             visual_sim=0.0,
             translation_sim=0.98,
-            phonetic_sim=0.0,
         )
         assert result["total"] >= 0.90, \
             f"Translation floor should give total >= 0.90, got {result['total']}"
@@ -222,7 +221,6 @@ class TestTranslationScoreFloor:
             text_idf_score=0.0,
             visual_sim=0.0,
             translation_sim=0.50,
-            phonetic_sim=0.0,
         )
         assert result["total"] < 0.90, \
             f"Below threshold should not floor, got {result['total']}"
@@ -234,7 +232,6 @@ class TestTranslationScoreFloor:
             text_idf_score=0.98,
             visual_sim=0.0,
             translation_sim=0.98,
-            phonetic_sim=0.0,
         )
         assert result["total"] >= 0.90
 
