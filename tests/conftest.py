@@ -28,6 +28,36 @@ if PROJECT_ROOT not in sys.path:
 #    This prevents GPU model loading during tests
 # ============================================================
 
+def _ensure_mock(name, mock_obj=None):
+    """Install a mock module if not already present."""
+    if name not in sys.modules:
+        sys.modules[name] = mock_obj or MagicMock()
+
+# --- PyTorch ecosystem (not installed in test Python 3.13) ---
+_mock_torch = MagicMock()
+_mock_torch.cuda.is_available.return_value = False
+_mock_torch.no_grad.return_value.__enter__ = MagicMock()
+_mock_torch.no_grad.return_value.__exit__ = MagicMock(return_value=False)
+_ensure_mock("torch", _mock_torch)
+_ensure_mock("torchvision")
+_ensure_mock("torchvision.transforms")
+
+# --- Computer vision ---
+_ensure_mock("cv2")
+_ensure_mock("numpy", MagicMock())  # numpy needed by risk_engine
+import numpy  # re-import so downstream code sees it
+
+# --- PIL (Pillow) ---
+_ensure_mock("PIL")
+_ensure_mock("PIL.Image")
+
+# --- ML libraries ---
+_ensure_mock("sentence_transformers")
+_ensure_mock("open_clip")
+_ensure_mock("easyocr")
+_ensure_mock("transformers")
+
+# --- Project heavy modules ---
 # Mock the 'ai' module (loads CLIP, DINOv2, MiniLM at import time)
 _mock_ai = MagicMock()
 _mock_ai.device = "cpu"
@@ -37,16 +67,13 @@ _mock_ai.clip_preprocess = MagicMock()
 _mock_ai.dinov2_model = MagicMock()
 _mock_ai.dinov2_preprocess = MagicMock()
 _mock_ai.process_folder = MagicMock()
-if "ai" not in sys.modules:
-    sys.modules["ai"] = _mock_ai
+_ensure_mock("ai", _mock_ai)
 
 # Mock scrapper (Playwright, browser automation)
-if "scrapper" not in sys.modules:
-    sys.modules["scrapper"] = MagicMock()
+_ensure_mock("scrapper")
 
 # Mock ingest (DB bulk writes)
-if "ingest" not in sys.modules:
-    sys.modules["ingest"] = MagicMock()
+_ensure_mock("ingest")
 
 # Mock logging_config (structured logging setup)
 _mock_logging = MagicMock()
