@@ -44,8 +44,7 @@ _ensure_mock("torchvision.transforms")
 
 # --- Computer vision ---
 _ensure_mock("cv2")
-_ensure_mock("numpy", MagicMock())  # numpy needed by risk_engine
-import numpy  # re-import so downstream code sees it
+# numpy is installed (required by pandas), no mock needed
 
 # --- PIL (Pillow) ---
 _ensure_mock("PIL")
@@ -97,6 +96,16 @@ if "db.pool" not in sys.modules:
 if "sentence_transformers" not in sys.modules:
     _mock_st = MagicMock()
     sys.modules["sentence_transformers"] = _mock_st
+
+# --- Scheduler / Playwright (needed for main.py import) ---
+_ensure_mock("apscheduler")
+_ensure_mock("apscheduler.schedulers")
+_ensure_mock("apscheduler.schedulers.asyncio")
+_ensure_mock("apscheduler.triggers")
+_ensure_mock("apscheduler.triggers.cron")
+_ensure_mock("playwright")
+_ensure_mock("playwright.sync_api")
+_ensure_mock("playwright.async_api")
 
 
 # ============================================================
@@ -291,3 +300,84 @@ def mock_db():
     db.__enter__ = MagicMock(return_value=db)
     db.__exit__ = MagicMock(return_value=False)
     return db
+
+
+# ============================================================
+# 6. FastAPI TestClient
+# ============================================================
+
+@pytest.fixture
+def client():
+    """
+    FastAPI TestClient with lifespan replaced by a no-op.
+    Auth dependency overridden to return a mock CurrentUser.
+    """
+    from fastapi.testclient import TestClient
+    from auth.authentication import get_current_user, CurrentUser
+    from contextlib import asynccontextmanager
+
+    # Import app after all mocks are in place
+    from main import app
+
+    # Replace lifespan to avoid DB migrations / scheduler startup
+    @asynccontextmanager
+    async def _noop_lifespan(app):
+        yield
+
+    original_router_lifespan = app.router.lifespan_context
+    app.router.lifespan_context = _noop_lifespan
+
+    mock_user = CurrentUser(
+        id=uuid.uuid4(),
+        organization_id=uuid.uuid4(),
+        email="test@example.com",
+        first_name="Test",
+        last_name="User",
+        role="owner",
+        is_superadmin=False,
+        permissions=["watchlist.write", "watchlist.read"],
+    )
+
+    app.dependency_overrides[get_current_user] = lambda: mock_user
+
+    with TestClient(app, raise_server_exceptions=False) as c:
+        yield c
+
+    app.dependency_overrides.clear()
+    app.router.lifespan_context = original_router_lifespan
+
+
+@pytest.fixture
+def superadmin_client():
+    """TestClient authenticated as superadmin."""
+    from fastapi.testclient import TestClient
+    from auth.authentication import get_current_user, CurrentUser
+    from contextlib import asynccontextmanager
+
+    from main import app
+
+    @asynccontextmanager
+    async def _noop_lifespan(app):
+        yield
+
+    original_router_lifespan = app.router.lifespan_context
+    app.router.lifespan_context = _noop_lifespan
+
+    mock_admin = CurrentUser(
+        id=uuid.uuid4(),
+        organization_id=uuid.uuid4(),
+        email="admin@example.com",
+        first_name="Admin",
+        last_name="User",
+        role="owner",
+        is_superadmin=True,
+        permissions=[],
+    )
+
+    app.dependency_overrides[get_current_user] = lambda: mock_admin
+
+    with TestClient(app, raise_server_exceptions=False) as c:
+        yield c
+
+    app.dependency_overrides.clear()
+    app.router.lifespan_context = original_router_lifespan
