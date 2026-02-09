@@ -276,6 +276,86 @@ class TestIDFWaterfallIntegration:
 
 
 # ============================================
+# 6. Visual composite scoring
+# ============================================
+
+class TestVisualComposite:
+    """Verify calculate_visual_similarity uses all 4 components."""
+
+    def test_clip_only(self):
+        from risk_engine import calculate_visual_similarity
+        score = calculate_visual_similarity(clip_sim=0.80)
+        assert abs(score - 0.80 * 0.35) < 0.01
+
+    def test_all_components(self):
+        from risk_engine import calculate_visual_similarity
+        score = calculate_visual_similarity(
+            clip_sim=0.80, dinov2_sim=0.70, color_sim=0.60,
+            ocr_text_a="NIKE", ocr_text_b="NIKE",
+        )
+        expected = 0.80 * 0.35 + 0.70 * 0.30 + 0.60 * 0.15 + 1.0 * 0.20
+        assert abs(score - expected) < 0.01
+
+    def test_no_ocr_when_one_empty(self):
+        from risk_engine import calculate_visual_similarity
+        score = calculate_visual_similarity(
+            clip_sim=0.80, dinov2_sim=0.70, color_sim=0.60,
+            ocr_text_a="", ocr_text_b="NIKE",
+        )
+        expected = 0.80 * 0.35 + 0.70 * 0.30 + 0.60 * 0.15
+        assert abs(score - expected) < 0.01
+
+    def test_zero_when_no_signals(self):
+        from risk_engine import calculate_visual_similarity
+        assert calculate_visual_similarity() == 0.0
+
+
+# ============================================
+# 7. Phonetic not double-counted
+# ============================================
+
+class TestPhoneticNotDoubleCounted:
+    """Verify phonetic is only in IDF waterfall, not in _dynamic_combine."""
+
+    def test_dynamic_combine_has_no_phonetic_weight(self):
+        """_dynamic_combine should only have text, visual, translation."""
+        from risk_engine import _dynamic_combine
+        result = _dynamic_combine(
+            text_idf_score=0.80,
+            visual_sim=0.50,
+            translation_sim=0.30,
+        )
+        weights = result["dynamic_weights"]
+        assert "phonetic" not in weights
+        assert "text" in weights
+        assert "visual" in weights
+        assert "translation" in weights
+
+    def test_dynamic_combine_3_params_only(self):
+        """_dynamic_combine should reject phonetic_sim parameter."""
+        from risk_engine import _dynamic_combine
+        import inspect
+        sig = inspect.signature(_dynamic_combine)
+        param_names = list(sig.parameters.keys())
+        assert "phonetic_sim" not in param_names
+        assert len(param_names) == 3  # text_idf_score, visual_sim, translation_sim
+
+    def test_score_pair_still_has_phonetic_in_breakdown(self):
+        """score_pair() should still include phonetic_similarity in breakdown."""
+        from risk_engine import score_pair
+        result = score_pair(
+            query_name="ELMA",
+            candidate_name="ELMA",
+            text_sim=0.80,
+            semantic_sim=0.50,
+            visual_sim=0.0,
+            phonetic_sim=1.0,
+        )
+        assert "phonetic_similarity" in result
+        assert result["phonetic_similarity"] == 1.0
+
+
+# ============================================
 # Run with pytest
 # ============================================
 if __name__ == "__main__":
