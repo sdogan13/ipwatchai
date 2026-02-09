@@ -530,15 +530,15 @@ class RiskEngine:
     def get_query_vectors(self, name, image_path=None):
         text_vec = self.text_model.encode(name).tolist()
         img_vec, dino_vec, color_vec = None, None, None
-        
+
         if image_path and os.path.exists(image_path):
             try:
                 pil_img = Image.open(image_path).convert('RGB')
                 img_vec, dino_vec, color_vec = self._encode_single_image(pil_img)
             except Exception as e:
                 logging.error(f"Image process failed: {e}")
-        
-        return text_vec, img_vec
+
+        return text_vec, img_vec, dino_vec, color_vec
 
     def suggest_classes(self, description, limit=3):
         if not description or not str(description).strip():
@@ -685,10 +685,16 @@ class RiskEngine:
 
         return all_candidates
 
-    def calculate_hybrid_risk(self, candidates, name_input, query_text_vec, query_img_vec):
+    def calculate_hybrid_risk(self, candidates, name_input, query_text_vec,
+                                 query_img_vec, query_dino_vec=None, query_color_vec=None):
         if not candidates: return []
 
         candidate_ids = [str(c[0]) for c in candidates]
+
+        # Build visual columns: CLIP, DINOv2, color cosine + OCR text
+        clip_col = f"(1 - (t.image_embedding <=> %s::halfvec))" if query_img_vec else "0.0"
+        dino_col = f"(1 - (t.dinov2_embedding <=> %s::halfvec))" if query_dino_vec else "0.0"
+        color_col = f"(1 - (t.color_histogram <=> %s::halfvec))" if query_color_vec else "0.0"
 
         sql = f"""
             SELECT
@@ -697,7 +703,10 @@ class RiskEngine:
                 t.holder_name, t.holder_tpe_client_id,
                 (1 - (t.text_embedding <=> %s::halfvec)) as score_semantic,
                 similarity(t.name, %s) as score_lexical,
-                {f"(1 - (t.image_embedding <=> %s::halfvec))" if query_img_vec else "0.0"} as score_visual,
+                {clip_col} as score_clip,
+                {dino_col} as score_dinov2,
+                {color_col} as score_color,
+                t.logo_ocr_text,
                 t.bulletin_no,
                 (dmetaphone(t.name) = dmetaphone(%s)) as phonetic_match,
                 (t.extracted_goods IS NOT NULL
@@ -710,6 +719,10 @@ class RiskEngine:
         params = [str(query_text_vec), name_input]
         if query_img_vec:
             params.append(str(query_img_vec))
+        if query_dino_vec:
+            params.append(str(query_dino_vec))
+        if query_color_vec:
+            params.append(str(query_color_vec))
         params.extend([name_input, candidate_ids])
 
         cur = self.conn.cursor()
@@ -728,9 +741,22 @@ class RiskEngine:
             candidate_holder_tpe_id = r[10]
             sem = float(r[11]) if r[11] is not None else 0.0
             lex_postgres = float(r[12]) if r[12] is not None else 0.0
-            vis = float(r[13]) if r[13] is not None else 0.0
-            phon_match = bool(r[15]) if len(r) > 15 and r[15] is not None else False
-            has_eg = bool(r[16]) if len(r) > 16 and r[16] is not None else False
+            clip_sim = float(r[13]) if r[13] is not None else 0.0
+            dino_sim = float(r[14]) if r[14] is not None else 0.0
+            color_sim = float(r[15]) if r[15] is not None else 0.0
+            candidate_ocr = (r[16] or "").strip()
+            phon_match = bool(r[18]) if len(r) > 18 and r[18] is not None else False
+            has_eg = bool(r[19]) if len(r) > 19 and r[19] is not None else False
+
+            # Full composite visual score (CLIP 0.35 + DINOv2 0.30 + color 0.15 + OCR 0.20)
+            # Query OCR not available (RiskEngine doesn't load EasyOCR), so ocr_text_a=""
+            vis = calculate_visual_similarity(
+                clip_sim=clip_sim,
+                dinov2_sim=dino_sim,
+                color_sim=color_sim,
+                ocr_text_a="",
+                ocr_text_b=candidate_ocr,
+            )
 
             # Centralized scoring via score_pair()
             score_breakdown = score_pair(
@@ -754,7 +780,7 @@ class RiskEngine:
                 "image_path": r[4],
                 "holder_name": candidate_holder_name,
                 "holder_tpe_client_id": candidate_holder_tpe_id,
-                "bulletin_no": r[14] if len(r) > 14 else None,
+                "bulletin_no": r[17] if len(r) > 17 else None,
                 "exact_match": score_breakdown.get("exact_match", False),
                 "scores": score_breakdown,
                 "has_extracted_goods": has_eg
@@ -782,7 +808,7 @@ class RiskEngine:
 
         # Vector encoding
         vec_start = time.perf_counter()
-        q_text_vec, q_img_vec = self.get_query_vectors(name, image_path)
+        q_text_vec, q_img_vec, q_dino_vec, q_color_vec = self.get_query_vectors(name, image_path)
         vec_duration = (time.perf_counter() - vec_start) * 1000
         logger.debug("Query vectors generated", duration_ms=round(vec_duration, 2), has_image_vec=q_img_vec is not None)
 
@@ -794,7 +820,9 @@ class RiskEngine:
 
         # Hybrid risk calculation
         risk_start = time.perf_counter()
-        final_results = self.calculate_hybrid_risk(raw_candidates, name, q_text_vec, q_img_vec)
+        final_results = self.calculate_hybrid_risk(
+            raw_candidates, name, q_text_vec, q_img_vec, q_dino_vec, q_color_vec
+        )
         risk_duration = (time.perf_counter() - risk_start) * 1000
         logger.debug("Hybrid risk calculated", results=len(final_results), duration_ms=round(risk_duration, 2))
 
@@ -864,8 +892,8 @@ class RiskEngine:
             self.conn.rollback()
             raise
 
-        # Recalculate with new data
-        q_text_vec, _ = self.get_query_vectors(name, None)
+        # Recalculate with new data (text-only, no image)
+        q_text_vec, _, _, _ = self.get_query_vectors(name, None)
         raw_candidates = self.pre_screen_candidates(name, target_classes, limit=30)
         final_results = self.calculate_hybrid_risk(raw_candidates, name, q_text_vec, None)
 

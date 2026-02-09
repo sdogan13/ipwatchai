@@ -33,6 +33,7 @@ from uuid import UUID
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+import numpy as np
 import psycopg2
 from psycopg2.extras import RealDictCursor, execute_values
 from dotenv import load_dotenv
@@ -80,6 +81,13 @@ def get_db_connection():
     )
 
 
+def _cosine_sim(a, b):
+    """Cosine similarity between two vectors."""
+    v1, v2 = np.array(a), np.array(b)
+    n1, n2 = np.linalg.norm(v1), np.linalg.norm(v2)
+    return float(np.dot(v1, v2) / (n1 * n2)) if n1 > 0 and n2 > 0 else 0.0
+
+
 # ============================================
 # UNIVERSAL SCANNER CLASS
 # ============================================
@@ -113,7 +121,8 @@ class UniversalScanner:
                     id, name, application_no, holder_id,
                     (SELECT name FROM holders WHERE id = t.holder_id) as holder_name,
                     nice_class_numbers, bulletin_no, bulletin_date,
-                    text_embedding, image_embedding, logo_ocr_text
+                    text_embedding, image_embedding, logo_ocr_text,
+                    dinov2_embedding, color_histogram
                 FROM trademarks t
                 WHERE id = %s::uuid
             """, (trademark_id,))
@@ -172,7 +181,8 @@ class UniversalScanner:
                 t.application_date, t.registration_date,
                 t.image_embedding, t.logo_ocr_text,
                 similarity(t.name, %s) as text_sim,
-                t.name_tr
+                t.name_tr,
+                t.dinov2_embedding, t.color_histogram
             FROM trademarks t
             LEFT JOIN holders h ON t.holder_id = h.id
             WHERE t.id != %s::uuid
@@ -200,7 +210,8 @@ class UniversalScanner:
                     t.application_date, t.registration_date,
                     t.image_embedding, t.logo_ocr_text,
                     1 - (t.text_embedding <=> %s::halfvec) as semantic_sim,
-                    t.name_tr
+                    t.name_tr,
+                    t.dinov2_embedding, t.color_histogram
                 FROM trademarks t
                 LEFT JOIN holders h ON t.holder_id = h.id
                 WHERE t.id != %s::uuid
@@ -248,18 +259,23 @@ class UniversalScanner:
             text_sim = float(candidate.get('text_sim', 0) or 0)
             semantic_sim = float(candidate.get('semantic_sim', 0) or 0)
 
-            # Visual similarity (CLIP + OCR text)
+            # Visual similarity (full composite: CLIP + DINOv2 + color + OCR)
             clip_sim = 0.0
             if new_mark.get('image_embedding') and candidate.get('image_embedding'):
-                import numpy as np
-                v1 = np.array(new_mark['image_embedding'])
-                v2 = np.array(candidate['image_embedding'])
-                n1, n2 = np.linalg.norm(v1), np.linalg.norm(v2)
-                if n1 > 0 and n2 > 0:
-                    clip_sim = float(np.dot(v1, v2) / (n1 * n2))
+                clip_sim = _cosine_sim(new_mark['image_embedding'], candidate['image_embedding'])
+
+            dino_sim = 0.0
+            if new_mark.get('dinov2_embedding') and candidate.get('dinov2_embedding'):
+                dino_sim = _cosine_sim(new_mark['dinov2_embedding'], candidate['dinov2_embedding'])
+
+            color_sim = 0.0
+            if new_mark.get('color_histogram') and candidate.get('color_histogram'):
+                color_sim = _cosine_sim(new_mark['color_histogram'], candidate['color_histogram'])
 
             visual_sim = calculate_visual_similarity(
                 clip_sim=clip_sim,
+                dinov2_sim=dino_sim,
+                color_sim=color_sim,
                 ocr_text_a=new_mark.get('logo_ocr_text') or '',
                 ocr_text_b=candidate.get('logo_ocr_text') or '',
             )
