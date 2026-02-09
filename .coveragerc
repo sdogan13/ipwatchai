@@ -1,0 +1,23 @@
+[run]
+source = .
+omit =
+    tests/*
+    venv/*
+    .venv/*
+    */migrations/*
+    conftest.py
+    .py/*
+    backup_20260207/*
+    __pycache__/*
+    pgdata/*
+    pgsql/*
+    python/*
+    bulletins/*
+
+[report]
+show_missing = true
+fail_under = 0
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.
+    pass
