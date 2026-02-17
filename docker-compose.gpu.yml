@@ -1,0 +1,35 @@
+# ============================================
+# GPU Override - adds NVIDIA GPU reservation
+# ============================================
+# Usage:
+#   GPU:  docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#   CPU:  docker compose up -d
+# ============================================
+
+services:
+  backend:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  worker:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  pipeline-worker:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

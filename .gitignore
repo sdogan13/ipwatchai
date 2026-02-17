@@ -1,0 +1,58 @@
+# Environment files (secrets)
+.env
+.env.*
+!.env.production.example
+.token
+
+# Temp files
+tmp_*
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+venv/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test / Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Large data
+bulletins/
+pgdata/
+pgsql/
+backup_*/
+*.exe
+
+# Logs
+*.log
+logs/
+
+# Docker volumes
+config-backup-*/
+
+# Misc temp/junk files
+C*Users*turk_patent*
+Users*turk_patent*
+openapi_temp.json
+openapi_tmp.json
+Start-Sleep
+nul
+test_avatar.png
+python/
+.py/
