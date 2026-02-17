@@ -1,0 +1,444 @@
+/* ============================================
+ * Design Tokens — IP WATⒸH AI
+ * Single source of truth for all design values.
+ * Dark mode (Step 5) will override via :root.dark
+ * ============================================ */
+
+:root {
+    /* === Brand === */
+    --color-primary: #4f46e5;
+    --color-primary-hover: #4338ca;
+    --color-primary-light: #eef2ff;
+    --color-primary-ring: rgba(129, 140, 248, 0.5);
+
+    /* === Surfaces === */
+    --color-bg-page: #f9fafb;
+    --color-bg-card: #ffffff;
+    --color-bg-card-hover: #f9fafb;
+    --color-bg-elevated: #ffffff;
+    --color-bg-overlay: rgba(0, 0, 0, 0.6);
+    --color-bg-nav: #ffffff;
+    --color-bg-input: #ffffff;
+    --color-bg-muted: #f3f4f6;
+    --color-bg-subtle: #f9fafb;
+
+    /* === Text === */
+    --color-text-primary: #111827;
+    --color-text-secondary: #4b5563;
+    --color-text-muted: #6b7280;
+    --color-text-faint: #9ca3af;
+    --color-text-on-primary: #ffffff;
+
+    /* === Borders === */
+    --color-border: #e5e7eb;
+    --color-border-light: #f3f4f6;
+    --color-border-input: #d1d5db;
+    --color-border-focus: #4f46e5;
+
+    /* === Risk / Severity (5 levels) === */
+    --color-risk-critical-bg: #fee2e2;
+    --color-risk-critical-text: #991b1b;
+    --color-risk-critical-border: #fecaca;
+    --color-risk-high-bg: #fff7ed;
+    --color-risk-high-text: #9a3412;
+    --color-risk-high-border: #fed7aa;
+    --color-risk-medium-bg: #fffbeb;
+    --color-risk-medium-text: #92400e;
+    --color-risk-medium-border: #fde68a;
+    --color-risk-elevated-bg: #fefce8;
+    --color-risk-elevated-text: #854d0e;
+    --color-risk-elevated-border: #fef08a;
+    --color-risk-low-bg: #f0fdf4;
+    --color-risk-low-text: #166534;
+    --color-risk-low-border: #bbf7d0;
+
+    /* === Feature Accents === */
+    --color-accent-ai: linear-gradient(135deg, #7c3aed, #9333ea);
+    --color-accent-pro: linear-gradient(135deg, #f59e0b, #f97316);
+    --color-accent-upgrade: linear-gradient(135deg, #a855f7, #ec4899);
+    --color-accent-portfolio: linear-gradient(135deg, #2563eb, #9333ea);
+
+    /* === Deadline Urgency === */
+    --color-deadline-expired: #9ca3af;
+    --color-deadline-critical: #dc2626;
+    --color-deadline-warning: #d97706;
+    --color-deadline-safe: #16a34a;
+
+    /* === Spacing Scale === */
+    --space-xs: 0.25rem;
+    --space-sm: 0.5rem;
+    --space-md: 0.75rem;
+    --space-lg: 1rem;
+    --space-xl: 1.5rem;
+    --space-2xl: 2rem;
+
+    /* === Shadows === */
+    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.08);
+    --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.1);
+    --shadow-dropdown: 0 10px 25px rgba(0, 0, 0, 0.12);
+    --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.2);
+
+    /* === Transitions === */
+    --transition-fast: 150ms ease;
+    --transition-normal: 200ms ease;
+    --transition-slow: 300ms ease;
+
+    /* === Border Radius === */
+    --radius-sm: 0.375rem;
+    --radius-md: 0.5rem;
+    --radius-lg: 0.75rem;
+    --radius-xl: 1rem;
+    --radius-full: 9999px;
+
+    /* === Z-Index Scale === */
+    --z-dropdown: 30;
+    --z-sticky: 40;
+    --z-nav: 50;
+    --z-modal-backdrop: 60;
+    --z-modal: 70;
+    --z-toast: 80;
+    --z-bottom-bar: 45;
+
+    /* === Typography === */
+    --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+}
+
+/* ============================================
+ * Dark Mode Token Overrides
+ * Applied via .dark class on <html>
+ * ============================================ */
+:root.dark {
+    /* === Surfaces === */
+    --color-bg-page: #0f172a;
+    --color-bg-card: #1e293b;
+    --color-bg-card-hover: #334155;
+    --color-bg-elevated: #1e293b;
+    --color-bg-overlay: rgba(0, 0, 0, 0.75);
+    --color-bg-nav: #1e293b;
+    --color-bg-input: #1e293b;
+    --color-bg-muted: #334155;
+    --color-bg-subtle: #1e293b;
+
+    /* === Text === */
+    --color-text-primary: #f1f5f9;
+    --color-text-secondary: #cbd5e1;
+    --color-text-muted: #94a3b8;
+    --color-text-faint: #64748b;
+    --color-text-on-primary: #ffffff;
+
+    /* === Borders === */
+    --color-border: #334155;
+    --color-border-light: #1e293b;
+    --color-border-input: #475569;
+    --color-border-focus: #818cf8;
+
+    /* === Risk (adjusted for dark backgrounds) === */
+    --color-risk-critical-bg: rgba(239, 68, 68, 0.15);
+    --color-risk-critical-text: #fca5a5;
+    --color-risk-critical-border: rgba(239, 68, 68, 0.3);
+    --color-risk-high-bg: rgba(249, 115, 22, 0.15);
+    --color-risk-high-text: #fdba74;
+    --color-risk-high-border: rgba(249, 115, 22, 0.3);
+    --color-risk-medium-bg: rgba(245, 158, 11, 0.15);
+    --color-risk-medium-text: #fcd34d;
+    --color-risk-medium-border: rgba(245, 158, 11, 0.3);
+    --color-risk-elevated-bg: rgba(234, 179, 8, 0.15);
+    --color-risk-elevated-text: #fde047;
+    --color-risk-elevated-border: rgba(234, 179, 8, 0.3);
+    --color-risk-low-bg: rgba(34, 197, 94, 0.15);
+    --color-risk-low-text: #86efac;
+    --color-risk-low-border: rgba(34, 197, 94, 0.3);
+
+    /* === Shadows (softer for dark) === */
+    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.3);
+    --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.4);
+    --shadow-dropdown: 0 10px 25px rgba(0, 0, 0, 0.5);
+    --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.6);
+
+    /* === Deadline (brighter for dark bg) === */
+    --color-deadline-expired: #64748b;
+    --color-deadline-critical: #f87171;
+    --color-deadline-warning: #fbbf24;
+    --color-deadline-safe: #4ade80;
+}
+
+/* ============================================
+ * Global Utility Styles
+ * ============================================ */
+
+/* Reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* Smooth transitions for theme switching */
+body {
+    transition: background-color var(--transition-normal), color var(--transition-normal);
+}
+
+/* Monospace for identifiers */
+.font-mono-id {
+    font-family: var(--font-mono);
+    font-size: 0.8125em;
+    letter-spacing: -0.01em;
+}
+
+/* Card base styles using tokens */
+.card-base {
+    background: var(--color-bg-card);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-card);
+    transition: box-shadow var(--transition-normal), border-color var(--transition-normal), transform var(--transition-normal);
+}
+.card-base:hover {
+    box-shadow: var(--shadow-card-hover);
+}
+
+/* Risk-colored left border stripe */
+.risk-stripe-critical { border-left: 4px solid var(--color-risk-critical-text); }
+.risk-stripe-high { border-left: 4px solid var(--color-risk-high-text); }
+.risk-stripe-medium { border-left: 4px solid var(--color-risk-medium-text); }
+.risk-stripe-elevated { border-left: 4px solid var(--color-risk-elevated-text); }
+.risk-stripe-low { border-left: 4px solid var(--color-risk-low-text); }
+
+/* Score ring SVG component */
+.score-ring {
+    transform: rotate(-90deg);
+}
+.score-ring-track {
+    stroke: var(--color-border);
+    fill: none;
+}
+.score-ring-fill {
+    fill: none;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 0.6s ease;
+}
+
+/* Skeleton shimmer animation */
+@keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+}
+.skeleton {
+    background: linear-gradient(90deg,
+        var(--color-bg-muted) 25%,
+        var(--color-bg-card) 50%,
+        var(--color-bg-muted) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+    border-radius: var(--radius-sm);
+}
+
+/* Card entrance animation */
+@keyframes cardEnter {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.card-enter {
+    animation: cardEnter 0.3s ease forwards;
+    opacity: 0;
+}
+
+/* Tab panel fade */
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+.tab-panel-enter {
+    animation: fadeIn 0.2s ease;
+}
+
+/* Deadline pulse for critical items */
+@keyframes deadlinePulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+.deadline-critical-pulse {
+    animation: deadlinePulse 2s ease-in-out infinite;
+}
+
+/* Score counter animation helper */
+@keyframes countUp {
+    from { opacity: 0; transform: scale(0.8); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+/* Slide-over drawer */
+@keyframes slideInLeft {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(0); }
+}
+@keyframes slideOutLeft {
+    from { transform: translateX(0); }
+    to { transform: translateX(-100%); }
+}
+
+/* Mobile modal slide-up */
+@keyframes slideUp {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+}
+
+/* Bottom bar safe area */
+.pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Button press effect */
+.btn-press:active {
+    transform: scale(0.97);
+}
+
+/* VS Comparison layout — stack on mobile */
+.vs-comparison {
+    display: flex;
+    align-items: stretch;
+}
+@media (max-width: 639px) {
+    .vs-comparison {
+        flex-direction: column;
+        gap: 0;
+    }
+    .vs-comparison > div:nth-child(2) {
+        flex-direction: row;
+        padding: 0.5rem 0;
+    }
+}
+
+/* Drag-and-drop active state */
+.dropzone-active {
+    border-color: var(--color-primary) !important;
+    background: var(--color-primary-light) !important;
+    box-shadow: inset 0 0 0 1px var(--color-primary);
+}
+
+/* Timeline bar progress animation */
+.timeline-bar-fill {
+    transition: width 0.6s ease;
+}
+.timeline-bar-marker {
+    transition: left 0.6s ease;
+}
+
+/* Focus visible ring */
+.focus-ring:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+}
+
+/* Skip to content link (accessibility) */
+.skip-link {
+    position: absolute;
+    top: -100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--color-primary);
+    color: var(--color-text-on-primary);
+    padding: 0.5rem 1rem;
+    border-radius: var(--radius-md);
+    z-index: 100;
+    font-weight: 600;
+    font-size: 0.875rem;
+}
+.skip-link:focus {
+    top: 0.5rem;
+}
+
+/* ============================================
+ * Mobile Optimizations
+ * ============================================ */
+
+/* Remove 300ms tap delay & default tap highlight */
+html {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+
+/* Body scroll lock when modal is open */
+body.modal-open {
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
+    left: 0;
+}
+
+/* Safe area padding utilities */
+.pt-safe { padding-top: env(safe-area-inset-top, 0px); }
+.pl-safe { padding-left: env(safe-area-inset-left, 0px); }
+.pr-safe { padding-right: env(safe-area-inset-right, 0px); }
+
+/* iOS momentum scrolling for overflow containers */
+.scroll-touch {
+    -webkit-overflow-scrolling: touch;
+    overflow-y: auto;
+}
+
+/* Mobile-friendly form inputs — larger hit area */
+@media (max-width: 767px) {
+    input[type="text"],
+    input[type="email"],
+    input[type="password"],
+    input[type="search"],
+    input[type="tel"],
+    input[type="url"],
+    input[type="number"],
+    select,
+    textarea {
+        min-height: 44px;
+        font-size: 16px !important; /* prevents iOS zoom on focus */
+    }
+
+    /* Bottom tab labels - readable on small screens */
+    .bottom-tab-btn span {
+        font-size: 11px;
+    }
+
+    /* Scrollable bottom bar for many tabs */
+    .mobile-bottom-bar > div {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none; /* Firefox */
+    }
+    .mobile-bottom-bar > div::-webkit-scrollbar {
+        display: none; /* Chrome/Safari */
+    }
+}
+
+/* Toast mobile positioning */
+@media (max-width: 639px) {
+    .toast-mobile {
+        left: 1rem !important;
+        right: 1rem !important;
+        max-width: none !important;
+    }
+}
+
+/* Admin sidebar mobile collapse */
+@media (max-width: 767px) {
+    .admin-sidebar {
+        display: none;
+    }
+    .admin-sidebar.open {
+        display: block;
+        position: fixed;
+        inset: 0;
+        z-index: 50;
+        width: 16rem;
+    }
+}
+
+/* Checkout sticky sidebar — non-sticky on mobile */
+@media (max-width: 1023px) {
+    .checkout-summary {
+        position: static !important;
+    }
+}

@@ -1,0 +1,402 @@
+<!-- Tab: Watchlist -->
+<main id="tab-content-watchlist" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 md:py-8 hidden">
+
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-3">
+        <div>
+            <h2 class="text-xl font-bold" style="color:var(--color-text-primary)" x-text="t('tabs.watchlist')">Takip Listesi</h2>
+            <p class="text-sm mt-1" style="color:var(--color-text-muted)" x-text="t('watchlist.monitoring_active')">Monitoring</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+            <!-- Scan All -->
+            <button onclick="scanAllWatchlist()" class="px-3 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5 border" style="color:var(--color-primary);border-color:var(--color-primary);background:transparent" onmouseover="this.style.background='var(--color-primary)';this.style.color='white'" onmouseout="this.style.background='transparent';this.style.color='var(--color-primary)'"
+                title="" :title="t('watchlist.scan_all_title')">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                <span class="hidden sm:inline" x-text="t('watchlist.scan_all')">Tara</span>
+            </button>
+
+            <!-- Bulk Upload -->
+            <button onclick="openBulkUploadModal()" class="px-3 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5 border" style="color:var(--color-text-secondary);border-color:var(--color-border)" onmouseover="this.style.borderColor='var(--color-primary)';this.style.color='var(--color-primary)'" onmouseout="this.style.borderColor='var(--color-border)';this.style.color='var(--color-text-secondary)'"
+                title="" :title="t('watchlist.bulk_upload_title')">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+                <span class="hidden sm:inline" x-text="t('watchlist.bulk_upload')">Yukle</span>
+            </button>
+
+            <!-- Delete All -->
+            <button onclick="deleteAllWatchlist()" class="px-3 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5 border border-red-200 text-red-500 hover:bg-red-50"
+                title="" :title="t('watchlist.delete_all_title')">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            </button>
+
+            <!-- Add New -->
+            <button onclick="openQuickWatchlistAdd({})" class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                <span x-text="t('watchlist.add_to_watchlist')">Takip Listesine Ekle</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Stats Summary Bar -->
+    <div id="wl-stats-bar" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
+        <div class="rounded-xl border p-3 flex items-center gap-3" style="background:var(--color-bg-card);border-color:var(--color-border)">
+            <div class="w-9 h-9 rounded-lg flex items-center justify-center bg-blue-100"><svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg></div>
+            <div><div id="wl-stat-total" class="text-lg font-bold" style="color:var(--color-text-primary)">-</div><div class="text-xs" style="color:var(--color-text-muted)" x-text="t('watchlist.stat_total_items')">Total Items</div></div>
+        </div>
+        <div class="rounded-xl border p-3 flex items-center gap-3" style="background:var(--color-bg-card);border-color:var(--color-border)">
+            <div class="w-9 h-9 rounded-lg flex items-center justify-center bg-red-100"><svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg></div>
+            <div><div id="wl-stat-threatened" class="text-lg font-bold" style="color:var(--color-text-primary)">-</div><div class="text-xs" style="color:var(--color-text-muted)" x-text="t('watchlist.stat_items_threatened')">Threatened</div></div>
+        </div>
+        <div class="rounded-xl border p-3 flex items-center gap-3" style="background:var(--color-bg-card);border-color:var(--color-border)">
+            <div class="w-9 h-9 rounded-lg flex items-center justify-center bg-red-100"><svg class="w-5 h-5 text-red-600 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div>
+            <div><div id="wl-stat-critical" class="text-lg font-bold" style="color:var(--color-risk-critical-text, #dc2626)">-</div><div class="text-xs" style="color:var(--color-text-muted)" x-text="t('watchlist.stat_critical')">Critical</div></div>
+        </div>
+        <div class="rounded-xl border p-3 flex items-center gap-3" style="background:var(--color-bg-card);border-color:var(--color-border)">
+            <div class="w-9 h-9 rounded-lg flex items-center justify-center bg-orange-100"><svg class="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg></div>
+            <div><div id="wl-stat-new-alerts" class="text-lg font-bold" style="color:var(--color-text-primary)">-</div><div class="text-xs" style="color:var(--color-text-muted)" x-text="t('watchlist.stat_new_alerts')">New Alerts</div></div>
+        </div>
+        <div class="rounded-xl border p-3 flex items-center gap-3" style="background:var(--color-bg-card);border-color:var(--color-border)">
+            <div class="w-9 h-9 rounded-lg flex items-center justify-center bg-yellow-100"><svg class="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg></div>
+            <div><div id="wl-stat-deadline" class="text-lg font-bold" style="color:var(--color-text-primary)">-</div><div class="text-xs" style="color:var(--color-text-muted)" x-text="t('watchlist.stat_nearest_deadline')">Nearest Deadline</div></div>
+        </div>
+    </div>
+
+    <!-- Threats & Deadlines Section -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+
+        <!-- Left: Chart + Recent Alerts -->
+        <div class="lg:col-span-2 space-y-6">
+
+            <!-- Chart Section -->
+            <div class="shadow-sm rounded-xl p-6 border" style="background:var(--color-bg-card);border-color:var(--color-border)">
+                <h3 class="text-lg font-semibold mb-4" style="color:var(--color-text-primary)" x-text="t('dashboard.risk_distribution')">Risk Distribution</h3>
+                <div class="relative h-64 w-full">
+                    <canvas id="riskChart"></canvas>
+                </div>
+                <div id="alert-status-breakdown" class="flex flex-wrap gap-2 mt-3 hidden"></div>
+            </div>
+
+            <!-- Recent Alerts List -->
+            <div>
+                <div id="alert-list-header" class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-semibold" style="color:var(--color-text-primary)" x-text="t('dashboard.recent_threats')">Son Tehditler</h3>
+                </div>
+                <div class="shadow-sm rounded-xl border divide-y" style="background:var(--color-bg-card);border-color:var(--color-border)">
+                    <template x-for="alert in alerts" :key="alert.alert_id">
+                        <div class="p-6 transition duration-150 ease-in-out">
+                            <div class="flex items-start justify-between">
+                                <div class="flex gap-4">
+                                    <!-- Risk Score Badge -->
+                                    <div class="flex-shrink-0 flex flex-col items-center justify-center h-16 w-16 rounded-lg font-bold text-xl border-2"
+                                         :style="getScoreStyle(alert.risk_score)">
+                                        <span x-text="Math.round(alert.risk_score)"></span>
+                                        <span class="text-xs font-normal opacity-75">%</span>
+                                    </div>
+
+                                    <!-- Conflicting mark thumbnail -->
+                                    <div x-html="window.AppComponents.renderThumbnail(alert.conflicting_image_path, alert.conflicting_brand, alert.conflicting_app_no, 'w-12 h-12')"></div>
+
+                                    <div>
+                                        <div class="flex items-center gap-2">
+                                            <h4 class="text-lg font-bold" style="color:var(--color-text-primary)" x-text="alert.conflicting_brand"></h4>
+                                            <span class="text-xs px-2 py-0.5 rounded" style="background:var(--color-bg-muted);color:var(--color-text-muted)" x-text="alert.conflicting_app_no"></span>
+                                            <span x-show="alert.severity" x-html="renderSeverityBadge(alert.severity)"></span>
+                                        </div>
+                                        <!-- Deadline Status Badge -->
+                                        <div x-show="alert.deadline_status" class="mt-1" x-html="renderDeadlineStatusBadge(alert)"></div>
+                                        <p class="text-sm mt-1" style="color:var(--color-text-muted)" x-text="t('dashboard.conflict_with', {brand: alert.brand_watched})"></p>
+                                        <!-- Score Breakdown -->
+                                        <div class="mt-2" x-show="alert.scores" x-html="window.AppComponents.renderSimilarityBadges(alert.scores)"></div>
+                                        <!-- Extracted goods indicator -->
+                                        <div x-show="alert.has_extracted_goods" class="mt-2">
+                                            <button @click.stop="showExtractedGoods(alert.conflicting_app_no, $event.currentTarget)"
+                                                    class="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-200 cursor-pointer transition-colors">
+                                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/>
+                                                </svg>
+                                                <span x-text="t('alerts.extracted_goods')">CIKARILMIS URUN:</span> <span class="underline" x-text="t('alerts.extracted_goods_yes')">EVET</span>
+                                            </button>
+                                        </div>
+                                        <!-- Pre-publication banner inline -->
+                                        <div x-show="alert.deadline_status === 'pre_publication'" class="mt-2 p-1.5 bg-blue-50 border border-blue-200 rounded text-xs text-blue-800" x-text="t('dashboard.pre_pub_inline')">
+                                        </div>
+                                        <p class="text-xs mt-2" style="color:var(--color-text-faint)" x-text="alert.date"></p>
+                                    </div>
+                                </div>
+                                <button @click="showAlertDetail(alert.alert_id)" class="text-sm font-medium text-indigo-600 hover:text-indigo-800">
+                                    <span x-text="t('dashboard.analyze')">Analiz</span> &rarr;
+                                </button>
+                            </div>
+                        </div>
+                    </template>
+                    <template x-if="alerts.length === 0">
+                        <div class="p-8 text-center">
+                            <img src="/static/icons/logo.jpeg" alt="IP WATⒸH AI" class="mx-auto h-12 w-12 mb-3 rounded-lg object-cover opacity-40">
+                            <p class="font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('empty.alerts_title')">No threats detected</p>
+                            <p class="text-sm" style="color:var(--color-text-faint)" x-text="t('empty.alerts_desc')">When new bulletins are scanned, threats will appear here.</p>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right: Deadlines Widget -->
+        <div class="space-y-6">
+            <div class="shadow-sm rounded-xl border overflow-hidden" style="background:var(--color-bg-card);border-color:var(--color-border)">
+                <div class="bg-orange-50 px-6 py-4 border-b border-orange-100 flex justify-between items-center">
+                    <h3 class="text-orange-800 font-semibold" x-text="t('dashboard.action_required')">Action Required</h3>
+                    <span class="bg-orange-200 text-orange-800 text-xs px-2 py-1 rounded-full font-bold" x-text="t('dashboard.opposition')">Opposition</span>
+                </div>
+                <div class="divide-y divide-gray-100 max-h-96 overflow-y-auto">
+                    <template x-for="d in deadlines" :key="d.alert_id">
+                        <div class="p-4 hover:bg-gray-50 border-l-4"
+                             :class="d.days_left < 10 ? 'border-red-500 bg-red-50' : 'border-orange-300'">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="font-semibold" style="color:var(--color-text-primary)" x-text="d.conflicting_brand"></p>
+                                    <p class="text-xs" style="color:var(--color-text-muted)"><span x-text="t('common.app_no_label')">Basvuru No:</span> <span x-text="d.app_no"></span></p>
+                                </div>
+                                <div class="text-right">
+                                    <span class="block text-xl font-bold"
+                                          :class="d.days_left < 10 ? 'text-red-600' : 'text-orange-600'"
+                                          x-text="t('dashboard.days_text', {count: d.days_left})"></span>
+                                    <span class="text-xs" style="color:var(--color-text-muted)" x-text="t('dashboard.left')">Left</span>
+                                </div>
+                            </div>
+                            <div class="mt-2 flex justify-between items-center">
+                                <span class="text-xs" style="color:var(--color-text-faint)"><span x-text="t('dashboard.deadline_label')">Son Tarih:</span> <span x-text="d.appeal_deadline"></span></span>
+                                <button @click="showOppositionModal(d)" class="text-xs border px-2 py-1 rounded shadow-sm" style="background:var(--color-bg-card);border-color:var(--color-border);color:var(--color-text-secondary)" x-text="t('dashboard.opposition_filing')">Itiraz Basvurusu</button>
+                            </div>
+                        </div>
+                    </template>
+                    <template x-if="deadlines.length === 0">
+                        <div class="p-6 text-center text-sm" style="color:var(--color-text-muted)" x-text="t('dashboard.no_active_deadlines')">
+                            Aktif itiraz suresi yok.
+                        </div>
+                    </template>
+                </div>
+                <!-- Pre-publication note in deadline widget -->
+                <div x-show="stats.pre_publication_count > 0" class="p-3 bg-blue-50 border-t border-blue-200 text-xs text-blue-800" x-text="t('dashboard.early_warning_short', {count: stats.pre_publication_count})">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search + Sort Bar -->
+    <div class="flex flex-wrap items-center gap-3 mb-4">
+        <!-- Search -->
+        <div class="relative flex-1 min-w-[200px] max-w-sm">
+            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style="color:var(--color-text-faint)" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+            <input id="wl-search-input" type="text" class="w-full pl-9 pr-8 py-2 text-sm rounded-lg" style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)" oninput="debounceWatchlistSearch(this.value)" :placeholder="t('watchlist.search_placeholder')">
+            <button id="wl-search-clear" onclick="clearWatchlistSearch()" class="absolute right-2 top-1/2 -translate-y-1/2 hidden p-1 rounded-full hover:bg-gray-200" style="color:var(--color-text-faint)">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+        </div>
+
+        <!-- Sort Dropdown -->
+        <div class="flex items-center gap-1.5">
+            <label class="text-xs font-medium whitespace-nowrap" style="color:var(--color-text-muted)" x-text="t('watchlist.filter_sort')">Sort</label>
+            <select id="wl-sort-select" onchange="onWatchlistSortChange()" class="text-xs px-2 py-1.5 rounded-lg" style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
+                <option value="date_desc" x-text="t('watchlist.sort_newest')">Newest</option>
+                <option value="date_asc" x-text="t('watchlist.sort_oldest')">Oldest</option>
+                <option value="conflicts_desc" x-text="t('watchlist.sort_most_conflicts')">Most Conflicts</option>
+                <option value="name_asc" x-text="t('watchlist.sort_name_az')">A-Z</option>
+            </select>
+        </div>
+
+        <span id="portfolio-count" class="text-sm" style="color:var(--color-text-faint)"></span>
+    </div>
+
+    <!-- Portfolio Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Left: Watchlist Items -->
+        <div>
+            <div class="shadow-sm rounded-xl border p-6" style="background:var(--color-bg-card);border-color:var(--color-border)">
+                <div id="portfolio-grid" class="space-y-2 max-h-[500px] overflow-y-auto pr-1" style="scrollbar-width:thin;scroll-behavior:smooth">
+                    <div class="text-sm text-gray-400 text-center py-4" x-text="t('dashboard.loading')">Loading...</div>
+                </div>
+                <!-- Pagination -->
+                <div id="wl-pagination" class="hidden flex items-center justify-between pt-3 mt-3" style="border-top:1px solid var(--color-border)">
+                    <button id="wl-prev-btn" onclick="wlPrevPage()" class="px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors disabled:opacity-40" style="color:var(--color-text-secondary);border-color:var(--color-border)" disabled>
+                        <span x-text="t('common.previous')">Previous</span>
+                    </button>
+                    <div id="wl-page-buttons" class="flex items-center gap-1"></div>
+                    <button id="wl-next-btn" onclick="wlNextPage()" class="px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors disabled:opacity-40" style="color:var(--color-text-secondary);border-color:var(--color-border)" disabled>
+                        <span x-text="t('common.next')">Next</span>
+                    </button>
+                </div>
+                <div id="wl-page-info" class="text-xs text-center mt-2 hidden" style="color:var(--color-text-faint)"></div>
+            </div>
+        </div>
+
+        <!-- Right: Alerts for selected watchlist item -->
+        <div>
+            <div class="shadow-sm rounded-xl border overflow-hidden" style="background:var(--color-bg-card);border-color:var(--color-border)">
+                <div class="px-6 py-4 border-b" style="border-color:var(--color-border)">
+                    <div class="flex items-center justify-between">
+                        <div id="watchlist-alert-header">
+                            <h3 class="font-semibold" style="color:var(--color-text-primary)" x-text="t('dashboard.recent_threats')">Recent Threats</h3>
+                            <p class="text-xs mt-0.5" style="color:var(--color-text-faint)" x-text="t('empty.watchlist_desc')">Click an item to see its alerts</p>
+                        </div>
+                        <!-- Toggle: Selected Item / All Threats -->
+                        <div class="flex rounded-lg overflow-hidden border" style="border-color:var(--color-border)">
+                            <button id="wl-view-selected-btn" onclick="switchWlRightPanel('selected')" class="px-3 py-1.5 text-xs font-medium transition-colors" style="background:var(--color-primary);color:white" x-text="t('watchlist.view_selected')">Selected</button>
+                            <button id="wl-view-all-btn" onclick="switchWlRightPanel('all')" class="px-3 py-1.5 text-xs font-medium transition-colors" style="background:var(--color-bg-muted);color:var(--color-text-secondary)" x-text="t('watchlist.view_all_threats')">All Threats</button>
+                        </div>
+                    </div>
+                    <!-- Alert Filters -->
+                    <div id="alert-filters" class="flex flex-wrap items-center gap-2 mt-3 hidden">
+                        <select id="alert-filter-date" onchange="applyAlertFilters()" class="text-xs px-2 py-1 rounded-lg" style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
+                            <option value="all" x-text="t('watchlist.filter_all')">All</option>
+                            <option value="7" x-text="t('watchlist.filter_last_7')">Last 7</option>
+                            <option value="30" x-text="t('watchlist.filter_last_30')">Last 30</option>
+                            <option value="90" x-text="t('watchlist.filter_last_90')">Last 90</option>
+                            <option value="365" x-text="t('watchlist.filter_last_year')">Last year</option>
+                        </select>
+                        <select id="alert-filter-bulletin" onchange="applyAlertFilters()" class="text-xs px-2 py-1 rounded-lg" style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
+                            <option value="none" x-text="t('watchlist.filter_bulletin')">Bulletin</option>
+                            <option value="bulletin_desc" x-text="t('watchlist.sort_bulletin_desc')">High to Low</option>
+                            <option value="bulletin_asc" x-text="t('watchlist.sort_bulletin_asc')">Low to High</option>
+                        </select>
+                        <select id="alert-filter-sort" onchange="applyAlertFilters()" class="text-xs px-2 py-1 rounded-lg" style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
+                            <option value="date_desc" x-text="t('watchlist.sort_newest')">Newest</option>
+                            <option value="date_asc" x-text="t('watchlist.sort_oldest')">Oldest</option>
+                            <option value="risk_desc" x-text="t('watchlist.sort_risk_high')">Risk High</option>
+                            <option value="risk_asc" x-text="t('watchlist.sort_risk_low')">Risk Low</option>
+                            <option value="name_asc" x-text="t('watchlist.sort_name_az')">A-Z</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="watchlist-alert-list" class="divide-y max-h-[500px] overflow-y-auto" style="border-color:var(--color-border)">
+                    <div class="p-6 text-center text-sm" style="color:var(--color-text-faint)" x-text="t('empty.alerts_desc')">
+                        Select a watchlist item to view related alerts.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</main>
+
+<!-- ============================================ -->
+<!-- WATCHLIST EDIT MODAL                         -->
+<!-- ============================================ -->
+<div id="watchlist-edit-modal" class="hidden fixed inset-0 flex items-center justify-center p-4" style="background:var(--color-bg-overlay);z-index:var(--z-modal)" onclick="if(event.target===this)closeEditWatchlistModal()">
+    <div class="rounded-xl shadow-xl max-w-md w-full overflow-hidden" style="background:var(--color-bg-card);border:1px solid var(--color-border)" onclick="event.stopPropagation()">
+        <div class="px-6 py-4 flex items-center justify-between" style="border-bottom:1px solid var(--color-border)">
+            <h3 class="text-lg font-semibold" style="color:var(--color-text-primary)" x-text="t('watchlist.edit_title')">Duzenle</h3>
+            <button onclick="closeEditWatchlistModal()" class="text-2xl leading-none min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg" style="color:var(--color-text-faint)">&times;</button>
+        </div>
+        <div class="p-6 space-y-3">
+            <div>
+                <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('watchlist.brand_name')">Marka Adi</label>
+                <input id="edit-wl-brand" type="text" class="w-full px-3 py-2 rounded-lg text-sm" style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('watchlist.nice_classes')">Nice Siniflari</label>
+                <input id="edit-wl-classes" type="text" placeholder="25, 35, 42" class="w-full px-3 py-2 rounded-lg text-sm" style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
+                <p class="text-xs mt-1" style="color:var(--color-text-faint)" x-text="t('watchlist.nice_classes_hint')"></p>
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('watchlist.similarity_threshold')">Benzerlik Esigi</label>
+                <select id="edit-wl-threshold" class="w-full px-3 py-2 rounded-lg text-sm" style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
+                    <option value="0.5" x-text="t('watchlist.threshold_50')">50% - Wide</option>
+                    <option value="0.6" x-text="t('watchlist.threshold_60')">60% - Normal</option>
+                    <option value="0.7" x-text="t('watchlist.threshold_70')">70% - Recommended</option>
+                    <option value="0.8" x-text="t('watchlist.threshold_80')">80% - Strict</option>
+                    <option value="0.9" x-text="t('watchlist.threshold_90')">90% - Very Strict</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('watchlist.description')">Aciklama</label>
+                <input id="edit-wl-description" type="text" class="w-full px-3 py-2 rounded-lg text-sm" style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('watchlist.alert_frequency_label')">Bildirim Sikligi</label>
+                <select id="edit-wl-frequency" class="w-full px-3 py-2 rounded-lg text-sm" style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
+                    <option value="daily" x-text="t('watchlist.freq_daily')">Gunluk</option>
+                    <option value="weekly" x-text="t('watchlist.freq_weekly')">Haftalik</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-2" style="color:var(--color-text-secondary)" x-text="t('watchlist.monitoring_scope')">Izleme Kapsamı</label>
+                <div class="flex flex-wrap gap-4">
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input id="edit-wl-monitor-text" type="checkbox" class="rounded border-gray-300">
+                        <span class="text-sm" style="color:var(--color-text-primary)" x-text="t('watchlist.scope_text')">Metin</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input id="edit-wl-monitor-visual" type="checkbox" class="rounded border-gray-300">
+                        <span class="text-sm" style="color:var(--color-text-primary)" x-text="t('watchlist.scope_visual')">Gorsel</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input id="edit-wl-monitor-phonetic" type="checkbox" class="rounded border-gray-300">
+                        <span class="text-sm" style="color:var(--color-text-primary)" x-text="t('watchlist.scope_phonetic')">Fonetik</span>
+                    </label>
+                </div>
+            </div>
+            <div class="flex justify-end gap-3 mt-4 pt-3" style="border-top:1px solid var(--color-border)">
+                <button onclick="closeEditWatchlistModal()" class="px-4 py-2 text-sm rounded-lg transition" style="color:var(--color-text-secondary)" x-text="t('watchlist.cancel')">Iptal</button>
+                <button id="edit-wl-submit-btn" onclick="submitEditWatchlist()" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition disabled:opacity-50" x-text="t('watchlist.save_changes')">Kaydet</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================ -->
+<!-- WATCHLIST BULK UPLOAD MODAL                  -->
+<!-- ============================================ -->
+<div id="watchlist-upload-modal" class="hidden fixed inset-0 flex items-center justify-center p-4" style="background:var(--color-bg-overlay);z-index:var(--z-modal)" onclick="if(event.target===this)closeBulkUploadModal()">
+    <div class="rounded-xl shadow-xl max-w-lg w-full overflow-hidden" style="background:var(--color-bg-card);border:1px solid var(--color-border)" onclick="event.stopPropagation()">
+        <div class="px-6 py-4 flex items-center justify-between" style="border-bottom:1px solid var(--color-border)">
+            <h3 class="text-lg font-semibold" style="color:var(--color-text-primary)" x-text="t('watchlist.bulk_upload_title')">Toplu Yukle</h3>
+            <button onclick="closeBulkUploadModal()" class="text-2xl leading-none min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg" style="color:var(--color-text-faint)">&times;</button>
+        </div>
+        <div class="p-6">
+            <!-- Step 1: File selection -->
+            <div id="upload-wl-step-1">
+                <p class="text-sm mb-4" style="color:var(--color-text-muted)" x-text="t('watchlist.upload_description')">Upload an Excel or CSV file with your trademarks.</p>
+
+                <div class="mb-4">
+                    <button onclick="downloadWatchlistTemplate()" class="text-sm text-blue-600 hover:text-blue-800 underline flex items-center gap-1">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                        <span x-text="t('watchlist.download_template')">Sablon Indir</span>
+                    </button>
+                </div>
+
+                <div class="border-2 border-dashed rounded-lg p-6 text-center" style="border-color:var(--color-border)">
+                    <svg class="w-10 h-10 mx-auto mb-2" style="color:var(--color-text-faint)" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+                    <label class="cursor-pointer">
+                        <span class="text-sm font-medium text-blue-600 hover:text-blue-800" x-text="t('watchlist.choose_file')">Dosya Sec</span>
+                        <input id="upload-wl-file" type="file" accept=".xlsx,.xls,.csv" class="hidden" onchange="var n=this.files&&this.files[0]?this.files[0].name:'';document.getElementById('upload-wl-filename').textContent=n;document.getElementById('upload-wl-filename').classList.toggle('hidden',!n);">
+                    </label>
+                    <p class="text-xs mt-1" style="color:var(--color-text-faint)">Excel (.xlsx, .xls) / CSV</p>
+                    <p id="upload-wl-filename" class="hidden text-sm font-medium mt-2" style="color:var(--color-text-primary)"></p>
+                </div>
+
+                <div class="flex justify-end gap-3 mt-4">
+                    <button onclick="closeBulkUploadModal()" class="px-4 py-2 text-sm rounded-lg" style="color:var(--color-text-secondary)" x-text="t('watchlist.cancel')">Iptal</button>
+                    <button id="upload-wl-detect-btn" onclick="detectUploadColumns()" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition disabled:opacity-50" x-text="t('watchlist.detect_columns')">Kolonları Algıla</button>
+                </div>
+            </div>
+
+            <!-- Step 2: Column mapping -->
+            <div id="upload-wl-step-2" class="hidden">
+                <!-- Usage / capacity info -->
+                <div id="upload-wl-usage"></div>
+
+                <p class="text-sm mb-3" style="color:var(--color-text-muted)" x-text="t('watchlist.map_columns_desc')">Map file columns to fields.</p>
+                <div id="upload-wl-mapping"></div>
+                <div class="flex justify-end gap-3 mt-4">
+                    <button onclick="document.getElementById('upload-wl-step-1').classList.remove('hidden');document.getElementById('upload-wl-step-2').classList.add('hidden')" class="px-4 py-2 text-sm rounded-lg" style="color:var(--color-text-secondary)" x-text="t('common.back')">Geri</button>
+                    <button id="upload-wl-submit-btn" onclick="submitBulkUpload()" class="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition disabled:opacity-50" x-text="t('watchlist.upload_now')">Yukle</button>
+                </div>
+            </div>
+
+            <!-- Result -->
+            <div id="upload-wl-result" class="hidden">
+                <div class="flex justify-end mt-4">
+                    <button onclick="closeBulkUploadModal()" class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg" x-text="t('common.close')">Kapat</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
+  <rect width="200" height="200" rx="8" fill="#e5e7eb"/>
+  <g transform="translate(100,90)" fill="none" stroke="#9ca3af" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="-40" y="-35" width="80" height="70" rx="4"/>
+    <circle cx="-18" cy="-13" r="8"/>
+    <polyline points="-40,25 -12,-5 8,15 18,5 40,25"/>
+  </g>
+  <text x="100" y="145" text-anchor="middle" fill="#9ca3af" font-family="system-ui,sans-serif" font-size="13">No Image</text>
+</svg>

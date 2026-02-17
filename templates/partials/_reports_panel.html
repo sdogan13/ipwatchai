@@ -1,0 +1,67 @@
+<!-- ============================================ -->
+<!-- Tab: Reports                                -->
+<!-- ============================================ -->
+<div id="tab-content-reports" class="hidden max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6">
+        <div>
+            <h2 class="text-2xl font-bold flex items-center gap-3" style="color:var(--color-text-primary)" x-text="t('reports.title')">Raporlar</h2>
+            <p class="mt-1" style="color:var(--color-text-muted)" x-text="t('reports.subtitle')">Risk analizi ve portfoy raporlari</p>
+        </div>
+        <div class="flex items-center gap-3">
+            <div id="reports-usage" class="rounded-lg px-4 py-2 text-sm" style="background:var(--color-bg-muted);border:1px solid var(--color-border)">
+                <span style="color:var(--color-text-muted)" x-text="t('reports.remaining')">Kalan:</span>
+                <span id="reports-usage-count" class="text-blue-600 font-bold ml-1">-</span>
+            </div>
+            <button onclick="showReportGenerateModal()"
+                    class="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-2 text-sm font-medium transition-colors btn-press min-h-[44px]">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                </svg>
+                <span x-text="t('reports.generate')">Rapor Olustur</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Loading -->
+    <div id="reports-loading" class="text-center py-16 hidden">
+        <div class="space-y-3 max-w-2xl mx-auto mb-6">
+            <div class="skeleton h-16 rounded-xl"></div>
+            <div class="skeleton h-16 rounded-xl"></div>
+        </div>
+        <p style="color:var(--color-text-faint)" x-text="t('reports.loading')">Raporlar yukleniyor...</p>
+    </div>
+
+    <!-- Empty State -->
+    <div id="reports-empty" class="hidden text-center py-16">
+        <svg class="mx-auto h-12 w-12 mb-4" style="color:var(--color-text-faint)" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+        </svg>
+        <p class="mb-1" style="color:var(--color-text-faint)" x-text="t('reports.empty')">Henuz rapor olusturulmadi.</p>
+        <p class="text-sm" style="color:var(--color-text-faint)" x-text="t('reports.empty_hint')">Yeni rapor olusturmak icin yukardaki butonu kullanin.</p>
+    </div>
+
+    <!-- Reports List -->
+    <div id="reports-list" class="space-y-3"></div>
+
+    <!-- Pagination -->
+    <div id="reports-pagination" class="hidden flex items-center justify-center gap-4 mt-6"></div>
+
+    <!-- Upgrade Prompt (for ineligible plans) -->
+    <div id="reports-upgrade-prompt" class="hidden text-center py-16">
+        <div class="rounded-2xl p-8 max-w-lg mx-auto shadow-sm" style="background:var(--color-bg-card);border:1px solid var(--color-border)">
+            <div class="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg class="h-8 w-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                </svg>
+            </div>
+            <h3 class="text-2xl font-bold mb-2" style="color:var(--color-text-primary)" x-text="t('reports.title')">Raporlar</h3>
+            <p class="mb-6" style="color:var(--color-text-muted)" x-text="t('reports.upgrade_desc')">
+            </p>
+            <button onclick="redirectToUpgrade()" class="w-full px-6 py-3 bg-gradient-to-r from-blue-500 to-indigo-500 text-white rounded-xl font-semibold hover:from-blue-600 hover:to-indigo-600 btn-press min-h-[48px]" x-text="t('reports.view_plans')">
+                Planlari Incele
+            </button>
+        </div>
+    </div>
+</div>

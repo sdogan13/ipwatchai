@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Checkout - IP WATⒸH AI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        [x-cloak] { display: none !important; }
+        #iyzico-checkout-form iframe { width: 100% !important; min-height: 400px; border: none; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen" x-data="checkoutPage()" x-cloak>
+
+    <!-- Header -->
+    <nav class="bg-white border-b border-gray-200">
+        <div class="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
+            <a href="/" class="flex items-center gap-2 text-gray-600 hover:text-gray-900 text-sm font-medium">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                <span x-text="t('checkout.back')">Geri Don</span>
+            </a>
+            <div class="flex items-center gap-2">
+                <img src="/static/icons/logo.jpeg" alt="IP WATⒸH AI" class="h-8 w-8 rounded-lg flex-shrink-0 object-cover">
+                <span class="text-sm font-bold text-gray-900">IP WATⒸH AI</span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="max-w-5xl mx-auto px-4 py-8">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+
+            <!-- Left: Steps -->
+            <div class="lg:col-span-2 space-y-6">
+
+                <!-- Step indicators -->
+                <div class="flex items-center gap-4 mb-6">
+                    <div class="flex items-center gap-2">
+                        <div class="w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold"
+                             :class="step === 'account' ? 'bg-indigo-600 text-white' : (isLoggedIn ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-500')">
+                            <template x-if="isLoggedIn && step !== 'account'"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></template>
+                            <template x-if="!isLoggedIn || step === 'account'"><span>1</span></template>
+                        </div>
+                        <span class="text-sm font-medium" :class="step === 'account' ? 'text-gray-900' : 'text-gray-500'" x-text="t('checkout.step_account')">Hesap</span>
+                    </div>
+                    <div class="flex-1 h-px bg-gray-200"></div>
+                    <div class="flex items-center gap-2">
+                        <div class="w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold"
+                             :class="step === 'payment' ? 'bg-indigo-600 text-white' : (step === 'complete' ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-500')">
+                            <template x-if="step === 'complete'"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></template>
+                            <template x-if="step !== 'complete'"><span>2</span></template>
+                        </div>
+                        <span class="text-sm font-medium" :class="step === 'payment' ? 'text-gray-900' : 'text-gray-500'" x-text="t('checkout.step_payment')">Odeme</span>
+                    </div>
+                </div>
+
+                <!-- STEP 1: Account -->
+                <div x-show="step === 'account'" class="bg-white rounded-2xl border border-gray-200 p-6">
+                    <h2 class="text-lg font-bold text-gray-900 mb-4" x-text="t('checkout.step_account')">Hesap</h2>
+
+                    <!-- Already logged in -->
+                    <template x-if="isLoggedIn">
+                        <div>
+                            <div class="flex items-center justify-between p-4 bg-green-50 border border-green-200 rounded-xl">
+                                <div class="flex items-center gap-3">
+                                    <div class="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
+                                        <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-medium text-gray-900" x-text="userEmail"></p>
+                                        <p class="text-xs text-green-600" x-text="t('checkout.logged_in')">Giris yapildi</p>
+                                    </div>
+                                </div>
+                                <button @click="logout()" class="text-xs text-gray-500 hover:text-gray-700 underline" x-text="t('checkout.switch_account')">Hesap degistir</button>
+                            </div>
+                            <div class="mt-4 flex justify-end">
+                                <button @click="goToPayment()" class="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-medium transition-colors" x-text="t('checkout.continue')">Devam Et</button>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- Not logged in: show tabs -->
+                    <template x-if="!isLoggedIn">
+                        <div>
+                            <!-- Login / Register tabs -->
+                            <div class="flex border-b border-gray-200 mb-6">
+                                <button @click="authTab = 'register'" class="px-4 py-2 text-sm font-medium border-b-2 transition-colors"
+                                        :class="authTab === 'register' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'"
+                                        x-text="t('checkout.tab_register')">Kayit Ol</button>
+                                <button @click="authTab = 'login'" class="px-4 py-2 text-sm font-medium border-b-2 transition-colors"
+                                        :class="authTab === 'login' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'"
+                                        x-text="t('checkout.tab_login')">Giris Yap</button>
+                            </div>
+
+                            <!-- Register form -->
+                            <div x-show="authTab === 'register'" class="space-y-4">
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1" x-text="t('checkout.first_name')">Ad</label>
+                                        <input type="text" x-model="regFirstName" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1" x-text="t('checkout.last_name')">Soyad</label>
+                                        <input type="text" x-model="regLastName" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1" x-text="t('checkout.email')">E-posta</label>
+                                    <input type="email" x-model="regEmail" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1" x-text="t('checkout.org_name')">Sirket Adi (Opsiyonel)</label>
+                                    <input type="text" x-model="regOrgName" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1" x-text="t('checkout.password')">Sifre</label>
+                                    <input type="password" x-model="regPassword" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                                </div>
+                                <p x-show="authError" class="text-sm text-red-600" x-text="authError"></p>
+                                <button @click="submitRegister()" :disabled="authLoading"
+                                        class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-medium transition-colors disabled:opacity-50">
+                                    <span x-show="!authLoading" x-text="t('checkout.create_account')">Hesap Olustur ve Devam Et</span>
+                                    <span x-show="authLoading" x-text="t('checkout.processing')">Isleniyor...</span>
+                                </button>
+                            </div>
+
+                            <!-- Login form -->
+                            <div x-show="authTab === 'login'" class="space-y-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1" x-text="t('checkout.email')">E-posta</label>
+                                    <input type="email" x-model="loginEmail" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                                           @keydown.enter="submitLogin()">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1" x-text="t('checkout.password')">Sifre</label>
+                                    <input type="password" x-model="loginPassword" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                                           @keydown.enter="submitLogin()">
+                                </div>
+                                <p x-show="authError" class="text-sm text-red-600" x-text="authError"></p>
+                                <button @click="submitLogin()" :disabled="authLoading"
+                                        class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-medium transition-colors disabled:opacity-50">
+                                    <span x-show="!authLoading" x-text="t('checkout.login_continue')">Giris Yap ve Devam Et</span>
+                                    <span x-show="authLoading" x-text="t('checkout.processing')">Isleniyor...</span>
+                                </button>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- STEP 2: Payment -->
+                <div x-show="step === 'payment'" class="bg-white rounded-2xl border border-gray-200 p-6">
+                    <h2 class="text-lg font-bold text-gray-900 mb-4" x-text="t('checkout.step_payment')">Odeme</h2>
+
+                    <!-- Free plan: just activate -->
+                    <template x-if="plan === 'free'">
+                        <div class="text-center py-8">
+                            <div class="w-16 h-16 mx-auto mb-4 bg-green-100 rounded-full flex items-center justify-center">
+                                <svg class="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                            </div>
+                            <p class="text-gray-700 mb-4" x-text="t('checkout.free_desc')">Ucretsiz plani hemen etkinlestirin.</p>
+                            <button @click="activateFree()" :disabled="paymentLoading"
+                                    class="px-8 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-medium transition-colors disabled:opacity-50">
+                                <span x-show="!paymentLoading" x-text="t('checkout.activate_free')">Ucretsiz Plani Etkinlestir</span>
+                                <span x-show="paymentLoading" x-text="t('checkout.processing')">Isleniyor...</span>
+                            </button>
+                        </div>
+                    </template>
+
+                    <!-- Paid plan: iyzico checkout form -->
+                    <template x-if="plan !== 'free'">
+                        <div>
+                            <!-- Loading state while initializing iyzico -->
+                            <div x-show="paymentLoading && !checkoutFormHtml" class="text-center py-8">
+                                <div class="animate-spin w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full mx-auto mb-4"></div>
+                                <p class="text-sm text-gray-500" x-text="t('checkout.loading_payment')">Odeme formu yukleniyor...</p>
+                            </div>
+
+                            <!-- iyzico form container -->
+                            <div x-show="checkoutFormHtml" id="iyzico-checkout-form" x-html="checkoutFormHtml"></div>
+
+                            <!-- Error state -->
+                            <div x-show="paymentError && !paymentLoading" class="text-center py-8">
+                                <div class="w-16 h-16 mx-auto mb-4 bg-red-100 rounded-full flex items-center justify-center">
+                                    <svg class="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                </div>
+                                <p class="text-red-600 text-sm mb-4" x-text="paymentError"></p>
+                                <button @click="initializePayment()" class="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-medium transition-colors" x-text="t('checkout.retry')">Tekrar Dene</button>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- STEP: Complete (after successful payment) -->
+                <div x-show="step === 'complete'" class="bg-white rounded-2xl border border-gray-200 p-6 text-center">
+                    <div class="w-16 h-16 mx-auto mb-4 bg-green-100 rounded-full flex items-center justify-center">
+                        <svg class="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                    </div>
+                    <h2 class="text-lg font-bold text-gray-900 mb-2" x-text="t('checkout.success_title')">Basarili!</h2>
+                    <p class="text-gray-600 mb-6" x-text="t('checkout.success_desc')">Planiniz etkinlestirildi. Dashboard'a yonlendiriliyorsunuz...</p>
+                </div>
+
+            </div>
+
+            <!-- Right: Order Summary -->
+            <div class="lg:col-span-1">
+                <div class="bg-white rounded-2xl border border-gray-200 p-6 lg:sticky lg:top-8">
+                    <h3 class="text-sm font-bold text-gray-900 uppercase tracking-wide mb-4" x-text="t('checkout.order_summary')">Siparis Ozeti</h3>
+
+                    <!-- Plan name -->
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-sm text-gray-600" x-text="t('checkout.plan_label')">Plan</span>
+                        <span class="text-sm font-bold text-gray-900" x-text="planDisplayName"></span>
+                    </div>
+
+                    <!-- Billing period toggle -->
+                    <template x-if="plan !== 'free'">
+                        <div class="mb-4">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-sm text-gray-600" x-text="t('checkout.billing_period')">Fatura Donemi</span>
+                            </div>
+                            <div class="flex bg-gray-100 rounded-lg p-1">
+                                <button @click="setBilling('monthly')" class="flex-1 py-1.5 text-xs font-medium rounded-md transition-colors"
+                                        :class="billing === 'monthly' ? 'bg-white shadow text-gray-900' : 'text-gray-500'"
+                                        x-text="t('checkout.monthly')">Aylik</button>
+                                <button @click="setBilling('annual')" class="flex-1 py-1.5 text-xs font-medium rounded-md transition-colors"
+                                        :class="billing === 'annual' ? 'bg-white shadow text-gray-900' : 'text-gray-500'"
+                                        x-text="t('checkout.annual')">Yillik</button>
+                            </div>
+                            <template x-if="billing === 'annual'">
+                                <p class="text-xs text-green-600 mt-1" x-text="t('checkout.annual_discount')">%20 indirim uygulanir</p>
+                            </template>
+                        </div>
+                    </template>
+
+                    <!-- Divider -->
+                    <div class="border-t border-gray-200 my-4"></div>
+
+                    <!-- Price breakdown -->
+                    <template x-if="plan !== 'free'">
+                        <div class="space-y-2 mb-4">
+                            <div class="flex items-center justify-between">
+                                <span class="text-sm text-gray-600" x-text="billing === 'annual' ? t('checkout.price_per_month') : t('checkout.price_monthly')">Aylik fiyat</span>
+                                <span class="text-sm text-gray-900" x-text="'&#8378;' + monthlyPrice"></span>
+                            </div>
+                            <template x-if="billing === 'annual'">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-sm text-gray-600" x-text="t('checkout.multiplied_12')">x 12 ay</span>
+                                    <span class="text-sm text-gray-900" x-text="'&#8378;' + totalPrice"></span>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+
+                    <!-- Total -->
+                    <div class="border-t border-gray-200 pt-4">
+                        <div class="flex items-center justify-between">
+                            <span class="text-base font-bold text-gray-900" x-text="t('checkout.total')">Toplam</span>
+                            <span class="text-xl font-bold text-gray-900" x-text="plan === 'free' ? '&#8378;0' : ('&#8378;' + totalPrice)"></span>
+                        </div>
+                        <template x-if="billing === 'annual' && plan !== 'free'">
+                            <p class="text-xs text-gray-500 mt-1 text-right" x-text="t('checkout.billed_annually')">Yillik faturalandirilir</p>
+                        </template>
+                        <template x-if="billing === 'monthly' && plan !== 'free'">
+                            <p class="text-xs text-gray-500 mt-1 text-right" x-text="t('checkout.billed_monthly')">Aylik faturalandirilir</p>
+                        </template>
+                    </div>
+
+                    <!-- VAT note -->
+                    <p class="text-xs text-gray-400 mt-4" x-text="t('checkout.vat_note')">Tum fiyatlar KDV harictir.</p>
+
+                    <!-- Plan features summary -->
+                    <div class="border-t border-gray-200 mt-4 pt-4">
+                        <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2" x-text="t('checkout.includes')">Dahil olanlar</p>
+                        <ul class="space-y-1.5 text-xs text-gray-600">
+                            <li class="flex items-start gap-1.5">
+                                <svg class="w-3.5 h-3.5 text-green-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                                <span x-text="t('checkout.feat_search', {n: planData.max_daily_quick_searches || 5})"></span>
+                            </li>
+                            <li class="flex items-start gap-1.5">
+                                <svg class="w-3.5 h-3.5 text-green-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                                <span x-text="t('checkout.feat_watchlist', {n: planData.max_watchlist_items || 3})"></span>
+                            </li>
+                            <template x-if="planData.monthly_live_searches > 0">
+                                <li class="flex items-start gap-1.5">
+                                    <svg class="w-3.5 h-3.5 text-green-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                                    <span x-text="t('checkout.feat_live', {n: planData.monthly_live_searches})"></span>
+                                </li>
+                            </template>
+                            <template x-if="planData.monthly_logo_runs > 0">
+                                <li class="flex items-start gap-1.5">
+                                    <svg class="w-3.5 h-3.5 text-green-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                                    <span x-text="t('checkout.feat_logo', {n: planData.monthly_logo_runs})"></span>
+                                </li>
+                            </template>
+                        </ul>
+                    </div>
+
+                    <!-- Change plan link -->
+                    <div class="mt-4 text-center">
+                        <a href="/pricing" class="text-xs text-indigo-600 hover:text-indigo-800 underline" x-text="t('checkout.change_plan')">Plani Degistir</a>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- i18n -->
+    <script src="/static/js/utils/i18n.js?v=17"></script>
+    <script>
+    // Plan data from server (Jinja2)
+    var SERVER_PLANS = {{ plans | tojson }};
+    var SELECTED_PLAN = '{{ selected_plan }}';
+    var SELECTED_BILLING = '{{ selected_billing }}';
+
+    function checkoutPage() {
+        return {
+            // State
+            step: 'account',
+            plan: SELECTED_PLAN,
+            billing: SELECTED_BILLING,
+            isLoggedIn: false,
+            userEmail: '',
+            authTab: 'register',
+            authLoading: false,
+            authError: '',
+            paymentLoading: false,
+            paymentError: '',
+            checkoutFormHtml: '',
+
+            // Register fields
+            regFirstName: '',
+            regLastName: '',
+            regEmail: '',
+            regOrgName: '',
+            regPassword: '',
+
+            // Login fields
+            loginEmail: '',
+            loginPassword: '',
+
+            // Computed
+            get planData() {
+                return SERVER_PLANS[this.plan] || SERVER_PLANS['free'] || {};
+            },
+            get planDisplayName() {
+                var names = { free: 'Free', starter: 'Starter', business: 'Business', professional: 'Professional', enterprise: 'Enterprise' };
+                return names[this.plan] || this.plan;
+            },
+            get monthlyPrice() {
+                if (this.billing === 'annual') {
+                    return this.planData.price_annual_monthly || 0;
+                }
+                return this.planData.price_monthly || 0;
+            },
+            get totalPrice() {
+                if (this.billing === 'annual') {
+                    return (this.planData.price_annual_monthly || 0) * 12;
+                }
+                return this.planData.price_monthly || 0;
+            },
+
+            init() {
+                // Check for existing auth
+                var token = localStorage.getItem('auth_token') || localStorage.getItem('access_token');
+                if (token) {
+                    this.checkAuth(token);
+                }
+
+                // Check URL error params
+                var params = new URLSearchParams(window.location.search);
+                var error = params.get('error');
+                if (error === 'payment_failed') {
+                    this.paymentError = this.t('checkout.error_payment_failed');
+                } else if (error === 'gateway_error') {
+                    this.paymentError = this.t('checkout.error_gateway');
+                }
+            },
+
+            t(key, params) {
+                if (window.AppUtils && window.AppUtils.t) {
+                    return window.AppUtils.t(key, params);
+                }
+                return key;
+            },
+
+            checkAuth(token) {
+                var self = this;
+                fetch('/api/v1/users/me', {
+                    headers: { 'Authorization': 'Bearer ' + token }
+                })
+                .then(function(res) {
+                    if (!res.ok) throw new Error('not_authed');
+                    return res.json();
+                })
+                .then(function(data) {
+                    self.isLoggedIn = true;
+                    self.userEmail = data.email || '';
+                    // If already logged in, auto-advance to payment
+                    if (self.step === 'account') {
+                        self.goToPayment();
+                    }
+                })
+                .catch(function() {
+                    localStorage.removeItem('auth_token');
+                    localStorage.removeItem('access_token');
+                    self.isLoggedIn = false;
+                });
+            },
+
+            setBilling(period) {
+                this.billing = period;
+                // Reset payment form if already initialized
+                this.checkoutFormHtml = '';
+                this.paymentError = '';
+                // Update URL
+                var url = new URL(window.location);
+                url.searchParams.set('billing', period);
+                window.history.replaceState({}, '', url);
+            },
+
+            goToPayment() {
+                this.step = 'payment';
+                if (this.plan !== 'free') {
+                    this.initializePayment();
+                }
+            },
+
+            logout() {
+                localStorage.removeItem('auth_token');
+                localStorage.removeItem('access_token');
+                localStorage.removeItem('refresh_token');
+                this.isLoggedIn = false;
+                this.userEmail = '';
+                this.step = 'account';
+                this.checkoutFormHtml = '';
+            },
+
+            submitRegister() {
+                if (!this.regFirstName || !this.regLastName || !this.regEmail || !this.regPassword) {
+                    this.authError = this.t('checkout.error_fill_fields');
+                    return;
+                }
+                this.authLoading = true;
+                this.authError = '';
+                var self = this;
+
+                fetch('/api/v1/auth/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        first_name: this.regFirstName,
+                        last_name: this.regLastName,
+                        email: this.regEmail,
+                        password: this.regPassword,
+                        organization_name: this.regOrgName || (this.regFirstName + ' ' + this.regLastName)
+                    })
+                })
+                .then(function(res) {
+                    if (!res.ok) {
+                        if (res.status === 409 || res.status === 400) throw new Error('email_taken');
+                        throw new Error('register_failed');
+                    }
+                    return res.json();
+                })
+                .then(function(data) {
+                    self.authLoading = false;
+                    if (data.access_token) {
+                        localStorage.setItem('auth_token', data.access_token);
+                        if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token);
+                        self.isLoggedIn = true;
+                        self.userEmail = self.regEmail;
+                        self.goToPayment();
+                    } else {
+                        // Registration succeeded but no auto-login; switch to login tab
+                        self.authTab = 'login';
+                        self.loginEmail = self.regEmail;
+                        self.authError = '';
+                    }
+                })
+                .catch(function(err) {
+                    self.authLoading = false;
+                    if (err.message === 'email_taken') {
+                        self.authError = self.t('checkout.error_email_taken');
+                    } else {
+                        self.authError = self.t('checkout.error_generic');
+                    }
+                });
+            },
+
+            submitLogin() {
+                if (!this.loginEmail || !this.loginPassword) {
+                    this.authError = this.t('checkout.error_fill_fields');
+                    return;
+                }
+                this.authLoading = true;
+                this.authError = '';
+                var self = this;
+
+                var formData = new URLSearchParams();
+                formData.append('username', this.loginEmail);
+                formData.append('password', this.loginPassword);
+
+                fetch('/api/v1/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: formData.toString()
+                })
+                .then(function(res) {
+                    if (!res.ok) {
+                        if (res.status === 401) throw new Error('invalid_credentials');
+                        throw new Error('login_failed');
+                    }
+                    return res.json();
+                })
+                .then(function(data) {
+                    self.authLoading = false;
+                    if (data.access_token) {
+                        localStorage.setItem('auth_token', data.access_token);
+                        if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token);
+                        self.isLoggedIn = true;
+                        self.userEmail = self.loginEmail;
+                        self.goToPayment();
+                    } else {
+                        throw new Error('no_token');
+                    }
+                })
+                .catch(function(err) {
+                    self.authLoading = false;
+                    if (err.message === 'invalid_credentials') {
+                        self.authError = self.t('checkout.error_invalid_credentials');
+                    } else {
+                        self.authError = self.t('checkout.error_generic');
+                    }
+                });
+            },
+
+            activateFree() {
+                this.paymentLoading = true;
+                var self = this;
+                var token = localStorage.getItem('auth_token') || localStorage.getItem('access_token');
+
+                fetch('/api/v1/payments/activate-free', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer ' + token,
+                        'Content-Type': 'application/json'
+                    }
+                })
+                .then(function(res) {
+                    if (!res.ok) throw new Error('activate_failed');
+                    return res.json();
+                })
+                .then(function(data) {
+                    self.paymentLoading = false;
+                    self.step = 'complete';
+                    setTimeout(function() {
+                        window.location.href = '/dashboard?payment=success';
+                    }, 1500);
+                })
+                .catch(function() {
+                    self.paymentLoading = false;
+                    self.paymentError = self.t('checkout.error_activation_failed');
+                });
+            },
+
+            initializePayment() {
+                this.paymentLoading = true;
+                this.paymentError = '';
+                this.checkoutFormHtml = '';
+                var self = this;
+                var token = localStorage.getItem('auth_token') || localStorage.getItem('access_token');
+
+                fetch('/api/v1/payments/initialize', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer ' + token,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ plan: this.plan, billing: this.billing })
+                })
+                .then(function(res) {
+                    if (!res.ok) {
+                        return res.json().then(function(err) { throw new Error(err.detail || 'init_failed'); });
+                    }
+                    return res.json();
+                })
+                .then(function(data) {
+                    self.paymentLoading = false;
+                    if (data.checkout_form_content) {
+                        self.checkoutFormHtml = data.checkout_form_content;
+                        // iyzico scripts in the HTML need to execute
+                        self.$nextTick(function() {
+                            var container = document.getElementById('iyzico-checkout-form');
+                            if (container) {
+                                var scripts = container.querySelectorAll('script');
+                                scripts.forEach(function(oldScript) {
+                                    var newScript = document.createElement('script');
+                                    if (oldScript.src) {
+                                        newScript.src = oldScript.src;
+                                    } else {
+                                        newScript.textContent = oldScript.textContent;
+                                    }
+                                    oldScript.parentNode.replaceChild(newScript, oldScript);
+                                });
+                            }
+                        });
+                    } else {
+                        self.paymentError = self.t('checkout.error_no_form');
+                    }
+                })
+                .catch(function(err) {
+                    self.paymentLoading = false;
+                    self.paymentError = err.message || self.t('checkout.error_gateway');
+                });
+            }
+        };
+    }
+    </script>
+
+</body>
+</html>
