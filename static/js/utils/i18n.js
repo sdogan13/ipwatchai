@@ -66,7 +66,8 @@ window.AppI18n.getDir = function() {
  */
 window.AppI18n.setLocale = async function(locale) {
     try {
-        var res = await fetch('/static/locales/' + locale + '.json');
+        var opts = typeof AbortSignal.timeout === 'function' ? { signal: AbortSignal.timeout(10000) } : {};
+        var res = await fetch('/static/locales/' + locale + '.json?v=28', opts);
         if (!res.ok) throw new Error('Locale file not found: ' + locale);
         var data = await res.json();
         window.AppI18n._strings = data;

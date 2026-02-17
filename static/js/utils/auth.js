@@ -16,9 +16,9 @@ window.AppAuth.getAuthToken = function() {
 window.AppAuth.fetchUserPlan = function() {
     var token = window.AppAuth.getAuthToken();
     if (!token) return;
-    fetch('/api/v1/auth/me', {
-        headers: { 'Authorization': 'Bearer ' + token }
-    }).then(function(res) {
+    var opts = { headers: { 'Authorization': 'Bearer ' + token } };
+    if (typeof AbortSignal.timeout === 'function') opts.signal = AbortSignal.timeout(15000);
+    fetch('/api/v1/auth/me', opts).then(function(res) {
         if (res.ok) return res.json();
         return null;
     }).then(function(profile) {
@@ -29,9 +29,14 @@ window.AppAuth.fetchUserPlan = function() {
             currentUserRole = window.AppAuth.currentUserRole;
             window.AppAuth.currentUserName = profile.first_name || profile.email || 'User';
             window.AppAuth.currentUserIsSuperadmin = !!profile.is_superadmin;
-            // Initialize admin-only features
-            if (currentUserRole === 'admin' || currentUserRole === 'owner') {
+            // Initialize admin-only features (superadmin only)
+            if (window.AppAuth.currentUserIsSuperadmin) {
                 initPipelineStatus();
+                // Show admin links in navbar
+                var deskLink = document.getElementById('admin-link-desktop');
+                if (deskLink) { deskLink.classList.remove('hidden'); deskLink.classList.add('flex'); }
+                var mobLink = document.getElementById('admin-link-mobile');
+                if (mobLink) mobLink.classList.remove('hidden');
             }
             // Load portfolio for all authenticated users
             if (typeof loadPortfolio === 'function') loadPortfolio();
@@ -44,9 +49,9 @@ window.AppAuth.fetchUserPlan = function() {
 window.AppAuth.fetchUsageSummary = function() {
     var token = window.AppAuth.getAuthToken();
     if (!token) return;
-    fetch('/api/v1/usage/summary', {
-        headers: { 'Authorization': 'Bearer ' + token }
-    }).then(function(res) {
+    var opts = { headers: { 'Authorization': 'Bearer ' + token } };
+    if (typeof AbortSignal.timeout === 'function') opts.signal = AbortSignal.timeout(15000);
+    fetch('/api/v1/usage/summary', opts).then(function(res) {
         if (res.ok) return res.json();
         return null;
     }).then(function(data) {

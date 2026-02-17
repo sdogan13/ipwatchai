@@ -1,6 +1,7 @@
 /**
  * studio-card.js - AI Studio card rendering (Name Lab + Logo Studio)
  * Uses shared helpers from score-badge.js
+ * Uses CSS custom properties for dark mode compatibility.
  */
 window.AppComponents = window.AppComponents || {};
 
@@ -10,34 +11,30 @@ window.AppComponents = window.AppComponents || {};
 window.AppComponents.renderNameCard = function(name, index) {
     var riskPct = Math.round(name.risk_score || 0);
     var isSafe = name.is_safe;
-    var safetyBadge = isSafe
-        ? '<span class="inline-flex items-center gap-1 text-xs font-medium bg-green-100 text-green-700 px-2 py-0.5 rounded-full border border-green-200">&#x2713; Guvenli</span>'
-        : '<span class="inline-flex items-center gap-1 text-xs font-medium bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full border border-amber-200">&#x26a0; Dikkat</span>';
+    var riskLevel = window.AppComponents.getScoreRiskLevel(riskPct);
 
-    var scoreBadge = window.AppComponents.renderScoreBadge(riskPct, 'Risk');
+    var safetyBadge = isSafe
+        ? '<span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style="' + window.AppComponents.getScoreColor(20) + '">&#x2713; ' + t('studio.safe_badge') + '</span>'
+        : '<span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style="' + window.AppComponents.getScoreColor(70) + '">&#x26a0; ' + t('studio.caution_badge') + '</span>';
+
+    var scoreRing = window.AppComponents.renderScoreRing(riskPct, 40);
 
     // Risk level badge with color
     var riskLevelHtml = '';
     if (name.risk_level && name.risk_level !== 'low') {
-        var rlColors = {
-            'critical': 'bg-red-600 text-white',
-            'very_high': 'bg-red-100 text-red-700 border border-red-200',
-            'high': 'bg-orange-100 text-orange-700 border border-orange-200',
-            'medium': 'bg-amber-100 text-amber-700 border border-amber-200'
-        };
-        var rlLabels = { 'critical': 'Kritik', 'very_high': 'Cok Yuksek', 'high': 'Yuksek', 'medium': 'Orta' };
-        var rlClass = rlColors[name.risk_level] || 'bg-gray-100 text-gray-600';
+        var rlStyle = window.AppComponents.getRiskBadgeSmall(name.risk_level);
+        var rlLabels = { 'critical': t('risk_level.critical'), 'very_high': t('risk_level.very_high'), 'high': t('risk_level.high'), 'medium': t('risk_level.medium') };
         var rlLabel = rlLabels[name.risk_level] || name.risk_level;
-        riskLevelHtml = '<span class="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full ' + rlClass + '">' + rlLabel + '</span>';
+        riskLevelHtml = '<span class="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full" style="' + rlStyle + '">' + rlLabel + '</span>';
     }
 
     var closestHtml = '';
     if (name.closest_match) {
-        closestHtml = '<div class="text-xs text-gray-500 mt-1.5">'
-            + 'En yakin: <span class="font-medium text-gray-700">' + escapeHtml(name.closest_match) + '</span>';
+        closestHtml = '<div class="text-xs mt-1.5" style="color:var(--color-text-muted)">'
+            + t('studio.closest_label') + ' <span class="font-medium" style="color:var(--color-text-secondary)">' + escapeHtml(name.closest_match) + '</span>';
         var maxSim = Math.max(name.text_similarity || 0, name.semantic_similarity || 0);
         if (maxSim > 0) {
-            closestHtml += ' <span class="text-gray-400">(%' + Math.round(maxSim * 100) + ' benzerlik)</span>';
+            closestHtml += ' <span style="color:var(--color-text-faint)">(' + t('studio.similarity_pct', { pct: Math.round(maxSim * 100) }) + ')</span>';
         }
         closestHtml += '</div>';
     }
@@ -45,20 +42,20 @@ window.AppComponents.renderNameCard = function(name, index) {
     var badgesHtml = window.AppComponents.renderSimilarityBadges(name);
     // Phonetic match badge (binary signal, shown separately)
     if (name.phonetic_match) {
-        badgesHtml += '<div class="mt-1"><span class="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded">Fonetik Eslesme</span></div>';
+        badgesHtml += '<div class="mt-1"><span class="text-xs px-1.5 py-0.5 rounded" style="' + window.AppComponents.getScoreColor(90) + '">' + t('studio.phonetic_match') + '</span></div>';
     }
 
     var useForLogoBtn = isSafe
         ? '<button onclick="useNameForLogo(\'' + escapeHtml(name.name).replace(/'/g, "\\'") + '\')" '
-          + 'class="text-xs text-purple-600 hover:text-purple-800 font-medium mt-2 flex items-center gap-1">'
+          + 'class="text-xs text-purple-600 hover:text-purple-800 font-medium mt-2 flex items-center gap-1 btn-press">'
           + '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>'
-          + 'Logo Olustur</button>'
+          + t('studio.generate_logo_btn') + '</button>'
         : '';
 
     var inner = '<div class="flex justify-between items-start gap-3">'
         + '<div class="flex-1 min-w-0">'
-        + '<div class="flex items-center gap-2 mb-1">'
-        + '<span class="text-lg font-bold text-gray-900">' + escapeHtml(name.name) + '</span>'
+        + '<div class="flex items-center gap-2 mb-1 flex-wrap">'
+        + '<span class="text-lg font-bold" style="color:var(--color-text-primary)">' + escapeHtml(name.name) + '</span>'
         + safetyBadge
         + riskLevelHtml
         + '</div>'
@@ -66,10 +63,10 @@ window.AppComponents.renderNameCard = function(name, index) {
         + badgesHtml
         + useForLogoBtn
         + '</div>'
-        + '<div class="flex-shrink-0">' + scoreBadge + '</div>'
+        + '<div class="flex-shrink-0">' + scoreRing + '</div>'
         + '</div>';
 
-    return window.AppComponents.renderCardShell(inner, { noMargin: true });
+    return window.AppComponents.renderCardShell(inner, { noMargin: true, riskLevel: riskLevel });
 };
 
 // ============================================
@@ -80,26 +77,27 @@ window.AppComponents.renderLogoCard = function(logo) {
     var isSafe = logo.is_safe;
 
     var safetyBadge = isSafe
-        ? '<span class="inline-flex items-center gap-1 text-xs font-medium bg-green-100 text-green-700 px-2 py-0.5 rounded-full border border-green-200">&#x2713; Guvenli</span>'
-        : '<span class="inline-flex items-center gap-1 text-xs font-medium bg-red-100 text-red-700 px-2 py-0.5 rounded-full border border-red-200">&#x26a0; Risk Var</span>';
+        ? '<span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style="' + window.AppComponents.getScoreColor(20) + '">&#x2713; ' + t('studio.safe_badge') + '</span>'
+        : '<span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style="' + window.AppComponents.getScoreColor(90) + '">&#x26a0; ' + t('studio.risk_exists') + '</span>';
 
     var closestHtml = '';
     if (logo.closest_match_name) {
-        closestHtml = '<div class="text-xs text-gray-500 mt-1">'
-            + 'En yakin esleme: <span class="font-medium text-gray-700">' + escapeHtml(logo.closest_match_name) + '</span>'
-            + ' <span class="text-gray-400">(%' + simPct + ' benzerlik)</span>'
+        closestHtml = '<div class="text-xs mt-1" style="color:var(--color-text-muted)">'
+            + t('studio.closest_match_full') + ' <span class="font-medium" style="color:var(--color-text-secondary)">' + escapeHtml(logo.closest_match_name) + '</span>'
+            + ' <span style="color:var(--color-text-faint)">(' + t('studio.similarity_pct', { pct: simPct }) + ')</span>'
             + '</div>';
 
         // Show closest match image if unsafe (clickable for lightbox)
         if (!isSafe && logo.closest_match_image_url) {
             var matchUrl = logo.closest_match_image_url;
             var matchName = (logo.closest_match_name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-            closestHtml += '<div class="mt-2 flex items-center gap-2 bg-red-50 rounded-lg p-2 border border-red-100">'
-                + '<img src="' + matchUrl + '" alt="Benzer marka" '
-                + 'class="w-10 h-10 object-contain rounded border border-red-200 bg-white cursor-pointer hover:ring-2 hover:ring-red-300 transition" '
-                + 'onclick="window.dispatchEvent(new CustomEvent(\'open-lightbox\', { detail: { src: \'' + matchUrl.replace(/'/g, "\\'") + '\', title: \'' + matchName + '\', subtitle: \'Benzer mevcut marka\' } }))" '
+            closestHtml += '<div class="mt-2 flex items-center gap-2 rounded-lg p-2" style="background:var(--color-risk-critical-bg);border:1px solid var(--color-risk-critical-border)">'
+                + '<img src="' + matchUrl + '" alt="' + t('studio.similar_brand') + '" '
+                + 'class="w-10 h-10 object-contain rounded cursor-pointer hover:ring-2 hover:ring-red-300 transition" '
+                + 'style="background:var(--color-bg-card);border:1px solid var(--color-risk-critical-border)" '
+                + 'onclick="window.dispatchEvent(new CustomEvent(\'open-lightbox\', { detail: { src: \'' + matchUrl.replace(/'/g, "\\'") + '\', title: \'' + matchName + '\', subtitle: \'' + t('studio.similar_brand').replace(/'/g, "\\'") + '\' } }))" '
                 + 'onerror="this.style.display=\'none\'">'
-                + '<span class="text-xs text-red-600">Benzer mevcut marka</span>'
+                + '<span class="text-xs" style="color:var(--color-risk-critical-text)">' + t('studio.similar_brand') + '</span>'
                 + '</div>';
         }
     }
@@ -107,27 +105,29 @@ window.AppComponents.renderLogoCard = function(logo) {
     var imgUrl = logo.image_url || '';
     var imgPlaceholderId = 'logo-img-' + logo.image_id;
 
-    var html = '<div class="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all overflow-hidden">'
+    var simColor = simPct >= 70 ? 'var(--color-risk-critical-text)' : simPct >= 50 ? 'var(--color-risk-medium-text)' : 'var(--color-risk-low-text)';
+
+    var html = '<div class="rounded-xl shadow-sm hover:shadow-md transition-all overflow-hidden" style="background:var(--color-bg-card);border:1px solid var(--color-border)">'
         // Logo image area — loaded via JS fetch for auth
-        + '<div id="' + imgPlaceholderId + '" class="aspect-square bg-gray-50 flex items-center justify-center p-4 border-b border-gray-100">'
+        + '<div id="' + imgPlaceholderId + '" class="aspect-square flex items-center justify-center p-4" style="background:var(--color-bg-muted);border-bottom:1px solid var(--color-border)">'
         + '<div class="animate-spin w-8 h-8 border-4 border-purple-200 border-t-purple-600 rounded-full"></div>'
         + '</div>'
         // Info area
         + '<div class="p-4">'
         + '<div class="flex items-center justify-between mb-1">'
         + safetyBadge
-        + '<span class="text-sm font-bold ' + (simPct >= 70 ? 'text-red-600' : simPct >= 50 ? 'text-amber-600' : 'text-green-600') + '">' + simPct + '%</span>'
+        + '<span class="text-sm font-bold" style="color:' + simColor + '">' + simPct + '%</span>'
         + '</div>'
         + closestHtml
         // Actions
         + '<div class="flex items-center gap-2 mt-3">'
         + '<button onclick="downloadLogo(\'' + escapeHtml(logo.image_id) + '\')" '
-        + 'class="flex-1 text-xs px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg flex items-center justify-center gap-1 font-medium transition-colors">'
+        + 'class="flex-1 text-xs px-3 py-1.5 rounded-lg flex items-center justify-center gap-1 font-medium transition-colors btn-press min-h-[36px]" style="background:var(--color-bg-muted);color:var(--color-text-secondary);border:1px solid var(--color-border)">'
         + '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>'
-        + 'PNG Indir</button>'
+        + t('studio.download_png') + '</button>'
         + '<button onclick="toggleLogoDetail(\'' + escapeHtml(logo.image_id) + '\')" '
-        + 'class="text-xs px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition-colors">'
-        + 'Detay</button>'
+        + 'class="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors btn-press min-h-[36px]" style="background:var(--color-bg-muted);color:var(--color-text-secondary);border:1px solid var(--color-border)">'
+        + t('studio.detail_btn') + '</button>'
         + '</div>'
         + '</div>'
         + '</div>';
@@ -158,7 +158,7 @@ window.AppComponents.downloadLogo = function(imageId) {
         a.remove();
         window.URL.revokeObjectURL(blobUrl);
     }).catch(function(err) {
-        showToast('Logo indirilemedi: ' + err.message, 'error');
+        showToast(t('studio.logo_download_failed') + ': ' + err.message, 'error');
     });
 };
 
@@ -180,11 +180,34 @@ window.AppComponents.loadLogoImages = function(logos) {
             var url = window.URL.createObjectURL(blob);
             container.innerHTML = '<img src="' + url + '" alt="Logo" class="max-w-full max-h-full object-contain">';
         }).catch(function() {
-            container.innerHTML = '<div class="text-gray-300 text-center">'
+            container.innerHTML = '<div class="text-center" style="color:var(--color-text-faint)">'
                 + '<svg class="w-12 h-12 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>'
-                + '<p class="text-xs mt-1">Yuklenemedi</p></div>';
+                + '<p class="text-xs mt-1">' + t('dashboard.load_failed_short') + '</p></div>';
         });
     });
+};
+
+// ============================================
+// E) Skeleton cards for loading states
+// ============================================
+window.AppComponents.renderSkeletonCards = function(count, type) {
+    count = count || 3;
+    type = type || 'result';
+    var html = '';
+    for (var i = 0; i < count; i++) {
+        if (type === 'logo') {
+            html += '<div class="rounded-xl overflow-hidden" style="background:var(--color-bg-card);border:1px solid var(--color-border)">'
+                + '<div class="skeleton aspect-square"></div>'
+                + '<div class="p-4 space-y-2"><div class="skeleton h-4 w-2/3 rounded"></div><div class="skeleton h-3 w-1/2 rounded"></div></div></div>';
+        } else {
+            html += '<div class="card-base p-5 space-y-3" style="animation-delay:' + (i * 100) + 'ms">'
+                + '<div class="flex justify-between"><div class="skeleton h-5 w-1/3 rounded"></div><div class="skeleton h-10 w-10 rounded-full"></div></div>'
+                + '<div class="skeleton h-3 w-2/3 rounded"></div>'
+                + '<div class="skeleton h-3 w-1/2 rounded"></div>'
+                + '<div class="flex gap-2"><div class="skeleton h-6 w-16 rounded"></div><div class="skeleton h-6 w-16 rounded"></div></div></div>';
+        }
+    }
+    return html;
 };
 
 // Expose as globals
