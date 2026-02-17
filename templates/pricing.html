@@ -3,173 +3,293 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Planlar - IP Watchdog</title>
+    <title x-data x-text="t('pricing.page_title') || 'Planlar - IP WATⒸH AI'">Planlar - IP WATⒸH AI</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <style>body { font-family: 'Inter', sans-serif; }</style>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .plan-feature-icon { width: 16px; height: 16px; flex-shrink: 0; margin-top: 2px; }
+        .toggle-bg { transition: background-color 0.2s; }
+        .toggle-dot { transition: transform 0.2s; }
+    </style>
 </head>
-<body class="bg-gray-50 min-h-screen">
+<body class="bg-gray-50 min-h-screen" x-data="pricingPage()">
 
     <!-- Header -->
     <nav class="bg-white border-b border-gray-200">
-        <div class="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+        <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
             <a href="/dashboard" class="flex items-center gap-2 text-gray-600 hover:text-gray-900 text-sm font-medium">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
-                Dashboard'a Don
+                <span x-text="t('pricing.back_to_dashboard')">Dashboard'a Don</span>
             </a>
             <div class="flex items-center gap-2">
-                <div class="bg-indigo-600 p-1.5 rounded-lg">
-                    <svg class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
-                </div>
-                <span class="font-bold text-gray-900">IP Watchdog</span>
+                <img src="/static/icons/logo.jpeg" alt="IP WATⒸH AI" class="h-8 w-8 rounded-lg flex-shrink-0 object-cover">
+                <span class="text-sm font-bold text-gray-900">IP WATⒸH AI</span>
             </div>
         </div>
     </nav>
 
     <!-- Content -->
-    <div class="max-w-6xl mx-auto px-4 py-12">
-        <div class="text-center mb-10">
-            <h1 class="text-3xl font-bold text-gray-900 mb-2">Planlar ve Fiyatlandirma</h1>
-            <p class="text-gray-500">Isletmenize uygun plani secin</p>
+    <div class="max-w-7xl mx-auto px-4 py-12">
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <h1 class="text-3xl font-bold text-gray-900 mb-2" x-text="t('pricing.title')">Planlar ve Fiyatlandirma</h1>
+            <p class="text-gray-500" x-text="t('pricing.subtitle')">Isletmenize uygun plani secin</p>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+        <!-- Monthly / Annual Toggle -->
+        <div class="flex items-center justify-center gap-3 mb-10">
+            <span class="text-sm font-medium" :class="!annual ? 'text-gray-900' : 'text-gray-400'" x-text="t('pricing.monthly')">Aylik</span>
+            <button @click="annual = !annual" class="relative w-14 h-8 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-300 min-h-[44px] flex items-center"
+                    :class="annual ? 'bg-indigo-600' : 'bg-gray-300'">
+                <div class="absolute top-1 left-1 w-6 h-6 bg-white rounded-full shadow transition-transform"
+                     :class="annual ? 'translate-x-6' : ''"></div>
+            </button>
+            <span class="text-sm font-medium" :class="annual ? 'text-gray-900' : 'text-gray-400'" x-text="t('pricing.annual')">Yillik</span>
+            <span class="bg-green-100 text-green-700 text-xs font-bold px-2 py-0.5 rounded-full" x-text="t('pricing.save_badge')">%20 Tasarruf</span>
+        </div>
+
+        <!-- Plan Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
 
             <!-- Free Plan -->
-            <div class="bg-white rounded-2xl border border-gray-200 p-6 flex flex-col">
-                <div class="mb-6">
-                    <h2 class="text-lg font-bold text-gray-900">Ucretsiz</h2>
+            <div class="bg-white rounded-2xl border border-gray-200 p-5 flex flex-col">
+                <div class="mb-5">
+                    <h2 class="text-lg font-bold text-gray-900" x-text="t('pricing.free_name')">Ucretsiz</h2>
                     <div class="mt-2">
                         <span class="text-3xl font-bold text-gray-900">&#8378;0</span>
-                        <span class="text-gray-500">/ay</span>
+                        <span class="text-gray-500" x-text="'/' + t('pricing.per_month')">/ay</span>
                     </div>
-                    <p class="text-sm text-gray-500 mt-2">Baslangic icin ideal</p>
+                    <p class="text-sm text-gray-500 mt-2" x-text="t('pricing.free_desc')">Platformu kesfetmek icin</p>
                 </div>
-                <ul class="space-y-3 text-sm text-gray-700 flex-1">
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> {{ plans.free.max_watchlist_items }} marka izleme</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Gunluk {{ plans.free.max_daily_quick_searches }} hizli arama</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Temel risk analizi</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> {{ plans.free.name_suggestions_per_session }} isim onerisi/oturum</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ayda {{ plans.free.monthly_name_generations }} isim olusturma</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ayda {{ plans.free.monthly_logo_runs }} logo olusturma</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ayda {{ plans.free.monthly_reports }} rapor</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> {{ plans.free.max_users }} kullanici</li>
-                    <li class="flex items-start gap-2"><span class="text-gray-300 mt-0.5">&#x2717;</span><span class="text-gray-400">Canli arama</span></li>
-                    <li class="flex items-start gap-2"><span class="text-gray-300 mt-0.5">&#x2717;</span><span class="text-gray-400">Opposition Radar</span></li>
-                    <li class="flex items-start gap-2"><span class="text-gray-300 mt-0.5">&#x2717;</span><span class="text-gray-400">Otomatik tarama</span></li>
+                <ul class="space-y-2.5 text-sm text-gray-700 flex-1">
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_daily_searches', {n: {{ plans.free.max_daily_quick_searches }}})">Gunluk {{ plans.free.max_daily_quick_searches }} hizli arama</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_watchlist', {n: {{ plans.free.max_watchlist_items }}})">{{ plans.free.max_watchlist_items }} marka izleme</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_risk_analysis')">Temel risk analizi</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_name_suggestions', {n: {{ plans.free.name_suggestions_per_session }}})">{{ plans.free.name_suggestions_per_session }} isim onerisi/oturum</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_reports', {n: {{ plans.free.monthly_reports }}})">Ayda {{ plans.free.monthly_reports }} rapor</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_users', {n: {{ plans.free.max_users }}})">{{ plans.free.max_users }} kullanici</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg> <span class="text-gray-400" x-text="t('pricing.f_ai_credits', {n: 0})">AI kredi</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg> <span class="text-gray-400" x-text="t('pricing.f_live_search')">Canli arama</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg> <span class="text-gray-400" x-text="t('pricing.f_logo_tracking')">Logo izleme</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg> <span class="text-gray-400" x-text="t('pricing.f_applications', {n: 0})">Marka basvurusu</span></li>
                 </ul>
-                <div class="mt-6">
-                    <span class="block text-center px-4 py-2.5 bg-gray-100 text-gray-500 rounded-xl text-sm font-medium">Mevcut Plan</span>
-                </div>
-            </div>
-
-            <!-- Starter Plan -->
-            <div class="bg-white rounded-2xl border border-gray-200 p-6 flex flex-col">
-                <div class="mb-6">
-                    <h2 class="text-lg font-bold text-gray-900">Starter</h2>
-                    <div class="mt-2">
-                        <span class="text-3xl font-bold text-gray-900">&#8378;299</span>
-                        <span class="text-gray-500">/ay</span>
-                    </div>
-                    <p class="text-sm text-gray-500 mt-2">Bireysel vekiller icin</p>
-                </div>
-                <ul class="space-y-3 text-sm text-gray-700 flex-1">
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> {{ plans.starter.max_watchlist_items }} marka izleme</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Gunluk {{ plans.starter.max_daily_quick_searches }} hizli arama</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Gelismis risk analizi</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> {{ plans.starter.name_suggestions_per_session }} isim onerisi/oturum</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ayda {{ plans.starter.monthly_name_generations }} isim olusturma</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ayda {{ plans.starter.monthly_logo_runs }} logo olusturma</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ayda {{ plans.starter.monthly_reports }} rapor</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Rapor indirme</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> {{ plans.starter.max_users }} kullanici</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Haftalik otomatik tarama ({{ plans.starter.auto_scan_max_items }} marka)</li>
-                    <li class="flex items-start gap-2"><span class="text-gray-300 mt-0.5">&#x2717;</span><span class="text-gray-400">Canli arama</span></li>
-                    <li class="flex items-start gap-2"><span class="text-gray-300 mt-0.5">&#x2717;</span><span class="text-gray-400">Opposition Radar</span></li>
-                </ul>
-                <div class="mt-6">
-                    <a href="mailto:sales@ipwatchdog.com.tr?subject=Starter%20Plan%20Basvurusu"
-                       class="block text-center px-4 py-2.5 bg-gray-900 hover:bg-gray-800 text-white rounded-xl text-sm font-medium transition-colors">
-                        Iletisime Gec
+                <div class="mt-5">
+                    <a href="/checkout?plan=free&billing=monthly"
+                       class="block text-center px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-sm font-medium transition-colors no-underline"
+                       x-text="t('pricing.cta_start')">
+                        Basla
                     </a>
                 </div>
             </div>
 
-            <!-- Professional Plan -->
-            <div class="bg-white rounded-2xl border-2 border-indigo-500 p-6 flex flex-col relative shadow-lg">
-                <div class="absolute -top-3 left-1/2 -translate-x-1/2 bg-indigo-600 text-white text-xs font-bold px-3 py-1 rounded-full">POPULER</div>
-                <div class="mb-6">
-                    <h2 class="text-lg font-bold text-gray-900">Professional</h2>
+            <!-- Starter Plan -->
+            <div class="bg-white rounded-2xl border border-gray-200 p-5 flex flex-col">
+                <div class="mb-5">
+                    <h2 class="text-lg font-bold text-gray-900">Starter</h2>
                     <div class="mt-2">
-                        <span class="text-3xl font-bold text-gray-900">&#8378;999</span>
-                        <span class="text-gray-500">/ay</span>
+                        <span class="text-3xl font-bold text-gray-900" x-text="'&#8378;' + (annual ? '{{ plans.starter.price_annual_monthly }}' : '{{ plans.starter.price_monthly }}')">&#8378;{{ plans.starter.price_monthly }}</span>
+                        <span class="text-gray-500" x-text="'/' + t('pricing.per_month')">/ay</span>
                     </div>
-                    <p class="text-sm text-gray-500 mt-2">Marka vekilleri icin</p>
+                    <template x-if="annual">
+                        <p class="text-xs text-green-600 mt-1" x-text="t('pricing.billed_annually', {total: {{ plans.starter.price_annual_monthly * 12 }}})">Yillik faturalandirilir</p>
+                    </template>
+                    <p class="text-sm text-gray-500 mt-2" x-text="t('pricing.starter_desc')">Bireysel vekiller icin</p>
+                    <p class="text-xs text-indigo-600 font-semibold mt-2 flex items-center gap-1"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.includes_free')">Ücretsiz+</span></p>
                 </div>
-                <ul class="space-y-3 text-sm text-gray-700 flex-1">
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> {{ plans.professional.max_watchlist_items }} marka izleme</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Gunluk {{ plans.professional.max_daily_quick_searches }} hizli arama</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ayda {{ plans.professional.monthly_live_searches }} canli arama</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Gelismis risk analizi</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> {{ plans.professional.name_suggestions_per_session }} isim onerisi/oturum</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ayda {{ plans.professional.monthly_name_generations }} isim olusturma</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ayda {{ plans.professional.monthly_logo_runs }} logo olusturma</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ayda {{ plans.professional.monthly_reports }} rapor + indirme</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> {{ plans.professional.max_users }} kullanici</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Opposition Radar ({{ plans.professional.daily_lead_views }} lead/gun)</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Sahip portfolyosu</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Gunluk otomatik tarama ({{ plans.professional.auto_scan_max_items }} marka)</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Oncelikli destek</li>
+                <ul class="space-y-2.5 text-sm text-gray-700 flex-1">
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_daily_searches', {n: {{ plans.starter.max_daily_quick_searches }}})">Gunluk {{ plans.starter.max_daily_quick_searches }} hizli arama</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_watchlist', {n: {{ plans.starter.max_watchlist_items }}})">{{ plans.starter.max_watchlist_items }} marka izleme</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_live_monthly', {n: {{ plans.starter.monthly_live_searches }}})">Ayda {{ plans.starter.monthly_live_searches }} canli arama</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_ai_credits', {n: {{ plans.starter.monthly_ai_credits }}})">Ayda {{ plans.starter.monthly_ai_credits }} AI kredi</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_applications', {n: {{ plans.starter.monthly_applications }}})">Ayda {{ plans.starter.monthly_applications }} marka basvurusu</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_logo_tracking')">Logo izleme</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_reports_export', {n: {{ plans.starter.monthly_reports }}})">Ayda {{ plans.starter.monthly_reports }} rapor</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_users', {n: {{ plans.starter.max_users }}})">{{ plans.starter.max_users }} kullanici</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_weekly_scan', {n: {{ plans.starter.auto_scan_max_items }}})">Haftalik tarama ({{ plans.starter.auto_scan_max_items }})</span></li>
                 </ul>
-                <div class="mt-6">
-                    <a href="mailto:sales@ipwatchdog.com.tr?subject=Professional%20Plan%20Basvurusu"
-                       class="block text-center px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-medium transition-colors">
-                        Iletisime Gec
+                <div class="mt-5">
+                    <a :href="'/checkout?plan=starter&billing=' + (annual ? 'annual' : 'monthly')"
+                       class="block text-center px-4 py-2.5 bg-gray-900 hover:bg-gray-800 text-white rounded-xl text-sm font-medium transition-colors no-underline"
+                       x-text="t('pricing.cta_start')">
+                        Basla
+                    </a>
+                </div>
+            </div>
+
+            <!-- Professional Plan (799₺) -->
+            <div class="bg-white rounded-2xl border border-gray-200 p-5 flex flex-col">
+                <div class="mb-5">
+                    <h2 class="text-lg font-bold text-gray-900" x-text="t('pricing.professional_desc') ? 'Professional' : 'Professional'">Professional</h2>
+                    <div class="mt-2">
+                        <span class="text-3xl font-bold text-gray-900" x-text="'&#8378;' + (annual ? '{{ plans.professional.price_annual_monthly }}' : '{{ plans.professional.price_monthly }}')">&#8378;{{ plans.professional.price_monthly }}</span>
+                        <span class="text-gray-500" x-text="'/' + t('pricing.per_month')">/ay</span>
+                    </div>
+                    <template x-if="annual">
+                        <p class="text-xs text-green-600 mt-1" x-text="t('pricing.billed_annually', {total: {{ plans.professional.price_annual_monthly * 12 }}})">Yillik faturalandirilir</p>
+                    </template>
+                    <p class="text-sm text-gray-500 mt-2" x-text="t('pricing.professional_desc')">Marka vekilleri icin</p>
+                    <p class="text-xs text-indigo-600 font-semibold mt-2 flex items-center gap-1"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.includes_starter')">Başlangıç+</span></p>
+                </div>
+                <ul class="space-y-2.5 text-sm text-gray-700 flex-1">
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_daily_searches', {n: {{ plans.professional.max_daily_quick_searches }}})">Gunluk {{ plans.professional.max_daily_quick_searches }} hizli arama</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_watchlist', {n: {{ plans.professional.max_watchlist_items }}})">{{ plans.professional.max_watchlist_items }} marka izleme</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_live_monthly', {n: {{ plans.professional.monthly_live_searches }}})">Ayda {{ plans.professional.monthly_live_searches }} canli arama</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_ai_credits', {n: {{ plans.professional.monthly_ai_credits }}})">Ayda {{ plans.professional.monthly_ai_credits }} AI kredi</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_applications', {n: {{ plans.professional.monthly_applications }}})">Ayda {{ plans.professional.monthly_applications }} marka basvurusu</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_logo_tracking')">Logo izleme</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_leads_daily', {n: {{ plans.professional.daily_lead_views }}})">Opposition Radar ({{ plans.professional.daily_lead_views }} lead/gun)</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_holder_portfolio')">Sahip portfolyosu</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_reports_export', {n: {{ plans.professional.monthly_reports }}})">Ayda {{ plans.professional.monthly_reports }} rapor</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_users', {n: {{ plans.professional.max_users }}})">{{ plans.professional.max_users }} kullanici</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_weekly_scan', {n: {{ plans.professional.auto_scan_max_items }}})">Haftalik tarama ({{ plans.professional.auto_scan_max_items }})</span></li>
+                </ul>
+                <div class="mt-5">
+                    <a :href="'/checkout?plan=professional&billing=' + (annual ? 'annual' : 'monthly')"
+                       class="block text-center px-4 py-2.5 bg-gray-900 hover:bg-gray-800 text-white rounded-xl text-sm font-medium transition-colors no-underline"
+                       x-text="t('pricing.cta_start')">
+                        Basla
+                    </a>
+                </div>
+            </div>
+
+            <!-- Business Plan (1299₺, POPULAR) -->
+            <div class="bg-white rounded-2xl border-2 border-indigo-500 p-5 flex flex-col relative shadow-lg">
+                <div class="absolute -top-3 left-1/2 -translate-x-1/2 bg-indigo-600 text-white text-xs font-bold px-3 py-1 rounded-full" x-text="t('pricing.popular_badge')">POPULER</div>
+                <div class="mb-5">
+                    <h2 class="text-lg font-bold text-gray-900" x-text="t('pricing.business_name')">Business</h2>
+                    <div class="mt-2">
+                        <span class="text-3xl font-bold text-gray-900" x-text="'&#8378;' + (annual ? '{{ plans.business.price_annual_monthly }}' : '{{ plans.business.price_monthly }}')">&#8378;{{ plans.business.price_monthly }}</span>
+                        <span class="text-gray-500" x-text="'/' + t('pricing.per_month')">/ay</span>
+                    </div>
+                    <template x-if="annual">
+                        <p class="text-xs text-green-600 mt-1" x-text="t('pricing.billed_annually', {total: {{ plans.business.price_annual_monthly * 12 }}})">Yillik faturalandirilir</p>
+                    </template>
+                    <p class="text-sm text-gray-500 mt-2" x-text="t('pricing.business_desc')">Buyuyen isletmeler icin</p>
+                    <p class="text-xs text-indigo-600 font-semibold mt-2 flex items-center gap-1"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.includes_professional')">Profesyonel+</span></p>
+                </div>
+                <ul class="space-y-2.5 text-sm text-gray-700 flex-1">
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_daily_searches', {n: {{ plans.business.max_daily_quick_searches }}})">Gunluk {{ plans.business.max_daily_quick_searches }} hizli arama</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_watchlist', {n: {{ plans.business.max_watchlist_items }}})">{{ plans.business.max_watchlist_items }} marka izleme</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_live_monthly', {n: {{ plans.business.monthly_live_searches }}})">Ayda {{ plans.business.monthly_live_searches }} canli arama</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_ai_credits', {n: {{ plans.business.monthly_ai_credits }}})">Ayda {{ plans.business.monthly_ai_credits }} AI kredi</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_applications', {n: {{ plans.business.monthly_applications }}})">Ayda {{ plans.business.monthly_applications }} marka basvurusu</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_logo_tracking')">Logo izleme</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_leads_daily', {n: {{ plans.business.daily_lead_views }}})">Opposition Radar ({{ plans.business.daily_lead_views }} lead/gun)</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_reports_export', {n: {{ plans.business.monthly_reports }}})">Ayda {{ plans.business.monthly_reports }} rapor</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_users', {n: {{ plans.business.max_users }}})">{{ plans.business.max_users }} kullanici</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_daily_scan', {n: {{ plans.business.auto_scan_max_items }}})">Gunluk tarama ({{ plans.business.auto_scan_max_items }})</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_priority_support')">Oncelikli destek</span></li>
+                </ul>
+                <div class="mt-5">
+                    <a :href="'/checkout?plan=business&billing=' + (annual ? 'annual' : 'monthly')"
+                       class="block text-center px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-medium transition-colors no-underline"
+                       x-text="t('pricing.cta_start')">
+                        Basla
                     </a>
                 </div>
             </div>
 
             <!-- Enterprise Plan -->
-            <div class="bg-white rounded-2xl border border-gray-200 p-6 flex flex-col">
-                <div class="mb-6">
+            <div class="bg-white rounded-2xl border border-gray-200 p-5 flex flex-col">
+                <div class="mb-5">
                     <h2 class="text-lg font-bold text-gray-900">Enterprise</h2>
                     <div class="mt-2">
-                        <span class="text-3xl font-bold text-gray-900">&#8378;2,499</span>
-                        <span class="text-gray-500">/ay</span>
+                        <span class="text-3xl font-bold text-gray-900" x-text="'&#8378;' + (annual ? '{{ plans.enterprise.price_annual_monthly }}' : '{{ plans.enterprise.price_monthly }}')">&#8378;{{ plans.enterprise.price_monthly }}</span>
+                        <span class="text-gray-500" x-text="'/' + t('pricing.per_month')">/ay</span>
                     </div>
-                    <p class="text-sm text-gray-500 mt-2">Buyuk firmalar icin</p>
+                    <template x-if="annual">
+                        <p class="text-xs text-green-600 mt-1" x-text="t('pricing.billed_annually', {total: {{ plans.enterprise.price_annual_monthly * 12 }}})">Yillik faturalandirilir</p>
+                    </template>
+                    <p class="text-sm text-gray-500 mt-2" x-text="t('pricing.enterprise_desc')">Buyuk firmalar icin</p>
+                    <p class="text-xs text-indigo-600 font-semibold mt-2 flex items-center gap-1"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.includes_business')">Business+</span></p>
                 </div>
-                <ul class="space-y-3 text-sm text-gray-700 flex-1">
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> {{ plans.enterprise.max_watchlist_items }} marka izleme</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Sinirsiz hizli arama</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ayda {{ plans.enterprise.monthly_live_searches }} canli arama</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Gelismis risk analizi + raporlama</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Sinirsiz isim onerisi</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ayda {{ plans.enterprise.monthly_name_generations }} isim olusturma</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ayda {{ plans.enterprise.monthly_logo_runs }} logo olusturma</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ayda {{ plans.enterprise.monthly_reports }} rapor + indirme</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> {{ plans.enterprise.max_users }} kullanici</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Opposition Radar (sinirsiz)</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Sahip portfolyosu</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> CSV export</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Gunluk otomatik tarama ({{ plans.enterprise.auto_scan_max_items }} marka)</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ozel entegrasyon + API</li>
-                    <li class="flex items-start gap-2"><span class="text-green-500 mt-0.5">&#x2713;</span> Ozel musteri temsilcisi</li>
+                <ul class="space-y-2.5 text-sm text-gray-700 flex-1">
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_unlimited_searches')">Sinirsiz hizli arama</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_unlimited_watchlist')">Sinirsiz marka izleme</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_unlimited_live')">Sinirsiz canli arama</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_unlimited_ai_credits')">Sinirsiz AI kredi</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_unlimited_applications')">Sinirsiz marka basvurusu</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_logo_tracking')">Logo izleme</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_unlimited_leads')">Opposition Radar (sinirsiz)</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_unlimited_reports')">Sinirsiz rapor + indirme</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_unlimited_users')">Sinirsiz kullanici</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_unlimited_scan')">Sinirsiz otomatik tarama</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_holder_portfolio')">Sahip portfolyosu</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_csv_export')">CSV export</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_api_access')">API erisimi</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_priority_support')">Oncelikli destek</span></li>
+                    <li class="flex items-start gap-2"><svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.f_dedicated_manager')">Ozel musteri temsilcisi</span></li>
                 </ul>
-                <div class="mt-6">
-                    <a href="mailto:sales@ipwatchdog.com.tr?subject=Enterprise%20Plan%20Basvurusu"
-                       class="block text-center px-4 py-2.5 bg-gray-900 hover:bg-gray-800 text-white rounded-xl text-sm font-medium transition-colors">
-                        Iletisime Gec
+                <div class="mt-5">
+                    <a :href="'/checkout?plan=enterprise&billing=' + (annual ? 'annual' : 'monthly')"
+                       class="block text-center px-4 py-2.5 bg-gray-900 hover:bg-gray-800 text-white rounded-xl text-sm font-medium transition-colors no-underline"
+                       x-text="t('pricing.cta_start')">
+                        Basla
                     </a>
                 </div>
             </div>
 
         </div>
 
-        <div class="text-center mt-10 text-sm text-gray-400">
-            Tum planlar KDV haric fiyatlandirilmistir. Yillik odeme ile %20 indirim.
+        <!-- Footer note -->
+        <div class="text-center mt-10 text-sm text-gray-400" x-text="t('pricing.vat_note')">
+            Tum fiyatlar KDV harictir.
+        </div>
+
+        <!-- FAQ Section -->
+        <div class="max-w-3xl mx-auto mt-16">
+            <h2 class="text-2xl font-bold text-gray-900 text-center mb-8" x-text="t('pricing.faq_title')">Sikca Sorulan Sorular</h2>
+            <div class="space-y-4">
+                <details class="group bg-white rounded-xl border border-gray-200 p-4">
+                    <summary class="flex items-center justify-between cursor-pointer text-sm font-medium text-gray-900">
+                        <span x-text="t('pricing.faq_q1')">Planlari diledigim zaman degistirebilir miyim?</span>
+                        <svg class="w-4 h-4 text-gray-400 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                    </summary>
+                    <p class="mt-3 text-sm text-gray-600" x-text="t('pricing.faq_a1')">Evet, planinizi istediginiz zaman yukseltebilir veya dusurtulebilirsiniz. Degisiklikler bir sonraki fatura donemine yansir.</p>
+                </details>
+                <details class="group bg-white rounded-xl border border-gray-200 p-4">
+                    <summary class="flex items-center justify-between cursor-pointer text-sm font-medium text-gray-900">
+                        <span x-text="t('pricing.faq_q2')">Canli arama nedir?</span>
+                        <svg class="w-4 h-4 text-gray-400 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                    </summary>
+                    <p class="mt-3 text-sm text-gray-600" x-text="t('pricing.faq_a2')">Canli arama, TURKPATENT portalindan gercek zamanli veri cekerek en guncel marka bilgilerine erismenizi saglar. Standart arama bulten verilerini kullanir.</p>
+                </details>
+                <details class="group bg-white rounded-xl border border-gray-200 p-4">
+                    <summary class="flex items-center justify-between cursor-pointer text-sm font-medium text-gray-900">
+                        <span x-text="t('pricing.faq_q3')">Opposition Radar nedir?</span>
+                        <svg class="w-4 h-4 text-gray-400 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                    </summary>
+                    <p class="mt-3 text-sm text-gray-600" x-text="t('pricing.faq_a3')">Opposition Radar, izleme listenizdeki markalarla benzerlik gosteren yeni basvurulari otomatik tespit eder ve itiraz surelerini takip etmenizi saglar.</p>
+                </details>
+                <details class="group bg-white rounded-xl border border-gray-200 p-4">
+                    <summary class="flex items-center justify-between cursor-pointer text-sm font-medium text-gray-900">
+                        <span x-text="t('pricing.faq_q4')">Odeme yontemleri nelerdir?</span>
+                        <svg class="w-4 h-4 text-gray-400 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                    </summary>
+                    <p class="mt-3 text-sm text-gray-600" x-text="t('pricing.faq_a4')">Banka havalesi ve kredi karti ile odeme yapabilirsiniz. Yillik planlarda %20 indirim uygulanir.</p>
+                </details>
+            </div>
         </div>
     </div>
+
+    <!-- i18n + Alpine setup -->
+    <script src="/static/js/utils/i18n.js?v=16"></script>
+    <script>
+    function pricingPage() {
+        return {
+            annual: false,
+            t(key, params) {
+                if (window.AppUtils && window.AppUtils.t) {
+                    return window.AppUtils.t(key, params);
+                }
+                // Fallback: return key
+                return key;
+            }
+        };
+    }
+    </script>
 
 </body>
 </html>
