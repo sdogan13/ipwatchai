@@ -1,0 +1,19 @@
+# ============================================
+# IP Watch AI - Cloudflare Tunnel Configuration
+# ============================================
+
+tunnel: ac15dd3b-36fa-4d60-8cf5-f71c4c78e0ec
+credentials-file: /etc/cloudflared/ac15dd3b-36fa-4d60-8cf5-f71c4c78e0ec.json
+
+ingress:
+  - hostname: ipwatchai.com
+    service: http://nginx:80
+    originRequest:
+      noTLSVerify: true
+
+  - hostname: www.ipwatchai.com
+    service: http://nginx:80
+    originRequest:
+      noTLSVerify: true
+
+  - service: http_status:404
