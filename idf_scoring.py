@@ -112,121 +112,20 @@ def compute_idf_weighted_score(
         return 1.0, breakdown
 
     # ==========================================
-    # CHECK 2: Token-level containment with LENGTH DILUTION
-    # Uses token sets instead of raw substring matching to avoid
-    # false positives like "nike" in "nikex" (different words).
-    # 1.0 is reserved for exact match only (CHECK 1).
+    # CHECK 2: Unified IDF-weighted token matching
     #
-    # Length dilution: the more extra words surround the matched
-    # distinctive token, the more the overall mark is differentiated.
-    # "NIKE JOYRIDE" (2 words) scores higher than
-    # "NIKE SPORTS INTERNATIONAL APPAREL GROUP" (5 words).
+    # All non-exact matches flow through a single waterfall that:
+    #   1. Scores each query token as exact match (full weight) or
+    #      fuzzy match (discounted weight) against target tokens
+    #   2. Classifies by IDF tier: distinctive(1.0), semi_generic(0.5), generic(0.1)
+    #   3. Computes exact_token_ratio (proportion of query tokens matched exactly)
+    #   4. Routes to Cases A-F based on distinctive % matched
+    #   5. Applies length dilution for extra unmatched words
     #
-    # Formula: score = floor + (ceiling - floor) * coverage
-    #   coverage = matched_tokens / total_tokens_in_longer_name
-    #   Extra generic words dilute LESS (they're just padding)
-    #   Extra distinctive words dilute MORE (new mark identity)
-    # ==========================================
-    q_tokens_temp = tokenize(query)
-    t_tokens_temp = tokenize(target)
-
-    # --- Length dilution helper ---
-    # ceiling/floor for distinctive containment, coverage is the ratio
-    _CONTAIN_CEILING_2A = 0.92   # query ⊂ target (target is broader)
-    _CONTAIN_CEILING_2B = 0.90   # target ⊂ query (query is broader)
-    _CONTAIN_FLOOR = 0.55        # minimum for very long names
-
-    def _length_diluted_score(matched_tokens, all_tokens, ceiling):
-        """Apply length dilution to containment score.
-        Extra distinctive words penalize more than extra generic words.
-        Uses cumulative penalty with diminishing returns per extra word.
-
-        Target behavior:
-          +1 extra word  → ~0.90-0.93 (still very confusable)
-          +2 extra words → ~0.83-0.88 (moderately differentiated)
-          +3-4 extra     → ~0.75-0.83 (more differentiated, still risky)
-          +5-6 extra     → ~0.68-0.76 (significantly differentiated)
-          +7+ extra      → ~0.65-0.70 (floor)
-        """
-        n_matched = len(matched_tokens)
-        n_total = len(all_tokens)
-        if n_total <= n_matched:
-            return ceiling  # no extra words
-
-        extra_tokens = all_tokens - matched_tokens
-        # Per-word penalty by class (cumulative, NOT coverage-based)
-        cumulative_penalty = 0.0
-        for w in extra_tokens:
-            wclass = IDFLookup.get_word_class(w)
-            if wclass == 'distinctive':
-                cumulative_penalty += 0.07   # distinctive extras dilute more
-            elif wclass == 'semi_generic':
-                cumulative_penalty += 0.055  # moderate dilution
-            else:  # generic
-                cumulative_penalty += 0.035  # mild dilution (just padding)
-
-        # Apply cumulative penalty, capped by floor
-        diluted = ceiling - cumulative_penalty
-        return round(max(_CONTAIN_FLOOR, diluted), 4)
-
-    # 2a: All query tokens found in target (target is broader or equal set)
-    if q_tokens_temp and t_tokens_temp and q_tokens_temp.issubset(t_tokens_temp):
-        has_distinctive = any(
-            IDFLookup.get_word_class(w) == 'distinctive'
-            for w in q_tokens_temp
-        )
-        if has_distinctive:
-            final_score = _length_diluted_score(
-                q_tokens_temp, t_tokens_temp, _CONTAIN_CEILING_2A
-            )
-            breakdown["containment"] = round(final_score / _CONTAIN_CEILING_2A, 4)
-            breakdown["distinctive_weight_matched"] = 1.0
-            breakdown["semi_generic_weight_matched"] = 1.0
-            n_extra = len(t_tokens_temp) - len(q_tokens_temp)
-            breakdown["scoring_path"] = (
-                f"CONTAINMENT (query in target, +{n_extra} extra words, "
-                f"diluted {_CONTAIN_CEILING_2A}→{final_score})"
-            )
-            breakdown["total"] = round(final_score, 4)
-            return final_score, breakdown
-        else:
-            breakdown["containment"] = 0.15
-            breakdown["scoring_path"] = "CONTAINMENT (query tokens in target, GENERIC ONLY - penalized)"
-            final_score = 0.15
-            breakdown["total"] = round(final_score, 4)
-            return final_score, breakdown
-
-    # 2b: All target tokens found in query (query is broader)
-    if (t_tokens_temp and q_tokens_temp
-            and t_tokens_temp.issubset(q_tokens_temp)
-            and t_tokens_temp != q_tokens_temp):
-        has_distinctive = any(
-            IDFLookup.get_word_class(w) == 'distinctive'
-            for w in t_tokens_temp
-        )
-        if has_distinctive:
-            final_score = _length_diluted_score(
-                t_tokens_temp, q_tokens_temp, _CONTAIN_CEILING_2B
-            )
-            breakdown["containment"] = round(final_score / _CONTAIN_CEILING_2B, 4)
-            breakdown["distinctive_weight_matched"] = 0.9
-            breakdown["semi_generic_weight_matched"] = 0.9
-            n_extra = len(q_tokens_temp) - len(t_tokens_temp)
-            breakdown["scoring_path"] = (
-                f"CONTAINMENT (target in query, +{n_extra} extra words, "
-                f"diluted {_CONTAIN_CEILING_2B}→{final_score})"
-            )
-            breakdown["total"] = round(final_score, 4)
-            return final_score, breakdown
-        else:
-            breakdown["containment"] = 0.15
-            breakdown["scoring_path"] = "CONTAINMENT (target tokens in query, GENERIC ONLY - penalized)"
-            final_score = 0.15
-            breakdown["total"] = round(final_score, 4)
-            return final_score, breakdown
-
-    # ==========================================
-    # CHECK 3: IDF-weighted token matching
+    # Containment (one side's tokens ⊂ the other) is detected as a
+    # signal but NOT a separate early-return path, ensuring that
+    # exact token matches always outrank fuzzy matches regardless
+    # of which scoring path fires.
     # ==========================================
     q_tokens = tokenize(query)
     t_tokens = tokenize(target)
@@ -366,65 +265,159 @@ def compute_idf_weighted_score(
     else:
         breakdown["generic_weight_matched"] = 0.0
 
-    # ==========================================
-    # SCORING LOGIC (3-tier aware)
-    # ==========================================
+    # ------------------------------------------------------------------
+    # KEY METRICS for unified scoring
+    # ------------------------------------------------------------------
 
-    # Normalize distinctive match to percentage of total distinctive weight
+    # 1. Exact token ratio: proportion of query tokens matched EXACTLY
+    #    (not fuzzy). This is the PRIMARY signal — exact word matches
+    #    always outrank fuzzy matches.
+    n_exact = sum(1 for m in matched_words if m.get("match_type") == "exact")
+    n_fuzzy = sum(1 for m in matched_words if m.get("match_type") == "fuzzy")
+    n_q = len(q_tokens)
+    exact_token_ratio = n_exact / n_q if n_q > 0 else 0.0
+
+    # 2. Exact IDF-weighted ratio: how much of query's IDF weight is
+    #    covered by EXACT matches (not fuzzy).
+    exact_weight = sum(
+        m["weight"] for m in matched_words if m.get("match_type") == "exact"
+    )
+    exact_idf_ratio = exact_weight / total_weight if total_weight > 0 else 0.0
+
+    # 3. Containment signal (informational, not an early return)
+    q_in_t = q_tokens and t_tokens and q_tokens.issubset(t_tokens)
+    t_in_q = t_tokens and q_tokens and t_tokens.issubset(q_tokens) and t_tokens != q_tokens
+    breakdown["containment"] = 1.0 if q_in_t else (0.5 if t_in_q else 0.0)
+
+    # 4. Length difference (for dilution)
+    n_target = len(t_tokens)
+    n_query = len(q_tokens)
+    extra_words = abs(n_target - n_query)
+
+    # 5. Distinctive match percentage
     if distinctive_weight_total > 0:
         distinctive_pct = distinctive_match / distinctive_weight_total
     else:
         distinctive_pct = 0.0
 
+    # Store extra metrics
+    breakdown["exact_token_ratio"] = round(exact_token_ratio, 3)
+    breakdown["exact_idf_ratio"] = round(exact_idf_ratio, 3)
+
+    # ==========================================
+    # SCORING LOGIC: Hierarchical token matching
+    #
+    # Priority order:
+    #   1. Exact token coverage (exact_token_ratio, exact_idf_ratio)
+    #   2. IDF-weighted overlap (distinctive_pct, weighted_overlap)
+    #   3. Fuzzy/semantic signals (text_sim, phonetic_sim, etc.)
+    #
+    # Length dilution: extra unmatched words dilute the score
+    # proportionally by their IDF class.
+    # ==========================================
+
+    def _compute_length_dilution(extra_count):
+        """Per-extra-word dilution penalty for unmatched words."""
+        if extra_count <= 0:
+            return 0.0
+        # Apply per-word penalty by examining actual extra words
+        q_unmatched = q_tokens - {m.get("target_word") or m.get("query_word") for m in matched_words}
+        t_unmatched = t_tokens - {m.get("target_word") for m in matched_words}
+        extras = q_unmatched | t_unmatched
+        penalty = 0.0
+        for w in extras:
+            wclass = IDFLookup.get_word_class(w)
+            if wclass == 'distinctive':
+                penalty += 0.06
+            elif wclass == 'semi_generic':
+                penalty += 0.045
+            else:
+                penalty += 0.025
+        return penalty
+
+    # ------------------------------------------------------------------
     # Case A: High distinctive match (>= 80%)
-    # "dogan patent" matches "d.p dogan patent" - both distinctive words match
+    # ------------------------------------------------------------------
     if distinctive_pct >= 0.8:
-        # Distinguish exact vs fuzzy matches.
-        # If all matches are fuzzy (e.g. "dogan"~"doga" at 0.89), the floor
-        # should be lower than the 0.92 used for exact token matches.
-        has_exact = any(m.get("match_type") == "exact" for m in matched_words)
-        if has_exact:
-            final_score = max(0.90, weighted_overlap, text_sim)
+        # Sub-case A1: Has exact distinctive token matches
+        #   "d.p dogan patent" vs query "dogan patent ve danismanlik"
+        #   → "dogan" exact, "patent" exact → high score
+        # Sub-case A2: Fuzzy-only distinctive matches
+        #   "dogam egitim" vs query "dogan patent" → "dogam"~"dogan" fuzzy
+        #   → lower ceiling than exact matches
+
+        has_exact_distinctive = any(
+            m.get("match_type") == "exact" and m.get("word_class") == "distinctive"
+            for m in matched_words
+        )
+
+        if has_exact_distinctive:
+            # Score driven by exact coverage proportion
+            # exact_idf_ratio captures how much of the query's weight is
+            # covered by exact matches — this is the primary signal.
+            base_score = max(0.90, exact_idf_ratio + 0.45, weighted_overlap + 0.20, text_sim)
+            base_score = min(0.98, base_score)  # 1.0 reserved for exact match
         else:
-            # Fuzzy-only: use weighted_overlap as score, floor at 0.60
+            # Fuzzy-only: cap below exact-match territory
             base = max(weighted_overlap, text_sim, semantic_sim, phonetic_sim)
-            final_score = max(0.60, base)
-            final_score = min(0.85, final_score)  # cap below exact-match territory
+            base_score = max(0.55, base)
+            base_score = min(0.82, base_score)
 
-        # Apply length dilution for multi-word targets (same principle as CHECK 2)
-        n_target = len(t_tokens)
-        n_query = len(q_tokens)
-        n_longer = max(n_target, n_query)
-        n_shorter = min(n_target, n_query)
-        if n_longer > n_shorter:
-            extra = n_longer - n_shorter
-            dilution = extra * 0.04  # 4% per extra word in Case A
-            final_score = max(0.55, final_score - dilution)
+        # Length dilution for unmatched words
+        dilution = _compute_length_dilution(extra_words)
+        final_score = max(0.50, base_score - dilution)
 
         breakdown["total"] = round(final_score, 4)
-        breakdown["scoring_path"] = "A: High distinctive match (>=80%)"
+        breakdown["scoring_path"] = (
+            f"A: High distinctive match (>=80%)"
+            f" [exact_tokens={n_exact}/{n_q}, fuzzy={n_fuzzy}]"
+        )
         return final_score, breakdown
 
+    # ------------------------------------------------------------------
     # Case B: Good distinctive match (>= 50%)
+    # ------------------------------------------------------------------
     elif distinctive_pct >= 0.5:
+        # Exact matches boost more than fuzzy matches
+        exact_bonus = exact_idf_ratio * 0.20  # bonus for exact coverage
         base = max(text_sim, semantic_sim, phonetic_sim)
-        final_score = max(0.65, base + distinctive_pct * 0.15)
-        final_score = min(1.0, final_score)
+        final_score = max(0.60, base + distinctive_pct * 0.15 + exact_bonus)
+        final_score = min(0.92, final_score)
+
+        # Length dilution
+        dilution = _compute_length_dilution(extra_words)
+        final_score = max(0.45, final_score - dilution)
+
         breakdown["total"] = round(final_score, 4)
-        breakdown["scoring_path"] = "B: Good distinctive match (>=50%)"
+        breakdown["scoring_path"] = (
+            f"B: Good distinctive match (>=50%)"
+            f" [exact_tokens={n_exact}/{n_q}, fuzzy={n_fuzzy}]"
+        )
         return final_score, breakdown
 
+    # ------------------------------------------------------------------
     # Case C: Some distinctive match (> 0)
+    # ------------------------------------------------------------------
     elif distinctive_match > 0:
+        exact_bonus = exact_idf_ratio * 0.15
         base = max(text_sim, semantic_sim, phonetic_sim)
-        final_score = max(0.50, base + distinctive_pct * 0.15)
-        final_score = min(1.0, final_score)
+        final_score = max(0.45, base + distinctive_pct * 0.15 + exact_bonus)
+        final_score = min(0.85, final_score)
+
+        # Length dilution
+        dilution = _compute_length_dilution(extra_words)
+        final_score = max(0.35, final_score - dilution)
+
         breakdown["total"] = round(final_score, 4)
-        breakdown["scoring_path"] = "C: Some distinctive match"
+        breakdown["scoring_path"] = (
+            f"C: Some distinctive match"
+            f" [exact_tokens={n_exact}/{n_q}, fuzzy={n_fuzzy}]"
+        )
         return final_score, breakdown
 
-    # Case D: Only semi-generic words match (e.g., "kent patent" vs "dogan patent")
-    # Only "patent" matches - noise, not a real risk → cap at 18%
+    # ------------------------------------------------------------------
+    # Case D: Only semi-generic words match
+    # ------------------------------------------------------------------
     elif semi_generic_match > 0:
         base = max(text_sim, semantic_sim, phonetic_sim)
         semi_contribution = semi_generic_match / max(1.0, total_weight) * 0.5
@@ -433,8 +426,9 @@ def compute_idf_weighted_score(
         breakdown["scoring_path"] = "D: Semi-generic only (PENALIZED)"
         return final_score, breakdown
 
-    # Case E: Only generic words match (e.g., "ltd" matches)
-    # Minimal score → cap at 10%
+    # ------------------------------------------------------------------
+    # Case E: Only generic words match
+    # ------------------------------------------------------------------
     elif generic_match > 0:
         base = max(text_sim, semantic_sim, phonetic_sim)
         generic_contribution = generic_match / max(1.0, total_weight) * 0.2
@@ -443,7 +437,9 @@ def compute_idf_weighted_score(
         breakdown["scoring_path"] = "E: Generic only (HEAVILY PENALIZED)"
         return final_score, breakdown
 
+    # ------------------------------------------------------------------
     # Case F: No token match at all
+    # ------------------------------------------------------------------
     else:
         final_score = max(text_sim, semantic_sim, phonetic_sim) * 0.7
         breakdown["total"] = round(final_score, 4)
