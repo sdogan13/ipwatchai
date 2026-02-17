@@ -308,6 +308,19 @@ def compute_idf_weighted_score(
             if best_target:
                 adjusted_weight = weight_mult * best_ratio
 
+                # Penalize substring-embedded matches: "dogan" in "ozdogan"
+                # or "erdogan". When the target word is significantly longer,
+                # the query word is embedded as a prefix/suffix/infix, NOT a
+                # near-equivalent. Apply a length ratio discount.
+                len_q = len(q_word)
+                len_t = len(best_target)
+                if len_t > len_q:
+                    # Ratio of lengths: "dogan"(5) vs "ozdogan"(7) = 0.71
+                    len_ratio = len_q / len_t
+                    # Discount: at ratio 1.0 no penalty, at 0.5 → 50% discount
+                    # Formula: keep the len_ratio portion of the weight
+                    adjusted_weight *= len_ratio
+
                 if word_class == 'distinctive':
                     distinctive_match += adjusted_weight
                 elif word_class == 'semi_generic':
@@ -369,7 +382,30 @@ def compute_idf_weighted_score(
     # Case A: High distinctive match (>= 80%)
     # "dogan patent" matches "d.p dogan patent" - both distinctive words match
     if distinctive_pct >= 0.8:
-        final_score = max(0.92, weighted_overlap, text_sim)
+        # Distinguish exact vs fuzzy matches.
+        # If all matches are fuzzy (e.g. "dogan"~"doga" at 0.89), the floor
+        # should be lower than the 0.92 used for exact token matches.
+        has_exact = any(m.get("match_type") == "exact" for m in matched_words)
+        if has_exact:
+            final_score = max(0.92, weighted_overlap, text_sim)
+        else:
+            # Fuzzy-only: use weighted_overlap as score, floor at 0.70
+            # This means "dogan"~"doga"(0.89) gives ~0.89, not 0.92
+            # and "dogan"~"erdogan"(0.59) gives ~0.75, not 0.92
+            base = max(weighted_overlap, text_sim, semantic_sim, phonetic_sim)
+            final_score = max(0.70, base)
+            final_score = min(0.91, final_score)  # cap below exact-match territory
+
+        # Apply length dilution for multi-word targets (same principle as CHECK 2)
+        n_target = len(t_tokens)
+        n_query = len(q_tokens)
+        n_longer = max(n_target, n_query)
+        n_shorter = min(n_target, n_query)
+        if n_longer > n_shorter:
+            extra = n_longer - n_shorter
+            dilution = extra * 0.03  # 3% per extra word in Case A
+            final_score = max(0.65, final_score - dilution)
+
         breakdown["total"] = round(final_score, 4)
         breakdown["scoring_path"] = "A: High distinctive match (>=80%)"
         return final_score, breakdown
