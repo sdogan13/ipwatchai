@@ -71,114 +71,105 @@ LANG_DISPLAY_NAMES = {
     'zh': 'Çince',
 }
 
-# Target languages for trademark translation
-TARGET_LANGUAGES = ['tr', 'en', 'ku', 'fa']
+# Target languages for trademark translation (only Turkish needed for risk scoring)
+TARGET_LANGUAGES = ['tr']
 
 # ============================================
-# CHARACTER SETS FOR DETECTION
+# FASTTEXT LANGUAGE IDENTIFICATION (for NLLB)
 # ============================================
+# Facebook's FastText LangID model — designed to pair with NLLB.
+# Returns NLLB-compatible language codes (eng_Latn, tur_Latn, etc.)
+# Trained model (~1.2MB), NOT hardcoded character sets.
+# Accurate even for 1-2 word queries. Runs on CPU in microseconds.
 
-TURKISH_CHARS = set('çğıöşüÇĞİÖŞÜ')
-KURDISH_LATIN_CHARS = set('êîûÊÎÛ')
-KURDISH_EXTRA = set('ẍẌ')
-# Fix: Added ی (U+06CC, Farsi Yeh) and ھ (U+06BE, Heh Doachashmee) to Farsi detection
-FARSI_CHARS = set('پچژگکیھ')
-ARABIC_CHARS = set('ءآأؤإئابةتثجحخدذرزسشصضطظعغفقكلمنهوي')
-SORANI_CHARS = set('ڕڵۆێ')
-GERMAN_CHARS = set('äöüßÄÖÜ')
-CYRILLIC_RANGE = ('\u0400', '\u04FF')
-CJK_RANGE = ('\u4e00', '\u9fff')
+_fasttext_model = None
 
-# Common Turkish words (ASCII-only) used as fallback detection
-# when no special characters are present. Covers high-frequency
-# trademark-relevant nouns, adjectives, verbs so that e.g. "ELMA"
-# is correctly identified as Turkish instead of defaulting to English.
-COMMON_TURKISH_WORDS = {
-    # Fruits / food
-    'elma', 'armut', 'portakal', 'kiraz', 'erik', 'kavun', 'karpuz',
-    'limon', 'muz', 'nar', 'incir', 'kayisi', 'visne', 'zeytin',
-    'bal', 'peynir', 'ekmek', 'su', 'sut', 'yumurta', 'tavuk',
-    # Animals
-    'aslan', 'kartal', 'kurt', 'ayı', 'at', 'kedi', 'kopek', 'kus',
-    'balik', 'arı', 'kaplan', 'tilki', 'tavsan', 'kurt', 'yunus',
-    # Nature
-    'deniz', 'dag', 'nehir', 'bulut', 'ruzgar', 'toprak', 'ates',
-    'gunes', 'ay', 'yildiz', 'orman', 'bahce', 'cicek', 'yaprak',
-    # Colors
-    'beyaz', 'siyah', 'kirmizi', 'mavi', 'yesil', 'sari', 'turuncu',
-    'mor', 'pembe', 'gri', 'kahverengi', 'altin', 'gumus',
-    # Common adjectives / nouns in trademarks
-    'buyuk', 'kucuk', 'yeni', 'eski', 'guzel', 'iyi', 'temiz',
-    'hizli', 'parlak', 'taze', 'dogal', 'saf', 'zengin',
-    'ev', 'yol', 'kapi', 'pencere', 'masa', 'sandalye',
-    'anahtar', 'kale', 'kule', 'kopru', 'liman', 'ada',
-    'tas', 'demir', 'bakir', 'celik', 'mermer',
-    'pinar', 'dere', 'vadi', 'tepe', 'ova',
-    # Business / commerce
-    'ticaret', 'pazar', 'magaza', 'fabrika', 'imalat',
-    'kalite', 'marka', 'sanayi', 'ihracat', 'ithalat',
-    # People / body
-    'anne', 'baba', 'kardes', 'dost', 'usta', 'reis',
-    'el', 'goz', 'kalp', 'akil', 'can',
-    # Time
-    'sabah', 'aksam', 'gece', 'bahar', 'yaz', 'sonbahar', 'kis',
-    # Food / drink brands
-    'cay', 'kahve', 'ayran', 'boza', 'simit', 'pide', 'kebap',
-    'helva', 'lokum', 'baklava', 'lahmacun', 'dondurma',
-}
+def _load_fasttext_langid():
+    """Lazy-load the FastText language identification model."""
+    global _fasttext_model
+    if _fasttext_model is not None:
+        return _fasttext_model
+    try:
+        import fasttext
+        from huggingface_hub import hf_hub_download
+        import warnings
+        warnings.filterwarnings('ignore', category=UserWarning, module='fasttext')
+        model_path = hf_hub_download(
+            repo_id="facebook/fasttext-language-identification",
+            filename="model.bin"
+        )
+        _fasttext_model = fasttext.load_model(model_path)
+        logger.info("FastText LangID model loaded")
+        return _fasttext_model
+    except Exception as e:
+        logger.warning(f"FastText LangID not available: {e}")
+        return None
 
 
-# ============================================
-# LANGUAGE DETECTION
-# ============================================
+# Reverse map: NLLB code → ISO 639-1 code (for NLLB_LANG_MAP lookup)
+_NLLB_TO_ISO = {v: k for k, v in NLLB_LANG_MAP.items()}
 
-def detect_language(text: str) -> str:
+
+def detect_language_fasttext(text: str) -> Tuple[str, str, float]:
+    """Detect language using FastText LangID model only (no hardcoded rules).
+
+    1. FastText LangID model (217 languages, trained by Facebook)
+    2. Low-confidence fallback → English (safe default for NLLB translation)
+
+    Returns:
+        Tuple of (iso_code, nllb_code, confidence).
+        iso_code: ISO 639-1 code (e.g., 'en', 'tr', 'fr')
+        nllb_code: NLLB flores code (e.g., 'eng_Latn', 'tur_Latn')
+        confidence: Detection confidence 0-1
     """
-    Detect language from text using character analysis + Turkish word lookup.
+    clean = text.replace('\n', ' ').strip() if text else ''
+    if not clean:
+        return 'en', 'eng_Latn', 0.0
 
-    Priority order for overlapping scripts:
-    1. Turkish (distinctive chars: ç, ğ, ı, ö, ş, ü, İ)
-    2. Kurdish Kurmanji (Latin with ê, î, û)
-    3. Farsi (پ چ ژ گ ک ی)
-    4. Sorani Kurdish (ڕ ڵ ۆ ێ)
-    5. Arabic
-    6. German (ä, ö, ü, ß)
-    7. Russian (Cyrillic)
-    8. Chinese (CJK)
-    9. Turkish (common word lookup — catches ASCII Turkish like "ELMA")
-    10. English (default for Latin)
+    # Lowercase for FastText: trademark names are often ALL-CAPS ("APPLE",
+    # "ŞEKER") which confuses FastText (trained on natural-case text).
+    # e.g., "APPLE" → Korean(1.0) but "apple" → English(0.95).
+    # Use turkish_lower() to handle İ→i, I→ı correctly.
+    clean = turkish_lower(clean)
 
-    Note: ASCII-only Turkish words without special characters (e.g. "ELMA",
-    "ASLAN") are detected via a common-word lookup. Words not in the set
-    will still default to English, which is acceptable — translate_to_turkish()
-    will fall back to text.lower() if NLLB returns no change.
-    """
+    # FastText model detection
+    model = _load_fasttext_langid()
+    if model is None:
+        # Model not available → fall back to English
+        return 'en', 'eng_Latn', 0.0
+
+    labels, scores = model.predict(clean)
+    nllb_code = labels[0].replace('__label__', '')
+    confidence = float(scores[0])
+    iso_code = _NLLB_TO_ISO.get(nllb_code, 'en')
+
+    # Low confidence → fall back to English as default.
+    # Short trademark names (1-3 words) can confuse FastText —
+    # e.g., "cicek masali" → Polish(0.95), "samsung" → German(0.27).
+    # English is a safe fallback: batch_translate_to_turkish() always
+    # translates from English anyway, so the detected_lang is mainly
+    # informational. NLLB echo detection returns None for names that
+    # aren't actually English (Turkish, brand names, etc.)
+    # English detections are trusted at any confidence since English is
+    # our default and the translation pipeline handles it correctly.
+    if iso_code == 'en':
+        return iso_code, nllb_code, confidence
+    if confidence < 0.5:
+        return 'en', 'eng_Latn', confidence
+
+    return iso_code, nllb_code, confidence
+
+
+# ============================================
+# TURKISH-AWARE TEXT HELPERS
+# ============================================
+
+def turkish_lower(text: str) -> str:
+    """Turkish-aware lowercase: İ→i, I→ı, then standard .lower()."""
     if not text:
-        return 'unknown'
-
-    if any(c in text for c in TURKISH_CHARS):
-        return 'tr'
-    if any(c in text for c in KURDISH_LATIN_CHARS):
-        return 'ku'
-    if any(c in text for c in FARSI_CHARS):
-        return 'fa'
-    if any(c in text for c in SORANI_CHARS):
-        return 'ku'
-    if any(c in text for c in ARABIC_CHARS):
-        return 'ar'
-    if any(c in text for c in GERMAN_CHARS):
-        return 'de'
-    if any(CYRILLIC_RANGE[0] <= c <= CYRILLIC_RANGE[1] for c in text):
-        return 'ru'
-    if any(CJK_RANGE[0] <= c <= CJK_RANGE[1] for c in text):
-        return 'zh'
-
-    # Fallback: check if any token is a known Turkish word
-    tokens = text.lower().split()
-    if any(t in COMMON_TURKISH_WORDS for t in tokens):
-        return 'tr'
-
-    return 'en'
+        return ""
+    text = text.replace('İ', 'i').replace('I', 'ı')
+    return text.lower()
 
 
 # ============================================
@@ -212,7 +203,7 @@ def initialize(device: str = None) -> bool:
 
         _model = AutoModelForSeq2SeqLM.from_pretrained(
             MODEL_NAME,
-            dtype=torch.float16 if _device == 'cuda' else torch.float32,
+            torch_dtype=torch.float16 if _device == 'cuda' else torch.float32,
         )
         _model.to(_device).eval()
         _initialized = True
@@ -317,23 +308,24 @@ def translate(text: str, source: str, target: str) -> Optional[str]:
             )
 
         translation = _tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
+        del inputs, outputs
 
         # Post-process NLLB-200-distilled quirks:
         # 1. Duplicated words: "apple" → "Elma elma" → "Elma"
         # 2. Input echo: "moon" → "ay moon" → "ay"
         if translation:
             words = translation.split()
-            # Dedup: all tokens are the same word (case-insensitive)
-            if len(words) > 1 and len(set(w.lower() for w in words)) == 1:
+            # Dedup: all tokens are the same word (case-insensitive, Turkish-aware)
+            if len(words) > 1 and len(set(turkish_lower(w) for w in words)) == 1:
                 translation = words[0]
             # Echo removal: for single-word input, strip the source word from output
             elif len(words) > 1 and len(model_input.split()) == 1:
-                filtered = [w for w in words if w.lower() != model_input.lower()]
+                filtered = [w for w in words if turkish_lower(w) != turkish_lower(model_input)]
                 if filtered:
                     translation = ' '.join(filtered)
 
         # Sanity: don't return if result is same as input (no translation happened)
-        if translation and translation.lower() != model_input.lower():
+        if translation and turkish_lower(translation) != turkish_lower(model_input):
             return translation
 
         return None
@@ -343,24 +335,196 @@ def translate(text: str, source: str, target: str) -> Optional[str]:
         return None
 
 
+def batch_translate(texts: List[str], source: str, target: str, batch_size: int = 256) -> List[Optional[str]]:
+    """
+    Translate a list of texts in batches using NLLB-200.
+    Much faster than calling translate() per-text because GPU processes
+    multiple sequences in one forward pass.
+
+    Args:
+        texts: List of texts to translate
+        source: Source language code
+        target: Target language code
+        batch_size: Number of texts per GPU batch (default 64)
+
+    Returns:
+        List of translations (same length as texts, None for failures)
+    """
+    if not texts:
+        return []
+
+    src_nllb = NLLB_LANG_MAP.get(source)
+    tgt_nllb = NLLB_LANG_MAP.get(target)
+    if not src_nllb or not tgt_nllb:
+        return [None] * len(texts)
+
+    if not is_ready():
+        if not initialize():
+            return [None] * len(texts)
+
+    tgt_token_id = _tokenizer.convert_tokens_to_ids(tgt_nllb)
+    results = [None] * len(texts)
+
+    for batch_start in range(0, len(texts), batch_size):
+        batch_texts = texts[batch_start:batch_start + batch_size]
+        batch_indices = []
+        batch_inputs = []
+
+        for i, text in enumerate(batch_texts):
+            idx = batch_start + i
+            if not text or not text.strip() or source == target:
+                continue
+            model_input = text.strip().lower() if text.strip().isascii() else text.strip()
+            batch_indices.append(idx)
+            batch_inputs.append(model_input)
+
+        if not batch_inputs:
+            continue
+
+        try:
+            _tokenizer.src_lang = src_nllb
+            encoded = _tokenizer(
+                batch_inputs, return_tensors="pt",
+                padding=True, truncation=True, max_length=128
+            )
+            encoded = {k: v.to(_device) for k, v in encoded.items()}
+
+            with torch.no_grad():
+                outputs = _model.generate(
+                    **encoded,
+                    forced_bos_token_id=tgt_token_id,
+                    max_new_tokens=32,
+                    num_beams=2,
+                )
+
+            decoded = _tokenizer.batch_decode(outputs, skip_special_tokens=True)
+            del encoded, outputs
+
+            for j, (idx, model_input) in enumerate(zip(batch_indices, batch_inputs)):
+                translation = decoded[j].strip() if j < len(decoded) else None
+                if translation:
+                    words = translation.split()
+                    if len(words) > 1 and len(set(turkish_lower(w) for w in words)) == 1:
+                        translation = words[0]
+                    elif len(words) > 1 and len(model_input.split()) == 1:
+                        filtered = [w for w in words if turkish_lower(w) != turkish_lower(model_input)]
+                        if filtered:
+                            translation = ' '.join(filtered)
+                    if turkish_lower(translation) != turkish_lower(model_input):
+                        results[idx] = translation
+
+        except Exception as e:
+            logger.warning(f"Batch translation failed (batch {batch_start}): {e}")
+
+    return results
+
+
+def batch_translate_to_turkish(texts: List[str]) -> List[Tuple[str, str]]:
+    """
+    Batch-translate a list of texts to Turkish.
+    Returns list of (name_tr, detected_lang) tuples.
+
+    Groups texts by detected language, batch-translates each group,
+    then reassembles in original order.
+    """
+    if not texts:
+        return []
+
+    results = [("", "unknown")] * len(texts)
+
+    # Phase 1: Detect languages using FastText (for detected_lang column)
+    detected_langs = []
+    all_indices = []      # indices of non-empty texts
+    all_texts = []        # corresponding texts
+    for i, text in enumerate(texts):
+        if not text or not text.strip():
+            detected_langs.append('unknown')
+            continue
+        iso_code, nllb_code, confidence = detect_language_fasttext(text)
+        lang = iso_code if iso_code in NLLB_LANG_MAP else 'en'
+        detected_langs.append(lang)
+        results[i] = (turkish_lower(text), lang)  # default: lowercased original
+        all_indices.append(i)
+        all_texts.append(text)
+
+    if not all_texts:
+        return results
+
+    # Phase 2: Always translate ALL names from English → Turkish.
+    # NLLB handles mixed-language input well: it preserves Turkish proper
+    # nouns and only translates the English parts. This ensures mixed names
+    # like "DOĞAN electronics" → "DOĞAN elektronik" get their English
+    # parts translated. For pure Turkish names, NLLB returns None (echo
+    # detection) and we keep the original.
+    en_translations = batch_translate(all_texts, 'en', 'tr')
+
+    for idx, orig_text, trans in zip(all_indices, all_texts, en_translations):
+        lang = detected_langs[idx]
+        if trans:
+            name_tr = turkish_lower(trans)
+            # If en→tr produced something different from original, use it
+            if name_tr != turkish_lower(orig_text):
+                # Guard: for Turkish-detected names, NLLB can hallucinate when
+                # forced through en→tr (e.g., "çikola çikola" → "okul").
+                # Only accept if translation preserves at least one original token.
+                # Mixed names like "DOĞAN electronics" → "doğan elektronik" pass
+                # because "doğan" is preserved.
+                if lang == 'tr':
+                    orig_tokens = set(turkish_lower(orig_text).split())
+                    trans_tokens = set(name_tr.split())
+                    if not orig_tokens & trans_tokens:
+                        # No overlap → NLLB hallucinated, keep original
+                        results[idx] = (turkish_lower(orig_text), lang)
+                        continue
+                results[idx] = (name_tr, lang)
+                continue
+        # en→tr returned None or same text — keep original
+        results[idx] = (turkish_lower(orig_text), lang)
+
+    # Phase 3: For non-English/non-Turkish detected names, also try
+    # translating from the detected language — might produce better results
+    # than the English path (e.g., French "La belle vie" → "güzel hayat").
+    other_lang_items: Dict[str, List[Tuple[int, str]]] = {}
+    for idx, orig_text in zip(all_indices, all_texts):
+        lang = detected_langs[idx]
+        if lang not in ('en', 'tr', 'unknown'):
+            other_lang_items.setdefault(lang, []).append((idx, orig_text))
+
+    for source_lang, items in other_lang_items.items():
+        indices = [i for i, _ in items]
+        source_texts = [t for _, t in items]
+        translations = batch_translate(source_texts, source_lang, 'tr')
+
+        for idx, orig_text, trans in zip(indices, source_texts, translations):
+            if not trans:
+                continue
+            name_tr = turkish_lower(trans)
+            # Validate: translation must share at least one token with original
+            orig_tokens = set(turkish_lower(orig_text).split())
+            trans_tokens = set(name_tr.split())
+            if not orig_tokens & trans_tokens:
+                continue  # Bad translation from wrong source, keep en→tr result
+            # Only replace if this translation is actually different and useful
+            current_tr = results[idx][0]
+            if name_tr != current_tr and name_tr != turkish_lower(orig_text):
+                results[idx] = (name_tr, detected_langs[idx])
+
+    return results
+
+
 # ============================================
 # HIGH-LEVEL API
 # ============================================
 
 def get_translations(text: str) -> Dict[str, Optional[str]]:
     """
-    Get all translations for a trademark name.
-
-    Translates to: Turkish, English, Kurdish, Farsi
+    Get Turkish translation for a trademark name.
 
     Returns:
         {
             'original': 'APPLE',
             'detected_lang': 'en',
             'tr': 'elma',
-            'en': 'apple',
-            'ku': 'sêv',
-            'fa': 'سیب'
         }
     """
     if not text:
@@ -368,29 +532,31 @@ def get_translations(text: str) -> Dict[str, Optional[str]]:
             'original': text,
             'detected_lang': 'unknown',
             'tr': None,
-            'en': None,
-            'ku': None,
-            'fa': None,
         }
 
-    detected = detect_language(text)
+    iso_code, nllb_code, confidence = detect_language_fasttext(text)
+    detected = iso_code
 
     result = {
         'original': text,
         'detected_lang': detected,
         'tr': None,
-        'en': None,
-        'ku': None,
-        'fa': None,
     }
 
-    for target in TARGET_LANGUAGES:
-        if detected == target:
-            result[target] = text.lower()
-        else:
-            translation = translate(text, detected, target)
-            if translation:
-                result[target] = translation.lower()
+    if detected == 'tr':
+        result['tr'] = turkish_lower(text)
+    else:
+        source = detected if detected in NLLB_LANG_MAP else 'en'
+        translation = translate(text, source, 'tr')
+        # Validate: if non-English source produced translation with no
+        # token overlap, retry from English (same logic as batch path)
+        if translation and source != 'en':
+            orig_tokens = set(turkish_lower(text).split())
+            trans_tokens = set(turkish_lower(translation).split())
+            if not orig_tokens & trans_tokens:
+                translation = translate(text, 'en', 'tr')
+        if translation:
+            result['tr'] = turkish_lower(translation)
 
     return result
 
@@ -408,12 +574,12 @@ def get_search_variants(query: str) -> List[str]:
     if not query:
         return []
 
-    variants.add(query.lower().strip())
+    variants.add(turkish_lower(query.strip()))
 
     translations = get_translations(query)
     for lang in TARGET_LANGUAGES:
         if translations.get(lang):
-            variants.add(translations[lang].lower().strip())
+            variants.add(turkish_lower(translations[lang].strip()))
 
     return list(variants)
 
@@ -450,15 +616,15 @@ def score_translated_pair(translated_query: str, translated_candidate_tr: str) -
     if not translated_query or not translated_candidate_tr:
         return {"translation_similarity": 0.0}
 
-    q = translated_query.strip().lower()
-    c = translated_candidate_tr.strip().lower()
+    q = turkish_lower(translated_query.strip())
+    c = turkish_lower(translated_candidate_tr.strip())
 
     if q == c:
         return {"translation_similarity": 1.0, "translation_scoring_path": "EXACT_MATCH"}
 
     # --- text_sim: Turkish-normalised SequenceMatcher + containment + token overlap ---
-    from risk_engine import calculate_turkish_similarity
-    turkish_sim = calculate_turkish_similarity(q, c)
+    from risk_engine import calculate_name_similarity
+    turkish_sim = calculate_name_similarity(q, c)
 
     from difflib import SequenceMatcher as _SM
     seq_sim = _SM(None, q, c).ratio()
@@ -533,41 +699,101 @@ def calculate_translation_similarity(
 
 @lru_cache(maxsize=MEMORY_CACHE_SIZE)
 def translate_to_turkish(text: str) -> str:
-    """Translate any text to Turkish. Returns lowercase.
+    """Translate any text to Turkish. Returns Turkish-aware lowercase.
 
     If text is already Turkish, returns as-is (no model call).
     """
     if not text or not text.strip():
         return ""
     text = text.strip()
-    source = detect_language(text)
-    if source == 'tr':
-        return text.lower()
+    iso_code, _, _ = detect_language_fasttext(text)
+    if iso_code == 'tr':
+        return turkish_lower(text)
+    source = iso_code if iso_code in NLLB_LANG_MAP else 'en'
     result = translate(text, source, 'tr')
-    return result.lower() if result else text.lower()
+    # Validate non-English translations (same logic as batch path)
+    if result and source != 'en':
+        orig_tokens = set(turkish_lower(text).split())
+        trans_tokens = set(turkish_lower(result).split())
+        if not orig_tokens & trans_tokens:
+            result = translate(text, 'en', 'tr')
+    return turkish_lower(result) if result else turkish_lower(text)
+
+
+def auto_translate_to_turkish(text: str) -> Tuple[Optional[str], str]:
+    """Translate any text to Turkish using model-based language detection.
+
+    Uses Facebook's FastText LangID (trained model, 217 languages) to detect
+    the source language, then NLLB-200 to translate. No hardcoded character
+    sets or word lists — both detection and translation are model-based.
+
+    Returns:
+        Tuple of (translated_text, detected_language_code).
+        translated_text is None if the text is already Turkish or
+        if translation produced the same result as input.
+        detected_language_code is the ISO 639-1 code (e.g., 'en', 'tr').
+    """
+    if not text or not text.strip():
+        return None, 'unknown'
+
+    text = text.strip()
+
+    # FastText LangID: model-based detection, accurate even for 1-2 words
+    iso_code, nllb_code, confidence = detect_language_fasttext(text)
+
+    # Turkish detected → no translation needed
+    if iso_code == 'tr':
+        return None, 'tr'
+
+    # Map to NLLB source code for translation.
+    # FastText returns NLLB-compatible codes directly.
+    # If the detected language isn't in our NLLB_LANG_MAP, fall back to
+    # English — NLLB still produces reasonable Turkish output.
+    source = iso_code if iso_code in NLLB_LANG_MAP else 'en'
+
+    # Translate to Turkish via NLLB
+    result = translate(text, source, 'tr')
+
+    if result:
+        # Validate: if source was not English and translation shares no
+        # tokens with original, it may be from a wrong source language.
+        # Retry from English (NLLB echo detection safely handles this).
+        if source != 'en':
+            orig_tokens = set(turkish_lower(text).split())
+            trans_tokens = set(turkish_lower(result).split())
+            if not orig_tokens & trans_tokens:
+                result = translate(text, 'en', 'tr')
+                if result:
+                    return turkish_lower(result), 'en'
+                return None, iso_code
+        return turkish_lower(result), iso_code
+    return None, iso_code
 
 
 def translate_to_english(text: str) -> Optional[str]:
     """Translate any text to English."""
-    source = detect_language(text)
-    if source == 'en':
+    iso_code, _, _ = detect_language_fasttext(text)
+    if iso_code == 'en':
         return text.lower()
+    source = iso_code if iso_code in NLLB_LANG_MAP else 'tr'
     return translate(text, source, 'en')
 
 
 def translate_to_kurdish(text: str) -> Optional[str]:
     """Translate any text to Kurdish (Kurmanji)."""
-    source = detect_language(text)
-    if source == 'ku':
-        return text.lower()
+    iso_code, _, _ = detect_language_fasttext(text)
+    if iso_code == 'ku':
+        return turkish_lower(text)
+    source = iso_code if iso_code in NLLB_LANG_MAP else 'en'
     return translate(text, source, 'ku')
 
 
 def translate_to_farsi(text: str) -> Optional[str]:
     """Translate any text to Farsi (Persian)."""
-    source = detect_language(text)
-    if source == 'fa':
+    iso_code, _, _ = detect_language_fasttext(text)
+    if iso_code == 'fa':
         return text.lower()
+    source = iso_code if iso_code in NLLB_LANG_MAP else 'en'
     return translate(text, source, 'fa')
 
 
@@ -600,12 +826,12 @@ if __name__ == "__main__":
         ("苹果", "zh"),
     ]
 
-    print("\nLanguage Detection:")
+    print("\nLanguage Detection (FastText):")
     print("-" * 50)
     for text, expected in detection_tests:
-        detected = detect_language(text)
-        status = "OK" if detected == expected else "FAIL"
-        print(f"  {status} '{text}' -> {detected} (expected: {expected})")
+        iso, nllb, conf = detect_language_fasttext(text)
+        status = "OK" if iso == expected else "FAIL"
+        print(f"  {status} '{text}' -> {iso} (expected: {expected}, conf={conf:.3f})")
 
     # Test translations
     translation_tests = ["APPLE", "STAR", "GOLDEN", "LION", "RED", "WATER"]

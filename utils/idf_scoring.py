@@ -219,31 +219,43 @@ def initialize_idf_scoring_sync():
 # TURKISH TEXT NORMALIZATION
 # ===============================================================
 
+def turkish_lower(text: str) -> str:
+    """Turkish-aware lowercase: İ→i, I→ı, then standard .lower()."""
+    if not text:
+        return ""
+    text = text.replace('İ', 'i').replace('I', 'ı')
+    return text.lower()
+
+
 def normalize_turkish(text: str) -> str:
     """
     Normalize Turkish characters to ASCII equivalents.
+    Uses turkish_lower() for proper I/İ handling.
 
     Examples:
         "doğan" -> "dogan"
         "şedat" -> "sedat"
-        "güler" -> "guler"
+        "İSTANBUL" -> "istanbul"
     """
     if not text:
         return ""
 
+    # First apply Turkish-aware lowercasing
+    text = turkish_lower(text.strip())
+    # Then fold Turkish chars to ASCII
     replacements = {
-        'ğ': 'g', 'Ğ': 'g',
-        'ı': 'i', 'İ': 'i', 'I': 'i',
-        'ö': 'o', 'Ö': 'o',
-        'ü': 'u', 'Ü': 'u',
-        'ş': 's', 'Ş': 's',
-        'ç': 'c', 'Ç': 'c',
+        'ğ': 'g',
+        'ı': 'i',
+        'ö': 'o',
+        'ü': 'u',
+        'ş': 's',
+        'ç': 'c',
     }
 
     for tr_char, en_char in replacements.items():
         text = text.replace(tr_char, en_char)
 
-    return text.lower().strip()
+    return text
 
 
 def tokenize(text: str) -> Set[str]:
@@ -686,6 +698,7 @@ def calculate_combined_score(
     search_type: str = 'combined'
 ) -> dict:
     """
+    DEPRECATED: Use risk_engine.score_pair() instead.
     Calculate combined score for text+image search.
 
     Key rules:
@@ -773,6 +786,7 @@ def calculate_combined_score(
 
 def adjust_image_similarity(raw_score: float) -> float:
     """
+    DEPRECATED: Use risk_engine.calculate_visual_similarity() instead.
     Apply a curve to image similarity scores to be more discriminating.
 
     Problem: Raw CLIP/DINOv2 scores are too generous for non-exact matches.
@@ -1284,9 +1298,12 @@ def calculate_comprehensive_score(
     query_text: str,
     result_text: str,
     raw_similarity: float = None,
-    include_details: bool = False
+    include_details: bool = False,
 ) -> Dict:
     """
+    DEPRECATED: Use risk_engine.score_pair() instead.
+    Kept as fallback behind USE_UNIFIED_SCORING=false feature flag.
+
     BALANCED COMPREHENSIVE SCORING FUNCTION
 
     Uses weighted average instead of multiplication to prevent
@@ -1625,7 +1642,7 @@ def extract_ocr_text(image_path: str) -> str:
 
     try:
         results = reader.readtext(image_path, detail=0, paragraph=True)
-        text = " ".join(results).lower().strip()
+        text = turkish_lower(" ".join(results).strip())
         return text
     except Exception as e:
         logger.warning(f"OCR extraction failed: {e}")
@@ -1640,7 +1657,7 @@ def calculate_ocr_similarity(ocr_text: str, trademark_name: str) -> float:
     if not ocr_text or not trademark_name:
         return 0.0
     from difflib import SequenceMatcher
-    return SequenceMatcher(None, ocr_text.lower().strip(), trademark_name.lower().strip()).ratio()
+    return SequenceMatcher(None, turkish_lower(ocr_text.strip()), turkish_lower(trademark_name.strip())).ratio()
 
 
 def combine_visual_scores(

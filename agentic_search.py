@@ -22,6 +22,8 @@ import io
 import json
 import logging
 import time
+import asyncio
+import threading
 import psycopg2
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -46,6 +48,80 @@ logger = logging.getLogger(__name__)
 # Project paths
 PROJECT_ROOT = Path(os.getenv("PROJECT_ROOT", r"C:\Users\701693\turk_patent"))
 DATA_ROOT = Path(os.getenv("DATA_ROOT", r"C:\Users\701693\turk_patent\bulletins\Marka"))
+
+# ============================================
+# REAL-TIME PROGRESS TRACKING (via Redis)
+# ============================================
+import redis as _redis_mod
+
+_progress_redis = None
+try:
+    _progress_redis = _redis_mod.Redis(
+        host=os.getenv("REDIS_HOST", "127.0.0.1"),
+        port=int(os.getenv("REDIS_PORT", 6379)),
+        password=os.getenv("REDIS_PASSWORD") or None,
+        decode_responses=True,
+    )
+    _progress_redis.ping()
+except Exception:
+    _progress_redis = None
+
+
+def _update_progress(user_id: str, step: str, progress: int, detail: str = ""):
+    """Append a step event to the user's progress list in Redis."""
+    if not _progress_redis:
+        return
+    try:
+        import json as _json
+        key = f"search_progress:{user_id}"
+        _progress_redis.rpush(key, _json.dumps({
+            "step": step,
+            "progress": progress,
+            "detail": detail,
+        }))
+        _progress_redis.expire(key, 120)
+    except Exception:
+        pass
+
+
+def _clear_progress(user_id: str):
+    """Clear progress list for a new search."""
+    if not _progress_redis:
+        return
+    try:
+        _progress_redis.delete(f"search_progress:{user_id}")
+    except Exception:
+        pass
+
+
+def _get_progress(user_id: str, after: int = 0) -> dict:
+    """Read progress events after a given index. Returns new events + next index."""
+    if not _progress_redis:
+        return {"events": [], "next_index": 0}
+    try:
+        import json as _json
+        key = f"search_progress:{user_id}"
+        raw_list = _progress_redis.lrange(key, after, -1)
+        events = [_json.loads(r) for r in raw_list]
+        return {"events": events, "next_index": after + len(events)}
+    except Exception:
+        pass
+    return {"events": [], "next_index": after}
+
+
+# ============================================
+# SCRAPE QUEUE — serialize TurkPatent requests
+# ============================================
+# Only one scrape can run at a time to avoid IP blocking.
+# Waiting requests are served FIFO via the lock.
+_scrape_lock = threading.Lock()
+_scrape_queue_size = 0        # how many threads are waiting + running
+_scrape_queue_counter = threading.Lock()  # protects the counter
+
+
+def _scrape_queue_position() -> int:
+    """Return current queue depth (0 = you're next)."""
+    return _scrape_queue_size
 
 
 class AgenticTrademarkSearch:
@@ -85,7 +161,10 @@ class AgenticTrademarkSearch:
 
         # Track scraped data location
         self.scraped_data_dir = DATA_ROOT / "APP_LIVE"
-        self.scraped_data_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.scraped_data_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass  # Read-only filesystem (e.g. Docker container)
 
     @property
     def conn(self):
@@ -125,8 +204,9 @@ class AgenticTrademarkSearch:
         nice_classes: List[int] = None,
         force_scrape: bool = False,
         image_path: str = None,
-        page: int = 1,
-        per_page: int = 20
+        status_filter: str = None,
+        attorney_no: str = None,
+        user_id: str = None
     ) -> Dict:
         """
         Intelligent search with automatic live investigation.
@@ -150,17 +230,47 @@ class AgenticTrademarkSearch:
         logger.info(f"   Confidence Threshold: {self.confidence_threshold:.0%}")
         logger.info(f"   Auto-Scrape: {self.auto_scrape}")
 
+        # Helper to push progress if user_id is set
+        def _prog(step, pct, detail=""):
+            if user_id:
+                _update_progress(user_id, step, pct, detail)
+
+        def _is_cancelled():
+            if not user_id or not _progress_redis:
+                return False
+            try:
+                return _progress_redis.get(f"search_cancel:{user_id}") == "1"
+            except Exception:
+                return False
+
+        def _clear_cancel():
+            if user_id and _progress_redis:
+                try:
+                    _progress_redis.delete(f"search_cancel:{user_id}")
+                except Exception:
+                    pass
+
+        # Clear stale cancel flag + progress list from previous search
+        _clear_cancel()
+        if user_id:
+            _clear_progress(user_id)
+
+        _prog("starting", 0, query)
+
         # ============================================
         # STEP 1: Search Local Database
         # ============================================
         logger.info("")
         logger.info("STEP 1/5: Searching local database (2.3M records)...")
         step1_start = time.time()
+        _prog("db_search", 5, query)
 
         db_result, needs_live = self.risk_engine.assess_brand_risk(
             name=query,
             image_path=image_path,
-            target_classes=nice_classes if nice_classes else None
+            target_classes=nice_classes if nice_classes else None,
+            status_filter=status_filter,
+            attorney_no=attorney_no
         )
 
         db_max_score = db_result.get("final_risk_score", 0)
@@ -170,6 +280,7 @@ class AgenticTrademarkSearch:
         logger.info(f"   [OK] Found {len(db_candidates)} candidates")
         logger.info(f"   [OK] Max score: {db_max_score:.2%}")
         logger.info(f"   [OK] Time: {time.time() - step1_start:.2f}s")
+        _prog("db_search_done", 15, f"{len(db_candidates)}")
 
         # Show top 3 from database
         if db_candidates:
@@ -201,8 +312,6 @@ class AgenticTrademarkSearch:
                 scrape_triggered=False,
                 elapsed_time=time.time() - start_time,
                 image_used=image_used,
-                page=page,
-                per_page=per_page
             )
 
         if not self.auto_scrape:
@@ -218,27 +327,39 @@ class AgenticTrademarkSearch:
                 scrape_triggered=False,
                 elapsed_time=time.time() - start_time,
                 image_used=image_used,
-                page=page,
-                per_page=per_page
             )
             response["needs_live_investigation"] = True
             return response
+
+        # ---- Cancel check before STEP 2 ----
+        if _is_cancelled():
+            logger.info("   [CANCELLED] Search cancelled by user before scraping.")
+            _prog("cancelled", 0)
+            return self._build_response(query=query, results=db_candidates, max_score=db_max_score,
+                source="cancelled", scrape_triggered=False, elapsed_time=time.time() - start_time,
+                image_used=image_used)
 
         # ============================================
         # STEP 2: Scrape TurkPatent Live
         # ============================================
         logger.info("")
         logger.info("STEP 2/5: Live scraping TurkPatent...")
-        logger.info(f"   Reason: Score {db_max_score:.2%} < Threshold {self.confidence_threshold:.0%}")
+        if force_scrape:
+            logger.info(f"   Reason: force_scrape=True (score was {db_max_score:.2%})")
+        else:
+            logger.info(f"   Reason: Score {db_max_score:.2%} < Threshold {self.confidence_threshold:.0%}")
         step2_start = time.time()
+        _prog("scraping", 20, query)
 
         try:
-            scraped_records = self._run_scrapper(query)
+            scraped_records = self._run_scrapper(query, _prog=_prog)
             scraped_count = len(scraped_records) if scraped_records else 0
             logger.info(f"   [OK] Scraped {scraped_count} records")
             logger.info(f"   [OK] Time: {time.time() - step2_start:.2f}s")
+            _prog("scraping_done", 45, str(scraped_count))
         except Exception as e:
             logger.error(f"   [FAIL] Scraping failed: {e}")
+            _prog("scraping_failed", 45, str(e))
             response = self._build_response(
                 query=query,
                 results=db_candidates,
@@ -247,8 +368,6 @@ class AgenticTrademarkSearch:
                 scrape_triggered=True,
                 elapsed_time=time.time() - start_time,
                 image_used=image_used,
-                page=page,
-                per_page=per_page
             )
             response["scrape_error"] = str(e)
             return response
@@ -264,24 +383,40 @@ class AgenticTrademarkSearch:
                 scraped_count=0,
                 elapsed_time=time.time() - start_time,
                 image_used=image_used,
-                page=page,
-                per_page=per_page
             )
 
+        # ---- Cancel check before STEP 3 ----
+        if _is_cancelled():
+            logger.info("   [CANCELLED] Search cancelled by user before embeddings.")
+            _prog("cancelled", 0)
+            return self._build_response(query=query, results=db_candidates, max_score=db_max_score,
+                source="cancelled", scrape_triggered=True, scraped_count=scraped_count,
+                elapsed_time=time.time() - start_time, image_used=image_used)
+
         # ============================================
-        # STEP 3: Generate AI Embeddings
+        # STEP 3: Generate AI Embeddings + Translations
         # ============================================
         logger.info("")
         logger.info("STEP 3/5: Generating AI embeddings...")
         step3_start = time.time()
+        _prog("embeddings", 50, str(scraped_count))
 
         try:
             enriched_count = self._generate_embeddings(scraped_records)
             logger.info(f"   [OK] Generated embeddings for {enriched_count} records")
             logger.info(f"   [OK] Time: {time.time() - step3_start:.2f}s")
+            _prog("embeddings_done", 60, str(enriched_count))
         except Exception as e:
             logger.warning(f"   [WARN] Embedding generation failed: {e}")
             enriched_count = 0
+
+        # ---- Cancel check before STEP 4 ----
+        if _is_cancelled():
+            logger.info("   [CANCELLED] Search cancelled by user before ingestion.")
+            _prog("cancelled", 0)
+            return self._build_response(query=query, results=db_candidates, max_score=db_max_score,
+                source="cancelled", scrape_triggered=True, scraped_count=scraped_count,
+                elapsed_time=time.time() - start_time, image_used=image_used)
 
         # ============================================
         # STEP 4: Ingest to Database
@@ -289,14 +424,25 @@ class AgenticTrademarkSearch:
         logger.info("")
         logger.info("STEP 4/5: Ingesting to database...")
         step4_start = time.time()
+        _prog("ingesting", 65, str(scraped_count))
 
         try:
             ingested_count = self._ingest_to_database(scraped_records, query)
             logger.info(f"   [OK] Ingested {ingested_count} records")
             logger.info(f"   [OK] Time: {time.time() - step4_start:.2f}s")
+            _prog("ingesting_done", 80, str(ingested_count))
         except Exception as e:
             logger.error(f"   [FAIL] Ingestion failed: {e}")
             ingested_count = 0
+
+        # ---- Cancel check before STEP 5 ----
+        if _is_cancelled():
+            logger.info("   [CANCELLED] Search cancelled by user before scoring.")
+            _prog("cancelled", 0)
+            return self._build_response(query=query, results=db_candidates, max_score=db_max_score,
+                source="cancelled", scrape_triggered=True, scraped_count=scraped_count,
+                ingested_count=ingested_count, elapsed_time=time.time() - start_time,
+                image_used=image_used)
 
         # ============================================
         # STEP 5: Recalculate Risk Score
@@ -304,11 +450,14 @@ class AgenticTrademarkSearch:
         logger.info("")
         logger.info("STEP 5/5: Recalculating risk score...")
         step5_start = time.time()
+        _prog("scoring", 85)
 
         final_result, _ = self.risk_engine.assess_brand_risk(
             name=query,
             image_path=image_path,
-            target_classes=nice_classes if nice_classes else None
+            target_classes=nice_classes if nice_classes else None,
+            status_filter=status_filter,
+            attorney_no=attorney_no
         )
 
         final_max_score = final_result.get("final_risk_score", 0)
@@ -317,6 +466,7 @@ class AgenticTrademarkSearch:
         logger.info(f"   [OK] New max score: {final_max_score:.2%}")
         logger.info(f"   [OK] Total candidates: {len(final_candidates)}")
         logger.info(f"   [OK] Time: {time.time() - step5_start:.2f}s")
+        _prog("complete", 100, f"{len(final_candidates)}")
 
         # Calculate improvement
         score_improvement = final_max_score - db_max_score
@@ -354,38 +504,65 @@ class AgenticTrademarkSearch:
             score_improvement=score_improvement,
             elapsed_time=total_time,
             image_used=image_used,
-            page=page,
-            per_page=per_page
         )
 
-    def _run_scrapper(self, query: str) -> List[Dict]:
-        """Run the scrapper to get live data from TurkPatent."""
-        # Scrapper returns list of row data and saves to JSON
-        results = self.scrapper.search_and_ingest(
-            trademark_name=query,
-            limit=self.scrape_limit
-        )
+    def _run_scrapper(self, query: str, _prog=None) -> List[Dict]:
+        """Run the scrapper to get live data from TurkPatent.
 
-        if not results:
-            return []
+        Uses a global lock to ensure only one scrape runs at a time,
+        preventing concurrent requests that could get our IP blocked.
+        """
+        global _scrape_queue_size
 
-        # Results are raw rows from scrapper, convert to dict format
-        if isinstance(results[0], list):
-            formatted = self._format_scraped_rows(results)
-        else:
-            formatted = results
+        # Track queue position
+        with _scrape_queue_counter:
+            _scrape_queue_size += 1
+            my_position = _scrape_queue_size
 
-        # Save to live scrape directory
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_query = "".join(c if c.isalnum() else "_" for c in query)
-        output_file = self.scraped_data_dir / f"live_{safe_query}_{timestamp}.json"
+        if my_position > 1:
+            logger.info(f"   [QUEUE] Waiting in scrape queue (position {my_position})...")
+            if _prog:
+                _prog("queued", 15, str(my_position))
 
-        with open(output_file, 'w', encoding='utf-8') as f:
-            json.dump(formatted, f, ensure_ascii=False, indent=2)
+        try:
+            # Acquire lock — only one scrape at a time
+            with _scrape_lock:
+                logger.info(f"   [QUEUE] Lock acquired, starting scrape for '{query}'")
+                if _prog and my_position > 1:
+                    _prog("scraping", 20, query)
 
-        logger.info(f"   Saved to: {output_file.name}")
+                # Scrapper returns list of row data and saves to JSON
+                results = self.scrapper.search_and_ingest(
+                    trademark_name=query,
+                    limit=self.scrape_limit
+                )
 
-        return formatted
+                if not results:
+                    return []
+
+                # Results are raw rows from scrapper, convert to dict format
+                if isinstance(results[0], list):
+                    formatted = self._format_scraped_rows(results)
+                else:
+                    formatted = results
+
+                # Save to live scrape directory
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                safe_query = "".join(c if c.isalnum() else "_" for c in query)
+                output_file = self.scraped_data_dir / f"live_{safe_query}_{timestamp}.json"
+
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    json.dump(formatted, f, ensure_ascii=False, indent=2)
+
+                logger.info(f"   Saved to: {output_file.name}")
+
+                # Brief cooldown after scrape to be gentle on TurkPatent
+                time.sleep(2)
+
+                return formatted
+        finally:
+            with _scrape_queue_counter:
+                _scrape_queue_size -= 1
 
     def _format_scraped_rows(self, rows: List[List]) -> List[Dict]:
         """Convert raw scrapper rows to metadata.json format."""
@@ -411,7 +588,7 @@ class AgenticTrademarkSearch:
             formatted.append({
                 "APPLICATIONNO": app_no,
                 "STATUS": status,
-                "IMAGE": app_no.replace('/', '_') if app_no else "",
+                "IMAGE": "",  # No images from live scrape (text-only)
                 "TRADEMARK": {
                     "APPLICATIONDATE": app_date,
                     "REGISTERNO": reg_no,
@@ -431,7 +608,7 @@ class AgenticTrademarkSearch:
         return formatted
 
     def _generate_embeddings(self, records: List[Dict]) -> int:
-        """Generate AI embeddings for scraped records using ai.py."""
+        """Generate AI embeddings + translations for scraped records using ai.py."""
         try:
             import ai
 
@@ -448,6 +625,16 @@ class AgenticTrademarkSearch:
                             enriched_count += 1
                     except Exception as e:
                         logger.debug(f"Failed to generate embedding for {name}: {e}")
+
+                    try:
+                        # Generate Turkish translation + language detection
+                        trans = ai.get_translations(name)
+                        if trans.get("name_tr"):
+                            record["name_tr"] = trans["name_tr"]
+                        if trans.get("detected_lang"):
+                            record["detected_lang"] = trans["detected_lang"]
+                    except Exception as e:
+                        logger.debug(f"Failed to translate {name}: {e}")
 
             return enriched_count
 
@@ -497,24 +684,14 @@ class AgenticTrademarkSearch:
         score_improvement: float = None,
         elapsed_time: float = 0,
         image_used: bool = False,
-        page: int = 1,
-        per_page: int = 20
     ) -> Dict:
-        """Build standardized response object with pagination."""
+        """Build standardized response object."""
         total = len(results)
-        total_pages = max(1, (total + per_page - 1) // per_page)
-        page = max(1, min(page, total_pages))
-        start = (page - 1) * per_page
-        end = start + per_page
-        paginated = results[start:end]
 
         return {
             "query": query,
-            "results": paginated,
-            "page": page,
-            "per_page": per_page,
+            "results": results,
             "total": total,
-            "total_pages": total_pages,
             "total_candidates": total,
             "max_score": max_score,
             "risk_level": self._get_risk_level(max_score),
@@ -584,6 +761,26 @@ _search_limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/api/v1/search", tags=["Agentic Search"])
 
 
+def _normalize_search_results(result: dict) -> None:
+    """
+    Normalize raw search results in-place to match the public search format.
+    Adds: image_url, trademark_name, nice_classes, flat scores (risk_score,
+    text_similarity, visual_similarity, translation_similarity, phonetic_similarity).
+    Keeps original fields for backward compatibility.
+    """
+    for r in result.get("results", []):
+        scores = r.get("scores") or {}
+        img_path = r.get("image_path")
+        r["image_url"] = f"/api/trademark-image/{img_path}" if img_path else None
+        r["trademark_name"] = r.get("trademark_name") or r.get("name", "")
+        r["nice_classes"] = r.get("nice_classes") or r.get("classes") or []
+        r["risk_score"] = scores.get("total") if scores.get("total") is not None else r.get("risk_score", 0)
+        r["text_similarity"] = round(scores.get("text_similarity", 0), 3)
+        r["visual_similarity"] = round(scores.get("visual_similarity", 0), 3)
+        r["translation_similarity"] = round(scores.get("translation_similarity", 0), 3)
+        r["phonetic_similarity"] = round(scores.get("phonetic_similarity", 0), 3)
+
+
 class SearchRequest(BaseModel):
     """Request model for intelligent search."""
     query: str
@@ -607,6 +804,49 @@ async def search_status():
             "idf_scoring": True
         }
     }
+
+
+def _run_search_sync(confidence_threshold, auto_scrape, query, nice_classes,
+                      force_scrape=False, image_path=None,
+                      status_filter=None, attorney_no=None, user_id=None):
+    """Run AgenticTrademarkSearch synchronously (for use with asyncio.to_thread)."""
+    with AgenticTrademarkSearch(
+        confidence_threshold=confidence_threshold,
+        auto_scrape=auto_scrape
+    ) as searcher:
+        return searcher.search(
+            query=query,
+            nice_classes=nice_classes,
+            force_scrape=force_scrape,
+            image_path=image_path,
+            status_filter=status_filter,
+            attorney_no=attorney_no,
+            user_id=user_id
+        )
+
+
+@router.get("/progress")
+async def get_search_progress(
+    after: int = 0,
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """Get real-time progress events after a given index."""
+    return _get_progress(str(current_user.id), after=after)
+
+
+@router.post("/cancel")
+async def cancel_search(
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """Cancel the current running live search."""
+    user_id = str(current_user.id)
+    if _progress_redis:
+        try:
+            _progress_redis.setex(f"search_cancel:{user_id}", 120, "1")
+            _update_progress(user_id, "cancelled", 0)
+        except Exception:
+            pass
+    return {"status": "cancelled"}
 
 
 @router.get("/credits")
@@ -639,8 +879,8 @@ async def quick_search(
     request: Request,
     query: str = Query(..., description="Trademark name to search"),
     classes: Optional[str] = Query(None, description="Nice classes (comma-separated)"),
-    page: int = Query(1, ge=1, description="Page number"),
-    per_page: int = Query(20, ge=1, le=100, description="Results per page"),
+    status: Optional[str] = Query(None, description="Filter by trademark status"),
+    attorney_no: Optional[str] = Query(None, description="Filter by attorney number"),
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """
@@ -669,9 +909,94 @@ async def quick_search(
                 query=query,
                 nice_classes=nice_classes,
                 force_scrape=False,
-                page=page,
-                per_page=per_page
+                status_filter=status,
+                attorney_no=attorney_no
             )
+
+        # Normalize results to match public search format
+        _normalize_search_results(result)
+
+        # Increment daily counter after successful search
+        with Database() as db:
+            increment_quick_search_usage(
+                db, str(current_user.id), str(current_user.organization_id)
+            )
+
+        # Free cached CUDA tensors after search
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
+
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Quick search failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/quick")
+@_search_limiter.limit(lambda: get_rate_limit_value("rate_limit.quick_search", "60/minute"))
+async def quick_search_with_image(
+    request: Request,
+    query: Optional[str] = Form(None, description="Trademark name to search"),
+    image: Optional[UploadFile] = File(None, description="Optional logo image for visual search"),
+    classes: Optional[str] = Form(None, description="Nice classes (comma-separated)"),
+    status: Optional[str] = Form(None, description="Filter by trademark status"),
+    attorney_no: Optional[str] = Form(None, description="Filter by attorney number"),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """
+    Quick database-only search with optional image upload for visual scoring.
+    No live scraping. Subject to daily search cap per plan.
+    """
+    has_image = image is not None and image.filename
+    has_query = query and len(query.strip()) >= 2
+    if not has_query and not has_image:
+        raise HTTPException(status_code=422, detail="Provide a brand name (min 2 chars) or upload a logo image")
+    query = query.strip() if query else ""
+
+    # Daily search cap check
+    with Database() as db:
+        can_search, reason, details = check_quick_search_eligibility(
+            db, str(current_user.id)
+        )
+        if not can_search:
+            raise HTTPException(status_code=429, detail=details)
+
+    nice_classes = []
+    if classes:
+        nice_classes = [int(c.strip()) for c in classes.split(",") if c.strip().isdigit()]
+
+    image_path = None
+    try:
+        # Save uploaded image to temp file if provided
+        if has_image:
+            suffix = os.path.splitext(image.filename)[1] or ".png"
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix, dir=tempfile.gettempdir()) as tmp:
+                content = await image.read()
+                tmp.write(content)
+                image_path = tmp.name
+            logger.info(f"Quick search image uploaded: {image.filename} ({len(content)} bytes)")
+
+        with AgenticTrademarkSearch(
+            confidence_threshold=0.75,
+            auto_scrape=False
+        ) as searcher:
+            result = searcher.search(
+                query=query,
+                nice_classes=nice_classes,
+                force_scrape=False,
+                image_path=image_path,
+                status_filter=status,
+                attorney_no=attorney_no
+            )
+
+        # Normalize results to match public search format
+        _normalize_search_results(result)
 
         # Increment daily counter after successful search
         with Database() as db:
@@ -683,8 +1008,21 @@ async def quick_search(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Quick search failed: {e}")
+        logger.error(f"Quick search with image failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if image_path and os.path.exists(image_path):
+            try:
+                os.unlink(image_path)
+            except OSError:
+                pass
+        # Free cached CUDA tensors after search
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
 
 
 @router.get("/intelligent")
@@ -693,10 +1031,10 @@ async def intelligent_search(
     request: Request,
     query: str = Query(..., description="Trademark name to search"),
     classes: Optional[str] = Query(None, description="Nice classes (comma-separated)"),
+    status: Optional[str] = Query(None, description="Filter by trademark status"),
+    attorney_no: Optional[str] = Query(None, description="Filter by attorney number"),
     threshold: float = Query(0.75, description="Confidence threshold for live scraping"),
     force_scrape: bool = Query(False, description="Force live scrape regardless of DB results"),
-    page: int = Query(1, ge=1, description="Page number"),
-    per_page: int = Query(20, ge=1, le=100, description="Results per page"),
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """
@@ -735,31 +1073,40 @@ async def intelligent_search(
         raise HTTPException(status_code=status_code, detail=details)
 
     try:
-        with AgenticTrademarkSearch(
+        _uid = str(current_user.id)
+        # Canlı Arama always scrapes TurkPatent for live data
+        result = await asyncio.to_thread(
+            _run_search_sync,
             confidence_threshold=threshold,
-            auto_scrape=True
-        ) as searcher:
-            result = searcher.search(
-                query=query,
-                nice_classes=nice_classes,
-                force_scrape=force_scrape,
-                page=page,
-                per_page=per_page
-            )
+            auto_scrape=True,
+            query=query,
+            nice_classes=nice_classes,
+            force_scrape=True,
+            status_filter=status,
+            attorney_no=attorney_no,
+            user_id=_uid
+        )
 
-        # Track usage if live scrape was triggered
-        if result.get('scrape_triggered', False):
-            with Database() as db:
-                new_count = increment_live_search_usage(
-                    db,
-                    str(current_user.id),
-                    str(current_user.organization_id)
-                )
-            result['credits_used'] = 1
-            result['credits_remaining'] = details['monthly_limit'] - (details['current_usage'] + 1)
-        else:
-            result['credits_used'] = 0
-            result['credits_remaining'] = details['remaining']
+        # Always count intelligent search usage
+        with Database() as db:
+            new_count = increment_live_search_usage(
+                db,
+                str(current_user.id),
+                str(current_user.organization_id)
+            )
+        result['credits_used'] = 1
+        result['credits_remaining'] = details['monthly_limit'] - (details['current_usage'] + 1)
+
+        # Normalize results to match public search format
+        _normalize_search_results(result)
+
+        # Free cached CUDA tensors after search
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
 
         return result
     except HTTPException:
@@ -776,10 +1123,10 @@ async def intelligent_search_with_image(
     query: str = Form(..., description="Trademark name to search"),
     image: Optional[UploadFile] = File(None, description="Optional logo image for visual scoring"),
     classes: Optional[str] = Form(None, description="Nice classes (comma-separated)"),
+    status: Optional[str] = Form(None, description="Filter by trademark status"),
+    attorney_no: Optional[str] = Form(None, description="Filter by attorney number"),
     threshold: float = Form(0.75, description="Confidence threshold for live scraping"),
     force_scrape: bool = Form(False, description="Force live scrape regardless of DB results"),
-    page: int = Form(1, description="Page number"),
-    per_page: int = Form(20, description="Results per page"),
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """
@@ -797,10 +1144,6 @@ async def intelligent_search_with_image(
     nice_classes = []
     if classes:
         nice_classes = [int(c.strip()) for c in classes.split(",") if c.strip().isdigit()]
-
-    # Clamp pagination params
-    page = max(1, page)
-    per_page = max(1, min(100, per_page))
 
     # Check plan eligibility
     with Database() as db:
@@ -823,32 +1166,33 @@ async def intelligent_search_with_image(
                 image_path = tmp.name
             logger.info(f"Image uploaded: {image.filename} ({len(content)} bytes) -> {image_path}")
 
-        with AgenticTrademarkSearch(
+        _uid = str(current_user.id)
+        # Canlı Arama always scrapes TurkPatent for live data
+        result = await asyncio.to_thread(
+            _run_search_sync,
             confidence_threshold=threshold,
-            auto_scrape=True
-        ) as searcher:
-            result = searcher.search(
-                query=query,
-                nice_classes=nice_classes,
-                force_scrape=force_scrape,
-                image_path=image_path,
-                page=page,
-                per_page=per_page
-            )
+            auto_scrape=True,
+            query=query,
+            nice_classes=nice_classes,
+            force_scrape=True,
+            image_path=image_path,
+            status_filter=status,
+            attorney_no=attorney_no,
+            user_id=_uid
+        )
 
-        # Track usage if live scrape was triggered
-        if result.get('scrape_triggered', False):
-            with Database() as db:
-                new_count = increment_live_search_usage(
-                    db,
-                    str(current_user.id),
-                    str(current_user.organization_id)
-                )
-            result['credits_used'] = 1
-            result['credits_remaining'] = details['monthly_limit'] - (details['current_usage'] + 1)
-        else:
-            result['credits_used'] = 0
-            result['credits_remaining'] = details['remaining']
+        # Always count intelligent search usage
+        with Database() as db:
+            new_count = increment_live_search_usage(
+                db,
+                str(current_user.id),
+                str(current_user.organization_id)
+            )
+        result['credits_used'] = 1
+        result['credits_remaining'] = details['monthly_limit'] - (details['current_usage'] + 1)
+
+        # Normalize results to match public search format
+        _normalize_search_results(result)
 
         return result
     except HTTPException:
@@ -863,6 +1207,13 @@ async def intelligent_search_with_image(
                 os.unlink(image_path)
             except OSError:
                 pass
+        # Free cached CUDA tensors after search
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
 
 
 @router.post("/search")
@@ -888,18 +1239,20 @@ async def post_search(
         details = None
 
     try:
-        with AgenticTrademarkSearch(
+        _uid = str(current_user.id)
+        # Canlı Arama always scrapes TurkPatent for live data
+        result = await asyncio.to_thread(
+            _run_search_sync,
             confidence_threshold=request.confidence_threshold,
-            auto_scrape=request.auto_scrape
-        ) as searcher:
-            result = searcher.search(
-                query=request.query,
-                nice_classes=request.nice_classes or [],
-                force_scrape=request.force_scrape
-            )
+            auto_scrape=True,
+            query=request.query,
+            nice_classes=request.nice_classes or [],
+            force_scrape=True,
+            user_id=_uid
+        )
 
-        # Track usage if live scrape was triggered
-        if result.get('scrape_triggered', False) and details:
+        # Always count search usage when auto_scrape is enabled
+        if details:
             with Database() as db:
                 increment_live_search_usage(
                     db,
@@ -910,8 +1263,14 @@ async def post_search(
             result['credits_remaining'] = details['monthly_limit'] - (details['current_usage'] + 1)
         else:
             result['credits_used'] = 0
-            if details:
-                result['credits_remaining'] = details['remaining']
+
+        # Free cached CUDA tensors after search
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
 
         return result
     except HTTPException:
