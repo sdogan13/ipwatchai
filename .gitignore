@@ -46,6 +46,9 @@ logs/
 # Docker volumes
 config-backup-*/
 
+# Client data (sensitive)
+clients/
+
 # Misc temp/junk files
 C*Users*turk_patent*
 Users*turk_patent*
