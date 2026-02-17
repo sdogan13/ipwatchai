@@ -97,7 +97,7 @@ async def delete_setting(
 
 @router.get("/overview")
 async def admin_overview(current_user: CurrentUser = Depends(require_superadmin())):
-    """Dashboard overview stats."""
+    """Dashboard overview stats with revenue metrics."""
     stats = {}
 
     with Database() as db:
@@ -138,6 +138,44 @@ async def admin_overview(current_user: CurrentUser = Depends(require_superadmin(
             FROM api_usage WHERE usage_date = CURRENT_DATE
         """)
         stats["api_calls_today"] = cur.fetchone()["cnt"]
+
+        # Revenue metrics: MRR (Monthly Recurring Revenue) from active paying orgs
+        cur.execute("""
+            SELECT COALESCE(sp.name, 'free') as plan_name,
+                   COALESCE(sp.price_monthly, 0) as price,
+                   COUNT(DISTINCT o.id) as org_count
+            FROM organizations o
+            LEFT JOIN subscription_plans sp ON o.subscription_plan_id = sp.id
+            WHERE o.is_active = TRUE
+            GROUP BY sp.name, sp.price_monthly
+        """)
+        revenue_rows = cur.fetchall()
+        mrr = sum(row["price"] * row["org_count"] for row in revenue_rows if row["price"])
+        stats["mrr"] = float(mrr)
+        stats["revenue_by_plan"] = {
+            row["plan_name"]: {"price": float(row["price"] or 0), "orgs": row["org_count"],
+                               "revenue": float((row["price"] or 0) * row["org_count"])}
+            for row in revenue_rows
+        }
+
+        # Recent plan changes (last 7 days)
+        cur.execute("""
+            SELECT COUNT(*) as cnt FROM audit_log
+            WHERE action = 'plan_changed'
+            AND created_at >= NOW() - INTERVAL '7 days'
+        """)
+        stats["plan_changes_7d"] = cur.fetchone()["cnt"]
+
+        # Total applications this month
+        cur.execute("""
+            SELECT COUNT(*) as cnt FROM trademark_applications_mt
+            WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE)
+        """)
+        stats["applications_this_month"] = cur.fetchone()["cnt"]
+
+        # Settings overrides count
+        cur.execute("SELECT COUNT(*) as cnt FROM app_settings WHERE category = 'plan_limits'")
+        stats["active_overrides"] = cur.fetchone()["cnt"]
 
     return stats
 
@@ -549,14 +587,18 @@ async def get_org_credits(
     current_user: CurrentUser = Depends(require_superadmin()),
 ):
     """Get current credit balances for an organization."""
+    from utils.subscription import get_plan_limit
+
     with Database() as db:
         cur = db.cursor()
 
         cur.execute("""
             SELECT o.logo_credits_monthly, o.logo_credits_purchased, o.name_credits_purchased,
                    o.logo_credits_reset_at,
-                   COALESCE(sp.name, 'free') as plan_name,
-                   COALESCE(sp.logo_runs_per_month, 1) as plan_logo_monthly
+                   COALESCE(o.ai_credits_monthly, 0) as ai_credits_monthly,
+                   COALESCE(o.ai_credits_purchased, 0) as ai_credits_purchased,
+                   o.ai_credits_reset_at,
+                   COALESCE(sp.name, 'free') as plan_name
             FROM organizations o
             LEFT JOIN subscription_plans sp ON o.subscription_plan_id = sp.id
             WHERE o.id = %s
@@ -564,6 +606,8 @@ async def get_org_credits(
         row = cur.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Organization not found")
+
+        plan_name = row["plan_name"]
 
         cur.execute("""
             SELECT
@@ -575,13 +619,20 @@ async def get_org_credits(
         """, (org_id,))
         usage = cur.fetchone()
 
+    ai_plan_limit = get_plan_limit(plan_name, "monthly_ai_credits")
+
     return {
         "organization_id": org_id,
-        "plan": row["plan_name"],
+        "plan": plan_name,
+        "ai_credits": {
+            "monthly_remaining": row["ai_credits_monthly"],
+            "purchased": row["ai_credits_purchased"],
+            "plan_limit": ai_plan_limit,
+            "reset_at": str(row["ai_credits_reset_at"]) if row["ai_credits_reset_at"] else None,
+        },
         "logo_credits": {
             "monthly_remaining": row["logo_credits_monthly"] or 0,
             "purchased": row["logo_credits_purchased"] or 0,
-            "plan_default": row["plan_logo_monthly"] or 0,
             "used_this_month": usage["logo_generations_this_month"] if usage else 0,
             "reset_at": str(row["logo_credits_reset_at"]) if row["logo_credits_reset_at"] else None,
         },
@@ -616,6 +667,8 @@ async def adjust_org_credits(
         "logo_purchased": "logo_credits_purchased",
         "logo_monthly": "logo_credits_monthly",
         "name_purchased": "name_credits_purchased",
+        "ai_monthly": "ai_credits_monthly",
+        "ai_purchased": "ai_credits_purchased",
     }
 
     if credit_type not in valid_types:
@@ -627,24 +680,39 @@ async def adjust_org_credits(
 
     column = valid_types[credit_type]
 
+    from psycopg2 import sql as psql
+
     with Database() as db:
         cur = db.cursor()
 
-        cur.execute(f"SELECT {column} FROM organizations WHERE id = %s", (org_id,))
+        cur.execute(
+            psql.SQL("SELECT {} FROM organizations WHERE id = %s").format(psql.Identifier(column)),
+            (org_id,)
+        )
         old = cur.fetchone()
         if not old:
             raise HTTPException(status_code=404, detail="Organization not found")
         old_value = old[column] or 0
 
+        col_id = psql.Identifier(column)
         if operation == "set":
             new_value = int(amount)
-            cur.execute(f"UPDATE organizations SET {column} = %s WHERE id = %s", (new_value, org_id))
+            cur.execute(
+                psql.SQL("UPDATE organizations SET {} = %s WHERE id = %s").format(col_id),
+                (new_value, org_id)
+            )
         elif operation == "add":
             new_value = old_value + int(amount)
-            cur.execute(f"UPDATE organizations SET {column} = {column} + %s WHERE id = %s", (int(amount), org_id))
+            cur.execute(
+                psql.SQL("UPDATE organizations SET {} = {} + %s WHERE id = %s").format(col_id, col_id),
+                (int(amount), org_id)
+            )
         else:  # subtract
             new_value = max(0, old_value - int(amount))
-            cur.execute(f"UPDATE organizations SET {column} = GREATEST(0, {column} - %s) WHERE id = %s", (int(amount), org_id))
+            cur.execute(
+                psql.SQL("UPDATE organizations SET {} = GREATEST(0, {} - %s) WHERE id = %s").format(col_id, col_id),
+                (int(amount), org_id)
+            )
 
         _audit_log(db, str(current_user.id), "credit_adjustment", {
             "organization_id": org_id,
@@ -691,6 +759,8 @@ async def bulk_credit_adjustment(
         "logo_purchased": "logo_credits_purchased",
         "logo_monthly": "logo_credits_monthly",
         "name_purchased": "name_credits_purchased",
+        "ai_monthly": "ai_credits_monthly",
+        "ai_purchased": "ai_credits_purchased",
     }
 
     if credit_type not in valid_types:
@@ -700,35 +770,35 @@ async def bulk_credit_adjustment(
 
     column = valid_types[credit_type]
 
+    from psycopg2 import sql as psql
+    col_id = psql.Identifier(column)
+
     with Database() as db:
         cur = db.cursor()
 
-        where = "WHERE o.is_active = TRUE"
+        where_parts = [psql.SQL("WHERE o.is_active = TRUE")]
         params = []
         if plan_filter != "all":
-            where += " AND COALESCE(sp.name, 'free') = %s"
+            where_parts.append(psql.SQL("AND COALESCE(sp.name, 'free') = %s"))
             params.append(plan_filter)
+        where_clause = psql.SQL(" ").join(where_parts)
+
+        subquery = psql.SQL("""
+            SELECT o.id FROM organizations o
+            LEFT JOIN subscription_plans sp ON o.subscription_plan_id = sp.id
+            {where}
+        """).format(where=where_clause)
 
         if operation == "add":
-            sql = f"""
-                UPDATE organizations SET {column} = {column} + %s
-                WHERE id IN (
-                    SELECT o.id FROM organizations o
-                    LEFT JOIN subscription_plans sp ON o.subscription_plan_id = sp.id
-                    {where}
-                )
-            """
-            cur.execute(sql, [int(amount)] + params)
+            query = psql.SQL(
+                "UPDATE organizations SET {col} = {col} + %s WHERE id IN ({sub})"
+            ).format(col=col_id, sub=subquery)
+            cur.execute(query, [int(amount)] + params)
         else:  # set
-            sql = f"""
-                UPDATE organizations SET {column} = %s
-                WHERE id IN (
-                    SELECT o.id FROM organizations o
-                    LEFT JOIN subscription_plans sp ON o.subscription_plan_id = sp.id
-                    {where}
-                )
-            """
-            cur.execute(sql, [int(amount)] + params)
+            query = psql.SQL(
+                "UPDATE organizations SET {col} = %s WHERE id IN ({sub})"
+            ).format(col=col_id, sub=subquery)
+            cur.execute(query, [int(amount)] + params)
 
         affected = cur.rowcount
 
@@ -847,14 +917,18 @@ async def update_discount_code(
     if not updates:
         raise HTTPException(status_code=400, detail="No valid fields to update")
 
+    from psycopg2 import sql as psql
+
     with Database() as db:
         cur = db.cursor()
 
-        set_clauses = ", ".join([f"{k} = %s" for k in updates])
+        set_parts = [psql.SQL("{} = %s").format(psql.Identifier(k)) for k in updates]
+        set_parts.append(psql.SQL("updated_at = NOW()"))
+        set_clause = psql.SQL(", ").join(set_parts)
         values = list(updates.values()) + [code_id]
 
         cur.execute(
-            f"UPDATE discount_codes SET {set_clauses}, updated_at = NOW() WHERE id = %s",
+            psql.SQL("UPDATE discount_codes SET {} WHERE id = %s").format(set_clause),
             values,
         )
 
@@ -918,8 +992,33 @@ async def list_plans(current_user: CurrentUser = Depends(require_superadmin())):
         cur.execute("SELECT * FROM subscription_plans ORDER BY price_monthly ASC NULLS FIRST")
         db_plans = [dict(row) for row in cur.fetchall()]
 
+        # Count orgs per plan for usage stats
+        cur.execute("""
+            SELECT COALESCE(sp.name, 'free') as plan_name, COUNT(*) as org_count
+            FROM organizations o
+            LEFT JOIN subscription_plans sp ON o.subscription_plan_id = sp.id
+            WHERE o.is_active = TRUE
+            GROUP BY sp.name
+        """)
+        org_counts = {row["plan_name"]: row["org_count"] for row in cur.fetchall()}
+
     # Get all plan_limits overrides from settings
     overrides = settings_manager.get_category("plan_limits")
+
+    # Categorize features for better UI grouping
+    feature_categories = {
+        "pricing": ["price_monthly", "price_annual_monthly"],
+        "search_limits": ["max_daily_quick_searches", "monthly_live_searches"],
+        "content_limits": ["max_watchlist_items", "max_users", "monthly_reports",
+                           "monthly_applications", "monthly_ai_credits",
+                           "name_suggestions_per_session", "daily_lead_views",
+                           "auto_scan_max_items"],
+        "boolean_flags": ["can_use_live_scraping", "can_track_logos",
+                          "can_view_holder_portfolio", "can_export_reports",
+                          "can_export_csv_leads", "priority_support",
+                          "api_access", "dedicated_account_manager"],
+        "other": ["auto_scan_frequency"],
+    }
 
     result = []
     for db_plan in db_plans:
@@ -936,9 +1035,10 @@ async def list_plans(current_user: CurrentUser = Depends(require_superadmin())):
             "db_record": db_plan,
             "code_defaults": code_defaults,
             "active_overrides": plan_overrides,
+            "active_orgs": org_counts.get(plan_name, 0),
         })
 
-    return {"plans": result}
+    return {"plans": result, "feature_categories": feature_categories}
 
 
 @router.put("/plans/{plan_name}/pricing")
@@ -949,9 +1049,10 @@ async def update_plan_pricing(
 ):
     """
     Update plan pricing in the DB.
-    Body: {"price_monthly": 999.00, "description": "Professional plan", "is_active": true}
+    Body: {"price_monthly": 999.00, "price_annual_monthly": 799.00,
+           "display_name": "Pro", "description": "Professional plan", "is_active": true}
     """
-    allowed = {"price_monthly", "description", "is_active"}
+    allowed = {"price_monthly", "price_annual_monthly", "display_name", "description", "is_active"}
     updates = {k: v for k, v in payload.items() if k in allowed}
 
     if not updates:
@@ -965,11 +1066,13 @@ async def update_plan_pricing(
         if not old:
             raise HTTPException(status_code=404, detail=f"Plan '{plan_name}' not found")
 
-        set_clauses = ", ".join([f"{k} = %s" for k in updates])
+        from psycopg2 import sql as psql
+        set_parts = [psql.SQL("{} = %s").format(psql.Identifier(k)) for k in updates]
+        set_clause = psql.SQL(", ").join(set_parts)
         values = list(updates.values()) + [plan_name]
 
         cur.execute(
-            f"UPDATE subscription_plans SET {set_clauses} WHERE name = %s",
+            psql.SQL("UPDATE subscription_plans SET {} WHERE name = %s").format(set_clause),
             values,
         )
 
@@ -980,6 +1083,141 @@ async def update_plan_pricing(
         db.commit()
 
     return {"status": "ok", "plan": plan_name}
+
+
+# ============ PAYMENT REFUNDS ============
+
+
+@router.post("/payments/{payment_id}/refund")
+async def refund_payment(
+    payment_id: str,
+    payload: dict = Body(default={}),
+    current_user: CurrentUser = Depends(require_superadmin()),
+):
+    """
+    Refund a completed payment via iyzico Refund API (full or partial).
+    Body: {"amount": 499.00, "reason": "Customer requested"}
+    Omit amount for full refund.
+    """
+    import iyzipay
+    from api.payments import _get_iyzico_options, _activate_subscription
+
+    refund_amount = payload.get("amount")  # None = full refund
+    reason = payload.get("reason", "")
+
+    with Database() as db:
+        cur = db.cursor()
+
+        # Fetch the payment
+        cur.execute("SELECT * FROM payments WHERE id = %s", (payment_id,))
+        payment = cur.fetchone()
+        if not payment:
+            raise HTTPException(status_code=404, detail="Payment not found")
+
+        if payment["status"] != "completed":
+            raise HTTPException(status_code=400, detail="Only completed payments can be refunded")
+
+        if payment.get("refund_status") in ("full",):
+            raise HTTPException(status_code=400, detail="Payment already fully refunded")
+
+        # Determine refund amount
+        paid_amount = float(payment["amount"])
+        if refund_amount is None:
+            refund_amount = paid_amount
+            refund_type = "full"
+        else:
+            refund_amount = float(refund_amount)
+            if refund_amount <= 0 or refund_amount > paid_amount:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Refund amount must be between 0 and {paid_amount}",
+                )
+            refund_type = "full" if refund_amount == paid_amount else "partial"
+
+        # Extract paymentTransactionId from iyzico raw response
+        raw_response = payment.get("iyzico_raw_response") or {}
+        if isinstance(raw_response, str):
+            raw_response = json.loads(raw_response)
+
+        item_transactions = raw_response.get("itemTransactions", [])
+        if not item_transactions:
+            raise HTTPException(
+                status_code=400,
+                detail="No transaction ID found in iyzico response — cannot refund",
+            )
+        payment_transaction_id = item_transactions[0].get("paymentTransactionId", "")
+        if not payment_transaction_id:
+            raise HTTPException(
+                status_code=400,
+                detail="paymentTransactionId missing in iyzico response",
+            )
+
+        # Call iyzico Refund API
+        refund_request = {
+            'locale': 'tr',
+            'conversationId': payment.get("iyzico_conversation_id", ""),
+            'paymentTransactionId': payment_transaction_id,
+            'price': f"{refund_amount:.2f}",
+            'currency': payment.get("currency", "TRY"),
+            'ip': '127.0.0.1',
+        }
+
+        try:
+            refund_result = iyzipay.Refund().create(refund_request, _get_iyzico_options())
+            result_str = refund_result.read().decode('utf-8')
+            result_json = json.loads(result_str)
+        except Exception as e:
+            logger.error(f"iyzico refund API call failed: {e}")
+            raise HTTPException(status_code=502, detail="Refund gateway error")
+
+        if result_json.get("status") != "success":
+            error_msg = result_json.get("errorMessage", "Unknown error")
+            logger.error(f"iyzico refund failed: {error_msg}")
+            raise HTTPException(status_code=502, detail=f"Refund failed: {error_msg}")
+
+        # Update payment record with refund info
+        cur.execute("""
+            UPDATE payments
+            SET refund_status = %s,
+                refund_amount = %s,
+                refunded_at = CURRENT_TIMESTAMP,
+                refund_reason = %s,
+                iyzico_refund_response = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+        """, (
+            refund_type,
+            refund_amount,
+            reason,
+            json.dumps(result_json),
+            payment_id,
+        ))
+
+        # Full refund: downgrade org to free plan
+        org_id = str(payment["organization_id"])
+        if refund_type == "full":
+            _activate_subscription(db, org_id, "free", "monthly")
+
+        _audit_log(db, str(current_user.id), "payment_refunded", {
+            "payment_id": payment_id,
+            "organization_id": org_id,
+            "refund_type": refund_type,
+            "refund_amount": refund_amount,
+            "original_amount": paid_amount,
+            "reason": reason,
+        })
+        db.commit()
+
+    logger.info(
+        f"Payment {payment_id} refunded ({refund_type}): "
+        f"{refund_amount} {payment.get('currency', 'TRY')} by {current_user.id}"
+    )
+    return {
+        "status": "ok",
+        "payment_id": payment_id,
+        "refund_type": refund_type,
+        "refund_amount": refund_amount,
+    }
 
 
 # ============ USAGE ANALYTICS ============

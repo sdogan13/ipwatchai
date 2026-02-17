@@ -6,8 +6,9 @@ import logging
 from datetime import datetime
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, HTTPException, File, UploadFile, Form, Depends
+from fastapi import FastAPI, Request, HTTPException, File, UploadFile, Form, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -53,6 +54,14 @@ from utils.class_utils import (
     calculate_class_overlap_score
 )
 
+# Unified scoring engine — single source of truth for all search paths
+from risk_engine import (
+    score_pair,
+    calculate_visual_similarity,
+    get_risk_level as risk_get_risk_level,
+    normalize_turkish as risk_normalize_turkish,
+)
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -65,7 +74,7 @@ logger = logging.getLogger(__name__)
 # SCORING FUNCTIONS - Now in shared module
 # ==========================================
 # normalize_turkish, calculate_text_similarity, calculate_combined_score,
-# get_risk_level, is_generic_word, get_word_weight are imported from utils.scoring
+# Scoring functions imported from utils.idf_scoring (centralized) and risk_engine (score_pair)
 # Uses data-driven IDF from word_idf table (run compute_idf.py monthly)
 # This ensures consistent scoring between Search and Scanner
 
@@ -92,7 +101,7 @@ async def lifespan(app: FastAPI):
         logger.warning(f"   IDF Scoring init failed (non-fatal): {e}")
 
     # Initialize Gemini client for Creative Suite (Name Generator + Logo Studio)
-    from ai.gemini_client import get_gemini_client
+    from generative_ai.gemini_client import get_gemini_client
     try:
         gemini = get_gemini_client(settings.creative)
         if gemini.is_available():
@@ -111,6 +120,26 @@ async def lifespan(app: FastAPI):
             logger.warning("   Reports table migration skipped or failed (non-fatal)")
     except Exception as e:
         logger.warning(f"   Reports table check failed (non-fatal): {e}")
+
+    # Ensure payments table exists
+    try:
+        from migrations.run_payments_migration import ensure_payments_table
+        if ensure_payments_table():
+            logger.info("   Payments table ready")
+        else:
+            logger.warning("   Payments table migration skipped or failed (non-fatal)")
+    except Exception as e:
+        logger.warning(f"   Payments table check failed (non-fatal): {e}")
+
+    # Ensure payment refund columns exist
+    try:
+        from migrations.run_add_payment_refunds import ensure_payment_refund_columns
+        if ensure_payment_refund_columns():
+            logger.info("   Payment refund columns ready")
+        else:
+            logger.warning("   Payment refund columns migration skipped or failed (non-fatal)")
+    except Exception as e:
+        logger.warning(f"   Payment refund columns check failed (non-fatal): {e}")
 
     # Initialize settings manager (in-memory cache for app_settings table)
     from utils.settings_manager import settings_manager
@@ -176,17 +205,41 @@ app = FastAPI(
     version=settings.app_version,
     docs_url="/docs" if settings.debug else None,
     redoc_url="/redoc" if settings.debug else None,
+    openapi_url="/openapi.json" if settings.debug else None,
     lifespan=lifespan
 )
 
-# CORS Middleware
+# GZip Middleware — compresses responses >500 bytes (critical for mobile bandwidth)
+app.add_middleware(GZipMiddleware, minimum_size=500)
+
+# CORS Middleware — restrict methods/headers to what's actually needed
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "Accept-Language", "X-Requested-With"],
+    expose_headers=["Content-Disposition"],
+    max_age=600,  # Cache preflight for 10 minutes
 )
+
+
+# Security Headers Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        if not settings.debug:
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 # Rate Limiting
@@ -221,14 +274,14 @@ async def _custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
 app.add_exception_handler(RateLimitExceeded, _custom_rate_limit_handler)
 
 
-# Global exception handler
+# Global exception handler — never leak internal errors to users
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Internal server error", "error": str(exc) if settings.debug else None}
-    )
+    logger.error(f"Unhandled exception on {request.url.path}: {exc}", exc_info=True)
+    content = {"detail": "Internal server error"}
+    if settings.debug:
+        content["debug_error"] = str(exc)
+    return JSONResponse(status_code=500, content=content)
 
 
 # ==========================================
@@ -249,10 +302,25 @@ from api.reports import router as reports_router
 from api.upload import router as upload_router
 from api.leads import router as leads_router
 from api.holders import router as holders_router
+try:
+    from api.attorneys import router as attorneys_router
+except Exception as e:
+    logger.warning(f"Could not load attorneys router: {e}")
+    attorneys_router = None
 from api.creative import router as creative_router
 from api.pipeline import router as pipeline_router
 from api.admin import router as admin_router
 from api.billing import router as billing_router
+try:
+    from api.payments import router as payments_router
+except Exception as e:
+    logger.warning(f"Could not load payments router: {e}")
+    payments_router = None
+try:
+    from api.applications import router as applications_router
+except Exception as e:
+    logger.warning(f"Could not load applications router: {e}")
+    applications_router = None
 from agentic_search import router as agentic_router
 
 # Public routes (no auth required for some endpoints)
@@ -268,6 +336,8 @@ app.include_router(reports_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(leads_router, prefix="/api/v1")
 app.include_router(holders_router, prefix="/api/v1")
+if attorneys_router:
+    app.include_router(attorneys_router, prefix="/api/v1")
 app.include_router(usage_router, prefix="/api/v1")
 
 # File upload routes
@@ -285,6 +355,14 @@ app.include_router(admin_router)
 # Billing (discount code validation)
 app.include_router(billing_router)
 
+# Payments (iyzico checkout)
+if payments_router:
+    app.include_router(payments_router)
+
+# Trademark applications
+if applications_router:
+    app.include_router(applications_router)
+
 # Agentic search (includes its own /api/v1/search prefix)
 app.include_router(agentic_router)
 
@@ -300,10 +378,353 @@ async def get_app_config():
         "risk_thresholds": {k: int(v * 100) for k, v in RISK_THRESHOLDS.items()},
     }
 
+
+# ==========================================
+# Search credits — authenticated, returns plan info + reset dates
+# ==========================================
+@app.get("/api/v1/search/credits", tags=["Search"])
+async def get_search_credits(current_user: CurrentUser = Depends(get_current_user)):
+    """Return search credit info: plan display name and next reset date."""
+    from utils.subscription import get_user_plan
+    from database.crud import Database
+    import datetime
+
+    with Database() as db:
+        plan = get_user_plan(db, str(current_user.id))
+
+    # Compute next daily reset (midnight tomorrow)
+    now = datetime.datetime.now(datetime.timezone.utc)
+    tomorrow = (now + datetime.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    return {
+        "display_name": plan.get("display_name", plan.get("plan_name", "Free")),
+        "resets_on": tomorrow.isoformat(),
+    }
+
+
+# ==========================================
+# Public search endpoint — unauthenticated, rate-limited
+# ==========================================
+@app.get("/api/v1/search/public", tags=["Search"])
+@limiter.limit("3/minute")
+async def public_search(
+    request: Request,
+    query: str = Query(..., min_length=2, max_length=100, description="Trademark name to search"),
+):
+    """
+    Public (unauthenticated) trademark search for landing page.
+    Rate limited to 3 requests per minute per IP.
+    Returns max 10 results with limited fields.
+    """
+    return await _do_public_search(query=query)
+
+
+@app.post("/api/v1/search/public", tags=["Search"])
+@limiter.limit("3/minute")
+async def public_search_post(
+    request: Request,
+    query: Optional[str] = Form(None, max_length=100, description="Trademark name to search"),
+    image: Optional[UploadFile] = File(None, description="Optional logo image for visual search"),
+    classes: Optional[str] = Form(None, description="Nice classes, comma-separated (e.g. 9,35,42)"),
+):
+    """
+    Public (unauthenticated) trademark search with optional image upload.
+    At least one of query or image must be provided.
+    Rate limited to 3 requests per minute per IP.
+    Returns max 10 results with limited fields.
+    """
+    has_image = image is not None and image.filename
+    has_query = query and len(query.strip()) >= 2
+    if not has_query and not has_image:
+        raise HTTPException(status_code=422, detail="Provide a brand name (min 2 chars) or upload a logo image")
+    query = query.strip() if query else ""
+
+    # Parse classes
+    class_list = None
+    if classes:
+        try:
+            class_list = [int(c.strip()) for c in classes.split(",") if c.strip()]
+            class_list = [c for c in class_list if 1 <= c <= 45] or None
+        except ValueError:
+            class_list = None
+
+    # Handle image upload
+    temp_path = None
+    has_image = image is not None and image.filename
+    if has_image:
+        if image.content_type not in ALLOWED_IMAGE_TYPES:
+            raise HTTPException(status_code=400, detail="Invalid image type")
+        content = await image.read()
+        if len(content) > MAX_IMAGE_SIZE:
+            raise HTTPException(status_code=413, detail="Image too large (max 10MB)")
+        if not validate_image_magic_bytes(content):
+            raise HTTPException(status_code=400, detail="Invalid image file content")
+        # Verify PIL can actually parse it
+        try:
+            Image.open(io.BytesIO(content)).verify()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Corrupted image file")
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
+        temp_file.write(content)
+        temp_file.close()
+        temp_path = temp_file.name
+
+    try:
+        return await _do_public_search(
+            query=query,
+            image_path=temp_path,
+            nice_classes=class_list,
+        )
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.unlink(temp_path)
+
+
+async def _do_public_search(
+    query: str,
+    image_path: str = None,
+    nice_classes: list = None,
+):
+    """Shared implementation for GET and POST public search."""
+    from agentic_search import AgenticTrademarkSearch
+
+    try:
+        with AgenticTrademarkSearch(
+            confidence_threshold=0.75,
+            auto_scrape=False
+        ) as searcher:
+            result = searcher.search(
+                query=query,
+                nice_classes=nice_classes,
+                force_scrape=False,
+                image_path=image_path,
+            )
+
+        # Strip sensitive fields, return max 10 results
+        safe_results = []
+        for r in (result.get("results") or [])[:10]:
+            scores = r.get("scores") or {}
+            # Build image URL if available
+            img_path = r.get("image_path")
+            image_url = f"/api/trademark-image/{img_path}" if img_path else None
+            safe_results.append({
+                "trademark_name": r.get("trademark_name") or r.get("name"),
+                "application_no": r.get("application_no"),
+                "status": r.get("status"),
+                "risk_score": scores.get("total") if scores.get("total") is not None else r.get("risk_score", 0),
+                "nice_classes": r.get("classes") or r.get("nice_classes") or [],
+                "image_url": image_url,
+                "name_tr": r.get("name_tr"),
+                "holder_name": r.get("holder_name"),
+                "holder_tpe_client_id": r.get("holder_tpe_client_id"),
+                "attorney_name": r.get("attorney_name"),
+                "attorney_no": r.get("attorney_no"),
+                "application_date": r.get("application_date"),
+                "registration_no": r.get("registration_no"),
+                "scoring_path": scores.get("scoring_path"),
+                "text_similarity": round(scores.get("text_similarity", 0), 3),
+                "visual_similarity": round(scores.get("visual_similarity", 0), 3),
+                "translation_similarity": round(scores.get("translation_similarity", 0), 3),
+                "phonetic_similarity": round(scores.get("phonetic_similarity", 0), 3),
+                "has_extracted_goods": r.get("has_extracted_goods", False),
+                "extracted_goods": r.get("extracted_goods"),
+            })
+
+        return {
+            "query": query,
+            "results": safe_results,
+            "total": len(safe_results),
+        }
+    except Exception as e:
+        logger.error(f"Public search failed: {e}")
+        raise HTTPException(status_code=500, detail="Search temporarily unavailable")
+
+
+# Public portfolio endpoint — unauthenticated, rate-limited
+@app.get("/api/v1/portfolio/public", tags=["Search"])
+@limiter.limit("5/minute")
+async def public_portfolio(
+    request: Request,
+    holder_id: str = Query(None, max_length=50, description="Holder TPE Client ID"),
+    attorney_no: str = Query(None, max_length=50, description="Attorney number"),
+):
+    """
+    Public portfolio lookup for landing page.
+    Returns max 10 trademarks by holder or attorney.
+    """
+    if not holder_id and not attorney_no:
+        raise HTTPException(status_code=400, detail="holder_id or attorney_no required")
+
+    from database.crud import Database
+
+    try:
+        with Database() as db:
+            cur = db.cursor()
+
+            if holder_id:
+                where_col = "holder_tpe_client_id"
+                entity_type = "holder"
+            else:
+                where_col = "attorney_no"
+                entity_type = "attorney"
+
+            from psycopg2 import sql as psql
+            param = holder_id or attorney_no
+
+            # Get real total count
+            cur.execute(
+                psql.SQL("SELECT COUNT(*) as cnt FROM trademarks WHERE {} = %s").format(
+                    psql.Identifier(where_col)
+                ), (param,)
+            )
+            total_count = cur.fetchone()['cnt']
+
+            # Get up to 100 trademarks for display + CSV
+            cur.execute(psql.SQL("""
+                SELECT application_no, name, current_status, nice_class_numbers,
+                       application_date, image_path, holder_name, holder_tpe_client_id,
+                       attorney_name, attorney_no, registration_no
+                FROM trademarks
+                WHERE {} = %s
+                ORDER BY application_date DESC NULLS LAST
+                LIMIT 100
+            """).format(psql.Identifier(where_col)), (param,))
+
+            rows = cur.fetchall()
+
+            results = []
+            for tm in rows:
+                img_path = tm.get('image_path')
+                image_url = f"/api/trademark-image/{img_path}" if img_path else None
+                results.append({
+                    "trademark_name": tm.get('name'),
+                    "application_no": tm.get('application_no'),
+                    "status": tm.get('current_status'),
+                    "nice_classes": tm.get('nice_class_numbers') or [],
+                    "image_url": image_url,
+                    "holder_name": tm.get('holder_name'),
+                    "holder_tpe_client_id": tm.get('holder_tpe_client_id'),
+                    "attorney_name": tm.get('attorney_name'),
+                    "attorney_no": tm.get('attorney_no'),
+                    "application_date": tm['application_date'].isoformat() if tm.get('application_date') else None,
+                    "registration_no": tm.get('registration_no'),
+                })
+
+            entity_name = ""
+            if rows:
+                if entity_type == "holder":
+                    entity_name = rows[0].get('holder_name') or ""
+                else:
+                    entity_name = rows[0].get('attorney_name') or ""
+
+            return {
+                "entity_type": entity_type,
+                "entity_name": entity_name,
+                "entity_id": holder_id or attorney_no,
+                "results": results,
+                "total_count": total_count,
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Public portfolio failed: {e}")
+        raise HTTPException(status_code=500, detail="Portfolio lookup temporarily unavailable")
+
+
+@app.get("/api/v1/portfolio/public/csv", tags=["Search"])
+@limiter.limit("3/minute")
+async def public_portfolio_csv(
+    request: Request,
+    holder_id: str = Query(None, max_length=50),
+    attorney_no: str = Query(None, max_length=50),
+):
+    """Public CSV export — all trademarks by holder or attorney."""
+    if not holder_id and not attorney_no:
+        raise HTTPException(status_code=400, detail="holder_id or attorney_no required")
+
+    import csv as _csv
+    import io as _io
+    from database.crud import Database
+
+    try:
+        with Database() as db:
+            cur = db.cursor()
+            from psycopg2 import sql as psql
+            if holder_id:
+                where_col, param = "holder_tpe_client_id", holder_id
+            else:
+                where_col, param = "attorney_no", attorney_no
+
+            cur.execute(psql.SQL("""
+                SELECT application_no, name, current_status,
+                       nice_class_numbers, application_date, registration_date,
+                       registration_no, holder_name, attorney_name, attorney_no,
+                       bulletin_no, gazette_no
+                FROM trademarks
+                WHERE {} = %s
+                ORDER BY application_date DESC NULLS LAST, application_no DESC
+            """).format(psql.Identifier(where_col)), (param,))
+            rows = cur.fetchall()
+
+            # Determine entity name for filename
+            if rows:
+                entity_name = rows[0].get('holder_name' if holder_id else 'attorney_name') or param
+            else:
+                entity_name = param
+
+        buf = _io.StringIO()
+        buf.write('\ufeff')
+        writer = _csv.writer(buf)
+        writer.writerow(['Marka Adi', 'Basvuru No', 'Durum', 'Siniflar',
+                         'Basvuru Tarihi', 'Tescil Tarihi', 'Tescil No',
+                         'Sahip', 'Vekil', 'Vekil No', 'Bulten No', 'Gazete No'])
+        for tm in rows:
+            writer.writerow([
+                tm.get('name') or '',
+                tm.get('application_no') or '',
+                tm.get('current_status') or '',
+                '; '.join(str(c) for c in (tm.get('nice_class_numbers') or [])),
+                tm['application_date'].isoformat() if tm.get('application_date') else '',
+                tm['registration_date'].isoformat() if tm.get('registration_date') else '',
+                tm.get('registration_no') or '',
+                tm.get('holder_name') or '',
+                tm.get('attorney_name') or '',
+                tm.get('attorney_no') or '',
+                tm.get('bulletin_no') or '',
+                tm.get('gazette_no') or '',
+            ])
+
+        safe_name = ''.join(c if c.isascii() and (c.isalnum() or c in ' _-') else '_' for c in entity_name)[:50]
+        buf.seek(0)
+        from fastapi.responses import StreamingResponse
+        return StreamingResponse(
+            buf,
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{safe_name}_portfolio.csv"'}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Public portfolio CSV failed: {e}")
+        raise HTTPException(status_code=500, detail="CSV export temporarily unavailable")
+
+
 # Static files (avatars, etc.)
 import os
 STATIC_DIR = Path(__file__).parent / "static"
 os.makedirs(STATIC_DIR / "avatars", exist_ok=True)
+
+
+@app.get("/static/sw.js", tags=["Root"], include_in_schema=False)
+async def serve_service_worker():
+    """Serve SW with no-cache headers so browsers always check for updates."""
+    return FileResponse(
+        STATIC_DIR / "sw.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+    )
+
+
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # Jinja2 Templates
@@ -315,30 +736,23 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 # Root & Health Endpoints
 # ==========================================
 
-# Frontend directory path
-FRONTEND_DIR = Path(__file__).parent / "frontend" / "dist"
-
-
-@app.get("/", tags=["Root"])
-async def root():
-    """Serve the frontend application"""
-    frontend_file = FRONTEND_DIR / "index.html"
-    if frontend_file.exists():
-        return FileResponse(frontend_file)
-    # Fallback to API info if frontend doesn't exist
-    return {
-        "name": settings.app_name,
-        "version": settings.app_version,
-        "status": "running",
-        "docs": "/docs" if settings.debug else "disabled",
-        "health": "/health"
-    }
+@app.get("/", response_class=HTMLResponse, tags=["Root"])
+async def root(request: Request):
+    """Serve the landing page"""
+    from utils.subscription import PLAN_FEATURES
+    public_plans = {k: v for k, v in PLAN_FEATURES.items() if k != "superadmin"}
+    return templates.TemplateResponse("landing.html", {
+        "request": request,
+        "plans": public_plans,
+    })
 
 
 @app.get("/dashboard", response_class=HTMLResponse, tags=["Root"])
 async def serve_dashboard(request: Request):
     """Serve the dashboard via Jinja2 templates"""
-    return templates.TemplateResponse("dashboard.html", {"request": request})
+    response = templates.TemplateResponse("dashboard.html", {"request": request})
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return response
 
 
 @app.get("/admin", response_class=HTMLResponse, tags=["Root"])
@@ -351,9 +765,28 @@ async def serve_admin(request: Request):
 async def serve_pricing(request: Request):
     """Serve the pricing page — renders limits dynamically from PLAN_FEATURES"""
     from utils.subscription import PLAN_FEATURES
+    public_plans = {k: v for k, v in PLAN_FEATURES.items() if k != "superadmin"}
     return templates.TemplateResponse("pricing.html", {
         "request": request,
-        "plans": PLAN_FEATURES,
+        "plans": public_plans,
+    })
+
+
+@app.get("/checkout", response_class=HTMLResponse, tags=["Root"])
+async def serve_checkout(request: Request, plan: str = "free", billing: str = "monthly"):
+    """Serve the checkout page — plan selection → register/login → pay"""
+    from utils.subscription import PLAN_FEATURES
+    public_plans = {k: v for k, v in PLAN_FEATURES.items() if k != "superadmin"}
+    # Validate plan param
+    if plan not in public_plans:
+        plan = "free"
+    if billing not in ("monthly", "annual"):
+        billing = "monthly"
+    return templates.TemplateResponse("checkout.html", {
+        "request": request,
+        "plans": public_plans,
+        "selected_plan": plan,
+        "selected_billing": billing,
     })
 
 
@@ -419,8 +852,11 @@ async def health_check():
 # IMAGE SERVING ENDPOINTS
 # ==========================================
 
-# Unified LOGOS directory for all trademark images
-LOGOS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bulletins", "Marka", "LOGOS")
+# Project root — used for resolving relative image paths
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+# Legacy LOGOS directory (fallback for old bare-filename image_path values)
+LOGOS_DIR = os.path.join(PROJECT_ROOT, "bulletins", "Marka", "LOGOS")
 
 # Supported image extensions (in order of preference)
 IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".bmp", ".tif", ".gif", ".webp"]
@@ -437,45 +873,60 @@ MEDIA_TYPES = {
 
 
 def find_trademark_image(image_path: str) -> str | None:
-    """Find a trademark logo image in the unified LOGOS folder."""
+    """Resolve an image_path to an absolute filesystem path.
+
+    Handles two formats:
+    1. Full relative path (new): "bulletins/Marka/BLT_253/images/2011_41714.jpg"
+       → resolved relative to PROJECT_ROOT
+    2. Bare filename (legacy): "2011_41714"
+       → looked up in LOGOS_DIR with extension probing
+    """
     if not image_path:
         return None
 
     # Security: block directory traversal
-    if ".." in image_path or "/" in image_path or "\\" in image_path:
+    if ".." in image_path:
         return None
 
-    # Try each extension
-    for ext in IMAGE_EXTENSIONS:
-        full_path = os.path.join(LOGOS_DIR, f"{image_path}{ext}")
+    # --- New format: full relative path (contains /) ---
+    if "/" in image_path:
+        full_path = os.path.join(PROJECT_ROOT, image_path.replace("/", os.sep))
         if os.path.isfile(full_path):
             return full_path
+        # Path has extension already but file missing — try without extension in LOGOS
+        basename = os.path.splitext(os.path.basename(image_path))[0]
+        return _find_in_logos(basename)
 
+    # --- Legacy format: bare filename (no slashes) ---
+    return _find_in_logos(image_path)
+
+
+def _find_in_logos(basename: str) -> str | None:
+    """Try to find an image by bare filename in the LOGOS folder."""
+    if not basename:
+        return None
+    # Try each extension
+    for ext in IMAGE_EXTENSIONS:
+        full_path = os.path.join(LOGOS_DIR, f"{basename}{ext}")
+        if os.path.isfile(full_path):
+            return full_path
     # Try as-is (might already have extension)
-    full_path = os.path.join(LOGOS_DIR, image_path)
+    full_path = os.path.join(LOGOS_DIR, basename)
     if os.path.isfile(full_path):
         return full_path
-
     return None
 
 
 @app.get("/api/trademark-image/{image_path:path}", tags=["Images"])
 async def serve_trademark_image(image_path: str):
     """
-    Serve a trademark logo image from the unified LOGOS folder.
+    Serve a trademark logo image.
 
-    Example: /api/trademark-image/2005_28311
-    Returns the image file (jpg, png, etc.) or 404 if not found.
+    Accepts both formats:
+    - New: /api/trademark-image/bulletins/Marka/BLT_253/images/2011_41714.jpg
+    - Legacy: /api/trademark-image/2005_28311
     """
-    # Strip extension if provided (lookup tries all extensions)
-    clean_path = image_path.rsplit('.', 1)[0] if '.' in image_path else image_path
-
-    # Handle legacy URLs: /api/trademark-image/{bulletin_no}/{image_path}
-    # If clean_path contains a slash, take the last segment as the actual image_path
-    if '/' in clean_path:
-        clean_path = clean_path.rsplit('/', 1)[-1]
-
-    file_path = find_trademark_image(clean_path)
+    file_path = find_trademark_image(image_path)
     if not file_path:
         raise HTTPException(status_code=404, detail="Image not found")
 
@@ -493,9 +944,27 @@ async def serve_trademark_image(image_path: str):
 # IMAGE SEARCH ENDPOINTS
 # ==========================================
 
-MAX_IMAGE_SIZE = 100 * 1024 * 1024  # 100MB max
-WARNING_FILE_SIZE = 50 * 1024 * 1024  # 50MB warning threshold
+MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10MB max (images shouldn't be 100MB)
+WARNING_FILE_SIZE = 5 * 1024 * 1024  # 5MB warning threshold
 ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/bmp", "image/webp"]
+
+# Magic byte signatures for image validation
+IMAGE_MAGIC_BYTES = {
+    b'\xff\xd8\xff': 'image/jpeg',
+    b'\x89PNG\r\n\x1a\n': 'image/png',
+    b'GIF87a': 'image/gif',
+    b'GIF89a': 'image/gif',
+    b'BM': 'image/bmp',
+    b'RIFF': 'image/webp',  # RIFF....WEBP
+}
+
+
+def validate_image_magic_bytes(content: bytes) -> bool:
+    """Validate image file by checking magic bytes, not just Content-Type header."""
+    for magic, _ in IMAGE_MAGIC_BYTES.items():
+        if content[:len(magic)] == magic:
+            return True
+    return False
 
 # Lazy load AI models only when needed
 _ai_models_loaded = False
@@ -528,7 +997,7 @@ async def process_uploaded_image(file: UploadFile) -> tuple:
     Validate and process uploaded image.
     Returns tuple of (temp_file_path, PIL_Image).
     """
-    # Validate content type
+    # Validate content type header (first layer)
     if file.content_type not in ALLOWED_IMAGE_TYPES:
         raise HTTPException(
             status_code=400,
@@ -543,20 +1012,26 @@ async def process_uploaded_image(file: UploadFile) -> tuple:
     if len(content) > MAX_IMAGE_SIZE:
         raise HTTPException(
             status_code=413,
-            detail=f"Dosya cok buyuk ({file_size_mb:.1f} MB). Maksimum: 100 MB. Ipucu: Gorseli sikistirin veya boyutunu kucultun."
+            detail=f"Dosya cok buyuk ({file_size_mb:.1f} MB). Maksimum: 10 MB."
         )
+
+    # Validate magic bytes (second layer - prevents Content-Type spoofing)
+    if not validate_image_magic_bytes(content):
+        raise HTTPException(
+            status_code=400,
+            detail="Dosya icerigi gecerli bir gorsel degil. Dosya basligi dogrulanamadi."
+        )
+
+    # Open as PIL Image (third layer - actual image parsing)
+    try:
+        pil_image = Image.open(io.BytesIO(content)).convert('RGB')
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Gorsel acilamadi: {str(e)}")
 
     # Save to temp file
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
     temp_file.write(content)
     temp_file.close()
-
-    # Open as PIL Image
-    try:
-        pil_image = Image.open(io.BytesIO(content)).convert('RGB')
-    except Exception as e:
-        os.unlink(temp_file.name)
-        raise HTTPException(status_code=400, detail=f"Gorsel acilamadi: {str(e)}")
 
     return temp_file.name, pil_image
 
@@ -585,44 +1060,93 @@ def get_image_embedding_for_search(image_path: str) -> list:
 
 from utils.settings_manager import get_rate_limit_value as _get_rl_value
 
+
+def encode_query_image(temp_path: str) -> dict:
+    """
+    Encode a query image into all visual vectors + OCR text using ai.py models.
+    Returns dict with clip_vec, dino_vec, color_vec, ocr_text.
+    """
+    _load_ai_models()
+
+    from ai import dinov2_model, dinov2_preprocess, device as ai_device
+
+    pil_img = Image.open(temp_path).convert('RGB')
+
+    # CLIP embedding
+    clip_tensor = _clip_preprocess(pil_img).unsqueeze(0).to(_device)
+    if _device == 'cuda' or (hasattr(_device, 'type') and getattr(_device, 'type', '') == 'cuda'):
+        clip_tensor = clip_tensor.half()
+    with torch.inference_mode():
+        clip_feat = _clip_model.encode_image(clip_tensor)
+        clip_feat /= clip_feat.norm(dim=-1, keepdim=True)
+        clip_vec = clip_feat.float().cpu().squeeze().tolist()
+
+    # DINOv2 embedding
+    dino_tensor = dinov2_preprocess(pil_img).unsqueeze(0).to(ai_device)
+    if str(ai_device) == 'cuda':
+        dino_tensor = dino_tensor.half()
+    with torch.inference_mode():
+        dino_vec = dinov2_model(dino_tensor).float().flatten().tolist()
+
+    # Color histogram (8x8x8 HSV = 512-dim, matching ai.py)
+    import cv2
+    import numpy as np
+    color_vec = None
+    try:
+        cv_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+        hsv_img = cv2.cvtColor(cv_img, cv2.COLOR_BGR2HSV)
+        hist = cv2.calcHist([hsv_img], [0, 1, 2], None, [8, 8, 8], [0, 180, 0, 256, 0, 256])
+        cv2.normalize(hist, hist)
+        color_vec = hist.flatten().tolist()
+    except Exception:
+        pass
+
+    # OCR text extraction
+    ocr_text = ""
+    try:
+        ocr_text = extract_ocr_text(temp_path) or ""
+    except Exception:
+        pass
+
+    return {
+        "clip_vec": clip_vec,
+        "dino_vec": dino_vec,
+        "color_vec": color_vec,
+        "ocr_text": ocr_text,
+    }
+
 @app.post("/api/search-by-image", tags=["Image Search"])
 @limiter.limit(lambda: _get_rl_value("rate_limit.public_search", "10/minute"))
 async def search_by_image(
     request: Request,
     image: UploadFile = File(..., description="Aranacak logo/marka gorseli"),
+    name: Optional[str] = Form(None, description="Optional trademark name for combined search"),
     classes: Optional[str] = Form(None, description="Nice siniflari (virgülle ayrilmis, orn: 9,35,42)"),
     limit: int = Form(MAX_RESULTS, description=f"Maksimum sonuc sayisi (max {MAX_RESULTS})")
 ):
     """
     Search for similar trademarks by uploading an image.
+    Routes through score_pair() for unified scoring.
 
-    This endpoint:
-    1. Accepts an uploaded image file
-    2. Generates CLIP embedding for the image
-    3. Searches database for visually similar trademarks
-    4. Returns results ranked by image similarity
+    Supports image-only and image+text (combined) modes.
     """
     import psycopg2
     import psycopg2.extras
 
-    # Process uploaded image
     temp_path, pil_image = await process_uploaded_image(image)
 
     try:
-        # Generate embedding for uploaded image
-        query_embedding = get_image_embedding_for_search(temp_path)
-
         # Parse classes if provided
         class_list = []
         if classes:
             try:
                 class_list = [int(c.strip()) for c in classes.split(",") if c.strip()]
-                # Allow classes 1-45 and Class 99 (Global Brand)
                 class_list = [c for c in class_list if (1 <= c <= 45) or c == GLOBAL_CLASS]
             except ValueError:
                 pass
 
-        # Get DB connection
+        use_unified = settings.use_unified_scoring
+
         conn = psycopg2.connect(
             host=settings.database.host,
             port=settings.database.port,
@@ -632,46 +1156,26 @@ async def search_by_image(
         )
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-        # Convert embedding to string format for pgvector
-        embedding_str = f"[{','.join(str(x) for x in query_embedding)}]"
-
         # Check if we have any image embeddings
         cur.execute("SELECT COUNT(*) as cnt FROM trademarks WHERE image_embedding IS NOT NULL")
         embedding_count = cur.fetchone()['cnt']
 
         if embedding_count == 0:
-            # No embeddings yet - fall back to random sample with warning
             logger.warning("No image embeddings in database - returning sample results")
-
-            if class_list:
-                # Class 99 (Global Brand) covers all classes - include in any class filter
-                cur.execute("""
-                    SELECT id, name, application_no, current_status, nice_class_numbers,
-                           bulletin_no, image_path
-                    FROM trademarks
-                    WHERE (nice_class_numbers && %s::int[] OR 99 = ANY(nice_class_numbers))
-                    AND bulletin_no IS NOT NULL
-                    ORDER BY RANDOM()
-                    LIMIT %s
-                """, (class_list, limit))
-            else:
-                cur.execute("""
-                    SELECT id, name, application_no, current_status, nice_class_numbers,
-                           bulletin_no, image_path
-                    FROM trademarks
-                    WHERE bulletin_no IS NOT NULL
-                    ORDER BY RANDOM()
-                    LIMIT %s
-                """, (limit,))
-
+            class_filter = "AND (nice_class_numbers && %s::int[] OR 99 = ANY(nice_class_numbers))" if class_list else ""
+            q = f"""
+                SELECT id, name, application_no, current_status, nice_class_numbers,
+                       bulletin_no, image_path
+                FROM trademarks
+                WHERE bulletin_no IS NOT NULL {class_filter}
+                ORDER BY RANDOM() LIMIT %s
+            """
+            params = ([class_list, limit] if class_list else [limit])
+            cur.execute(q, params)
             rows = cur.fetchall()
             results = []
             for row in rows:
-                image_url = None
-                img = row.get('image_path')
-                if img:
-                    image_url = f"/api/trademark-image/{img}"
-
+                image_url = f"/api/trademark-image/{row['image_path']}" if row.get('image_path') else None
                 results.append({
                     "id": str(row['id']),
                     "name": row['name'] or '-',
@@ -679,132 +1183,216 @@ async def search_by_image(
                     "status": row['current_status'] or '-',
                     "nice_classes": row['nice_class_numbers'] or [],
                     "image_url": image_url,
-                    "similarity": 0,  # No real similarity without embeddings
-                    "image_similarity": 0,
+                    "similarity": 0, "image_similarity": 0,
                     "risk_level": "unknown",
                     "note": "Gorsel embedding veritabaninda bulunamadi - ornek sonuclar"
                 })
-
             cur.close()
             conn.close()
-
             return {
-                "success": True,
-                "search_type": "image",
+                "success": True, "search_type": "image",
                 "warning": "Gorsel embeddingler henuz olusturulmamis. Ornek sonuclar gosteriliyor.",
                 "total_results": len(results),
                 "classes_filtered": class_list if class_list else None,
                 "results": results
             }
 
-        # ═══════════════════════════════════════════════════════════════
-        # STEP 1: Extract OCR from uploaded query image
-        # ═══════════════════════════════════════════════════════════════
-        query_ocr_text = ""
-        try:
-            query_ocr_text = extract_ocr_text(temp_path)
-            if query_ocr_text:
-                logger.info(f"OCR extracted from query image: '{query_ocr_text[:50]}...'")
-        except Exception as e:
-            logger.warning(f"OCR extraction failed for query image: {e}")
-
-        # ═══════════════════════════════════════════════════════════════
-        # STEP 2: Search database (include logo_ocr_text for comparison)
-        # ═══════════════════════════════════════════════════════════════
-        if class_list:
-            # Class 99 (Global Brand) covers all classes - include in any class filter
-            cur.execute("""
-                SELECT
-                    t.id,
-                    t.name,
-                    t.application_no,
-                    t.current_status,
-                    t.nice_class_numbers,
-                    t.bulletin_no,
-                    t.image_path,
-                    t.logo_ocr_text,
-                    1 - (t.image_embedding <=> %s::vector) AS image_similarity
-                FROM trademarks t
-                WHERE
-                    t.image_embedding IS NOT NULL
-                    AND (t.nice_class_numbers && %s::int[] OR 99 = ANY(t.nice_class_numbers))
-                ORDER BY image_similarity DESC
-                LIMIT %s
-            """, (embedding_str, class_list, limit))
+        # =========================================================
+        # ENCODE QUERY IMAGE — all visual vectors + OCR
+        # =========================================================
+        if use_unified:
+            query_img_data = encode_query_image(temp_path)
+            clip_vec_str = "[" + ",".join(str(x) for x in query_img_data['clip_vec']) + "]"
+            dino_vec_str = "[" + ",".join(str(x) for x in query_img_data['dino_vec']) + "]" if query_img_data.get('dino_vec') else None
+            query_ocr_text = query_img_data.get('ocr_text', '')
         else:
-            cur.execute("""
-                SELECT
-                    t.id,
-                    t.name,
-                    t.application_no,
-                    t.current_status,
-                    t.nice_class_numbers,
-                    t.bulletin_no,
-                    t.image_path,
-                    t.logo_ocr_text,
-                    1 - (t.image_embedding <=> %s::vector) AS image_similarity
-                FROM trademarks t
-                WHERE t.image_embedding IS NOT NULL
-                ORDER BY image_similarity DESC
-                LIMIT %s
-            """, (embedding_str, limit))
+            # Legacy: CLIP only
+            query_embedding = get_image_embedding_for_search(temp_path)
+            clip_vec_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
+            dino_vec_str = None
+            query_ocr_text = ""
+            try:
+                query_ocr_text = extract_ocr_text(temp_path) or ""
+            except Exception:
+                pass
 
-        rows = cur.fetchall()
+        # =========================================================
+        # CANDIDATE RETRIEVAL — CLIP + DINOv2 merged set
+        # =========================================================
+        class_filter_sql = "AND (t.nice_class_numbers && %s::int[] OR 99 = ANY(t.nice_class_numbers))" if class_list else ""
+
+        # Query 1: Top 100 by CLIP cosine distance
+        clip_sql = f"""
+            SELECT t.id, t.name, t.application_no, t.current_status, t.nice_class_numbers,
+                   t.bulletin_no, t.image_path, t.logo_ocr_text, t.name_tr,
+                   t.text_embedding, t.image_embedding, t.dinov2_embedding, t.color_histogram,
+                   t.holder_name, t.holder_tpe_client_id,
+                   t.attorney_name, t.attorney_no, t.registration_no,
+                   t.application_date, t.expiry_date,
+                   1 - (t.image_embedding <=> %s::halfvec) AS clip_sim
+            FROM trademarks t
+            WHERE t.image_embedding IS NOT NULL {class_filter_sql}
+            ORDER BY t.image_embedding <=> %s::halfvec
+            LIMIT 100
+        """
+        clip_params = [clip_vec_str]
+        if class_list:
+            clip_params.append(class_list)
+        clip_params.append(clip_vec_str)
+        cur.execute(clip_sql, clip_params)
+        clip_rows = {str(r['id']): r for r in cur.fetchall()}
+
+        # Query 2: Top 100 by DINOv2 cosine distance (if available)
+        dino_rows = {}
+        if use_unified and dino_vec_str:
+            dino_sql = f"""
+                SELECT t.id, t.name, t.application_no, t.current_status, t.nice_class_numbers,
+                       t.bulletin_no, t.image_path, t.logo_ocr_text, t.name_tr,
+                       t.text_embedding, t.image_embedding, t.dinov2_embedding, t.color_histogram,
+                       t.holder_name, t.holder_tpe_client_id,
+                       t.attorney_name, t.attorney_no, t.registration_no,
+                       t.application_date, t.expiry_date,
+                       1 - (t.dinov2_embedding <=> %s::halfvec) AS dino_sim
+                FROM trademarks t
+                WHERE t.dinov2_embedding IS NOT NULL {class_filter_sql}
+                ORDER BY t.dinov2_embedding <=> %s::halfvec
+                LIMIT 100
+            """
+            dino_params = [dino_vec_str]
+            if class_list:
+                dino_params.append(class_list)
+            dino_params.append(dino_vec_str)
+            cur.execute(dino_sql, dino_params)
+            dino_rows = {str(r['id']): r for r in cur.fetchall()}
+
+        # Merge both sets, deduplicate
+        merged = {**dino_rows, **clip_rows}  # clip_rows takes priority for shared keys
+
+        # If name provided, also encode text for combined scoring
+        query_text_vec = None
+        has_name = bool(name and name.strip())
+        if has_name:
+            from ai import get_text_embedding_cached
+            query_text_vec = get_text_embedding_cached(name)
+
         cur.close()
         conn.close()
 
-        # ═══════════════════════════════════════════════════════════════
-        # STEP 3: Build results with OCR-enhanced scoring
-        # ═══════════════════════════════════════════════════════════════
+        # =========================================================
+        # SCORE EACH CANDIDATE
+        # =========================================================
+        import numpy as np
+
+        def _cosine(a, b_raw):
+            if a is None or b_raw is None:
+                return 0.0
+            a_arr = np.array(a, dtype=np.float32)
+            if isinstance(b_raw, str):
+                b_arr = np.array([float(x) for x in b_raw.strip('[]').split(',')], dtype=np.float32)
+            else:
+                b_arr = np.array(list(b_raw), dtype=np.float32)
+            dot = np.dot(a_arr, b_arr)
+            norms = np.linalg.norm(a_arr) * np.linalg.norm(b_arr)
+            return float(dot / norms) if norms > 0 else 0.0
+
         results = []
-        for row in rows:
-            image_url = None
-            img = row.get('image_path')
-            if img:
-                image_url = f"/api/trademark-image/{img}"
+        for tid, row in merged.items():
+            candidate_name = row['name'] or ""
+            candidate_ocr = (row.get('logo_ocr_text') or "").strip()
+            image_url = f"/api/trademark-image/{row['image_path']}" if row.get('image_path') else None
 
-            # Get raw image similarity
-            raw_image_sim = float(row.get('image_similarity', 0))
+            if use_unified:
+                # Compute visual sub-scores from full candidate data
+                clip_sim = _cosine(query_img_data['clip_vec'], row.get('image_embedding'))
+                dino_sim = _cosine(query_img_data.get('dino_vec'), row.get('dinov2_embedding'))
+                color_sim = _cosine(query_img_data.get('color_vec'), row.get('color_histogram'))
 
-            # Get trademark's stored OCR text
-            trademark_ocr_text = row.get('logo_ocr_text') or ""
+                vis_sim = calculate_visual_similarity(
+                    clip_sim=clip_sim, dinov2_sim=dino_sim, color_sim=color_sim,
+                    ocr_text_a=query_ocr_text, ocr_text_b=candidate_ocr,
+                )
 
-            # Unified visual similarity (OCR compares logo text vs logo text ONLY)
-            from risk_engine import calculate_visual_similarity, get_risk_level as _get_risk_level
-            final_score = calculate_visual_similarity(
-                clip_sim=raw_image_sim,
-                ocr_text_a=query_ocr_text,
-                ocr_text_b=trademark_ocr_text,
-            )
+                # Text signals (if name provided)
+                text_sim = 0.0
+                semantic_sim = 0.0
+                phon_sim = 0.0
+                if has_name:
+                    from risk_engine import calculate_name_similarity
+                    text_sim = calculate_name_similarity(name, candidate_name)
+                    semantic_sim = _cosine(query_text_vec, row.get('text_embedding'))
+                    # Simple phonetic: dmetaphone not available in Python, use text_sim > 0.8 as proxy
+                    phon_sim = 0.0
 
-            # Compute OCR similarity for display
-            from difflib import SequenceMatcher
-            ocr_sim = 0.0
-            if query_ocr_text and trademark_ocr_text:
-                ocr_sim = SequenceMatcher(None, query_ocr_text.lower().strip(), trademark_ocr_text.lower().strip()).ratio()
+                score_breakdown = score_pair(
+                    query_name=name or "",
+                    candidate_name=candidate_name,
+                    text_sim=text_sim,
+                    semantic_sim=semantic_sim,
+                    visual_sim=vis_sim,
+                    phonetic_sim=phon_sim,
+                    candidate_translations={'name_tr': row.get('name_tr') or ''}
+                )
 
-            results.append({
-                "id": str(row['id']),
-                "name": row['name'] or '-',
-                "application_no": row['application_no'],
-                "status": row['current_status'] or '-',
-                "nice_classes": row['nice_class_numbers'] or [],
-                "image_url": image_url,
-                "similarity": round(final_score * 100, 1),
-                "image_similarity": round(raw_image_sim * 100, 1),
-                "raw_image_score": round(raw_image_sim * 100, 1),
-                "ocr_boost": round(ocr_sim * 0.20 * 100, 1),
-                "ocr_similarity": round(ocr_sim * 100, 1),
-                "final_score": final_score,
-                "risk_level": _get_risk_level(final_score)
-            })
+                total = score_breakdown['total']
 
-        # Re-sort by final score (OCR boost may change ranking)
-        results.sort(key=lambda x: x['final_score'], reverse=True)
+                results.append({
+                    "id": tid,
+                    "name": candidate_name or '-',
+                    "name_tr": row.get('name_tr') or None,
+                    "application_no": row['application_no'],
+                    "status": row['current_status'] or '-',
+                    "nice_classes": row['nice_class_numbers'] or [],
+                    "image_url": image_url,
+                    "application_date": str(row['application_date']) if row.get('application_date') else None,
+                    "expiry_date": str(row['expiry_date']) if row.get('expiry_date') else None,
+                    "similarity": round(total * 100, 1),
+                    "image_similarity": round(clip_sim * 100, 1),
+                    "visual_similarity": round(vis_sim * 100, 1),
+                    "text_similarity": round(text_sim * 100, 1) if has_name else None,
+                    "final_score": total,
+                    "risk_level": risk_get_risk_level(total),
+                    "scores": score_breakdown,
+                })
+            else:
+                # --- LEGACY SCORING ---
+                raw_image_sim = float(row.get('clip_sim', 0) or row.get('dino_sim', 0) or 0)
+                final_score = calculate_visual_similarity(
+                    clip_sim=raw_image_sim,
+                    ocr_text_a=query_ocr_text,
+                    ocr_text_b=candidate_ocr,
+                )
+                from difflib import SequenceMatcher
+                ocr_sim = 0.0
+                if query_ocr_text and candidate_ocr:
+                    ocr_sim = SequenceMatcher(None, query_ocr_text.lower().strip(), candidate_ocr.lower().strip()).ratio()
+
+                results.append({
+                    "id": tid,
+                    "name": candidate_name or '-',
+                    "name_tr": row.get('name_tr') or None,
+                    "application_no": row['application_no'],
+                    "status": row['current_status'] or '-',
+                    "nice_classes": row['nice_class_numbers'] or [],
+                    "image_url": image_url,
+                    "application_date": str(row['application_date']) if row.get('application_date') else None,
+                    "expiry_date": str(row['expiry_date']) if row.get('expiry_date') else None,
+                    "similarity": round(final_score * 100, 1),
+                    "image_similarity": round(raw_image_sim * 100, 1),
+                    "raw_image_score": round(raw_image_sim * 100, 1),
+                    "ocr_boost": round(ocr_sim * 0.20 * 100, 1),
+                    "ocr_similarity": round(ocr_sim * 100, 1),
+                    "final_score": final_score,
+                    "risk_level": risk_get_risk_level(final_score),
+                })
+
+        # Sort by score and limit
+        results.sort(key=lambda x: x.get('final_score', 0), reverse=True)
+        results = results[:limit]
 
         return {
             "success": True,
-            "search_type": "image",
+            "search_type": "combined" if has_name else "image",
+            "scoring_engine": "unified" if use_unified else "legacy",
             "ocr_enabled": True,
             "query_ocr_text": query_ocr_text[:100] if query_ocr_text else None,
             "total_results": len(results),
@@ -813,7 +1401,6 @@ async def search_by_image(
         }
 
     finally:
-        # Clean up temp file
         if os.path.exists(temp_path):
             os.unlink(temp_path)
 
@@ -866,600 +1453,9 @@ from fastapi import Query
 from typing import Optional, List
 from pydantic import BaseModel, Field
 
-@app.get("/api/search/simple", tags=["Search"])
-@limiter.limit(lambda: _get_rl_value("rate_limit.public_search", "10/minute"))
-async def simple_search(
-    request: Request,
-    q: str = Query(..., description="Trademark name to search"),
-    limit: int = Query(MAX_RESULTS, ge=1, le=MAX_RESULTS, description="Number of results (max 10)"),
-    current_user: CurrentUser = Depends(get_current_user)
-):
-    """
-    Simple trademark search.
-    Returns similar trademarks from database.
-    Requires authentication.
-    """
-    import os
-    import psycopg2
-    import psycopg2.extras
 
-    try:
-        conn = psycopg2.connect(
-            host=settings.database.host,
-            port=settings.database.port,
-            database=settings.database.name,
-            user=settings.database.user,
-            password=settings.database.password
-        )
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
-        # Normalize query for Turkish character matching
-        q_normalized = normalize_turkish(q)
-
-        # SQL function to normalize Turkish characters
-        normalize_sql = """
-            LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-            REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(t.name,
-            'ğ','g'),'Ğ','g'),'ı','i'),'İ','i'),'ö','o'),'Ö','o'),
-            'ü','u'),'Ü','u'),'ş','s'),'Ş','s'),'ç','c'),'Ç','c'))
-        """
-
-        # Fetch 100 candidates, then apply comprehensive scoring
-        cur.execute(f"""
-            SELECT
-                t.id,
-                t.application_no,
-                t.name,
-                t.current_status,
-                t.nice_class_numbers,
-                t.application_date,
-                t.bulletin_no,
-                t.image_path,
-                t.holder_name,
-                t.holder_tpe_client_id,
-                GREATEST(
-                    similarity(LOWER(t.name), LOWER(%s)),
-                    similarity({normalize_sql}, LOWER(%s)),
-                    CASE WHEN LOWER(t.name) LIKE LOWER(%s) THEN 0.9 ELSE 0 END,
-                    CASE WHEN {normalize_sql} LIKE LOWER(%s) THEN 0.9 ELSE 0 END
-                ) as score
-            FROM trademarks t
-            WHERE
-                LOWER(t.name) LIKE LOWER(%s)
-                OR {normalize_sql} LIKE LOWER(%s)
-                OR similarity(LOWER(t.name), LOWER(%s)) > 0.2
-                OR similarity({normalize_sql}, LOWER(%s)) > 0.2
-            ORDER BY score DESC, t.name
-            LIMIT 100
-        """, (q, q_normalized, f'%{q}%', f'%{q_normalized}%',
-              f'%{q}%', f'%{q_normalized}%', q, q_normalized))
-
-        rows = cur.fetchall()
-        cur.close()
-        conn.close()
-
-        results = []
-        for row in rows:
-            # Generate image URL
-            image_path = row.get('image_path')
-            app_no = row['application_no']
-
-            image_url = None
-            if image_path:
-                image_url = f"/api/trademark-image/{image_path}"
-            elif app_no:
-                safe_app_no = app_no.replace('/', '_')
-                image_url = f"/api/trademark-image/{safe_app_no}"
-
-            # Use comprehensive scoring for consistency
-            target_name = row['name'] or ""
-            scoring = calculate_comprehensive_score(q, target_name)
-            final_score = scoring['final_score']
-
-            results.append({
-                "id": row['id'],
-                "name": row['name'],
-                "application_no": app_no,
-                "nice_classes": row['nice_class_numbers'] or [],
-                "current_status": row['current_status'],
-                "application_date": str(row['application_date']) if row['application_date'] else None,
-                "holder_name": row.get('holder_name'),
-                "holder_tpe_client_id": row.get('holder_tpe_client_id'),
-                "bulletin_no": row.get('bulletin_no'),
-                "image_url": image_url,
-                "score": round(final_score, 4),
-                "risk_level": scoring['risk_level']
-            })
-
-        # Re-sort by comprehensive score and limit to requested count
-        results.sort(key=lambda x: x['score'], reverse=True)
-        results = results[:limit]
-
-        return {
-            "query": q,
-            "count": len(results),
-            "results": results
-        }
-
-    except Exception as e:
-        logger.error(f"Search error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ==========================================
-# UNIFIED SEARCH (Form Data with Optional Image)
-# ==========================================
-
-@app.post("/api/search/unified", tags=["Unified Search"])
-@limiter.limit(lambda: _get_rl_value("rate_limit.public_search", "10/minute"))
-async def unified_search(
-    request: Request,
-    name: Optional[str] = Form(None),
-    image: Optional[UploadFile] = File(None),
-    classes: Optional[str] = Form(None),
-    goods_description: Optional[str] = Form(None),
-    limit: int = Form(MAX_RESULTS)
-):
-    """
-    Unified search endpoint supporting text, image, or combined search.
-
-    Accepts multipart form data with:
-    - name: Trademark name (optional if image provided)
-    - image: Logo image file (optional)
-    - classes: Comma-separated Nice class numbers, e.g., "9,35,42"
-    - goods_description: For auto class suggestion
-    - limit: Max results (default 10)
-    """
-    import time
-    import tempfile
-    import psycopg2
-    import psycopg2.extras
-
-    start_time = time.time()
-
-    # Parse classes from comma-separated string
-    class_list = []
-    if classes:
-        try:
-            class_list = [int(c.strip()) for c in classes.split(",") if c.strip()]
-            # Allow classes 1-45 and Class 99 (Global Brand)
-            class_list = [c for c in class_list if (1 <= c <= 45) or c == GLOBAL_CLASS]
-        except ValueError:
-            pass
-
-    # Check what we have to search with
-    has_name = bool(name and name.strip())
-    has_image = image is not None and image.filename
-
-    # Must have at least name or image
-    if not has_name and not has_image:
-        raise HTTPException(status_code=400, detail="Marka adi veya gorsel gerekli")
-
-    # Initialize
-    image_embedding = None
-    temp_path = None
-    search_type = "text"
-    warning_msg = None
-
-    try:
-        # =========================================================
-        # PROCESS IMAGE IF PROVIDED
-        # =========================================================
-        if has_image:
-            # Validate file type
-            content_type = image.content_type or ""
-            if not content_type.startswith("image/"):
-                raise HTTPException(status_code=400, detail="Gecersiz dosya turu. Sadece gorsel dosyalari kabul edilir.")
-
-            # Read and validate size
-            content = await image.read()
-            if len(content) > MAX_IMAGE_SIZE:
-                raise HTTPException(status_code=400, detail=f"Dosya cok buyuk. Maksimum {MAX_IMAGE_SIZE // (1024*1024)}MB.")
-
-            # Save to temp file and get embedding
-            try:
-                _load_ai_models()
-
-                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
-                temp_file.write(content)
-                temp_file.close()
-                temp_path = temp_file.name
-
-                # Get CLIP embedding
-                from PIL import Image as PILImage
-                import torch
-
-                pil_image = PILImage.open(temp_path).convert("RGB")
-                image_tensor = _clip_preprocess(pil_image).unsqueeze(0).to(_device)
-
-                # Always convert to half precision since model is loaded in FP16
-                if _device == 'cuda' or (hasattr(_device, 'type') and _device.type == 'cuda'):
-                    image_tensor = image_tensor.half()
-
-                with torch.no_grad():
-                    image_embedding = _clip_model.encode_image(image_tensor)
-                    image_embedding = image_embedding / image_embedding.norm(dim=-1, keepdim=True)
-                    image_embedding = image_embedding.cpu().float().numpy().flatten().tolist()
-
-                search_type = "combined" if has_name else "image"
-
-            except Exception as e:
-                logger.error(f"Image processing error: {e}")
-                warning_msg = "Gorsel islenemedi, sadece metin aramasi yapilacak."
-                has_image = False
-                search_type = "text"
-
-        # =========================================================
-        # AUTO CLASS SUGGESTION (if no classes and description provided)
-        # =========================================================
-        auto_suggested = []
-        classes_were_auto_suggested = False
-
-        if not class_list and goods_description and len(goods_description) >= 10:
-            try:
-                suggestions = get_class_suggestions_internal(
-                    goods_description=goods_description,
-                    trademark_name=name or "",
-                    limit=5
-                )
-                top_suggestions = [s for s in suggestions if s['similarity'] > 0.3][:3]
-
-                if top_suggestions:
-                    class_list = [s['class_number'] for s in top_suggestions]
-                    classes_were_auto_suggested = True
-                    auto_suggested = top_suggestions
-                    logger.info(f"Auto-suggested classes: {class_list}")
-            except Exception as e:
-                logger.error(f"Class suggestion failed: {e}")
-
-        # =========================================================
-        # DATABASE SEARCH
-        # =========================================================
-        conn = psycopg2.connect(
-            host=settings.database.host,
-            port=settings.database.port,
-            database=settings.database.name,
-            user=settings.database.user,
-            password=settings.database.password
-        )
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
-        results = []
-
-        if has_image and image_embedding:
-            # Check if we have image embeddings in DB
-            cur.execute("SELECT COUNT(*) FROM trademarks WHERE image_embedding IS NOT NULL")
-            embedding_count = cur.fetchone()['count']
-
-            if embedding_count == 0:
-                # No embeddings - fall back to text search or return sample results
-                warning_msg = "Gorsel embeddingler henuz olusturulmamis. Metin aramasi yapiliyor."
-
-                if has_name:
-                    # Do text search instead
-                    search_type = "text"
-                    has_image = False
-                else:
-                    # Return sample results
-                    class_filter = "AND (nice_class_numbers && %s::integer[] OR 99 = ANY(nice_class_numbers))" if class_list else ""
-                    query = f"""
-                        SELECT id, application_no, name, current_status, nice_class_numbers,
-                               application_date, bulletin_no, image_path
-                        FROM trademarks
-                        WHERE name IS NOT NULL {class_filter}
-                        ORDER BY RANDOM()
-                        LIMIT %s
-                    """
-                    params = [class_list, limit] if class_list else [limit]
-                    cur.execute(query, params)
-                    rows = cur.fetchall()
-
-                    for row in rows:
-                        results.append({
-                            "id": str(row['id']),
-                            "name": row['name'],
-                            "application_no": row['application_no'],
-                            "status": row['current_status'] or 'Bilinmiyor',
-                            "nice_classes": row['nice_class_numbers'] or [],
-                            "bulletin_no": row.get('bulletin_no'),
-                            "image_url": get_image_url(row.get('image_path'), row['application_no'], row.get('bulletin_no')),
-                            "similarity": 0,
-                            "image_similarity": 0,
-                            "text_similarity": None,
-                            "note": "Gorsel embedding veritabaninda bulunamadi - ornek sonuclar"
-                        })
-            else:
-                # Do image search
-                embedding_str = "[" + ",".join(map(str, image_embedding)) + "]"
-
-                class_filter = "AND (nice_class_numbers && %s::integer[] OR 99 = ANY(nice_class_numbers))" if class_list else ""
-
-                # Normalize query for Turkish character matching
-                name_normalized = normalize_turkish(name) if has_name else name
-
-                # SQL function to normalize Turkish characters in database names
-                normalize_sql = """
-                    LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-                    REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(name,
-                    'ğ','g'),'Ğ','g'),'ı','i'),'İ','i'),'ö','o'),'Ö','o'),
-                    'ü','u'),'Ü','u'),'ş','s'),'Ş','s'),'ç','c'),'Ç','c'))
-                """
-
-                if has_name:
-                    # Combined search with Turkish normalization
-                    query = f"""
-                        SELECT id, application_no, name, current_status, nice_class_numbers,
-                               application_date, bulletin_no, image_path,
-                               1 - (image_embedding <=> %s::vector) AS image_sim,
-                               GREATEST(
-                                   similarity(LOWER(name), LOWER(%s)),
-                                   similarity({normalize_sql}, LOWER(%s))
-                               ) AS text_sim,
-                               (0.4 * (1 - (image_embedding <=> %s::vector)) +
-                                0.6 * GREATEST(
-                                    similarity(LOWER(name), LOWER(%s)),
-                                    similarity({normalize_sql}, LOWER(%s))
-                                )) AS combined_score
-                        FROM trademarks
-                        WHERE image_embedding IS NOT NULL {class_filter}
-                        ORDER BY combined_score DESC
-                        LIMIT 100
-                    """
-                    # Fetch 100 candidates for comprehensive scoring, return top N
-                    params = [embedding_str, name, name_normalized, embedding_str, name, name_normalized]
-                    if class_list:
-                        params.append(class_list)
-                else:
-                    # Image only search - include logo_ocr_text for OCR comparison
-                    query = f"""
-                        SELECT id, application_no, name, current_status, nice_class_numbers,
-                               application_date, bulletin_no, image_path, logo_ocr_text,
-                               1 - (image_embedding <=> %s::vector) AS image_sim
-                        FROM trademarks
-                        WHERE image_embedding IS NOT NULL {class_filter}
-                        ORDER BY image_sim DESC
-                        LIMIT %s
-                    """
-                    params = [embedding_str]
-                    if class_list:
-                        params.append(class_list)
-                    params.append(limit)
-
-                    # Extract OCR from uploaded query image for comparison
-                    query_ocr_text = ""
-                    if temp_path:
-                        try:
-                            query_ocr_text = extract_ocr_text(temp_path)
-                            if query_ocr_text:
-                                logger.info(f"OCR from query image: '{query_ocr_text[:50]}...'")
-                        except Exception as e:
-                            logger.warning(f"OCR extraction failed: {e}")
-
-                cur.execute(query, params)
-                rows = cur.fetchall()
-
-                for row in rows:
-                    # Get raw image similarity
-                    raw_image_sim = float(row.get('image_sim', 0)) if row.get('image_sim') else 0
-
-                    if has_name:
-                        # ═══════════════════════════════════════════════════════════
-                        # COMBINED SEARCH (text + image)
-                        # ═══════════════════════════════════════════════════════════
-                        image_sim = adjust_image_similarity(raw_image_sim)
-                        pg_text_sim = float(row.get('text_sim', 0)) if row.get('text_sim') else 0
-
-                        # COMPREHENSIVE MULTI-FACTOR SCORING
-                        target_name = row['name'] or ""
-                        scoring = calculate_comprehensive_score(
-                            query_text=name,
-                            result_text=target_name,
-                            include_details=False
-                        )
-                        text_sim = scoring['final_score']
-
-                        # Combined score with smart weighting
-                        combined_scoring = calculate_combined_score(
-                            text_similarity=text_sim,
-                            image_similarity=image_sim,
-                            search_type='combined'
-                        )
-                        combined = combined_scoring['overall_score']
-
-                        results.append({
-                            "id": str(row['id']),
-                            "name": row['name'],
-                            "application_no": row['application_no'],
-                            "status": row['current_status'] or 'Bilinmiyor',
-                            "nice_classes": row['nice_class_numbers'] or [],
-                            "bulletin_no": row.get('bulletin_no'),
-                            "image_url": get_image_url(row.get('image_path'), row['application_no'], row.get('bulletin_no')),
-                            "similarity": round(combined * 100, 1),
-                            "image_similarity": round(image_sim * 100, 1),
-                            "raw_image_score": round(raw_image_sim * 100, 1),
-                            "text_similarity": round(text_sim * 100, 1),
-                            "risk_level": combined_scoring['risk_level'],
-                            "scoring_factors": scoring['factors']
-                        })
-                    else:
-                        # ═══════════════════════════════════════════════════════════
-                        # IMAGE-ONLY SEARCH with OCR enhancement
-                        # ═══════════════════════════════════════════════════════════
-                        trademark_ocr_text = row.get('logo_ocr_text') or ""
-
-                        # Unified visual similarity (OCR compares logo text vs logo text ONLY)
-                        from risk_engine import calculate_visual_similarity, get_risk_level as _get_risk_level
-                        final_score = calculate_visual_similarity(
-                            clip_sim=raw_image_sim,
-                            ocr_text_a=query_ocr_text,
-                            ocr_text_b=trademark_ocr_text,
-                        )
-                        from difflib import SequenceMatcher
-                        ocr_sim = 0.0
-                        if query_ocr_text and trademark_ocr_text:
-                            ocr_sim = SequenceMatcher(None, query_ocr_text.lower().strip(), trademark_ocr_text.lower().strip()).ratio()
-
-                        results.append({
-                            "id": str(row['id']),
-                            "name": row['name'],
-                            "application_no": row['application_no'],
-                            "status": row['current_status'] or 'Bilinmiyor',
-                            "nice_classes": row['nice_class_numbers'] or [],
-                            "bulletin_no": row.get('bulletin_no'),
-                            "image_url": get_image_url(row.get('image_path'), row['application_no'], row.get('bulletin_no')),
-                            "similarity": round(final_score * 100, 1),
-                            "image_similarity": round(raw_image_sim * 100, 1),
-                            "raw_image_score": round(raw_image_sim * 100, 1),
-                            "ocr_boost": round(ocr_sim * 0.20 * 100, 1),
-                            "ocr_similarity": round(ocr_sim * 100, 1),
-                            "risk_level": _get_risk_level(final_score)
-                        })
-
-        # Text search (no image or fallback)
-        if not results and has_name:
-            search_type = "text"
-
-            class_filter = "AND (nice_class_numbers && %s::integer[] OR 99 = ANY(nice_class_numbers))" if class_list else ""
-
-            # Normalize the search query for Turkish character matching
-            name_normalized = normalize_turkish(name)
-
-            # SQL function to normalize Turkish characters in database names
-            # This allows "dogan" to match "doğan" in the database
-            normalize_sql = """
-                LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-                REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(name,
-                'ğ','g'),'Ğ','g'),'ı','i'),'İ','i'),'ö','o'),'Ö','o'),
-                'ü','u'),'Ü','u'),'ş','s'),'Ş','s'),'ç','c'),'Ç','c'))
-            """
-
-            query = f"""
-                SELECT id, application_no, name, current_status, nice_class_numbers,
-                       application_date, bulletin_no, image_path,
-                       GREATEST(
-                           similarity(LOWER(name), LOWER(%s)),
-                           similarity({normalize_sql}, LOWER(%s)),
-                           CASE WHEN LOWER(name) LIKE LOWER(%s) THEN 0.9 ELSE 0 END,
-                           CASE WHEN {normalize_sql} LIKE LOWER(%s) THEN 0.9 ELSE 0 END
-                       ) as score
-                FROM trademarks
-                WHERE (
-                    LOWER(name) LIKE LOWER(%s)
-                    OR {normalize_sql} LIKE LOWER(%s)
-                    OR similarity(LOWER(name), LOWER(%s)) > 0.2
-                    OR similarity({normalize_sql}, LOWER(%s)) > 0.2
-                )
-                {class_filter}
-                ORDER BY score DESC
-                LIMIT 100
-            """
-            # Fetch 100 candidates, apply comprehensive scoring, then return top N
-            params = [name, name_normalized, f'%{name}%', f'%{name_normalized}%',
-                      f'%{name}%', f'%{name_normalized}%', name, name_normalized]
-            if class_list:
-                params.append(class_list)
-
-            cur.execute(query, params)
-            rows = cur.fetchall()
-
-            searched_classes_set = set(class_list) if class_list else set()
-
-            for row in rows:
-                result_classes = row['nice_class_numbers'] or []
-                overlap_count = len(searched_classes_set.intersection(set(result_classes))) if searched_classes_set else 0
-                pg_score = float(row['score']) if row['score'] else 0.0
-
-                # COMPREHENSIVE MULTI-FACTOR SCORING
-                # Uses word boundary matching, length ratio, coverage, and IDF
-                # This correctly handles "dogan patent" vs "erdogan patent ofisi"
-                # NOTE: Do NOT pass raw_similarity - let the function calculate it
-                # using SequenceMatcher for consistency with test endpoint
-                target_name = row['name'] or ""
-                scoring = calculate_comprehensive_score(
-                    query_text=name,
-                    result_text=target_name,
-                    include_details=False
-                )
-                score = scoring['final_score']
-
-                results.append({
-                    "id": str(row['id']),
-                    "name": row['name'],
-                    "application_no": row['application_no'],
-                    "status": row['current_status'] or 'Bilinmiyor',
-                    "nice_classes": result_classes,
-                    "bulletin_no": row.get('bulletin_no'),
-                    "image_url": get_image_url(row.get('image_path'), row['application_no'], row.get('bulletin_no')),
-                    "similarity": round(score * 100, 1),
-                    "name_similarity": round(score * 100, 1),
-                    "class_overlap_count": overlap_count,
-                    "risk_level": scoring['risk_level'],
-                    "scoring_factors": scoring['factors']
-                })
-
-        cur.close()
-        conn.close()
-
-        # Re-sort results by similarity after Turkish normalization recalculation
-        results.sort(key=lambda x: x.get('similarity', 0), reverse=True)
-
-        # Apply TOP 10 limit
-        total_found = len(results)
-        results = results[:MAX_RESULTS]
-
-        search_time = (time.time() - start_time) * 1000
-
-        # =========================================================
-        # BUILD RESPONSE
-        # =========================================================
-        response = {
-            "success": True,
-            "results": results,
-            "search_type": search_type,
-            "search_context": {
-                "searched_name": name if has_name else None,
-                "searched_classes": class_list,
-                "total_results": len(results),
-                "total_found": total_found,
-                "search_time_ms": round(search_time, 2)
-            },
-            "classes_were_auto_suggested": classes_were_auto_suggested
-        }
-
-        if auto_suggested:
-            response["auto_suggested_classes"] = [
-                {
-                    "class_number": s['class_number'],
-                    "class_name": s['class_name'],
-                    "similarity_score": round(s['similarity'], 4)
-                }
-                for s in auto_suggested
-            ]
-
-        if warning_msg:
-            response["warning"] = warning_msg
-
-        return response
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Unified search error: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Arama hatasi: {str(e)}")
-    finally:
-        if temp_path and os.path.exists(temp_path):
-            os.unlink(temp_path)
-
-
-# ==========================================
-# Enhanced Search with Auto Class Suggestion
-# ==========================================
-
-# Pydantic models for enhanced search
 class SearchRequest(BaseModel):
-    """Enhanced search request with auto class suggestion."""
+    """Enhanced search request with auto class suggestion and optional image URL."""
     name: str = Field(..., min_length=1, description="Trademark name to search")
     classes: Optional[List[int]] = Field(None, description="Manually selected Nice classes (1-45)")
     goods_description: Optional[str] = Field(
@@ -1475,9 +1471,230 @@ class SearchRequest(BaseModel):
         default=True,
         description="Include class suggestion details in response"
     )
+    image_url: Optional[str] = Field(None, description="Optional image URL for combined text+image search")
+    status: Optional[str] = Field(None, description="Filter by trademark status (e.g. Published, Registered)")
+    attorney_no: Optional[str] = Field(None, description="Filter by attorney number")
     limit: int = Field(20, ge=1, le=100, description="Maximum number of results")
 
 
+
+@app.get("/api/search/simple", tags=["Search"], deprecated=True)
+@limiter.limit(lambda: _get_rl_value("rate_limit.public_search", "10/minute"))
+async def simple_search(
+    request: Request,
+    q: str = Query(..., description="Trademark name to search"),
+    limit: int = Query(MAX_RESULTS, ge=1, le=MAX_RESULTS, description="Number of results (max 10)"),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """
+    DEPRECATED: Use POST /api/search instead.
+    Simple trademark search — internally redirects to enhanced_search with score_pair().
+    """
+    logger.warning("Deprecated /api/search/simple called — redirect to /api/search")
+    search_req = SearchRequest(name=q, limit=limit)
+    result = await enhanced_search(request, search_req)
+
+    # Convert EnhancedSearchResponse to the old simple format
+    simple_results = []
+    for r in result.results:
+        simple_results.append({
+            "id": r.id,
+            "name": r.name,
+            "application_no": r.application_no,
+            "nice_classes": r.nice_classes,
+            "current_status": r.status,
+            "application_date": r.application_date,
+            "holder_name": r.owner,
+            "bulletin_no": r.bulletin_no,
+            "image_url": r.image_url,
+            "score": round(r.similarity / 100, 4),
+            "risk_level": risk_get_risk_level(r.similarity / 100),
+        })
+
+    response = JSONResponse(content={
+        "query": q,
+        "count": len(simple_results),
+        "results": simple_results
+    })
+    response.headers["Deprecation"] = "true"
+    response.headers["Sunset"] = "2026-03-10"
+    return response
+
+
+# ==========================================
+# UNIFIED SEARCH (Form Data with Optional Image)
+# ==========================================
+
+@app.post("/api/search/unified", tags=["Unified Search"], deprecated=True)
+@limiter.limit(lambda: _get_rl_value("rate_limit.public_search", "10/minute"))
+async def unified_search(
+    request: Request,
+    name: Optional[str] = Form(None),
+    image: Optional[UploadFile] = File(None),
+    classes: Optional[str] = Form(None),
+    goods_description: Optional[str] = Form(None),
+    limit: int = Form(MAX_RESULTS)
+):
+    """
+    DEPRECATED: Use POST /api/search (text) or POST /api/search-by-image (image) instead.
+    Internally redirects to the appropriate unified endpoint.
+    """
+    logger.warning("Deprecated /api/search/unified called — redirecting")
+
+    has_image = image is not None and image.filename
+
+    if has_image:
+        # Redirect to image search endpoint
+        result = await search_by_image(
+            request=request, image=image, name=name, classes=classes, limit=limit
+        )
+        if isinstance(result, dict):
+            resp = JSONResponse(content=result)
+        else:
+            resp = result
+    elif name and name.strip():
+        # Redirect to text search endpoint
+        class_list = None
+        if classes:
+            try:
+                class_list = [int(c.strip()) for c in classes.split(",") if c.strip()]
+            except ValueError:
+                class_list = None
+
+        search_req = SearchRequest(
+            name=name,
+            classes=class_list,
+            goods_description=goods_description,
+            limit=limit
+        )
+        enhanced_result = await enhanced_search(request, search_req)
+
+        # Convert EnhancedSearchResponse to unified format
+        results_dicts = []
+        for r in enhanced_result.results:
+            results_dicts.append({
+                "id": r.id, "name": r.name, "application_no": r.application_no,
+                "status": r.status, "nice_classes": r.nice_classes,
+                "bulletin_no": r.bulletin_no, "image_url": r.image_url,
+                "similarity": r.similarity, "name_similarity": r.name_similarity,
+                "risk_level": risk_get_risk_level(r.similarity / 100) if r.similarity else "low",
+            })
+
+        resp = JSONResponse(content={
+            "success": True, "results": results_dicts,
+            "search_type": "text",
+            "search_context": {
+                "searched_name": name,
+                "searched_classes": class_list or [],
+                "total_results": len(results_dicts),
+                "search_time_ms": enhanced_result.search_time_ms,
+            },
+            "classes_were_auto_suggested": enhanced_result.classes_were_auto_suggested,
+        })
+    else:
+        raise HTTPException(status_code=400, detail="Marka adi veya gorsel gerekli")
+
+    if isinstance(resp, JSONResponse):
+        resp.headers["Deprecation"] = "true"
+        resp.headers["Sunset"] = "2026-03-10"
+    return resp
+
+
+# ==========================================
+# LEGACY ROLLBACK ENDPOINTS (temporary, remove after 4 weeks)
+# Force USE_UNIFIED_SCORING=false path for regression testing
+# ==========================================
+
+@app.post("/api/v1/search/legacy", tags=["Legacy"])
+@limiter.limit(f"{settings.auth.api_rate_limit}/minute")
+async def legacy_text_search(request: Request, search_request: SearchRequest):
+    """
+    Temporary legacy rollback endpoint for text search.
+    Always uses calculate_comprehensive_score() regardless of feature flag.
+    Remove after 2026-03-10.
+    """
+    import time
+    import psycopg2
+    import psycopg2.extras
+
+    start_time = time.time()
+    search_classes = search_request.classes or []
+
+    try:
+        conn = psycopg2.connect(
+            host=settings.database.host, port=settings.database.port,
+            database=settings.database.name, user=settings.database.user,
+            password=settings.database.password
+        )
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        name_normalized = normalize_turkish(search_request.name)
+        normalize_sql = """
+            LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+            REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(t.name,
+            'ğ','g'),'Ğ','g'),'ı','i'),'İ','i'),'ö','o'),'Ö','o'),
+            'ü','u'),'Ü','u'),'ş','s'),'Ş','s'),'ç','c'),'Ç','c'))
+        """
+
+        sql = f"""
+            SELECT t.id, t.application_no, t.name, t.current_status,
+                   t.nice_class_numbers, t.application_date, t.registration_date,
+                   t.bulletin_no, t.image_path, t.holder_name,
+                   t.holder_tpe_client_id, t.attorney_name, t.attorney_no,
+                   t.registration_no
+            FROM trademarks t
+            WHERE LOWER(t.name) LIKE LOWER(%s)
+                OR {normalize_sql} LIKE LOWER(%s)
+                OR similarity(LOWER(t.name), LOWER(%s)) > 0.2
+                OR similarity({normalize_sql}, LOWER(%s)) > 0.2
+            ORDER BY GREATEST(
+                similarity(LOWER(t.name), LOWER(%s)),
+                similarity({normalize_sql}, LOWER(%s))
+            ) DESC LIMIT 100
+        """
+        params = [f'%{search_request.name}%', f'%{name_normalized}%',
+                  search_request.name, name_normalized,
+                  search_request.name, name_normalized]
+
+        cur.execute(sql, params)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        results = []
+        for row in rows:
+            target_name = row['name'] or ""
+            scoring = calculate_comprehensive_score(search_request.name, target_name)
+            score = scoring['final_score']
+            results.append({
+                "id": str(row['id']), "name": row['name'],
+                "application_no": row['application_no'],
+                "status": row['current_status'] or 'Bilinmiyor',
+                "nice_classes": row['nice_class_numbers'] or [],
+                "similarity": round(score * 100, 1),
+                "risk_level": scoring['risk_level'],
+                "scoring_engine": "legacy",
+            })
+
+        results.sort(key=lambda x: x['similarity'], reverse=True)
+        results = results[:MAX_RESULTS]
+
+        return {
+            "query": search_request.name,
+            "scoring_engine": "legacy",
+            "total_results": len(results),
+            "search_time_ms": round((time.time() - start_time) * 1000, 2),
+            "results": results
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==========================================
+# Enhanced Search with Auto Class Suggestion
+# ==========================================
+
+# Pydantic models for enhanced search
 class AutoSuggestedClass(BaseModel):
     """Class that was auto-suggested for the search."""
     class_number: int
@@ -1506,7 +1723,10 @@ class TrademarkResult(BaseModel):
 
     # Ownership
     owner: Optional[str] = Field(None, description="Trademark owner/applicant name")
-    attorney: Optional[str] = Field(None, description="Patent attorney/representative")
+    holder_tpe_client_id: Optional[str] = Field(None, description="Holder TPE Client ID")
+    attorney: Optional[str] = Field(None, description="Patent attorney/representative name")
+    attorney_no: Optional[str] = Field(None, description="Patent attorney number (unique ID)")
+    registration_no: Optional[str] = Field(None, description="Registration number")
 
     # Publication
     bulletin_no: Optional[str] = Field(None, description="Publication bulletin number")
@@ -1664,33 +1884,14 @@ def get_class_suggestions_internal(goods_description: str, trademark_name: str =
 async def enhanced_search(request: Request, search_request: SearchRequest):
     """
     Enhanced trademark search with auto class suggestion.
+    Routes all scoring through score_pair() for consistent results.
 
-    **Auto-Suggestion Behavior:**
-    - If `classes` is empty/null AND `goods_description` is provided AND `auto_suggest_classes` is true:
-      - System automatically suggests relevant Nice classes based on the description
-      - Only classes with similarity > 0.3 are used (max 3 classes)
-    - If `classes` is provided, those classes are used directly (no auto-suggestion)
-
-    **Example with auto-suggestion:**
-    ```json
-    {
-      "name": "QUICKBITE",
-      "goods_description": "Mobile app for food delivery and restaurant reservations"
-    }
-    ```
-
-    **Example with manual classes:**
-    ```json
-    {
-      "name": "QUICKBITE",
-      "classes": [9, 43]
-    }
-    ```
+    Supports text-only and text+image (via image_url) modes.
     """
     import time
-    import os
     import psycopg2
     import psycopg2.extras
+    from ai import get_text_embedding_cached
 
     start_time = time.time()
 
@@ -1706,14 +1907,11 @@ async def enhanced_search(request: Request, search_request: SearchRequest):
         logger.info(f"Auto-suggesting classes for: {search_request.goods_description[:50]}...")
 
         try:
-            # Get suggestions internally
             suggestions = get_class_suggestions_internal(
                 goods_description=search_request.goods_description,
                 trademark_name=search_request.name,
                 limit=5
             )
-
-            # Use top 3 classes with similarity > 0.3
             top_suggestions = [s for s in suggestions if s['similarity'] > 0.3][:3]
 
             if top_suggestions:
@@ -1729,18 +1927,18 @@ async def enhanced_search(request: Request, search_request: SearchRequest):
                     )
                     for s in top_suggestions
                 ]
-
                 logger.info(f"Auto-suggested classes: {search_classes}")
             else:
                 logger.warning("No classes met similarity threshold (0.3)")
 
         except Exception as e:
             logger.error(f"Class suggestion failed: {e}")
-            # Continue without class filtering rather than failing
 
     # =========================================================
-    # TRADEMARK SEARCH LOGIC
+    # FEATURE FLAG: unified scoring vs legacy
     # =========================================================
+    use_unified = settings.use_unified_scoring
+
     try:
         conn = psycopg2.connect(
             host=settings.database.host,
@@ -1751,7 +1949,6 @@ async def enhanced_search(request: Request, search_request: SearchRequest):
         )
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-        # Normalize query for Turkish character matching
         name_normalized = normalize_turkish(search_request.name)
 
         # SQL function to normalize Turkish characters in database names
@@ -1762,8 +1959,10 @@ async def enhanced_search(request: Request, search_request: SearchRequest):
             'ü','u'),'Ü','u'),'ş','s'),'Ş','s'),'ç','c'),'Ç','c'))
         """
 
-        # Build query with optional class filtering
-        # Enhanced query to fetch all detail fields with Turkish normalization
+        # =========================================================
+        # CANDIDATE RETRIEVAL (3-stage funnel)
+        # Fetch text_embedding, name_tr, logo_ocr_text + visual vectors
+        # =========================================================
         base_select = f"""
             SELECT
                 t.id,
@@ -1777,77 +1976,165 @@ async def enhanced_search(request: Request, search_request: SearchRequest):
                 t.image_path,
                 t.holder_name,
                 t.holder_tpe_client_id,
+                t.attorney_name,
+                t.attorney_no,
+                t.registration_no,
+                t.name_tr,
+                t.logo_ocr_text,
+                t.text_embedding,
+                t.image_embedding,
+                t.dinov2_embedding,
+                t.color_histogram,
                 GREATEST(
                     similarity(LOWER(t.name), LOWER(%s)),
                     similarity({normalize_sql}, LOWER(%s)),
                     CASE WHEN LOWER(t.name) LIKE LOWER(%s) THEN 0.9 ELSE 0 END,
                     CASE WHEN {normalize_sql} LIKE LOWER(%s) THEN 0.9 ELSE 0 END
                 ) as score,
-                GREATEST(
-                    similarity(LOWER(t.name), LOWER(%s)),
-                    similarity({normalize_sql}, LOWER(%s))
-                ) as name_sim
+                (dmetaphone(t.name) = dmetaphone(%s)) as phonetic_match
             FROM trademarks t
         """
 
-        if search_classes:
-            # Filter by Nice classes using array overlap
-            # Class 99 (Global Brand) covers all classes - include in any class filter
-            cur.execute(base_select + f"""
-                WHERE
-                    (LOWER(t.name) LIKE LOWER(%s)
-                     OR {normalize_sql} LIKE LOWER(%s)
-                     OR similarity(LOWER(t.name), LOWER(%s)) > 0.2
-                     OR similarity({normalize_sql}, LOWER(%s)) > 0.2)
-                    AND (t.nice_class_numbers && %s::integer[] OR 99 = ANY(t.nice_class_numbers))
-                ORDER BY score DESC, t.name
-                LIMIT 100
-            """, (search_request.name, name_normalized, f'%{search_request.name}%', f'%{name_normalized}%',
-                  search_request.name, name_normalized,
-                  f'%{search_request.name}%', f'%{name_normalized}%', search_request.name, name_normalized,
-                  search_classes))
-        else:
-            # No class filtering - search all
-            cur.execute(base_select + f"""
-                WHERE
-                    LOWER(t.name) LIKE LOWER(%s)
-                    OR {normalize_sql} LIKE LOWER(%s)
-                    OR similarity(LOWER(t.name), LOWER(%s)) > 0.2
-                    OR similarity({normalize_sql}, LOWER(%s)) > 0.2
-                ORDER BY score DESC, t.name
-                LIMIT 100
-            """, (search_request.name, name_normalized, f'%{search_request.name}%', f'%{name_normalized}%',
-                  search_request.name, name_normalized,
-                  f'%{search_request.name}%', f'%{name_normalized}%', search_request.name, name_normalized))
+        where_clause = f"""
+            WHERE (
+                LOWER(t.name) LIKE LOWER(%s)
+                OR {normalize_sql} LIKE LOWER(%s)
+                OR similarity(LOWER(t.name), LOWER(%s)) > 0.2
+                OR similarity({normalize_sql}, LOWER(%s)) > 0.2
+            )
+        """
 
+        base_params = [
+            search_request.name, name_normalized,
+            f'%{search_request.name}%', f'%{name_normalized}%',
+            search_request.name,
+        ]
+        where_params = [
+            f'%{search_request.name}%', f'%{name_normalized}%',
+            search_request.name, name_normalized,
+        ]
+
+        if search_classes:
+            where_clause += " AND (t.nice_class_numbers && %s::integer[] OR 99 = ANY(t.nice_class_numbers))"
+            where_params.append(search_classes)
+
+        if search_request.status:
+            where_clause += " AND t.current_status = %s"
+            where_params.append(search_request.status)
+
+        if search_request.attorney_no:
+            where_clause += " AND t.attorney_no = %s"
+            where_params.append(search_request.attorney_no)
+
+        order_limit = " ORDER BY score DESC, t.name LIMIT 100"
+
+        cur.execute(base_select + where_clause + order_limit, base_params + where_params)
         rows = cur.fetchall()
-        cur.close()
-        conn.close()
 
         # =========================================================
-        # BUILD RESULTS WITH ALL DETAIL FIELDS
+        # ENCODE QUERY VECTORS
+        # =========================================================
+        query_text_vec = get_text_embedding_cached(search_request.name)
+
+        # Optional image encoding for combined search
+        query_img_data = None
+        if search_request.image_url and use_unified:
+            try:
+                # Download image from URL to temp file
+                import urllib.request
+                temp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
+                urllib.request.urlretrieve(search_request.image_url, temp_img.name)
+                temp_img.close()
+                query_img_data = encode_query_image(temp_img.name)
+                os.unlink(temp_img.name)
+            except Exception as e:
+                logger.warning(f"Image URL processing failed: {e}")
+
+        # =========================================================
+        # SCORE EACH CANDIDATE
         # =========================================================
         searched_classes_set = set(search_classes) if search_classes else set()
         results = []
 
         for row in rows:
-            # Get Nice classes for this result
             result_classes = row['nice_class_numbers'] or []
-
-            # Calculate class overlap count
             overlap_count = len(searched_classes_set.intersection(set(result_classes))) if searched_classes_set else 0
-
-            # CRITICAL FIX: Use multi-factor comprehensive scoring
-            # This applies 4 factors: word match, length ratio, coverage, IDF weight
-            # - "dogan patent" vs "erdogan patent ofisi" = LOW (prefix mismatch)
-            # - "dogan patent" vs "d.p dogan patent" = HIGH (distinctive word match)
             target_name = row['name'] or ""
-            scoring = calculate_comprehensive_score(search_request.name, target_name)
-            score = scoring['final_score']
-            similarity_pct = round(score * 100, 1)
 
-            # Name similarity uses the same comprehensive score
-            name_similarity_pct = similarity_pct
+            if use_unified:
+                # --- UNIFIED SCORING via score_pair() ---
+                pg_text_sim = float(row['score']) if row['score'] else 0.0
+                phon_match = bool(row.get('phonetic_match'))
+
+                # Semantic similarity (text embedding cosine)
+                semantic_sim = 0.0
+                cand_text_emb = row.get('text_embedding')
+                if query_text_vec and cand_text_emb:
+                    try:
+                        import numpy as np
+                        q_arr = np.array(query_text_vec if isinstance(query_text_vec, list) else list(query_text_vec), dtype=np.float32)
+                        # pgvector returns string like '[0.1,0.2,...]', parse it
+                        if isinstance(cand_text_emb, str):
+                            cand_arr = np.array([float(x) for x in cand_text_emb.strip('[]').split(',')], dtype=np.float32)
+                        else:
+                            cand_arr = np.array(list(cand_text_emb), dtype=np.float32)
+                        dot = np.dot(q_arr, cand_arr)
+                        norms = np.linalg.norm(q_arr) * np.linalg.norm(cand_arr)
+                        semantic_sim = float(dot / norms) if norms > 0 else 0.0
+                    except Exception:
+                        semantic_sim = 0.0
+
+                # Visual similarity (only if query has image)
+                vis_sim = 0.0
+                if query_img_data:
+                    try:
+                        import numpy as np
+
+                        def _cosine(a, b_raw):
+                            if a is None or b_raw is None:
+                                return 0.0
+                            a_arr = np.array(a, dtype=np.float32)
+                            if isinstance(b_raw, str):
+                                b_arr = np.array([float(x) for x in b_raw.strip('[]').split(',')], dtype=np.float32)
+                            else:
+                                b_arr = np.array(list(b_raw), dtype=np.float32)
+                            dot = np.dot(a_arr, b_arr)
+                            norms = np.linalg.norm(a_arr) * np.linalg.norm(b_arr)
+                            return float(dot / norms) if norms > 0 else 0.0
+
+                        clip_sim = _cosine(query_img_data['clip_vec'], row.get('image_embedding'))
+                        dino_sim = _cosine(query_img_data['dino_vec'], row.get('dinov2_embedding'))
+                        color_sim = _cosine(query_img_data['color_vec'], row.get('color_histogram'))
+                        candidate_ocr = (row.get('logo_ocr_text') or "").strip()
+
+                        vis_sim = calculate_visual_similarity(
+                            clip_sim=clip_sim,
+                            dinov2_sim=dino_sim,
+                            color_sim=color_sim,
+                            ocr_text_a=query_img_data.get('ocr_text', ''),
+                            ocr_text_b=candidate_ocr,
+                        )
+                    except Exception:
+                        vis_sim = 0.0
+
+                score_breakdown = score_pair(
+                    query_name=search_request.name,
+                    candidate_name=target_name,
+                    text_sim=pg_text_sim,
+                    semantic_sim=semantic_sim,
+                    visual_sim=vis_sim,
+                    phonetic_sim=1.0 if phon_match else 0.0,
+                    candidate_translations={'name_tr': row.get('name_tr') or ''}
+                )
+
+                score_val = score_breakdown['total']
+                similarity_pct = round(score_val * 100, 1)
+
+            else:
+                # --- LEGACY SCORING via calculate_comprehensive_score() ---
+                scoring = calculate_comprehensive_score(search_request.name, target_name)
+                score_val = scoring['final_score']
+                similarity_pct = round(score_val * 100, 1)
 
             results.append(TrademarkResult(
                 id=str(row['id']),
@@ -1859,26 +2146,27 @@ async def enhanced_search(request: Request, search_request: SearchRequest):
                 status_code=get_status_code(row['current_status']),
                 nice_classes=result_classes,
                 owner=row.get('holder_name'),
-                attorney=None,  # TODO: Join with attorneys table when relationship is established
+                holder_tpe_client_id=row.get('holder_tpe_client_id'),
+                attorney=row.get('attorney_name'),
+                attorney_no=row.get('attorney_no'),
+                registration_no=row.get('registration_no'),
                 bulletin_no=row.get('bulletin_no'),
                 image_url=get_image_url(row.get('image_path'), row['application_no'], row.get('bulletin_no')),
                 similarity=similarity_pct,
-                name_similarity=name_similarity_pct,
+                name_similarity=similarity_pct,
                 class_overlap_count=overlap_count
             ))
 
-        # Re-sort results by similarity after Turkish normalization recalculation
-        results.sort(key=lambda x: x.similarity, reverse=True)
+        cur.close()
+        conn.close()
 
-        # Apply TOP 10 limit
+        # Re-sort by score and limit
+        results.sort(key=lambda x: x.similarity, reverse=True)
         total_found = len(results)
         results = results[:MAX_RESULTS]
 
         search_time = (time.time() - start_time) * 1000
 
-        # =========================================================
-        # BUILD SEARCH CONTEXT
-        # =========================================================
         search_context = SearchContext(
             searched_name=search_request.name,
             searched_classes=search_classes,
@@ -1887,13 +2175,9 @@ async def enhanced_search(request: Request, search_request: SearchRequest):
             search_time_ms=round(search_time, 2)
         )
 
-        # =========================================================
-        # BUILD RESPONSE
-        # =========================================================
         return EnhancedSearchResponse(
             results=results,
             search_context=search_context,
-            # Backward compatibility fields
             query=search_request.name,
             total_results=len(results),
             search_time_ms=round(search_time, 2),
@@ -1916,6 +2200,7 @@ async def enhanced_search(request: Request, search_request: SearchRequest):
 class ClassSuggestionRequest(BaseModel):
     description: str = Field(..., description="Description of goods/services in Turkish or English", min_length=3, max_length=2000)
     top_k: int = Field(5, ge=1, le=45, description="Number of classes to return")
+    lang: str = Field("tr", description="Language for class names: tr, en, ar")
 
 
 class SuggestedClass(BaseModel):
@@ -1981,54 +2266,54 @@ NICE_CLASS_NAMES = {
     99: "Global Brand (All Classes)"  # Special: covers all 45 classes
 }
 
-# Turkish Nice Class names
+# Turkish Nice Class names (proper Turkish characters)
 NICE_CLASS_NAMES_TR = {
     1: "Kimyasallar",
     2: "Boyalar",
     3: "Kozmetikler",
-    4: "Yaglar ve Yakitlar",
-    5: "Eczacilik Urunleri",
+    4: "Yağlar ve Yakıtlar",
+    5: "Eczacılık Ürünleri",
     6: "Metaller",
     7: "Makineler",
     8: "El Aletleri",
     9: "Bilgisayar ve Elektronik",
-    10: "Tibbi Cihazlar",
-    11: "Aydinlatma ve Isitma",
-    12: "Tasitlar",
-    13: "Atesli Silahlar",
-    14: "Mucevherat",
-    15: "Muzik Aletleri",
-    16: "Kagit ve Ofis",
-    17: "Kaucuk ve Plastik",
-    18: "Deri Urunleri",
-    19: "Yapi Malzemeleri",
+    10: "Tıbbi Cihazlar",
+    11: "Aydınlatma ve Isıtma",
+    12: "Taşıtlar",
+    13: "Ateşli Silahlar",
+    14: "Mücevherat",
+    15: "Müzik Aletleri",
+    16: "Kağıt ve Ofis",
+    17: "Kauçuk ve Plastik",
+    18: "Deri Ürünleri",
+    19: "Yapı Malzemeleri",
     20: "Mobilya",
-    21: "Ev Esyalari",
-    22: "Halatlar ve Cadirlar",
-    23: "Iplikler",
+    21: "Ev Eşyaları",
+    22: "Halatlar ve Çadırlar",
+    23: "İplikler",
     24: "Tekstil",
     25: "Giyim",
     26: "Aksesuarlar",
-    27: "Halilar",
+    27: "Halılar",
     28: "Oyunlar ve Oyuncaklar",
-    29: "Et ve Sut Urunleri",
-    30: "Gida Urunleri",
-    31: "Tarim Urunleri",
-    32: "Icecekler",
-    33: "Alkollü Icecekler",
-    34: "Tutun",
-    35: "Reklamcilik",
-    36: "Sigortacilik ve Finans",
-    37: "Insaat",
+    29: "Et ve Süt Ürünleri",
+    30: "Gıda Ürünleri",
+    31: "Tarım Ürünleri",
+    32: "İçecekler",
+    33: "Alkollü İçecekler",
+    34: "Tütün",
+    35: "Reklamcılık",
+    36: "Sigortacılık ve Finans",
+    37: "İnşaat",
     38: "Telekomünikasyon",
-    39: "Tasimacilik",
-    40: "Uretim",
-    41: "Egitim ve Eglence",
+    39: "Taşımacılık",
+    40: "Üretim",
+    41: "Eğitim ve Eğlence",
     42: "Bilimsel ve Teknolojik Hizmetler",
     43: "Yiyecek ve Konaklama",
-    44: "Tibbi Hizmetler",
+    44: "Tıbbi Hizmetler",
     45: "Hukuki Hizmetler",
-    99: "Global Marka (Tum Siniflar)"  # Ozel: tum 45 sinifi kapsar
+    99: "Global Marka (Tüm Sınıflar)"  # Özel: tüm 45 sınıfı kapsar
 }
 
 
@@ -2212,7 +2497,7 @@ async def suggest_nice_classes(request: ClassSuggestionRequest):
         for row in rows:
             suggestions.append(SuggestedClass(
                 class_number=row['class_number'],
-                class_name=NICE_CLASS_NAMES.get(row['class_number'], f"Class {row['class_number']}"),
+                class_name=(NICE_CLASS_NAMES_TR if request.lang == "tr" else NICE_CLASS_NAMES).get(row['class_number'], f"Class {row['class_number']}"),
                 similarity=round(float(row['similarity']), 4),
                 description=row['description'][:200] + "..." if len(row['description']) > 200 else row['description']
             ))

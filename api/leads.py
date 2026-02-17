@@ -74,6 +74,9 @@ class LeadResponse(BaseModel):
     opposition_deadline: date
     days_until_deadline: int
     urgency_level: str
+    # Application dates
+    new_mark_application_date: Optional[date] = None
+    existing_mark_application_date: Optional[date] = None
     # Extracted goods flags
     new_mark_has_extracted_goods: bool = False
     existing_mark_has_extracted_goods: bool = False
@@ -212,13 +215,14 @@ def _urgency_case_sql():
 # ENDPOINTS
 # ============================================
 
-@router.get("/feed", response_model=List[LeadResponse])
+@router.get("/feed")
 async def get_lead_feed(
     urgency: Optional[str] = Query(None, description="Filter: 'critical', 'urgent', 'soon', 'all'"),
     nice_class: Optional[int] = Query(None, description="Filter by Nice class"),
     min_score: Optional[float] = Query(0.6, ge=0.0, le=1.0, description="Minimum similarity score"),
     risk_level: Optional[str] = Query(None, description="Filter: 'CRITICAL', 'HIGH', 'MEDIUM'"),
     status: Optional[str] = Query('new', description="Lead status: 'new', 'viewed', 'all'"),
+    search: Optional[str] = Query(None, description="Search brand name or holder name"),
     page: int = Query(1, ge=1),
     limit: int = Query(LEADS_PER_PAGE, ge=1, le=100),
     current_user: CurrentUser = Depends(get_current_user)
@@ -245,7 +249,7 @@ async def get_lead_feed(
                 uc.existing_mark_name, uc.existing_mark_app_no,
                 uc.existing_mark_holder_name, uc.existing_mark_nice_classes,
                 uc.similarity_score,
-                uc.text_similarity, uc.semantic_similarity, uc.visual_similarity,
+                uc.text_similarity, uc.semantic_similarity, uc.visual_similarity, uc.translation_similarity,
                 uc.risk_level, uc.conflict_type,
                 uc.overlapping_classes, uc.conflict_reasons,
                 uc.bulletin_no, uc.bulletin_date,
@@ -253,6 +257,8 @@ async def get_lead_feed(
                 uc.lead_status, uc.created_at,
                 new_tm.image_path as new_mark_image,
                 exist_tm.image_path as existing_mark_image,
+                new_tm.application_date as new_mark_application_date,
+                exist_tm.application_date as existing_mark_application_date,
                 {urgency_sql} as urgency_level,
                 (new_tm.extracted_goods IS NOT NULL
                     AND new_tm.extracted_goods != '[]'::jsonb
@@ -265,6 +271,8 @@ async def get_lead_feed(
             LEFT JOIN trademarks exist_tm ON uc.existing_mark_id = exist_tm.id
             WHERE uc.opposition_deadline >= CURRENT_DATE
               AND uc.similarity_score >= %s
+              AND uc.overlapping_classes IS NOT NULL
+              AND array_length(uc.overlapping_classes, 1) > 0
         """
         params: list = [min_score]
 
@@ -300,6 +308,23 @@ async def get_lead_feed(
             query += " AND uc.lead_status = %s"
             params.append(status)
 
+        # Text search filter (brand name or holder name)
+        if search and search.strip():
+            safe_search = search.strip().replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+            query += """ AND (
+                uc.new_mark_name ILIKE %s ESCAPE '\\' OR
+                uc.existing_mark_name ILIKE %s ESCAPE '\\' OR
+                uc.new_mark_holder_name ILIKE %s ESCAPE '\\' OR
+                uc.existing_mark_holder_name ILIKE %s ESCAPE '\\'
+            )"""
+            like_pattern = f"%{safe_search}%"
+            params.extend([like_pattern, like_pattern, like_pattern, like_pattern])
+
+        # Get total count before pagination
+        count_query = "SELECT COUNT(*) as cnt FROM (" + query + ") sub"
+        cur.execute(count_query, params)
+        total_count = cur.fetchone()['cnt']
+
         query += " ORDER BY uc.opposition_deadline ASC, uc.similarity_score DESC"
 
         offset = (page - 1) * limit
@@ -309,7 +334,11 @@ async def get_lead_feed(
         cur.execute(query, params)
         leads = cur.fetchall()
 
-        return [
+        return {
+            "total_count": total_count,
+            "page": page,
+            "limit": limit,
+            "items": [
             LeadResponse(
                 id=str(lead['id']),
                 new_mark_name=lead['new_mark_name'],
@@ -326,6 +355,7 @@ async def get_lead_feed(
                 text_similarity=lead.get('text_similarity'),
                 semantic_similarity=lead.get('semantic_similarity'),
                 visual_similarity=lead.get('visual_similarity'),
+                translation_similarity=lead.get('translation_similarity'),
                 risk_level=lead['risk_level'],
                 conflict_type=lead['conflict_type'],
                 overlapping_classes=lead['overlapping_classes'],
@@ -335,13 +365,15 @@ async def get_lead_feed(
                 opposition_deadline=lead['opposition_deadline'],
                 days_until_deadline=lead['days_until_deadline'],
                 urgency_level=lead['urgency_level'],
+                new_mark_application_date=lead.get('new_mark_application_date'),
+                existing_mark_application_date=lead.get('existing_mark_application_date'),
                 new_mark_has_extracted_goods=bool(lead.get('new_mark_has_extracted_goods', False)),
                 existing_mark_has_extracted_goods=bool(lead.get('existing_mark_has_extracted_goods', False)),
                 lead_status=lead['lead_status'],
                 created_at=lead['created_at'],
             )
             for lead in leads
-        ]
+        ]}
 
 
 @router.get("/stats", response_model=LeadStatsResponse)
@@ -367,6 +399,8 @@ async def get_lead_stats(
                 MAX(created_at) as last_scan_at
             FROM universal_conflicts
             WHERE opposition_deadline >= CURRENT_DATE
+              AND overlapping_classes IS NOT NULL
+              AND array_length(overlapping_classes, 1) > 0
         """)
 
         stats = cur.fetchone()
@@ -433,6 +467,8 @@ async def export_leads_csv(
             WHERE uc.opposition_deadline >= CURRENT_DATE
               AND uc.similarity_score >= %s
               AND uc.lead_status NOT IN ('dismissed', 'converted')
+              AND uc.overlapping_classes IS NOT NULL
+              AND array_length(uc.overlapping_classes, 1) > 0
         """
         params: list = [min_score]
 
@@ -514,6 +550,8 @@ async def get_lead_detail(
                 uc.*,
                 new_tm.image_path as new_mark_image,
                 exist_tm.image_path as existing_mark_image,
+                new_tm.application_date as new_mark_application_date,
+                exist_tm.application_date as existing_mark_application_date,
                 {urgency_sql} as urgency_level,
                 (new_tm.extracted_goods IS NOT NULL
                     AND new_tm.extracted_goods != '[]'::jsonb
@@ -560,6 +598,7 @@ async def mark_lead_contacted(
 ):
     """Mark a lead as contacted."""
     with Database() as db:
+        _require_lead_access(db, str(current_user.id))
         cur = db.cursor()
         cur.execute("""
             UPDATE universal_conflicts
@@ -597,6 +636,7 @@ async def mark_lead_converted(
 ):
     """Mark a lead as converted (became a client)."""
     with Database() as db:
+        _require_lead_access(db, str(current_user.id))
         cur = db.cursor()
         cur.execute("""
             UPDATE universal_conflicts
@@ -633,6 +673,7 @@ async def dismiss_lead(
 ):
     """Dismiss a lead (not interested / not relevant)."""
     with Database() as db:
+        _require_lead_access(db, str(current_user.id))
         cur = db.cursor()
         cur.execute("""
             UPDATE universal_conflicts

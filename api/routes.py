@@ -6,7 +6,9 @@ import io
 import os
 import re
 import logging
-from datetime import datetime
+import secrets
+import hashlib
+from datetime import datetime, timedelta
 from typing import List, Optional
 from uuid import UUID, uuid4
 
@@ -23,6 +25,7 @@ from openpyxl.styles import Font, PatternFill, Alignment
 from config.settings import settings
 from auth.authentication import (
     CurrentUser, TokenPair, UserLogin, UserRegister, PasswordChange,
+    PasswordReset, PasswordResetConfirm, VerifyEmailRequest,
     get_current_user, require_role, create_token_pair, decode_token,
     hash_password, verify_password, generate_verification_token
 )
@@ -167,6 +170,35 @@ async def register(request: Request, data: UserRegister):
             # Generate tokens
             ip = request.client.host if request.client else "unknown"
             logger.info(f"New registration: user={user['id']} email={data.email} org={user['organization_id']} IP={ip}")
+
+            # Generate email verification code (6-digit, same pattern as password reset)
+            verification_code = f"{secrets.randbelow(1000000):06d}"
+            code_hash = hashlib.sha256(verification_code.encode()).hexdigest()
+            verification_expires = datetime.utcnow() + timedelta(hours=24)
+
+            cur = db.cursor()
+            cur.execute(
+                """INSERT INTO email_verification_tokens (id, user_id, token_hash, expires_at, created_at)
+                   VALUES (gen_random_uuid(), %s, %s, %s, NOW())""",
+                (str(user['id']), code_hash, verification_expires)
+            )
+            db.commit()
+
+            # Send welcome + verification email (non-blocking, don't fail registration if email fails)
+            try:
+                from notifications.service import EmailService
+                email_svc = EmailService()
+                if email_svc.is_configured():
+                    email_svc.send_welcome(
+                        to_email=data.email,
+                        first_name=data.first_name,
+                        plan_name="Free",
+                        lang=getattr(data, 'lang', 'tr'),
+                        verification_code=verification_code
+                    )
+            except Exception as e:
+                logger.error(f"Failed to send welcome email to {data.email}: {e}")
+
             return create_token_pair(
                 str(user['id']),
                 str(user['organization_id']),
@@ -179,28 +211,47 @@ async def register(request: Request, data: UserRegister):
 
 @auth_router.post("/login", response_model=TokenPair)
 @limiter.limit(lambda: get_rate_limit_value("rate_limit.login", "5/minute"))
-async def login(request: Request, data: UserLogin):
-    """Login with email and password"""
+async def login(request: Request):
+    """Login with email and password. Accepts JSON or form-urlencoded."""
     ip = request.client.host if request.client else "unknown"
+
+    # Parse email/password from JSON or form-urlencoded
+    content_type = (request.headers.get("content-type") or "").lower()
+    if "application/json" in content_type:
+        body = await request.json()
+        email = body.get("email", "")
+        password = body.get("password", "")
+    else:
+        # form-urlencoded: frontend sends 'username' field (OAuth2 convention)
+        form = await request.form()
+        email = form.get("username", "") or form.get("email", "")
+        password = form.get("password", "")
+
+    if not email or not password:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Email and password are required"
+        )
+
     with Database() as db:
-        user = UserCRUD.get_by_email(db, data.email)
+        user = UserCRUD.get_by_email(db, email)
 
         if not user:
-            logger.warning(f"Failed login: email={data.email} IP={ip} reason=user_not_found")
+            logger.warning(f"Failed login: email={email} IP={ip} reason=user_not_found")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials"
             )
 
         if not user['is_active']:
-            logger.warning(f"Failed login: email={data.email} IP={ip} reason=account_deactivated")
+            logger.warning(f"Failed login: email={email} IP={ip} reason=account_deactivated")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Account is deactivated"
             )
 
-        if not verify_password(data.password, user['password_hash']):
-            logger.warning(f"Failed login: email={data.email} IP={ip} reason=wrong_password")
+        if not verify_password(password, user['password_hash']):
+            logger.warning(f"Failed login: email={email} IP={ip} reason=wrong_password")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials"
@@ -209,7 +260,7 @@ async def login(request: Request, data: UserLogin):
         # Update last login
         UserCRUD.update_login(db, UUID(user['id']))
 
-        logger.info(f"Successful login: user={user['id']} email={data.email} IP={ip}")
+        logger.info(f"Successful login: user={user['id']} email={email} IP={ip}")
         return create_token_pair(
             str(user['id']),
             str(user['organization_id']),
@@ -303,6 +354,179 @@ async def change_password(
         return SuccessResponse(message="Password changed successfully")
 
 
+@auth_router.post("/forgot-password", response_model=SuccessResponse)
+@limiter.limit(lambda: get_rate_limit_value("rate_limit.login", "3/minute"))
+async def forgot_password(request: Request, data: PasswordReset):
+    """Request a password reset. Generates a 6-digit code stored in DB."""
+    import secrets, hashlib
+    from datetime import datetime, timedelta
+
+    with Database() as db:
+        user = UserCRUD.get_by_email(db, data.email)
+        if not user:
+            # Don't reveal whether the email exists
+            return SuccessResponse(message="If this email is registered, a reset code has been generated.")
+
+        # Generate a 6-digit code
+        code = f"{secrets.randbelow(1000000):06d}"
+        code_hash = hashlib.sha256(code.encode()).hexdigest()
+        expires = datetime.utcnow() + timedelta(minutes=15)
+
+        cur = db.cursor()
+        # Delete any existing tokens for this user
+        cur.execute("DELETE FROM password_reset_tokens WHERE user_id = %s", (str(user['id']),))
+        # Insert new token
+        cur.execute(
+            """INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at, created_at)
+               VALUES (gen_random_uuid(), %s, %s, %s, NOW())""",
+            (str(user['id']), code_hash, expires)
+        )
+        db.commit()
+
+        logger.info(f"Password reset requested: email={data.email} user_id={user['id']}")
+
+        # Send code via email
+        try:
+            from notifications.service import EmailService
+            email_svc = EmailService()
+            if email_svc.is_configured():
+                email_svc.send_password_reset(to_email=data.email, code=code, lang=getattr(data, 'lang', 'tr'))
+            else:
+                logger.warning("SMTP not configured — password reset code not emailed")
+        except Exception as e:
+            logger.error(f"Failed to send password reset email: {e}")
+
+        return SuccessResponse(message="If this email is registered, a reset code has been sent.")
+
+
+@auth_router.post("/reset-password", response_model=SuccessResponse)
+@limiter.limit(lambda: get_rate_limit_value("rate_limit.login", "5/minute"))
+async def reset_password(request: Request, data: PasswordResetConfirm):
+    """Verify the 6-digit reset code and set a new password."""
+    import hashlib
+    from datetime import datetime
+
+    code_hash = hashlib.sha256(data.token.encode()).hexdigest()
+
+    with Database() as db:
+        cur = db.cursor()
+        cur.execute(
+            """SELECT prt.id, prt.user_id, prt.expires_at, prt.used_at
+               FROM password_reset_tokens prt
+               WHERE prt.token_hash = %s""",
+            (code_hash,)
+        )
+        token_row = cur.fetchone()
+
+        if not token_row:
+            raise HTTPException(status_code=400, detail="Invalid or expired reset code")
+
+        if token_row['used_at'] is not None:
+            raise HTTPException(status_code=400, detail="This reset code has already been used")
+
+        if token_row['expires_at'] < datetime.utcnow():
+            raise HTTPException(status_code=400, detail="Reset code has expired")
+
+        # Update password
+        new_hash = hash_password(data.new_password)
+        cur.execute(
+            "UPDATE users SET password_hash = %s, password_changed_at = NOW() WHERE id = %s",
+            (new_hash, str(token_row['user_id']))
+        )
+        # Mark token as used
+        cur.execute(
+            "UPDATE password_reset_tokens SET used_at = NOW() WHERE id = %s",
+            (str(token_row['id']),)
+        )
+        db.commit()
+
+        logger.info(f"Password reset completed: user_id={token_row['user_id']}")
+        return SuccessResponse(message="Password has been reset successfully")
+
+
+@auth_router.post("/verify-email", response_model=SuccessResponse)
+@limiter.limit(lambda: get_rate_limit_value("rate_limit.login", "5/minute"))
+async def verify_email(request: Request, data: VerifyEmailRequest, current_user: CurrentUser = Depends(get_current_user)):
+    """Verify email with 6-digit code sent during registration."""
+    code_hash = hashlib.sha256(data.code.encode()).hexdigest()
+
+    with Database() as db:
+        cur = db.cursor()
+        cur.execute(
+            """SELECT evt.id, evt.user_id, evt.expires_at, evt.used_at
+               FROM email_verification_tokens evt
+               WHERE evt.token_hash = %s AND evt.user_id = %s""",
+            (code_hash, str(current_user.id))
+        )
+        token_row = cur.fetchone()
+
+        if not token_row:
+            raise HTTPException(status_code=400, detail="Invalid verification code")
+
+        if token_row['used_at'] is not None:
+            raise HTTPException(status_code=400, detail="This code has already been used")
+
+        if token_row['expires_at'] < datetime.utcnow():
+            raise HTTPException(status_code=400, detail="Verification code has expired")
+
+        # Mark email as verified
+        UserCRUD.verify_email(db, current_user.id)
+        # Mark token as used
+        cur.execute(
+            "UPDATE email_verification_tokens SET used_at = NOW() WHERE id = %s",
+            (str(token_row['id']),)
+        )
+        db.commit()
+
+        logger.info(f"Email verified: user_id={current_user.id}")
+        return SuccessResponse(message="Email verified successfully")
+
+
+@auth_router.post("/resend-verification", response_model=SuccessResponse)
+@limiter.limit(lambda: get_rate_limit_value("rate_limit.login", "2/minute"))
+async def resend_verification(request: Request, current_user: CurrentUser = Depends(get_current_user)):
+    """Resend email verification code. Invalidates previous codes."""
+    with Database() as db:
+        # Check if already verified
+        user = UserCRUD.get_by_id(db, current_user.id)
+        if user.get('is_email_verified'):
+            return SuccessResponse(message="Email is already verified")
+
+        cur = db.cursor()
+        # Delete old verification tokens for this user
+        cur.execute("DELETE FROM email_verification_tokens WHERE user_id = %s", (str(current_user.id),))
+
+        # Generate new 6-digit code
+        verification_code = f"{secrets.randbelow(1000000):06d}"
+        code_hash = hashlib.sha256(verification_code.encode()).hexdigest()
+        expires = datetime.utcnow() + timedelta(hours=24)
+
+        cur.execute(
+            """INSERT INTO email_verification_tokens (id, user_id, token_hash, expires_at, created_at)
+               VALUES (gen_random_uuid(), %s, %s, %s, NOW())""",
+            (str(current_user.id), code_hash, expires)
+        )
+        db.commit()
+
+        # Send combined welcome + verification email
+        try:
+            from notifications.service import EmailService
+            email_svc = EmailService()
+            if email_svc.is_configured():
+                email_svc.send_welcome(
+                    to_email=current_user.email,
+                    first_name=current_user.first_name or "User",
+                    plan_name="Free",
+                    lang="tr",
+                    verification_code=verification_code
+                )
+        except Exception as e:
+            logger.error(f"Failed to send verification email to {current_user.email}: {e}")
+
+        logger.info(f"Verification code resent: user_id={current_user.id}")
+        return SuccessResponse(message="Verification code sent")
+
+
 @auth_router.get("/me", response_model=UserProfile)
 async def get_current_user_profile(current_user: CurrentUser = Depends(get_current_user)):
     """Get current user profile with organization info"""
@@ -314,9 +538,32 @@ async def get_current_user_profile(current_user: CurrentUser = Depends(get_curre
         user_data = dict(user)
         user_data['is_verified'] = user_data.pop('is_email_verified', False)
 
+        # Enrich org with plan details from subscription_plans
+        org_data = dict(org)
+        if org_data.get('subscription_plan_id'):
+            cur = db.cursor()
+            cur.execute(
+                "SELECT name, max_watchlist_items, max_api_calls_per_day FROM subscription_plans WHERE id = %s",
+                (str(org_data['subscription_plan_id']),)
+            )
+            plan_row = cur.fetchone()
+            if plan_row:
+                org_data['plan'] = plan_row['name']
+                org_data['max_watchlist_items'] = plan_row['max_watchlist_items']
+                org_data['max_monthly_searches'] = plan_row['max_api_calls_per_day'] * 30
+
+        # Super admins get unlimited access
+        if current_user.is_superadmin:
+            from utils.subscription import PLAN_FEATURES
+            sa = PLAN_FEATURES['superadmin']
+            org_data['plan'] = 'enterprise'
+            org_data['max_watchlist_items'] = sa['max_watchlist_items']
+            org_data['max_monthly_searches'] = sa['monthly_live_searches']
+            org_data['max_users'] = sa['max_users']
+
         return UserProfile(
             **user_data,
-            organization=OrganizationResponse(**org),
+            organization=OrganizationResponse(**org_data),
             permissions=[]
         )
 
@@ -340,7 +587,8 @@ async def get_user_profile(current_user: CurrentUser = Depends(get_current_user)
             "department": user.get("department", ""),
             "linkedin": user.get("linkedin", ""),
             "avatar_url": user.get("avatar_url", ""),
-            "created_at": user.get("created_at").isoformat() if user.get("created_at") else None
+            "created_at": user.get("created_at").isoformat() if user.get("created_at") else None,
+            "is_email_verified": bool(user.get("is_email_verified", False))
         }
 
 
@@ -601,12 +849,22 @@ async def get_organization_stats(current_user: CurrentUser = Depends(get_current
     """Get organization statistics"""
     with Database() as db:
         stats = OrganizationCRUD.get_stats(db, current_user.organization_id)
+        org_id = str(current_user.organization_id)
+        cur = db.cursor()
+        cur.execute("""
+            SELECT COALESCE(SUM(au.quick_searches), 0) + COALESCE(SUM(au.live_searches), 0) as cnt
+            FROM api_usage au
+            JOIN users u ON au.user_id = u.id
+            WHERE u.organization_id = %s
+              AND au.usage_date >= date_trunc('month', CURRENT_DATE)
+        """, (org_id,))
+        srch = cur.fetchone()
         return OrganizationStats(
             user_count=stats.get('user_count', 0),
             active_watchlist_items=stats.get('active_watchlist_items', 0),
             new_alerts=stats.get('new_alerts', 0),
             critical_alerts=stats.get('critical_alerts', 0),
-            searches_this_month=0,  # TODO: Implement
+            searches_this_month=srch['cnt'] if srch else 0,
             storage_used_mb=0.0  # TODO: Implement
         )
 
@@ -690,17 +948,64 @@ async def update_threshold_and_rescan(
 # Watchlist Routes
 # ==========================================
 
+@watchlist_router.get("/stats")
+async def watchlist_stats(
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """Get aggregate stats for the organization's watchlist"""
+    with Database() as db:
+        cur = db.cursor()
+        cur.execute("""
+            SELECT
+                COUNT(w.id) AS total_items,
+                COUNT(w.id) FILTER (WHERE w.is_active = TRUE) AS active_items,
+                COUNT(DISTINCT w.id) FILTER (WHERE a.id IS NOT NULL AND a.status NOT IN ('dismissed', 'resolved')) AS items_with_threats,
+                COUNT(a.id) FILTER (WHERE a.severity = 'critical' AND a.status NOT IN ('dismissed', 'resolved')) AS critical_threats,
+                COUNT(a.id) FILTER (WHERE a.severity = 'high' AND a.status NOT IN ('dismissed', 'resolved')) AS high_threats,
+                COUNT(a.id) FILTER (WHERE a.severity = 'medium' AND a.status NOT IN ('dismissed', 'resolved')) AS medium_threats,
+                COUNT(a.id) FILTER (WHERE a.severity = 'low' AND a.status NOT IN ('dismissed', 'resolved')) AS low_threats,
+                COUNT(a.id) FILTER (WHERE a.status = 'new') AS new_alerts,
+                MIN(a.opposition_deadline) FILTER (WHERE a.opposition_deadline > CURRENT_DATE AND a.status NOT IN ('dismissed', 'resolved')) AS nearest_deadline
+            FROM watchlist_mt w
+            LEFT JOIN alerts_mt a ON w.id = a.watchlist_item_id
+            WHERE w.organization_id = %s AND w.is_active = TRUE
+        """, (str(current_user.organization_id),))
+        row = cur.fetchone()
+
+        nearest = row['nearest_deadline']
+        nearest_days = None
+        if nearest:
+            from datetime import date as date_type
+            nearest_days = (nearest - date_type.today()).days
+
+        return {
+            "total_items": row['total_items'],
+            "active_items": row['active_items'],
+            "items_with_threats": row['items_with_threats'],
+            "critical_threats": row['critical_threats'],
+            "high_threats": row['high_threats'],
+            "medium_threats": row['medium_threats'],
+            "low_threats": row['low_threats'],
+            "new_alerts": row['new_alerts'],
+            "nearest_deadline": nearest.isoformat() if nearest else None,
+            "nearest_deadline_days": nearest_days
+        }
+
+
 @watchlist_router.get("", response_model=PaginatedResponse)
 async def list_watchlist(
     page: int = Query(1, ge=1),
-    page_size: int = Query(100, ge=1, le=2000),  # Increased default to 100, max to 2000
+    page_size: int = Query(20, ge=1, le=100),
     active_only: bool = True,
+    search: Optional[str] = Query(None, min_length=1, max_length=200),
+    sort: Optional[str] = Query(None),
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """List watchlist items for organization"""
     with Database() as db:
         items, total = WatchlistCRUD.get_by_organization(
-            db, current_user.organization_id, active_only, page, page_size
+            db, current_user.organization_id, active_only, page, page_size,
+            search=search, sort_by=sort
         )
 
         # Fetch conflict summaries for all watchlist items in one query
@@ -716,14 +1021,22 @@ async def list_watchlist(
                     COUNT(*) FILTER (WHERE t.appeal_deadline > CURRENT_DATE AND t.appeal_deadline <= CURRENT_DATE + INTERVAL '7 days') as critical_count,
                     COUNT(*) FILTER (WHERE t.appeal_deadline > CURRENT_DATE + INTERVAL '7 days' AND t.appeal_deadline <= CURRENT_DATE + INTERVAL '30 days') as urgent_count,
                     COUNT(*) FILTER (WHERE t.appeal_deadline > CURRENT_DATE + INTERVAL '30 days') as active_count,
-                    COUNT(*) FILTER (WHERE t.appeal_deadline IS NOT NULL AND t.appeal_deadline < CURRENT_DATE) as expired_count,
-                    MIN(t.appeal_deadline) FILTER (WHERE t.appeal_deadline > CURRENT_DATE) as nearest_deadline
+                    MIN(t.appeal_deadline) FILTER (WHERE t.appeal_deadline > CURRENT_DATE) as nearest_deadline,
+                    MAX(CASE a.severity
+                        WHEN 'critical' THEN 4
+                        WHEN 'high' THEN 3
+                        WHEN 'medium' THEN 2
+                        WHEN 'low' THEN 1
+                        ELSE 0
+                    END) FILTER (WHERE a.status NOT IN ('dismissed', 'resolved')) AS highest_severity_rank
                 FROM alerts_mt a
                 LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
                 WHERE a.watchlist_item_id = ANY(%s::uuid[])
                     AND a.status NOT IN ('dismissed', 'resolved')
+                    AND (t.appeal_deadline IS NULL OR t.appeal_deadline >= CURRENT_DATE)
                 GROUP BY a.watchlist_item_id
             """, (item_ids,))
+            severity_map = {4: 'critical', 3: 'high', 2: 'medium', 1: 'low'}
             for row in cur.fetchall():
                 wid = str(row['watchlist_item_id'])
                 nearest = row['nearest_deadline']
@@ -738,9 +1051,9 @@ async def list_watchlist(
                     "active_critical": row['critical_count'],
                     "active_urgent": row['urgent_count'],
                     "active": row['active_count'],
-                    "expired": row['expired_count'],
                     "nearest_deadline": nearest.isoformat() if nearest else None,
-                    "nearest_deadline_days": days_to_nearest
+                    "nearest_deadline_days": days_to_nearest,
+                    "highest_severity": severity_map.get(row['highest_severity_rank'])
                 }
 
         response_items = []
@@ -764,19 +1077,73 @@ async def create_watchlist_item(
     background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(get_current_user)
 ):
-    """Add trademark to watchlist"""
+    """Add trademark to watchlist — auto-copies AI embeddings & logo from trademarks DB when application_no is provided."""
+    # Check logo tracking eligibility
+    if getattr(data, 'monitor_visual', False):
+        from utils.subscription import get_user_plan, get_plan_limit
+        with Database() as db_check:
+            plan = get_user_plan(db_check, str(current_user.id))
+            can_track = get_plan_limit(plan['plan_name'], 'can_track_logos')
+            if not can_track:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={"error": "upgrade_required", "message": "Logo tracking requires a paid plan."}
+                )
+
     with Database() as db:
         try:
-            item = WatchlistCRUD.create(
-                db, current_user.organization_id, current_user.id, data
-            )
-            
+            # If application_no is provided, look up trademark AI features
+            tm_ai = None
+            app_no = getattr(data, 'application_no', None)
+            if app_no:
+                cur = db.cursor()
+                cur.execute("""
+                    SELECT image_path,
+                           image_embedding::text, dinov2_embedding::text,
+                           color_histogram::text, logo_ocr_text, text_embedding::text
+                    FROM trademarks
+                    WHERE application_no = %s
+                    LIMIT 1
+                """, (app_no,))
+                tm_ai = cur.fetchone()
+
+            if tm_ai:
+                def _parse_vec(val):
+                    if not val:
+                        return None
+                    if isinstance(val, list):
+                        return val
+                    s = val.strip()
+                    if s.startswith('[') and s.endswith(']'):
+                        return [float(x) for x in s[1:-1].split(',') if x.strip()]
+                    return None
+
+                logo_abs = None
+                img_path = tm_ai.get('image_path')
+                if img_path:
+                    from main import find_trademark_image
+                    logo_abs = find_trademark_image(img_path)
+
+                item = WatchlistCRUD.create_with_embeddings(
+                    db, current_user.organization_id, current_user.id, data,
+                    logo_path=logo_abs,
+                    logo_embedding=_parse_vec(tm_ai.get('image_embedding')),
+                    logo_dinov2_embedding=_parse_vec(tm_ai.get('dinov2_embedding')),
+                    logo_color_histogram=_parse_vec(tm_ai.get('color_histogram')),
+                    logo_ocr_text=tm_ai.get('logo_ocr_text'),
+                    text_embedding=_parse_vec(tm_ai.get('text_embedding')),
+                )
+            else:
+                item = WatchlistCRUD.create(
+                    db, current_user.organization_id, current_user.id, data
+                )
+
             # Trigger initial scan in background
             background_tasks.add_task(
                 _scan_watchlist_item,
                 UUID(item['id'])
             )
-            
+
             return WatchlistItemResponse(**item)
         except ValueError as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -790,12 +1157,39 @@ async def bulk_import_watchlist(
 ):
     """Bulk import watchlist items"""
     with Database() as db:
+        # Pre-check watchlist limit
+        from utils.subscription import get_plan_limit, get_user_plan
+        plan_info = get_user_plan(db, str(current_user.id))
+        plan_name = plan_info.get("plan_name", "free")
+        max_items = get_plan_limit(plan_name, "max_watchlist_items")
+        cur = db.cursor()
+        cur.execute("SELECT COUNT(*) FROM watchlist_mt WHERE organization_id = %s AND is_active = TRUE",
+                    (str(current_user.organization_id),))
+        current_count = cur.fetchone()['count']
+        remaining_slots = max(0, max_items - current_count)
+
+        if remaining_slots == 0:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": "limit_exceeded",
+                    "message": f"Izleme listesi limitinize ulastiniz ({max_items}). Daha fazla eklemek icin planinizi yukseltin.",
+                    "current_count": current_count,
+                    "max_items": max_items,
+                }
+            )
+
         created = 0
         failed = 0
         errors = []
         created_ids = []
-        
+
         for i, item in enumerate(data.items):
+            if created >= remaining_slots:
+                errors.append({"index": i, "brand_name": item.brand_name,
+                               "error": f"Izleme listesi limiti asildi ({max_items})"})
+                failed += 1
+                continue
             try:
                 result = WatchlistCRUD.create(
                     db, current_user.organization_id, current_user.id, item
@@ -805,16 +1199,167 @@ async def bulk_import_watchlist(
             except Exception as e:
                 failed += 1
                 errors.append({"index": i, "brand_name": item.brand_name, "error": str(e)})
-        
+
         # Trigger scans for all created items
         for item_id in created_ids:
             background_tasks.add_task(_scan_watchlist_item, item_id)
-        
+
         return WatchlistBulkImportResult(
             total=len(data.items),
             created=created,
             failed=failed,
             errors=errors
+        )
+
+
+class BulkFromPortfolioRequest(PydanticBaseModel):
+    holder_id: Optional[str] = None
+    attorney_no: Optional[str] = None
+    similarity_threshold: float = 0.70
+
+
+@watchlist_router.post("/bulk-from-portfolio", response_model=WatchlistBulkImportResult)
+async def bulk_import_from_portfolio(
+    data: BulkFromPortfolioRequest,
+    background_tasks: BackgroundTasks,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Bulk import watchlist items from a holder/attorney portfolio,
+    copying AI embeddings and logo paths from the trademarks table."""
+    if not data.holder_id and not data.attorney_no:
+        raise HTTPException(status_code=400, detail="holder_id or attorney_no required")
+
+    # Check portfolio access permission
+    from utils.subscription import get_user_plan as _gup_port, get_plan_limit as _gpl_port
+    with Database() as db_perm:
+        _pplan = _gup_port(db_perm, str(current_user.id))
+        if not _gpl_port(_pplan['plan_name'], 'can_view_holder_portfolio'):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": "upgrade_required",
+                    "message": "Portfoy erisimi icin Business veya ustu plan gereklidir.",
+                    "current_plan": _pplan['plan_name'],
+                }
+            )
+
+    with Database() as db:
+        cur = db.cursor()
+
+        if data.holder_id:
+            where_col = "holder_tpe_client_id"
+            param = data.holder_id
+        else:
+            where_col = "attorney_no"
+            param = data.attorney_no
+
+        # Fetch trademarks with all AI columns
+        from psycopg2 import sql as psql
+        cur.execute(psql.SQL("""
+            SELECT application_no, name, nice_class_numbers, image_path,
+                   image_embedding::text, dinov2_embedding::text,
+                   color_histogram::text, logo_ocr_text, text_embedding::text
+            FROM trademarks
+            WHERE {} = %s
+            ORDER BY application_date DESC NULLS LAST
+        """).format(psql.Identifier(where_col)), (param,))
+        rows = cur.fetchall()
+
+        if not rows:
+            return WatchlistBulkImportResult(total=0, created=0, failed=0, errors=[])
+
+        def _parse_vec(val):
+            if not val:
+                return None
+            if isinstance(val, list):
+                return val
+            s = val.strip()
+            if s.startswith('[') and s.endswith(']'):
+                return [float(x) for x in s[1:-1].split(',') if x.strip()]
+            return None
+
+        # Pre-check watchlist limit
+        from utils.subscription import get_plan_limit, get_user_plan
+        plan_info = get_user_plan(db, str(current_user.id))
+        plan_name = plan_info.get("plan_name", "free")
+        max_items = get_plan_limit(plan_name, "max_watchlist_items")
+        cur.execute("SELECT COUNT(*) FROM watchlist_mt WHERE organization_id = %s AND is_active = TRUE",
+                    (str(current_user.organization_id),))
+        current_count = cur.fetchone()['count']
+        remaining_slots = max(0, max_items - current_count)
+
+        created = 0
+        failed = 0
+        errors = []
+        created_ids = []
+        limit_reached = False
+
+        for i, tm in enumerate(rows):
+            # Stop adding once limit is reached
+            if created >= remaining_slots:
+                limit_reached = True
+                break
+
+            try:
+                brand = tm.get('name') or tm.get('application_no') or 'Unknown'
+                classes = tm.get('nice_class_numbers') or []
+                # Filter to valid Nice classes (1-45)
+                classes = [c for c in classes if 1 <= c <= 45]
+                if not classes:
+                    classes = [1]
+
+                item_data = WatchlistItemCreate(
+                    brand_name=brand,
+                    nice_class_numbers=classes,
+                    application_no=tm.get('application_no'),
+                    similarity_threshold=data.similarity_threshold,
+                )
+
+                # Resolve image_path to absolute filesystem path for logo_path
+                logo_abs = None
+                img_path = tm.get('image_path')
+                if img_path:
+                    from main import find_trademark_image
+                    logo_abs = find_trademark_image(img_path)
+
+                # Use SAVEPOINT so one failure doesn't abort the whole transaction
+                cur.execute("SAVEPOINT sp_bulk")
+                result = WatchlistCRUD.create_with_embeddings(
+                    db, current_user.organization_id, current_user.id, item_data,
+                    logo_path=logo_abs,
+                    logo_embedding=_parse_vec(tm.get('image_embedding')),
+                    logo_dinov2_embedding=_parse_vec(tm.get('dinov2_embedding')),
+                    logo_color_histogram=_parse_vec(tm.get('color_histogram')),
+                    logo_ocr_text=tm.get('logo_ocr_text'),
+                    text_embedding=_parse_vec(tm.get('text_embedding')),
+                    auto_commit=False,
+                )
+                cur.execute("RELEASE SAVEPOINT sp_bulk")
+                created += 1
+                created_ids.append(UUID(result['id']))
+            except Exception as e:
+                try:
+                    cur.execute("ROLLBACK TO SAVEPOINT sp_bulk")
+                except Exception:
+                    pass
+                failed += 1
+                errors.append({"index": i, "brand_name": tm.get('name', ''), "error": str(e)})
+
+        # Commit all successful inserts
+        db.commit()
+
+        # Trigger scans for all created items
+        for item_id in created_ids:
+            background_tasks.add_task(_scan_watchlist_item, item_id)
+
+        return WatchlistBulkImportResult(
+            total=len(rows),
+            created=created,
+            failed=failed,
+            errors=errors,
+            limit_reached=limit_reached,
+            max_allowed=max_items,
+            current_count=current_count + created,
         )
 
 
@@ -948,8 +1493,13 @@ async def detect_columns(
     try:
         if filename.endswith(('.xlsx', '.xls')):
             df = pd.read_excel(io.BytesIO(contents), nrows=5)
+            # Count total rows
+            df_count = pd.read_excel(io.BytesIO(contents), usecols=[0])
+            total_rows = len(df_count)
         elif filename.endswith('.csv'):
             df = pd.read_csv(io.BytesIO(contents), nrows=5)
+            df_count = pd.read_csv(io.BytesIO(contents), usecols=[0])
+            total_rows = len(df_count)
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -1001,7 +1551,8 @@ async def detect_columns(
     return ColumnDetectionResponse(
         columns=original_columns,
         sample_data=sample_data,
-        auto_mappings=auto_mappings_orig
+        auto_mappings=auto_mappings_orig,
+        total_rows=total_rows
     )
 
 
@@ -1024,13 +1575,15 @@ async def upload_with_mapping(
             detail="Gecersiz sutun eslestirme formati"
         )
 
-    # Validate required mappings
-    required_fields = ['brand_name', 'application_no', 'nice_classes']
-    missing_mappings = [f for f in required_fields if not mappings.get(f)]
-    if missing_mappings:
+    # Normalize alternative field names
+    if 'nice_class_numbers' in mappings and 'nice_classes' not in mappings:
+        mappings['nice_classes'] = mappings.pop('nice_class_numbers')
+
+    # Validate required mappings (only brand_name is strictly required)
+    if not mappings.get('brand_name'):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Eksik zorunlu eslestirmeler: {', '.join(missing_mappings)}"
+            detail="Eksik zorunlu eslestirme: brand_name"
         )
 
     # Read file
@@ -1099,6 +1652,17 @@ async def upload_with_mapping(
             for r in existing if r['customer_application_no']
         }
 
+    # Pre-check watchlist limit
+    from utils.subscription import get_plan_limit, get_user_plan as _get_plan
+    with Database() as db_lim:
+        _plan = _get_plan(db_lim, user_id)
+        _plan_name = _plan.get("plan_name", "free")
+        _max_items = get_plan_limit(_plan_name, "max_watchlist_items")
+        _cur = db_lim.cursor()
+        _cur.execute("SELECT COUNT(*) FROM watchlist_mt WHERE organization_id = %s AND is_active = TRUE", (org_id,))
+        _current_count = _cur.fetchone()['count']
+    remaining_slots = max(0, _max_items - _current_count)
+
     # Process rows
     added_count = 0
     skipped_count = 0
@@ -1114,6 +1678,15 @@ async def upload_with_mapping(
             row_num = idx + 2  # Excel row number (1-indexed + header)
 
             try:
+                # Check watchlist limit before each insert
+                if added_count >= remaining_slots:
+                    error_count += 1
+                    error_items.append(FileUploadErrorItem(
+                        row=row_num,
+                        error=f"Izleme listesi limiti asildi ({_max_items})"
+                    ))
+                    continue
+
                 # Validate brand name (required)
                 brand_name = str(row.get('brand_name', '')).strip()
                 if not brand_name or brand_name.lower() in ['nan', 'none', '']:
@@ -1124,28 +1697,18 @@ async def upload_with_mapping(
                     ))
                     continue
 
-                # Validate application number (required)
+                # Application number (optional — auto-generate if missing)
                 app_no = str(row.get('application_no', '')).strip()
                 if not app_no or app_no.lower() in ['nan', 'none', '']:
-                    error_count += 1
-                    error_items.append(FileUploadErrorItem(
-                        row=row_num,
-                        brand_name=brand_name,
-                        error="Basvuru numarasi bos"
-                    ))
-                    continue
+                    app_no = f"WL-{uuid4().hex[:8].upper()}"
 
-                # Validate nice classes (required)
-                classes_raw = row.get('nice_classes', '')
-                nice_classes = _parse_nice_classes(classes_raw)
-                if not nice_classes:
-                    error_count += 1
-                    error_items.append(FileUploadErrorItem(
-                        row=row_num,
-                        brand_name=brand_name,
-                        error="Sinif bilgisi bos veya gecersiz"
-                    ))
-                    continue
+                # Nice classes (optional — default to empty list)
+                classes_raw = row.get('nice_classes', '') if 'nice_classes' in df.columns else ''
+                classes_str = str(classes_raw).strip() if classes_raw is not None else ''
+                if classes_str and classes_str.lower() not in ['nan', 'none', '']:
+                    nice_classes = _parse_nice_classes(classes_raw)
+                else:
+                    nice_classes = []
 
                 # Bulletin number (optional)
                 bulletin_no = None
@@ -1340,7 +1903,7 @@ async def upload_file(
     org_id = str(current_user.organization_id)
     user_id = str(current_user.id)
 
-    # Get existing application numbers
+    # Get existing application numbers + watchlist limit
     with Database() as db:
         cur = db.cursor()
         cur.execute("""
@@ -1355,6 +1918,15 @@ async def upload_file(
             r['customer_application_no'].strip().lower()
             for r in existing if r['customer_application_no']
         }
+
+        # Pre-check watchlist limit
+        from utils.subscription import get_plan_limit, get_user_plan as _get_plan2
+        _plan2 = _get_plan2(db, user_id)
+        _plan_name2 = _plan2.get("plan_name", "free")
+        _max_items2 = get_plan_limit(_plan_name2, "max_watchlist_items")
+        cur.execute("SELECT COUNT(*) FROM watchlist_mt WHERE organization_id = %s AND is_active = TRUE", (org_id,))
+        _current_count2 = cur.fetchone()['count']
+    remaining_slots2 = max(0, _max_items2 - _current_count2)
 
     # Process rows
     added_count = 0
@@ -1371,6 +1943,15 @@ async def upload_file(
             row_num = idx + 2  # Excel row number (1-indexed + header)
 
             try:
+                # Check watchlist limit before each insert
+                if added_count >= remaining_slots2:
+                    error_count += 1
+                    error_items.append(FileUploadErrorItem(
+                        row=row_num,
+                        error=f"Izleme listesi limiti asildi ({_max_items2})"
+                    ))
+                    continue
+
                 # Validate brand name (required)
                 brand_name = str(row.get(brand_col, '')).strip()
                 if not brand_name or brand_name.lower() in ['nan', 'none', '']:
@@ -1483,6 +2064,20 @@ async def trigger_scan_all(
 ):
     """Scan all active watchlist items for the organization"""
     with Database() as db:
+        # Check auto-scan eligibility
+        from utils.subscription import get_user_plan as _gup_scan, get_plan_limit as _gpl_scan
+        _scan_plan = _gup_scan(db, str(current_user.id))
+        _scan_max = _gpl_scan(_scan_plan['plan_name'], 'auto_scan_max_items')
+        if _scan_max == 0:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": "upgrade_required",
+                    "message": "Otomatik tarama icin planinizi yukseltin.",
+                    "current_plan": _scan_plan['plan_name'],
+                }
+            )
+
         # Get ALL active watchlist items for this org (no page limit)
         # First get total count, then fetch all in one query
         _, total = WatchlistCRUD.get_by_organization(
@@ -1495,11 +2090,17 @@ async def trigger_scan_all(
     if not items:
         return SuccessResponse(message="Izleme listesinde taranacak marka yok")
 
-    # Queue scans for all items
-    for item in items:
+    # Respect auto_scan_max_items limit
+    items_to_scan = items[:_scan_max] if _scan_max < 999999 else items
+
+    # Queue scans for items within limit
+    for item in items_to_scan:
         background_tasks.add_task(_scan_watchlist_item, UUID(item['id']))
 
-    return SuccessResponse(message=f"{len(items)} marka taramaya alindi (toplam: {total})")
+    msg = f"{len(items_to_scan)} marka taramaya alindi (toplam: {total})"
+    if len(items_to_scan) < len(items):
+        msg += f" — plan limitiniz nedeniyle {_scan_max} marka tarandi"
+    return SuccessResponse(message=msg)
 
 
 @watchlist_router.get("/scan-status")
@@ -1550,6 +2151,20 @@ async def rescan_all_watchlist(
 ):
     """Clear old alerts and rescan all watchlist items fresh"""
     with Database() as db:
+        # Check auto-scan eligibility
+        from utils.subscription import get_user_plan as _gup_rescan, get_plan_limit as _gpl_rescan
+        _rescan_plan = _gup_rescan(db, str(current_user.id))
+        _rescan_max = _gpl_rescan(_rescan_plan['plan_name'], 'auto_scan_max_items')
+        if _rescan_max == 0:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": "upgrade_required",
+                    "message": "Otomatik tarama icin planinizi yukseltin.",
+                    "current_plan": _rescan_plan['plan_name'],
+                }
+            )
+
         cur = db.cursor()
         org_id = str(current_user.organization_id)
 
@@ -1578,12 +2193,15 @@ async def rescan_all_watchlist(
     if not items:
         return SuccessResponse(message=f"Eski {cleared_alerts} uyari silindi. Taranacak marka yok.")
 
-    # Queue fresh scans for all items
-    for item in items:
+    # Respect auto_scan_max_items limit
+    items_to_scan = items[:_rescan_max] if _rescan_max < 999999 else items
+
+    # Queue fresh scans for items within limit
+    for item in items_to_scan:
         background_tasks.add_task(_scan_watchlist_item, UUID(item['id']))
 
     return SuccessResponse(
-        message=f"Eski {cleared_alerts} uyari silindi. {len(items)} marka yeniden taramaya alindi."
+        message=f"Eski {cleared_alerts} uyari silindi. {len(items_to_scan)} marka yeniden taramaya alindi."
     )
 
 
@@ -1607,6 +2225,18 @@ async def update_watchlist_item(
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """Update watchlist item"""
+    # Check logo tracking eligibility if enabling visual monitoring
+    if getattr(data, 'monitor_visual', None) is True:
+        from utils.subscription import get_user_plan, get_plan_limit
+        with Database() as db_check:
+            plan = get_user_plan(db_check, str(current_user.id))
+            can_track = get_plan_limit(plan['plan_name'], 'can_track_logos')
+            if not can_track:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={"error": "upgrade_required", "message": "Logo tracking requires a paid plan."}
+                )
+
     with Database() as db:
         item = WatchlistCRUD.update(db, item_id, current_user.organization_id, data)
         if not item:
@@ -1784,11 +2414,19 @@ def _scan_watchlist_item(item_id: UUID):
     try:
         from watchlist.scanner import get_scanner
         scanner = get_scanner()  # Reuse cached scanner with loaded models
+        # Ensure connection is clean (rollback any aborted transaction)
+        try:
+            scanner.conn.rollback()
+        except Exception:
+            pass
         alerts_count = scanner.scan_single_watchlist(item_id)
         logger.info(f"✅ [SCAN COMPLETE] Item {item_id}: {alerts_count} alerts created")
     except Exception as e:
         logger.error(f"❌ [SCAN FAILED] Item {item_id}: {e}")
         logger.error(f"   Traceback: {traceback.format_exc()}")
+        # Reset singleton scanner to get fresh connection on next scan
+        from watchlist.scanner import reset_scanner
+        reset_scanner()
 
 
 # ==========================================
@@ -1856,6 +2494,86 @@ async def get_alerts_summary(
             "by_severity": by_severity,
             "total_new": by_status.get('new', 0)
         }
+
+
+@alerts_router.get("/aggregate")
+async def aggregate_alerts(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    severity: Optional[str] = Query(None),
+    current_user: CurrentUser = Depends(get_current_user)
+):
+    """Get all alerts across all watchlist items, sorted by deadline urgency"""
+    with Database() as db:
+        cur = db.cursor()
+        org_id = str(current_user.organization_id)
+
+        where_extra = ""
+        params = [org_id]
+        if severity:
+            where_extra = " AND a.severity = %s"
+            params.append(severity)
+
+        # Count
+        cur.execute("""
+            SELECT COUNT(*) FROM alerts_mt a
+            JOIN watchlist_mt w ON a.watchlist_item_id = w.id
+            WHERE a.organization_id = %s
+                AND a.status NOT IN ('dismissed', 'resolved')
+        """ + where_extra, params)
+        total = cur.fetchone()['count']
+
+        # Fetch page
+        offset = (page - 1) * page_size
+        cur.execute("""
+            SELECT a.*, w.brand_name AS watched_brand_name,
+                   a.opposition_deadline, a.conflicting_name,
+                   t.name AS tm_name, t.current_status, t.bulletin_date
+            FROM alerts_mt a
+            JOIN watchlist_mt w ON a.watchlist_item_id = w.id
+            LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
+            WHERE a.organization_id = %s
+                AND a.status NOT IN ('dismissed', 'resolved')
+        """ + where_extra + """
+            ORDER BY
+                CASE WHEN a.opposition_deadline IS NOT NULL AND a.opposition_deadline > CURRENT_DATE
+                     THEN 0 ELSE 1 END,
+                a.opposition_deadline ASC NULLS LAST,
+                a.created_at DESC
+            LIMIT %s OFFSET %s
+        """, params + [page_size, offset])
+
+        rows = cur.fetchall()
+        items = []
+        from datetime import date as date_type
+        today = date_type.today()
+        for r in rows:
+            deadline = r.get('opposition_deadline')
+            deadline_days = None
+            if deadline and deadline > today:
+                deadline_days = (deadline - today).days
+            items.append({
+                "id": str(r['id']),
+                "watchlist_item_id": str(r['watchlist_item_id']),
+                "watched_brand_name": r.get('watched_brand_name'),
+                "conflicting_brand_name": r.get('conflicting_name') or r.get('tm_name'),
+                "conflicting_trademark_id": str(r['conflicting_trademark_id']) if r.get('conflicting_trademark_id') else None,
+                "severity": r.get('severity'),
+                "risk_score": r.get('overall_risk_score'),
+                "status": r.get('status'),
+                "opposition_deadline": deadline.isoformat() if deadline else None,
+                "deadline_days": deadline_days,
+                "overlapping_classes": r.get('overlapping_classes'),
+                "created_at": r['created_at'].isoformat() if r.get('created_at') else None
+            })
+
+        return PaginatedResponse(
+            items=items,
+            total=total,
+            page=page,
+            page_size=page_size,
+            total_pages=(total + page_size - 1) // page_size
+        )
 
 
 @alerts_router.get("/{alert_id}", response_model=AlertResponse)
@@ -1976,7 +2694,7 @@ def _format_alert(alert: dict) -> AlertResponse:
             classes=conflict_classes,
             holder=alert.get('conflicting_holder_name'),
             image_path=alert.get('conflicting_image_path'),
-            filing_date=None,
+            application_date=alert.get('conflict_application_date'),
             has_extracted_goods=bool(alert.get('conflict_has_extracted_goods', False))
         ),
         conflict_bulletin_no=alert.get('conflict_bulletin_no'),  # Conflicting trademark's bulletin
@@ -2039,14 +2757,31 @@ async def get_dashboard_stats(current_user: CurrentUser = Depends(get_current_us
         """, (org_id,))
         al = cur.fetchone()
         
-        # Organization limits from subscription plan
+        # Searches this month (from api_usage table)
         cur.execute("""
-            SELECT o.*, sp.max_watchlist_items, sp.max_alerts_per_month, sp.max_reports_per_month
-            FROM organizations o
-            LEFT JOIN subscription_plans sp ON o.subscription_plan_id = sp.id
-            WHERE o.id = %s
+            SELECT COALESCE(SUM(au.quick_searches), 0) + COALESCE(SUM(au.live_searches), 0) as cnt
+            FROM api_usage au
+            JOIN users u ON au.user_id = u.id
+            WHERE u.organization_id = %s
+              AND au.usage_date >= date_trunc('month', CURRENT_DATE)
         """, (org_id,))
-        org = cur.fetchone()
+        searches_row = cur.fetchone()
+        searches_this_month = searches_row['cnt'] if searches_row else 0
+
+        # Organization limits from PLAN_FEATURES (single source of truth)
+        from utils.subscription import get_user_plan as _gup_dash, get_plan_limit as _gpl_dash
+        _dash_plan = _gup_dash(db, str(current_user.id))
+        _dash_plan_name = _dash_plan['plan_name']
+
+        wl_limit = _gpl_dash(_dash_plan_name, 'max_watchlist_items')
+        user_limit = _gpl_dash(_dash_plan_name, 'max_users')
+        qs_limit = _gpl_dash(_dash_plan_name, 'max_daily_quick_searches')
+        ls_limit = _gpl_dash(_dash_plan_name, 'monthly_live_searches')
+        report_limit = _gpl_dash(_dash_plan_name, 'monthly_reports')
+
+        # Count users in org
+        cur.execute("SELECT COUNT(*) as cnt FROM users WHERE organization_id = %s AND is_active = TRUE", (org_id,))
+        user_count = cur.fetchone()['cnt']
 
         return DashboardStats(
             watchlist_count=wl['total'],
@@ -2055,11 +2790,12 @@ async def get_dashboard_stats(current_user: CurrentUser = Depends(get_current_us
             new_alerts=al['new'],
             critical_alerts=al['critical'],
             alerts_this_week=al['this_week'],
-            searches_this_month=0,  # TODO
+            searches_this_month=searches_this_month,
             plan_usage={
-                "watchlist": {"used": wl['active'], "limit": org.get('max_watchlist_items') or 100},
-                "users": {"used": 0, "limit": 10},  # TODO
-                "searches": {"used": 0, "limit": org.get('max_reports_per_month') or 100}
+                "watchlist": {"used": wl['active'], "limit": wl_limit},
+                "users": {"used": user_count, "limit": user_limit},
+                "searches": {"used": searches_this_month, "limit": qs_limit + ls_limit},
+                "reports": {"used": 0, "limit": report_limit},
             }
         )
 
@@ -2233,7 +2969,7 @@ async def get_usage_summary(current_user: CurrentUser = Depends(get_current_user
         get_user_plan, get_plan_limit,
         get_daily_quick_searches, get_live_search_usage,
         get_monthly_name_generations, get_org_plan,
-        check_logo_generation_eligibility,
+        check_ai_credit_eligibility, get_monthly_applications,
     )
 
     with Database() as db:
@@ -2250,14 +2986,20 @@ async def get_usage_summary(current_user: CurrentUser = Depends(get_current_user
         ls_used = get_live_search_usage(db, user_id)
         ls_limit = get_plan_limit(plan_name, 'monthly_live_searches')
 
-        # Monthly name generations (org-level)
-        ng_used = get_monthly_name_generations(db, org_id)
-        ng_limit = get_plan_limit(plan_name, 'monthly_name_generations')
+        # AI credits (org-level, unified pool)
+        ai_ok, _, ai_details = check_ai_credit_eligibility(db, org_id, cost=1)
+        ai_remaining = ai_details.get('total_remaining', 0)
+        ai_limit = get_plan_limit(plan_name, 'monthly_ai_credits')
 
-        # Logo credits (org-level)
-        logo_ok, _, logo_details = check_logo_generation_eligibility(db, org_id)
-        logo_remaining = logo_details.get('total_remaining', 0)
-        logo_limit = get_plan_limit(plan_name, 'monthly_logo_runs')
+        # Monthly name generations (org-level, for display)
+        ng_used = get_monthly_name_generations(db, org_id)
+
+        # Monthly applications (org-level)
+        app_used = get_monthly_applications(db, org_id)
+        app_limit = get_plan_limit(plan_name, 'monthly_applications')
+
+        # Logo tracking
+        can_track_logos = get_plan_limit(plan_name, 'can_track_logos')
 
         # Watchlist items count
         cur = db.cursor()
@@ -2269,15 +3011,25 @@ async def get_usage_summary(current_user: CurrentUser = Depends(get_current_user
         wl_count = wl_row['cnt'] if wl_row else 0
         wl_limit = get_plan_limit(plan_name, 'max_watchlist_items')
 
+        # Name generation limit (uses the unified AI credit pool)
+        ng_limit = ai_limit  # name generations share the AI credit pool
+
+        # Logo generation limit (also from unified AI credit pool)
+        logo_limit = ai_limit
+
     return {
         "plan": plan_name,
         "display_name": plan['display_name'],
         "usage": {
             "daily_quick_searches": {"used": qs_used, "limit": qs_limit},
             "monthly_live_searches": {"used": ls_used, "limit": ls_limit},
+            "monthly_ai_credits": {"remaining": ai_remaining, "limit": ai_limit},
             "monthly_name_generations": {"used": ng_used, "limit": ng_limit},
-            "logo_credits": {"remaining": logo_remaining, "limit": logo_limit},
+            "monthly_name_generations_used": ng_used,
+            "monthly_applications": {"used": app_used, "limit": app_limit},
             "watchlist_items": {"used": wl_count, "limit": wl_limit},
+            "logo_credits": {"remaining": ai_remaining, "limit": logo_limit},
+            "can_track_logos": can_track_logos,
         },
     }
 

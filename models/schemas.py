@@ -60,6 +60,27 @@ class DeadlineStatus(str, Enum):
     RESOLVED = "resolved"
 
 
+class ApplicationStatus(str, Enum):
+    DRAFT = "draft"
+    SUBMITTED = "submitted"
+    UNDER_REVIEW = "under_review"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    COMPLETED = "completed"
+
+
+class MarkType(str, Enum):
+    WORD = "word"
+    FIGURATIVE = "figurative"
+    COMBINED = "combined"
+
+
+class ApplicationType(str, Enum):
+    REGISTRATION = "registration"
+    APPEAL = "appeal"
+    RENEWAL = "renewal"
+
+
 class ReportType(str, Enum):
     WATCHLIST_SUMMARY = "watchlist_summary"
     ALERT_DIGEST = "alert_digest"
@@ -89,13 +110,13 @@ class TrademarkStatus(str, Enum):
 
 class OrganizationBase(BaseModel):
     name: str = Field(..., min_length=2, max_length=255)
-    email: EmailStr
     phone: Optional[str] = None
     address: Optional[str] = None
 
 
 class OrganizationCreate(OrganizationBase):
     slug: str = Field(..., min_length=2, max_length=100, pattern=r'^[a-z0-9-]+$')
+    email: Optional[EmailStr] = None
 
 
 class OrganizationUpdate(BaseModel):
@@ -108,14 +129,15 @@ class OrganizationUpdate(BaseModel):
 
 class OrganizationResponse(OrganizationBase):
     id: UUID
-    slug: str
-    plan: PlanType
-    max_users: int
-    max_watchlist_items: int
-    max_monthly_searches: int
-    is_active: bool
-    created_at: datetime
-    
+    slug: Optional[str] = None
+    is_active: bool = True
+    created_at: Optional[datetime] = None
+    # Plan details resolved from subscription_plans join
+    plan: Optional[PlanType] = None
+    max_users: Optional[int] = None
+    max_watchlist_items: Optional[int] = None
+    max_monthly_searches: Optional[int] = None
+
     class Config:
         from_attributes = True
 
@@ -193,7 +215,7 @@ class WatchlistItemBase(BaseModel):
     application_no: Optional[str] = None  # User's own application number (saved as customer_application_no in DB)
     bulletin_no: Optional[str] = None  # User's trademark publication bulletin number (saved as customer_bulletin_no in DB)
     registration_no: Optional[str] = None
-    filing_date: Optional[date] = None
+    application_date: Optional[date] = None
     
     # Monitoring settings
     similarity_threshold: float = Field(default=0.70, ge=0.0, le=1.0)
@@ -255,7 +277,7 @@ class WatchlistItemResponse(WatchlistItemBase):
     application_no: Optional[str] = Field(None, validation_alias='customer_application_no')
     bulletin_no: Optional[str] = Field(None, validation_alias='customer_bulletin_no')
     registration_no: Optional[str] = Field(None, validation_alias='customer_registration_no')
-    filing_date: Optional[date] = Field(None, validation_alias='customer_registration_date')
+    application_date: Optional[date] = Field(None, validation_alias='customer_registration_date')
 
     # Logo (logo_path is internal, excluded from JSON via model serialization)
     logo_path: Optional[str] = Field(None, exclude=True)
@@ -298,6 +320,9 @@ class WatchlistBulkImportResult(BaseModel):
     created: int
     failed: int
     errors: List[Dict[str, Any]]
+    limit_reached: bool = False
+    max_allowed: int = 0
+    current_count: int = 0
 
 
 class FileUploadWarning(BaseModel):
@@ -382,8 +407,9 @@ class ColumnDetectionResponse(BaseModel):
     columns: List[str]
     sample_data: List[Dict[str, Any]]
     auto_mappings: ColumnAutoMappings
-    required_fields: List[str] = ["brand_name", "application_no", "nice_classes"]
-    optional_fields: List[str] = ["bulletin_no"]
+    total_rows: int = 0
+    required_fields: List[str] = ["brand_name"]
+    optional_fields: List[str] = ["application_no", "nice_classes", "bulletin_no"]
 
 
 class ColumnMapping(BaseModel):
@@ -406,8 +432,12 @@ class ConflictingTrademark(BaseModel):
     status: TrademarkStatus
     classes: List[int]
     holder: Optional[str]
+    holder_tpe_client_id: Optional[str] = None
+    attorney_name: Optional[str] = None
+    attorney_no: Optional[str] = None
+    registration_no: Optional[str] = None
     image_path: Optional[str]
-    filing_date: Optional[date]
+    application_date: Optional[date] = None
     has_extracted_goods: bool = False
 
 
@@ -753,3 +783,114 @@ class GenerationHistoryResponse(BaseModel):
     page: int
     per_page: int
     total_pages: int
+
+
+# ==========================================
+# Trademark Application Models
+# ==========================================
+
+class TrademarkApplicationCreate(BaseModel):
+    """Create a new trademark application"""
+    application_type: ApplicationType = ApplicationType.REGISTRATION
+    brand_name: str = Field(..., min_length=1, max_length=500)
+    mark_type: MarkType = MarkType.WORD
+    nice_class_numbers: List[int] = Field(default=[])
+    goods_services_description: Optional[str] = None
+
+    # Applicant info (optional at draft stage)
+    applicant_full_name: Optional[str] = None
+    applicant_id_no: Optional[str] = None
+    applicant_id_type: Optional[str] = Field(default="tc_kimlik", pattern=r'^(tc_kimlik|vergi_no)$')
+    applicant_address: Optional[str] = None
+    applicant_phone: Optional[str] = None
+    applicant_email: Optional[EmailStr] = None
+
+    notes: Optional[str] = None
+
+    # Context from search
+    source_search_query: Optional[str] = None
+    source_risk_score: Optional[float] = None
+
+    @validator('nice_class_numbers', each_item=True)
+    def validate_nice_classes(cls, v):
+        if v < 1 or v > 45:
+            raise ValueError(f"Nice class {v} must be between 1 and 45")
+        return v
+
+
+class TrademarkApplicationUpdate(BaseModel):
+    """Update a draft application"""
+    application_type: Optional[ApplicationType] = None
+    brand_name: Optional[str] = None
+    mark_type: Optional[MarkType] = None
+    nice_class_numbers: Optional[List[int]] = None
+    goods_services_description: Optional[str] = None
+
+    applicant_full_name: Optional[str] = None
+    applicant_id_no: Optional[str] = None
+    applicant_id_type: Optional[str] = None
+    applicant_address: Optional[str] = None
+    applicant_phone: Optional[str] = None
+    applicant_email: Optional[str] = None
+
+    notes: Optional[str] = None
+
+
+class TrademarkApplicationResponse(BaseModel):
+    """Response model for a trademark application"""
+    id: UUID
+    organization_id: UUID
+    user_id: UUID
+    status: ApplicationStatus
+    application_type: ApplicationType = ApplicationType.REGISTRATION
+    brand_name: str
+    mark_type: MarkType
+    nice_class_numbers: List[int]
+    goods_services_description: Optional[str] = None
+
+    applicant_full_name: Optional[str] = None
+    applicant_id_no: Optional[str] = None
+    applicant_id_type: Optional[str] = None
+    applicant_address: Optional[str] = None
+    applicant_phone: Optional[str] = None
+    applicant_email: Optional[str] = None
+
+    notes: Optional[str] = None
+    specialist_notes: Optional[str] = None
+    rejection_reason: Optional[str] = None
+
+    assigned_specialist_id: Optional[UUID] = None
+    turkpatent_application_no: Optional[str] = None
+    turkpatent_filing_date: Optional[date] = None
+
+    source_search_query: Optional[str] = None
+    source_risk_score: Optional[float] = None
+
+    logo_path: Optional[str] = Field(None, exclude=True)
+    has_logo: bool = False
+    logo_url: Optional[str] = None
+
+    created_at: datetime
+    updated_at: datetime
+    submitted_at: Optional[datetime] = None
+    reviewed_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+    @validator('has_logo', pre=True, always=True)
+    def compute_has_logo(cls, v, values):
+        if v:
+            return v
+        return bool(values.get('logo_path'))
+
+    @validator('logo_url', pre=True, always=True)
+    def compute_logo_url(cls, v, values):
+        if v:
+            return v
+        app_id = values.get('id')
+        logo_path = values.get('logo_path')
+        if app_id and logo_path:
+            return f"/api/v1/applications/{app_id}/logo"
+        return None
+
+    class Config:
+        from_attributes = True

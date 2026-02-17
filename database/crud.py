@@ -17,7 +17,9 @@ from models.schemas import (
     UserCreate, UserUpdate, UserRole,
     WatchlistItemCreate, WatchlistItemUpdate,
     AlertStatus, AlertSeverity,
-    PlanType
+    PlanType,
+    TrademarkApplicationCreate, TrademarkApplicationUpdate,
+    ApplicationStatus
 )
 
 logger = logging.getLogger(__name__)
@@ -52,8 +54,9 @@ class Database:
             self.conn.rollback()
         self.conn.close()
     
-    def cursor(self):
-        return self.conn.cursor(cursor_factory=RealDictCursor)
+    def cursor(self, **kwargs):
+        kwargs.setdefault('cursor_factory', RealDictCursor)
+        return self.conn.cursor(**kwargs)
     
     def commit(self):
         self.conn.commit()
@@ -86,10 +89,10 @@ class OrganizationCRUD:
 
         org_id = uuid4()
         cur.execute("""
-            INSERT INTO organizations (id, name, slug, email, phone, address)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO organizations (id, name, slug, phone, address)
+            VALUES (%s, %s, %s, %s, %s)
             RETURNING *
-        """, (str(org_id), data.name, slug, data.email, data.phone, data.address))
+        """, (str(org_id), data.name, slug, data.phone, data.address))
         
         db.commit()
         return dict(cur.fetchone())
@@ -174,26 +177,45 @@ class OrganizationCRUD:
         return dict(row) if row else {}
     
     @staticmethod
-    def check_limits(db: Database, org_id: UUID, resource: str) -> Tuple[bool, int, int]:
+    def check_limits(db: Database, org_id: UUID, resource: str, user_id=None) -> Tuple[bool, int, int]:
         """
         Check if organization is within limits based on subscription plan.
+        If user_id is provided, checks superadmin status (superadmins bypass limits).
+        Also checks individual_plan_id on the user for per-user plan overrides.
         Returns: (within_limit, current_count, max_allowed)
         """
         from utils.subscription import get_plan_limit
 
         cur = db.cursor()
-        cur.execute("""
-            SELECT COALESCE(sp.name, 'free') as plan_name
-            FROM organizations o
-            LEFT JOIN subscription_plans sp ON o.subscription_plan_id = sp.id
-            WHERE o.id = %s
-        """, (str(org_id),))
-        row = cur.fetchone()
 
-        if not row:
-            return False, 0, 0
-
-        plan_name = row['plan_name']
+        # Resolve effective plan: user superadmin > user individual plan > org plan > free
+        plan_name = 'free'
+        if user_id:
+            cur.execute("""
+                SELECT u.is_superadmin,
+                       COALESCE(sp_user.name, sp_org.name, 'free') as plan_name
+                FROM users u
+                LEFT JOIN subscription_plans sp_user ON u.individual_plan_id = sp_user.id
+                LEFT JOIN organizations o ON u.organization_id = o.id
+                LEFT JOIN subscription_plans sp_org ON o.subscription_plan_id = sp_org.id
+                WHERE u.id = %s
+            """, (str(user_id),))
+            urow = cur.fetchone()
+            if urow:
+                plan_name = urow['plan_name']
+                if urow['is_superadmin']:
+                    plan_name = 'superadmin'
+        else:
+            cur.execute("""
+                SELECT COALESCE(sp.name, 'free') as plan_name
+                FROM organizations o
+                LEFT JOIN subscription_plans sp ON o.subscription_plan_id = sp.id
+                WHERE o.id = %s
+            """, (str(org_id),))
+            row = cur.fetchone()
+            if not row:
+                return False, 0, 0
+            plan_name = row['plan_name']
 
         if resource == "users":
             cur.execute("SELECT COUNT(*) FROM users WHERE organization_id = %s AND is_active = TRUE", (str(org_id),))
@@ -250,7 +272,7 @@ class UserCRUD:
         """Get user by ID"""
         cur = db.cursor()
         cur.execute("""
-            SELECT id, organization_id, email, first_name, last_name, phone, role,
+            SELECT id, organization_id, email, password_hash, first_name, last_name, phone, role,
                    is_active, is_email_verified, COALESCE(is_superadmin, FALSE) as is_superadmin,
                    last_login_at, created_at,
                    avatar_url, title, department, linkedin
@@ -378,13 +400,13 @@ class WatchlistCRUD:
         """Create watchlist item"""
         cur = db.cursor()
         
-        # Check limits
-        within_limit, _, _ = OrganizationCRUD.check_limits(db, org_id, "watchlist")
+        # Check limits (pass user_id so superadmin/individual plan is respected)
+        within_limit, _, _ = OrganizationCRUD.check_limits(db, org_id, "watchlist", user_id=user_id)
         if not within_limit:
             raise ValueError("Organization has reached maximum watchlist items limit")
-        
+
         item_id = uuid4()
-        
+
         # Get alert_frequency, defaulting to 'daily' if not provided
         alert_freq = getattr(data, 'alert_frequency', None)
         if alert_freq:
@@ -414,61 +436,143 @@ class WatchlistCRUD:
         
         db.commit()
         return dict(cur.fetchone())
-    
+
     @staticmethod
-    def get_by_id(db: Database, item_id: UUID, org_id: Optional[UUID] = None) -> Optional[Dict]:
-        """Get watchlist item by ID"""
+    def create_with_embeddings(
+        db: Database, org_id: UUID, user_id: UUID, data: WatchlistItemCreate,
+        logo_path: Optional[str] = None,
+        logo_embedding: Optional[List[float]] = None,
+        logo_dinov2_embedding: Optional[List[float]] = None,
+        logo_color_histogram: Optional[List[float]] = None,
+        logo_ocr_text: Optional[str] = None,
+        text_embedding: Optional[List[float]] = None,
+        auto_commit: bool = True,
+    ) -> Dict:
+        """Create watchlist item with pre-computed embeddings (from trademark data)."""
         cur = db.cursor()
-        query = "SELECT * FROM watchlist_mt WHERE id = %s"
-        params = [str(item_id)]
-        
-        if org_id:
-            query += " AND organization_id = %s"
-            params.append(str(org_id))
-        
-        cur.execute(query, params)
+
+        within_limit, _, _ = OrganizationCRUD.check_limits(db, org_id, "watchlist", user_id=user_id)
+        if not within_limit:
+            raise ValueError("Organization has reached maximum watchlist items limit")
+
+        item_id = uuid4()
+        alert_freq = getattr(data, 'alert_frequency', None)
+        if alert_freq:
+            alert_freq = alert_freq.value if hasattr(alert_freq, 'value') else alert_freq
+        else:
+            alert_freq = 'daily'
+
+        app_no = getattr(data, 'application_no', None)
+        bulletin_no = getattr(data, 'bulletin_no', None)
+
+        cols = [
+            "id", "organization_id", "user_id", "brand_name", "nice_class_numbers",
+            "description", "alert_threshold", "monitor_similar_names", "monitor_similar_logos",
+            "alert_frequency", "customer_application_no", "customer_bulletin_no"
+        ]
+        vals = [
+            str(item_id), str(org_id), str(user_id), data.brand_name, data.nice_class_numbers,
+            data.description, data.similarity_threshold, data.monitor_text, data.monitor_visual,
+            alert_freq, app_no, bulletin_no
+        ]
+        placeholders = ["%s"] * len(cols)
+
+        if logo_path:
+            cols.append("logo_path")
+            vals.append(logo_path)
+            placeholders.append("%s")
+        if logo_embedding is not None:
+            cols.append("logo_embedding")
+            vals.append(str(logo_embedding))
+            placeholders.append("%s::halfvec")
+        if logo_dinov2_embedding is not None:
+            cols.append("logo_dinov2_embedding")
+            vals.append(str(logo_dinov2_embedding))
+            placeholders.append("%s::halfvec")
+        if logo_color_histogram is not None:
+            cols.append("logo_color_histogram")
+            vals.append(str(logo_color_histogram))
+            placeholders.append("%s::halfvec")
+        if logo_ocr_text is not None:
+            cols.append("logo_ocr_text")
+            vals.append(logo_ocr_text)
+            placeholders.append("%s")
+        if text_embedding is not None:
+            cols.append("text_embedding")
+            vals.append(str(text_embedding))
+            placeholders.append("%s::halfvec")
+
+        sql = f"INSERT INTO watchlist_mt ({', '.join(cols)}) VALUES ({', '.join(placeholders)}) RETURNING *"
+        cur.execute(sql, vals)
+        if auto_commit:
+            db.commit()
+        return dict(cur.fetchone())
+
+    @staticmethod
+    def get_by_id(db: Database, item_id: UUID, org_id: UUID) -> Optional[Dict]:
+        """Get watchlist item by ID, scoped to organization (tenant isolation)."""
+        cur = db.cursor()
+        cur.execute(
+            "SELECT * FROM watchlist_mt WHERE id = %s AND organization_id = %s",
+            (str(item_id), str(org_id))
+        )
         row = cur.fetchone()
         return dict(row) if row else None
     
     @staticmethod
     def get_by_organization(
-        db: Database, 
-        org_id: UUID, 
+        db: Database,
+        org_id: UUID,
         active_only: bool = True,
         page: int = 1,
-        page_size: int = 20
+        page_size: int = 20,
+        search: Optional[str] = None,
+        sort_by: Optional[str] = None
     ) -> Tuple[List[Dict], int]:
-        """Get watchlist items for organization with pagination"""
+        """Get watchlist items for organization with pagination, search, and sort"""
         cur = db.cursor()
-        
-        # Count total
-        count_query = "SELECT COUNT(*) FROM watchlist_mt WHERE organization_id = %s"
+
+        # Build WHERE clause
+        where_parts = ["w.organization_id = %s"]
+        params = [str(org_id)]
         if active_only:
-            count_query += " AND is_active = TRUE"
-        cur.execute(count_query, (str(org_id),))
+            where_parts.append("w.is_active = TRUE")
+        if search:
+            where_parts.append("w.brand_name ILIKE %s ESCAPE '\\'")
+            safe_search = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            params.append(f"%{safe_search}%")
+
+        where_clause = " AND ".join(where_parts)
+
+        # Count total
+        cur.execute(f"SELECT COUNT(*) FROM watchlist_mt w WHERE {where_clause}", params)
         total = cur.fetchone()['count']
-        
+
+        # Sort clause
+        sort_map = {
+            'date_desc': 'w.created_at DESC',
+            'date_asc': 'w.created_at ASC',
+            'name_asc': 'w.brand_name ASC',
+            'conflicts_desc': 'total_alerts_count DESC, w.created_at DESC'
+        }
+        order_by = sort_map.get(sort_by, 'w.created_at DESC')
+
         # Get items with alert counts
-        query = """
+        query = f"""
             SELECT w.*,
                    COUNT(a.id) FILTER (WHERE a.status = 'new') AS new_alerts_count,
                    COUNT(a.id) AS total_alerts_count
             FROM watchlist_mt w
             LEFT JOIN alerts_mt a ON w.id = a.watchlist_item_id
-            WHERE w.organization_id = %s
-        """
-        if active_only:
-            query += " AND w.is_active = TRUE"
-        
-        query += """
+            WHERE {where_clause}
             GROUP BY w.id
-            ORDER BY w.created_at DESC
+            ORDER BY {order_by}
             LIMIT %s OFFSET %s
         """
-        
+
         offset = (page - 1) * page_size
-        cur.execute(query, (str(org_id), page_size, offset))
-        
+        cur.execute(query, params + [page_size, offset])
+
         return [dict(row) for row in cur.fetchall()], total
     
     @staticmethod
@@ -494,6 +598,10 @@ class WatchlistCRUD:
             'application_no': 'customer_application_no',
             'bulletin_no': 'customer_bulletin_no',
             'registration_no': 'customer_registration_no',
+            'similarity_threshold': 'alert_threshold',
+            'monitor_text': 'monitor_similar_names',
+            'monitor_visual': 'monitor_similar_logos',
+            'alert_email': 'notify_email',
         }
 
         updates = []
@@ -712,27 +820,21 @@ class AlertCRUD:
         return dict(cur.fetchone())
     
     @staticmethod
-    def get_by_id(db: Database, alert_id: UUID, org_id: Optional[UUID] = None) -> Optional[Dict]:
-        """Get alert by ID with appeal deadline from trademarks join"""
+    def get_by_id(db: Database, alert_id: UUID, org_id: UUID) -> Optional[Dict]:
+        """Get alert by ID, scoped to organization (tenant isolation)."""
         cur = db.cursor()
-        query = """
+        cur.execute("""
             SELECT a.*,
                    t.appeal_deadline as conflict_appeal_deadline,
                    t.bulletin_date as conflict_bulletin_date,
                    t.bulletin_no as conflict_bulletin_no,
                    t.current_status as conflict_live_status,
-                   t.nice_class_numbers as conflict_live_classes
+                   t.nice_class_numbers as conflict_live_classes,
+                   t.application_date as conflict_application_date
             FROM alerts_mt a
             LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
-            WHERE a.id = %s
-        """
-        params = [str(alert_id)]
-
-        if org_id:
-            query += " AND a.organization_id = %s"
-            params.append(str(org_id))
-
-        cur.execute(query, params)
+            WHERE a.id = %s AND a.organization_id = %s
+        """, (str(alert_id), str(org_id)))
         row = cur.fetchone()
         return dict(row) if row else None
     
@@ -749,29 +851,35 @@ class AlertCRUD:
         """Get alerts for organization with filtering"""
         cur = db.cursor()
         
-        conditions = ["organization_id = %s"]
+        conditions = ["a.organization_id = %s"]
         params = [str(org_id)]
-        
+
         if status:
-            conditions.append(f"status = ANY(%s)")
+            conditions.append(f"a.status = ANY(%s)")
             params.append(status)
-        
+
         if severity:
-            conditions.append(f"severity = ANY(%s)")
+            conditions.append(f"a.severity = ANY(%s)")
             params.append(severity)
-        
+
         if watchlist_id:
-            conditions.append("watchlist_item_id = %s")
+            conditions.append("a.watchlist_item_id = %s")
             params.append(str(watchlist_id))
         
         where_clause = " AND ".join(conditions)
-        
-        # Count total
-        cur.execute(f"SELECT COUNT(*) FROM alerts_mt WHERE {where_clause}", params)
+
+        # Count total (only appealable: deadline not yet passed or pre-publication with no deadline)
+        cur.execute(f"""
+            SELECT COUNT(*) FROM alerts_mt a
+            LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
+            WHERE {where_clause}
+            AND (t.appeal_deadline IS NULL OR t.appeal_deadline >= CURRENT_DATE)
+        """, params)
         total = cur.fetchone()['count']
-        
+
         # Get alerts with watchlist info and both bulletin numbers
         # Also fetch live status from trademarks table since alerts_mt.conflicting_status may be NULL
+        # Only return appealable conflicts (deadline not yet passed)
         offset = (page - 1) * page_size
 
         cur.execute(f"""
@@ -785,6 +893,7 @@ class AlertCRUD:
                    t.nice_class_numbers as conflict_live_classes,
                    t.appeal_deadline as conflict_appeal_deadline,
                    t.bulletin_date as conflict_bulletin_date,
+                   t.application_date as conflict_application_date,
                    (t.extracted_goods IS NOT NULL
                        AND t.extracted_goods != '[]'::jsonb
                        AND t.extracted_goods != 'null'::jsonb) AS conflict_has_extracted_goods
@@ -792,6 +901,7 @@ class AlertCRUD:
             LEFT JOIN watchlist_mt w ON a.watchlist_item_id = w.id
             LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
             WHERE a.organization_id = %s
+            AND (t.appeal_deadline IS NULL OR t.appeal_deadline >= CURRENT_DATE)
             {"AND a.status = ANY(%s)" if status else ""}
             {"AND a.severity = ANY(%s)" if severity else ""}
             {"AND a.watchlist_item_id = %s" if watchlist_id else ""}
@@ -972,3 +1082,177 @@ class ScanLogCRUD:
         """, (source_type,))
         row = cur.fetchone()
         return dict(row) if row else None
+
+
+# ==========================================
+# Application CRUD
+# ==========================================
+
+class ApplicationCRUD:
+
+    @staticmethod
+    def create(db: Database, org_id: UUID, user_id: UUID, data: TrademarkApplicationCreate) -> Dict:
+        """Create a new trademark application"""
+        cur = db.cursor()
+        app_id = uuid4()
+        cur.execute("""
+            INSERT INTO trademark_applications_mt (
+                id, organization_id, user_id, status, application_type,
+                brand_name, mark_type, nice_class_numbers, goods_services_description,
+                applicant_full_name, applicant_id_no, applicant_id_type,
+                applicant_address, applicant_phone, applicant_email,
+                notes, source_search_query, source_risk_score
+            ) VALUES (
+                %s, %s, %s, 'draft', %s,
+                %s, %s, %s, %s,
+                %s, %s, %s,
+                %s, %s, %s,
+                %s, %s, %s
+            ) RETURNING *
+        """, (
+            str(app_id), str(org_id), str(user_id), data.application_type.value,
+            data.brand_name, data.mark_type.value, data.nice_class_numbers, data.goods_services_description,
+            data.applicant_full_name, data.applicant_id_no, data.applicant_id_type,
+            data.applicant_address, data.applicant_phone,
+            str(data.applicant_email) if data.applicant_email else None,
+            data.notes, data.source_search_query, data.source_risk_score
+        ))
+        db.commit()
+        return dict(cur.fetchone())
+
+    @staticmethod
+    def get_by_id(db: Database, app_id: UUID, org_id: UUID) -> Optional[Dict]:
+        """Get application by ID scoped to organization"""
+        cur = db.cursor()
+        cur.execute("""
+            SELECT * FROM trademark_applications_mt
+            WHERE id = %s AND organization_id = %s
+        """, (str(app_id), str(org_id)))
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
+    def get_by_organization(
+        db: Database, org_id: UUID,
+        status: Optional[str] = None,
+        application_type: Optional[str] = None,
+        page: int = 1, page_size: int = 20
+    ) -> Tuple[List[Dict], int]:
+        """Get paginated applications for an organization"""
+        cur = db.cursor()
+        where = "WHERE organization_id = %s"
+        params: list = [str(org_id)]
+
+        if status:
+            where += " AND status = %s"
+            params.append(status)
+
+        if application_type:
+            where += " AND application_type = %s"
+            params.append(application_type)
+
+        # Count
+        cur.execute(f"SELECT COUNT(*) FROM trademark_applications_mt {where}", params)
+        total = cur.fetchone()['count']
+
+        # Fetch
+        offset = (page - 1) * page_size
+        cur.execute(f"""
+            SELECT * FROM trademark_applications_mt
+            {where}
+            ORDER BY created_at DESC
+            LIMIT %s OFFSET %s
+        """, params + [page_size, offset])
+        rows = [dict(r) for r in cur.fetchall()]
+        return rows, total
+
+    @staticmethod
+    def update(db: Database, app_id: UUID, org_id: UUID, data: TrademarkApplicationUpdate) -> Optional[Dict]:
+        """Update a draft application"""
+        cur = db.cursor()
+        # Only allow updating drafts
+        cur.execute("""
+            SELECT status FROM trademark_applications_mt
+            WHERE id = %s AND organization_id = %s
+        """, (str(app_id), str(org_id)))
+        row = cur.fetchone()
+        if not row:
+            return None
+        if row['status'] != 'draft':
+            raise ValueError("Only draft applications can be edited")
+
+        updates = []
+        params = []
+        for field, value in data.dict(exclude_unset=True).items():
+            if value is not None:
+                if field in ('mark_type', 'application_type'):
+                    updates.append(f"{field} = %s")
+                    params.append(value.value if hasattr(value, 'value') else value)
+                else:
+                    updates.append(f"{field} = %s")
+                    params.append(value)
+
+        if not updates:
+            return ApplicationCRUD.get_by_id(db, app_id, org_id)
+
+        updates.append("updated_at = NOW()")
+        params.extend([str(app_id), str(org_id)])
+
+        cur.execute(f"""
+            UPDATE trademark_applications_mt
+            SET {', '.join(updates)}
+            WHERE id = %s AND organization_id = %s
+            RETURNING *
+        """, params)
+        db.commit()
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
+    def update_status(db: Database, app_id: UUID, org_id: UUID, new_status: str) -> Optional[Dict]:
+        """Update application status with appropriate timestamp"""
+        cur = db.cursor()
+        ts_field = {
+            'submitted': 'submitted_at',
+            'under_review': 'reviewed_at',
+            'approved': 'reviewed_at',
+            'rejected': 'reviewed_at',
+            'completed': 'completed_at',
+        }.get(new_status)
+
+        ts_clause = f", {ts_field} = NOW()" if ts_field else ""
+
+        cur.execute(f"""
+            UPDATE trademark_applications_mt
+            SET status = %s, updated_at = NOW(){ts_clause}
+            WHERE id = %s AND organization_id = %s
+            RETURNING *
+        """, (new_status, str(app_id), str(org_id)))
+        db.commit()
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
+    def update_logo(db: Database, app_id: UUID, org_id: UUID, logo_path: str) -> Optional[Dict]:
+        """Update application logo path"""
+        cur = db.cursor()
+        cur.execute("""
+            UPDATE trademark_applications_mt
+            SET logo_path = %s, updated_at = NOW()
+            WHERE id = %s AND organization_id = %s
+            RETURNING *
+        """, (logo_path, str(app_id), str(org_id)))
+        db.commit()
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
+    def delete(db: Database, app_id: UUID, org_id: UUID) -> bool:
+        """Delete a draft application"""
+        cur = db.cursor()
+        cur.execute("""
+            DELETE FROM trademark_applications_mt
+            WHERE id = %s AND organization_id = %s AND status = 'draft'
+        """, (str(app_id), str(org_id)))
+        db.commit()
+        return cur.rowcount > 0

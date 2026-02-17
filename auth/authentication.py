@@ -51,6 +51,7 @@ class UserRegister(BaseModel):
     last_name: str = Field(..., min_length=1, max_length=100)
     organization_name: Optional[str] = None  # If creating new org
     organization_slug: Optional[str] = None  # If joining existing org
+    lang: str = Field(default="tr", description="UI language: tr, en, ar")
     
     @validator("password")
     def password_strength(cls, v):
@@ -74,12 +75,18 @@ class UserLogin(BaseModel):
 class PasswordReset(BaseModel):
     """Password Reset Request"""
     email: EmailStr
+    lang: str = Field(default="tr", description="UI language: tr, en, ar")
 
 
 class PasswordResetConfirm(BaseModel):
     """Password Reset Confirmation"""
     token: str
     new_password: str = Field(..., min_length=8)
+
+
+class VerifyEmailRequest(BaseModel):
+    """Email verification code submission"""
+    code: str = Field(..., min_length=6, max_length=6, pattern=r"^\d{6}$")
 
 
 class PasswordChange(BaseModel):

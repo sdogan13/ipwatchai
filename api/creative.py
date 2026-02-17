@@ -495,7 +495,7 @@ async def suggest_names(
     # ----------------------------------------------------------
     # 4. Generate names via Gemini
     # ----------------------------------------------------------
-    from ai.gemini_client import get_gemini_client, GeminiError
+    from generative_ai.gemini_client import get_gemini_client, GeminiError
 
     client = get_gemini_client()
     if not client.is_available():
@@ -1059,7 +1059,7 @@ async def generate_logo(
     # ----------------------------------------------------------
     # 3. Generate logos via Gemini
     # ----------------------------------------------------------
-    from ai.gemini_client import get_gemini_client, GeminiError
+    from generative_ai.gemini_client import get_gemini_client, GeminiError
 
     client = get_gemini_client()
     if not client.is_available():
@@ -1430,7 +1430,7 @@ async def creative_suite_status():
 
     # Check Gemini client availability
     try:
-        from ai.gemini_client import get_gemini_client
+        from generative_ai.gemini_client import get_gemini_client
         client = get_gemini_client()
         if client.is_available():
             status["name_generator"]["available"] = True
