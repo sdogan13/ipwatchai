@@ -202,20 +202,37 @@ class TestIDFWaterfall:
         assert score == 1.0
 
     def test_containment_distinctive_query_in_target(self):
-        """'nike' in 'nike sports' with distinctive word → ≥0.95."""
+        """'nike' in 'nike sports' with distinctive word → ≥0.88 (length-diluted from 0.95)."""
         score, breakdown = compute_idf_weighted_score(
             query="NIKE", target="NIKE SPORTS", text_sim=0.5, semantic_sim=0.5,
         )
-        assert score >= 0.95
+        assert score >= 0.88, f"Expected >=0.88 for +1 word containment, got {score}"
         assert "CONTAINMENT" in breakdown["scoring_path"]
 
     def test_containment_distinctive_target_in_query(self):
-        """'nike' (target) is substring of 'nike sports' (query) → ≥0.90."""
+        """'nike' (target) is substring of 'nike sports' (query) → ≥0.85 (length-diluted from 0.93)."""
         score, breakdown = compute_idf_weighted_score(
             query="NIKE SPORTS", target="NIKE", text_sim=0.5, semantic_sim=0.5,
         )
-        assert score >= 0.90
+        assert score >= 0.85, f"Expected >=0.85 for +1 word containment, got {score}"
         assert "CONTAINMENT" in breakdown["scoring_path"]
+
+    def test_containment_length_dilution_increases_with_words(self):
+        """More extra words → lower containment score."""
+        score_1, _ = compute_idf_weighted_score(
+            query="NIKE", target="NIKE JOYRIDE", text_sim=0.5,
+        )
+        score_3, _ = compute_idf_weighted_score(
+            query="NIKE", target="NIKE SPORTS INTERNATIONAL GROUP", text_sim=0.5,
+        )
+        score_5, _ = compute_idf_weighted_score(
+            query="NIKE", target="NIKE SPORTS INTERNATIONAL APPAREL GROUP LTD", text_sim=0.5,
+        )
+        assert score_1 > score_3 > score_5, (
+            f"Expected monotonic decrease: {score_1} > {score_3} > {score_5}"
+        )
+        assert score_1 >= 0.88, f"+1 word should be >=0.88, got {score_1}"
+        assert score_5 <= 0.82, f"+5 words should be <=0.82, got {score_5}"
 
     def test_containment_generic_only_penalized(self):
         """Only generic words in contained query → low score (0.15)."""
@@ -848,3 +865,61 @@ class TestRegressionKnownPairs:
         # With visual
         r_with_vis = score_pair("BRAND", "LOGO", text_sim=0.2, visual_sim=0.85)
         assert r_with_vis["total"] > r_no_vis["total"]
+
+
+# ============================================================
+# Graduated Phonetic in IDF Waterfall
+# ============================================================
+
+class TestGraduatedPhoneticInWaterfall:
+    """Verify that graduated phonetic scores (not binary 0/1) produce
+    intermediate results in the IDF waterfall Cases B-F."""
+
+    def test_intermediate_phonetic_produces_intermediate_total(self):
+        """A phonetic_sim of 0.6 should NOT inflate total as much as 1.0."""
+        # Binary 1.0 phonetic (old behavior)
+        _, bd_full = compute_idf_weighted_score(
+            query="dogan patent",
+            target="togan patent",
+            text_sim=0.30,
+            semantic_sim=0.20,
+            phonetic_sim=1.0,
+        )
+        total_full = bd_full.get("final_score", 0) if "final_score" in bd_full else _
+
+        # Graduated 0.6 phonetic (new behavior)
+        score_grad, bd_grad = compute_idf_weighted_score(
+            query="dogan patent",
+            target="togan patent",
+            text_sim=0.30,
+            semantic_sim=0.20,
+            phonetic_sim=0.6,
+        )
+
+        # Graduated should produce a lower or equal score vs binary 1.0
+        score_full, _ = compute_idf_weighted_score(
+            query="dogan patent",
+            target="togan patent",
+            text_sim=0.30,
+            semantic_sim=0.20,
+            phonetic_sim=1.0,
+        )
+        assert score_grad <= score_full
+
+    def test_zero_phonetic_no_inflation(self):
+        """phonetic_sim=0.0 should not inflate base at all."""
+        score_zero, _ = compute_idf_weighted_score(
+            query="silver star",
+            target="golden moon",
+            text_sim=0.10,
+            semantic_sim=0.15,
+            phonetic_sim=0.0,
+        )
+        score_half, _ = compute_idf_weighted_score(
+            query="silver star",
+            target="golden moon",
+            text_sim=0.10,
+            semantic_sim=0.15,
+            phonetic_sim=0.5,
+        )
+        assert score_half >= score_zero

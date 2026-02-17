@@ -31,6 +31,8 @@ from utils.idf_scoring import (
 )
 # Translation similarity for cross-language conflict detection
 from utils.translation import calculate_translation_similarity
+# Graduated phonetic scoring (replaces binary dMetaphone match)
+from utils.phonetic import calculate_phonetic_similarity
 # Class 99 (Global Brand) utilities - covers all 45 Nice classes
 from utils.class_utils import (
     GLOBAL_CLASS,
@@ -357,6 +359,12 @@ def _dynamic_combine(
 
     total = sum(signals[k] * final_weights[k] for k in final_weights)
     total = max(0.0, min(1.0, total))
+
+    # Floor: near-perfect visual match guarantees high total risk.
+    # Two logos that are 97% identical IS a trademark conflict regardless of name.
+    # Without this, a 0.24 text score drags 0.97 visual down to 0.87.
+    if visual_sim >= 0.85:
+        total = max(total, visual_sim)
 
     # Floor: near-perfect translation match guarantees high total risk.
     # e.g. APPLE ↔ ELMA with translation_sim >= 0.95 → total can't be below 0.90.
@@ -1334,7 +1342,7 @@ class RiskEngine:
                 text_sim=lex_postgres,
                 semantic_sim=sem,
                 visual_sim=vis,
-                phonetic_sim=1.0 if phon_match else 0.0,
+                phonetic_sim=calculate_phonetic_similarity(name_input, candidate_name),
                 candidate_translations={
                     'name_tr': candidate_name_tr,
                 }

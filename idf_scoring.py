@@ -112,14 +112,62 @@ def compute_idf_weighted_score(
         return 1.0, breakdown
 
     # ==========================================
-    # CHECK 2: Token-level containment
+    # CHECK 2: Token-level containment with LENGTH DILUTION
     # Uses token sets instead of raw substring matching to avoid
     # false positives like "nike" in "nikex" (different words).
-    # Scores are fixed (not boosted by text_sim) — 1.0 is reserved
-    # for exact match only (CHECK 1).
+    # 1.0 is reserved for exact match only (CHECK 1).
+    #
+    # Length dilution: the more extra words surround the matched
+    # distinctive token, the more the overall mark is differentiated.
+    # "NIKE JOYRIDE" (2 words) scores higher than
+    # "NIKE SPORTS INTERNATIONAL APPAREL GROUP" (5 words).
+    #
+    # Formula: score = floor + (ceiling - floor) * coverage
+    #   coverage = matched_tokens / total_tokens_in_longer_name
+    #   Extra generic words dilute LESS (they're just padding)
+    #   Extra distinctive words dilute MORE (new mark identity)
     # ==========================================
     q_tokens_temp = tokenize(query)
     t_tokens_temp = tokenize(target)
+
+    # --- Length dilution helper ---
+    # ceiling/floor for distinctive containment, coverage is the ratio
+    _CONTAIN_CEILING_2A = 0.95   # query ⊂ target (target is broader)
+    _CONTAIN_CEILING_2B = 0.93   # target ⊂ query (query is broader)
+    _CONTAIN_FLOOR = 0.65        # minimum for very long names
+
+    def _length_diluted_score(matched_tokens, all_tokens, ceiling):
+        """Apply length dilution to containment score.
+        Extra distinctive words penalize more than extra generic words.
+        Uses cumulative penalty with diminishing returns per extra word.
+
+        Target behavior:
+          +1 extra word  → ~0.90-0.93 (still very confusable)
+          +2 extra words → ~0.83-0.88 (moderately differentiated)
+          +3-4 extra     → ~0.75-0.83 (more differentiated, still risky)
+          +5-6 extra     → ~0.68-0.76 (significantly differentiated)
+          +7+ extra      → ~0.65-0.70 (floor)
+        """
+        n_matched = len(matched_tokens)
+        n_total = len(all_tokens)
+        if n_total <= n_matched:
+            return ceiling  # no extra words
+
+        extra_tokens = all_tokens - matched_tokens
+        # Per-word penalty by class (cumulative, NOT coverage-based)
+        cumulative_penalty = 0.0
+        for w in extra_tokens:
+            wclass = IDFLookup.get_word_class(w)
+            if wclass == 'distinctive':
+                cumulative_penalty += 0.05   # distinctive extras dilute more
+            elif wclass == 'semi_generic':
+                cumulative_penalty += 0.04   # moderate dilution
+            else:  # generic
+                cumulative_penalty += 0.025  # mild dilution (just padding)
+
+        # Apply cumulative penalty, capped by floor
+        diluted = ceiling - cumulative_penalty
+        return round(max(_CONTAIN_FLOOR, diluted), 4)
 
     # 2a: All query tokens found in target (target is broader or equal set)
     if q_tokens_temp and t_tokens_temp and q_tokens_temp.issubset(t_tokens_temp):
@@ -128,11 +176,17 @@ def compute_idf_weighted_score(
             for w in q_tokens_temp
         )
         if has_distinctive:
-            breakdown["containment"] = 1.0
+            final_score = _length_diluted_score(
+                q_tokens_temp, t_tokens_temp, _CONTAIN_CEILING_2A
+            )
+            breakdown["containment"] = round(final_score / _CONTAIN_CEILING_2A, 4)
             breakdown["distinctive_weight_matched"] = 1.0
             breakdown["semi_generic_weight_matched"] = 1.0
-            breakdown["scoring_path"] = "CONTAINMENT (all query tokens in target, has distinctive)"
-            final_score = 0.95
+            n_extra = len(t_tokens_temp) - len(q_tokens_temp)
+            breakdown["scoring_path"] = (
+                f"CONTAINMENT (query in target, +{n_extra} extra words, "
+                f"diluted {_CONTAIN_CEILING_2A}→{final_score})"
+            )
             breakdown["total"] = round(final_score, 4)
             return final_score, breakdown
         else:
@@ -151,11 +205,17 @@ def compute_idf_weighted_score(
             for w in t_tokens_temp
         )
         if has_distinctive:
-            breakdown["containment"] = 0.9
+            final_score = _length_diluted_score(
+                t_tokens_temp, q_tokens_temp, _CONTAIN_CEILING_2B
+            )
+            breakdown["containment"] = round(final_score / _CONTAIN_CEILING_2B, 4)
             breakdown["distinctive_weight_matched"] = 0.9
             breakdown["semi_generic_weight_matched"] = 0.9
-            breakdown["scoring_path"] = "CONTAINMENT (target tokens in query, has distinctive)"
-            final_score = 0.93
+            n_extra = len(q_tokens_temp) - len(t_tokens_temp)
+            breakdown["scoring_path"] = (
+                f"CONTAINMENT (target in query, +{n_extra} extra words, "
+                f"diluted {_CONTAIN_CEILING_2B}→{final_score})"
+            )
             breakdown["total"] = round(final_score, 4)
             return final_score, breakdown
         else:

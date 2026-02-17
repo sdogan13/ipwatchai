@@ -630,18 +630,9 @@ def score_translated_pair(translated_query: str, translated_candidate_tr: str) -
     seq_sim = _SM(None, q, c).ratio()
     text_sim = max(turkish_sim, seq_sim)
 
-    # --- phonetic match on translated strings (double-metaphone) ---
-    phon = 0.0
-    try:
-        import metaphone
-        m1 = metaphone.doublemetaphone(q)
-        m2 = metaphone.doublemetaphone(c)
-        codes1 = {code for code in m1 if code}
-        codes2 = {code for code in m2 if code}
-        if codes1 & codes2:
-            phon = 1.0
-    except ImportError:
-        pass
+    # --- graduated phonetic similarity on translated strings ---
+    from utils.phonetic import calculate_phonetic_similarity
+    phon = calculate_phonetic_similarity(q, c)
 
     # --- IDF waterfall (the same Cases A-F used for normal text scoring) ---
     from idf_scoring import compute_idf_weighted_score

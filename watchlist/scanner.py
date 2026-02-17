@@ -27,6 +27,7 @@ from utils.class_utils import (
 )
 import ai  # Shared AI models (loaded once at app startup)
 from risk_engine import score_pair, calculate_visual_similarity  # Centralized scoring
+from utils.phonetic import calculate_phonetic_similarity  # Graduated phonetic scoring
 
 logger = logging.getLogger(__name__)
 
@@ -410,8 +411,8 @@ class WatchlistScanner:
         # 2c. Visual similarity (combined CLIP/DINOv2/Color/OCR — logo text vs logo text)
         visual_sim = self._compute_visual_sim(trademark, watchlist_item)
 
-        # 2d. Phonetic similarity
-        phonetic_sim = 1.0 if self._phonetic_sim(tm_name, wl_name) else 0.0
+        # 2d. Phonetic similarity (graduated 0.0-1.0)
+        phonetic_sim = self._phonetic_sim(tm_name, wl_name)
 
         # 3. DELEGATE TO CENTRALIZED SCORING
         score_breakdown = score_pair(
@@ -435,7 +436,7 @@ class WatchlistScanner:
             'semantic_similarity': score_breakdown.get('semantic_similarity', 0),
             'visual_similarity': score_breakdown.get('visual_similarity', 0),
             'translation_similarity': score_breakdown.get('translation_similarity', 0),
-            'phonetic_match': phonetic_sim > 0,
+            'phonetic_match': phonetic_sim >= 0.5,
             'text_idf_score': score_breakdown.get('text_idf_score', 0),
             'scoring_path': score_breakdown.get('scoring_path', ''),
             'overlapping_classes': list(overlapping_classes),
@@ -501,17 +502,9 @@ class WatchlistScanner:
         )
 
     @staticmethod
-    def _phonetic_sim(s1: str, s2: str) -> bool:
-        """Return True if metaphone codes overlap, False otherwise."""
-        try:
-            import metaphone
-            m1 = metaphone.doublemetaphone(s1)
-            m2 = metaphone.doublemetaphone(s2)
-            codes1 = set(c for c in m1 if c)
-            codes2 = set(c for c in m2 if c)
-            return bool(codes1 & codes2)
-        except ImportError:
-            return False
+    def _phonetic_sim(s1: str, s2: str) -> float:
+        """Return graduated phonetic similarity (0.0-1.0)."""
+        return calculate_phonetic_similarity(s1, s2)
 
     def _get_trademarks_by_ids(self, trademark_ids: List[UUID]) -> List[Dict]:
         """Get trademark details by IDs"""
