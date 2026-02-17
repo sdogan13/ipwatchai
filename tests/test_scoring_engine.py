@@ -202,19 +202,19 @@ class TestIDFWaterfall:
         assert score == 1.0
 
     def test_containment_distinctive_query_in_target(self):
-        """'nike' in 'nike sports' with distinctive word → ≥0.88 (length-diluted from 0.95)."""
+        """'nike' in 'nike sports' with distinctive word → ≥0.83 (length-diluted from 0.92)."""
         score, breakdown = compute_idf_weighted_score(
             query="NIKE", target="NIKE SPORTS", text_sim=0.5, semantic_sim=0.5,
         )
-        assert score >= 0.88, f"Expected >=0.88 for +1 word containment, got {score}"
+        assert score >= 0.83, f"Expected >=0.83 for +1 word containment, got {score}"
         assert "CONTAINMENT" in breakdown["scoring_path"]
 
     def test_containment_distinctive_target_in_query(self):
-        """'nike' (target) is substring of 'nike sports' (query) → ≥0.85 (length-diluted from 0.93)."""
+        """'nike' (target) is substring of 'nike sports' (query) → ≥0.80 (length-diluted from 0.90)."""
         score, breakdown = compute_idf_weighted_score(
             query="NIKE SPORTS", target="NIKE", text_sim=0.5, semantic_sim=0.5,
         )
-        assert score >= 0.85, f"Expected >=0.85 for +1 word containment, got {score}"
+        assert score >= 0.80, f"Expected >=0.80 for +1 word containment, got {score}"
         assert "CONTAINMENT" in breakdown["scoring_path"]
 
     def test_containment_length_dilution_increases_with_words(self):
@@ -231,8 +231,8 @@ class TestIDFWaterfall:
         assert score_1 > score_3 > score_5, (
             f"Expected monotonic decrease: {score_1} > {score_3} > {score_5}"
         )
-        assert score_1 >= 0.88, f"+1 word should be >=0.88, got {score_1}"
-        assert score_5 <= 0.82, f"+5 words should be <=0.82, got {score_5}"
+        assert score_1 >= 0.82, f"+1 word should be >=0.82, got {score_1}"
+        assert score_5 <= 0.75, f"+5 words should be <=0.75, got {score_5}"
 
     def test_containment_generic_only_penalized(self):
         """Only generic words in contained query → low score (0.15)."""
@@ -243,25 +243,24 @@ class TestIDFWaterfall:
         assert "GENERIC ONLY" in breakdown["scoring_path"]
 
     def test_case_a_high_distinctive(self):
-        """≥80% distinctive weight matched → floor 0.92."""
+        """≥80% distinctive weight matched → containment path."""
         # "dogan" is distinctive, "patent" is semi-generic
         # In "dogan patent" vs "dogan marka": "dogan" matches (distinctive, weight 1.0)
-        # Total distinctive weight = 1.0, matched = 1.0 → 100% → Case A
+        # Hits containment path since query tokens ⊂ target tokens
         score, breakdown = compute_idf_weighted_score(
             query="DOGAN", target="DOGAN MARKA", text_sim=0.5, semantic_sim=0.5,
         )
-        # Since "dogan" in "dogan marka" → containment path (distinctive)
-        assert score >= 0.90
+        assert score >= 0.83, f"Expected >=0.83, got {score}"
 
     def test_case_b_good_distinctive(self):
-        """≥50% distinctive matched → floor 0.75."""
+        """≥50% distinctive matched → floor 0.65."""
         # Two distinctive words, one matches
         score, breakdown = compute_idf_weighted_score(
             query="NIKE ADIDAS", target="NIKE PUMA", text_sim=0.3, semantic_sim=0.3,
         )
         # "nike" matches exactly (distinctive), "adidas" doesn't match "puma"
         # distinctive_pct = 0.5 → Case B
-        assert score >= 0.75
+        assert score >= 0.65
         assert "B:" in breakdown["scoring_path"]
 
     def test_case_c_some_distinctive(self):

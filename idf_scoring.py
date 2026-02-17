@@ -132,9 +132,9 @@ def compute_idf_weighted_score(
 
     # --- Length dilution helper ---
     # ceiling/floor for distinctive containment, coverage is the ratio
-    _CONTAIN_CEILING_2A = 0.95   # query ⊂ target (target is broader)
-    _CONTAIN_CEILING_2B = 0.93   # target ⊂ query (query is broader)
-    _CONTAIN_FLOOR = 0.65        # minimum for very long names
+    _CONTAIN_CEILING_2A = 0.92   # query ⊂ target (target is broader)
+    _CONTAIN_CEILING_2B = 0.90   # target ⊂ query (query is broader)
+    _CONTAIN_FLOOR = 0.55        # minimum for very long names
 
     def _length_diluted_score(matched_tokens, all_tokens, ceiling):
         """Apply length dilution to containment score.
@@ -159,11 +159,11 @@ def compute_idf_weighted_score(
         for w in extra_tokens:
             wclass = IDFLookup.get_word_class(w)
             if wclass == 'distinctive':
-                cumulative_penalty += 0.05   # distinctive extras dilute more
+                cumulative_penalty += 0.07   # distinctive extras dilute more
             elif wclass == 'semi_generic':
-                cumulative_penalty += 0.04   # moderate dilution
+                cumulative_penalty += 0.055  # moderate dilution
             else:  # generic
-                cumulative_penalty += 0.025  # mild dilution (just padding)
+                cumulative_penalty += 0.035  # mild dilution (just padding)
 
         # Apply cumulative penalty, capped by floor
         diluted = ceiling - cumulative_penalty
@@ -387,14 +387,12 @@ def compute_idf_weighted_score(
         # should be lower than the 0.92 used for exact token matches.
         has_exact = any(m.get("match_type") == "exact" for m in matched_words)
         if has_exact:
-            final_score = max(0.92, weighted_overlap, text_sim)
+            final_score = max(0.90, weighted_overlap, text_sim)
         else:
-            # Fuzzy-only: use weighted_overlap as score, floor at 0.70
-            # This means "dogan"~"doga"(0.89) gives ~0.89, not 0.92
-            # and "dogan"~"erdogan"(0.59) gives ~0.75, not 0.92
+            # Fuzzy-only: use weighted_overlap as score, floor at 0.60
             base = max(weighted_overlap, text_sim, semantic_sim, phonetic_sim)
-            final_score = max(0.70, base)
-            final_score = min(0.91, final_score)  # cap below exact-match territory
+            final_score = max(0.60, base)
+            final_score = min(0.85, final_score)  # cap below exact-match territory
 
         # Apply length dilution for multi-word targets (same principle as CHECK 2)
         n_target = len(t_tokens)
@@ -403,8 +401,8 @@ def compute_idf_weighted_score(
         n_shorter = min(n_target, n_query)
         if n_longer > n_shorter:
             extra = n_longer - n_shorter
-            dilution = extra * 0.03  # 3% per extra word in Case A
-            final_score = max(0.65, final_score - dilution)
+            dilution = extra * 0.04  # 4% per extra word in Case A
+            final_score = max(0.55, final_score - dilution)
 
         breakdown["total"] = round(final_score, 4)
         breakdown["scoring_path"] = "A: High distinctive match (>=80%)"
@@ -413,7 +411,7 @@ def compute_idf_weighted_score(
     # Case B: Good distinctive match (>= 50%)
     elif distinctive_pct >= 0.5:
         base = max(text_sim, semantic_sim, phonetic_sim)
-        final_score = max(0.75, base + distinctive_pct * 0.2)
+        final_score = max(0.65, base + distinctive_pct * 0.15)
         final_score = min(1.0, final_score)
         breakdown["total"] = round(final_score, 4)
         breakdown["scoring_path"] = "B: Good distinctive match (>=50%)"
