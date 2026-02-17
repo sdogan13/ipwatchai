@@ -2,19 +2,53 @@
 <html lang="tr" dir="ltr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trademark Intelligence Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>IP WATⒸH AI — Trademark Intelligence</title>
+
+    <!-- PWA Meta -->
+    <meta name="theme-color" content="#4f46e5">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="IP WATⒸH AI">
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="icon" type="image/png" href="/static/icons/icon-192.png">
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+
+    <!-- Preconnect for performance -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+    <!-- Design Tokens (load before Tailwind so vars are available) -->
+    <link rel="stylesheet" href="/static/css/tokens.css?v=22">
+
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Alpine.js (Logic) -->
-    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.3/dist/cdn.min.js"></script>
-    <!-- Chart.js (Visuals) -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Alpine.js (Logic) — defer ensures it initializes after bottom scripts -->
+    <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/collapse@3.13.3/dist/cdn.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.3/dist/cdn.min.js"></script>
+    <!-- Chart.js (Visuals) — defer to avoid blocking page load -->
+    <script defer src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Google Fonts — async via media="print" swap (prevents blocking load event) -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" media="print" onload="this.media='all'">
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"></noscript>
     <style>
-        body { font-family: 'Inter', sans-serif; }
+        body {
+            font-family: var(--font-sans);
+            background: var(--color-bg-page);
+            color: var(--color-text-primary);
+        }
         [x-cloak] { display: none !important; }
+
+        /* Override browser autofill/autocomplete background */
+        #search-input:-webkit-autofill,
+        #search-input:-webkit-autofill:hover,
+        #search-input:-webkit-autofill:focus,
+        #search-input:-webkit-autofill:active {
+            -webkit-box-shadow: 0 0 0 30px var(--color-bg-card) inset !important;
+            -webkit-text-fill-color: var(--color-text-primary) !important;
+            transition: background-color 5000s ease-in-out 0s;
+        }
 
         /* Agentic search terminal animation */
         #agentic-log .log-line {
@@ -41,9 +75,43 @@
         html.rtl .text-left { text-align: right; }
         html.rtl .text-right { text-align: left; }
         html.rtl .border-l-4 { border-left: 0; border-right-width: 4px; }
+
+        /* Tab panel entrance animation */
+        .tab-panel-enter {
+            animation: tabFadeIn 0.15s ease-out;
+        }
+        @keyframes tabFadeIn {
+            from { opacity: 0; transform: translateY(4px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Nav tab button hover (desktop) */
+        .nav-tab-btn:not(.bg-indigo-600):hover {
+            background: var(--color-bg-muted);
+            color: var(--color-text-primary) !important;
+        }
+
+        /* Mobile: show bottom bar space */
+        @media (max-width: 767px) {
+            body { padding-bottom: 4.5rem; }
+            /* Full-screen modals on mobile */
+            .modal-mobile-fullscreen > div:last-child {
+                position: fixed !important;
+                inset: 0 !important;
+                border-radius: 0 !important;
+                max-width: 100% !important;
+                max-height: 100% !important;
+                width: 100% !important;
+                height: 100% !important;
+            }
+        }
+        @media (min-width: 768px) {
+            .mobile-bottom-bar { display: none !important; }
+            .mobile-drawer-backdrop { display: none !important; }
+        }
     </style>
 </head>
-<body class="bg-gray-100 text-gray-800" x-data="dashboard()">
+<body x-data="dashboard()" style="background:var(--color-bg-page);color:var(--color-text-primary)">
 
     {% include 'partials/_navbar.html' %}
 
@@ -51,33 +119,123 @@
 
     {% include 'partials/_results_panel.html' %}
 
+    {% include 'partials/_watchlist_panel.html' %}
+
     {% include 'partials/_leads_panel.html' %}
 
     {% include 'partials/_ai_studio_panel.html' %}
 
     {% include 'partials/_reports_panel.html' %}
 
+    {% include 'partials/_applications_panel.html' %}
+
     {% include 'partials/_modals.html' %}
 
     <!-- i18n (must load first, before other scripts use t()) -->
-    <script src="/static/js/utils/i18n.js"></script>
+    <script src="/static/js/utils/i18n.js?v=23"></script>
 
     <!-- Utilities first -->
-    <script src="/static/js/utils/helpers.js"></script>
-    <script src="/static/js/utils/auth.js"></script>
-    <script src="/static/js/utils/toast.js"></script>
+    <script src="/static/js/utils/helpers.js?v=22"></script>
+    <script src="/static/js/utils/auth.js?v=22"></script>
+    <script src="/static/js/utils/toast.js?v=22"></script>
 
     <!-- Components -->
-    <script src="/static/js/components/score-badge.js"></script>
-    <script src="/static/js/components/result-card.js"></script>
-    <script src="/static/js/components/lead-card.js"></script>
-    <script src="/static/js/components/studio-card.js"></script>
+    <script src="/static/js/components/score-badge.js?v=22"></script>
+    <script src="/static/js/components/opposition-timeline.js?v=22"></script>
+    <script src="/static/js/components/result-card.js?v=23"></script>
+    <script src="/static/js/components/lead-card.js?v=23"></script>
+    <script src="/static/js/components/studio-card.js?v=22"></script>
 
     <!-- API layer -->
-    <script src="/static/js/api.js"></script>
+    <script src="/static/js/api.js?v=34"></script>
 
     <!-- App init last -->
-    <script src="/static/js/app.js"></script>
+    <script src="/static/js/app.js?v=43"></script>
+
+    <!-- Handle deep-link from landing page (e.g. ?tab=ai-studio&studio_mode=name&studio_query=nike) -->
+    <script>
+    (function() {
+        var params = new URLSearchParams(window.location.search);
+        var tab = params.get('tab');
+        if (tab) {
+            setTimeout(function() {
+                if (typeof showDashboardTab === 'function') {
+                    showDashboardTab(tab);
+                }
+                var mode = params.get('studio_mode');
+                var query = params.get('studio_query');
+                if (tab === 'ai-studio' && mode && query) {
+                    setTimeout(function() {
+                        if (typeof openStudioWithContext === 'function') {
+                            openStudioWithContext(mode, { query: query });
+                        }
+                    }, 300);
+                }
+                // Handle watchlist add deep-link — switch to watchlist tab + open modal
+                if (params.get('watchlist_add') === '1') {
+                    if (typeof showDashboardTab === 'function') {
+                        showDashboardTab('watchlist');
+                    }
+                    setTimeout(function() {
+                        var wlData = {
+                            name: params.get('wl_name') || '',
+                            application_no: params.get('wl_appno') || '',
+                            classes: (params.get('wl_classes') || '').split(',').filter(Boolean).map(Number),
+                            image_path: '',
+                            holder_name: '',
+                            bulletin_no: ''
+                        };
+                        if (typeof openQuickWatchlistAdd === 'function') {
+                            openQuickWatchlistAdd(wlData);
+                        }
+                    }, 500);
+                }
+                // Handle bulk watchlist deep-link
+                if (params.get('bulk_watchlist') === '1') {
+                    setTimeout(function() {
+                        window.dispatchEvent(new CustomEvent('open-bulk-watchlist', {
+                            detail: {
+                                type: params.get('bw_type') || '',
+                                id: params.get('bw_id') || '',
+                                name: params.get('bw_name') || '',
+                                totalCount: parseInt(params.get('bw_count')) || 0
+                            }
+                        }));
+                    }, 500);
+                }
+                // Handle application deep-link from landing page
+                if (tab === 'applications') {
+                    var appName = params.get('app_name');
+                    var appClasses = params.get('app_classes');
+                    if (appName) {
+                        setTimeout(function() {
+                            if (typeof openApplicationWithContext === 'function') {
+                                var classes = appClasses ? appClasses.split(',').filter(Boolean).map(Number) : [];
+                                openApplicationWithContext(appName, classes);
+                            }
+                        }, 300);
+                    }
+                }
+                // Clean URL
+                window.history.replaceState({}, '', '/dashboard');
+            }, 200);
+        }
+    })();
+    </script>
+
+    <!-- Service Worker: unregister old SWs + purge all caches to prevent stale content -->
+    <script>
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function(registrations) {
+            registrations.forEach(function(r) { r.unregister(); });
+        });
+    }
+    if ('caches' in window) {
+        caches.keys().then(function(names) {
+            names.forEach(function(name) { caches.delete(name); });
+        });
+    }
+    </script>
 
 </body>
 </html>

@@ -1,21 +1,98 @@
 <!-- ============================================ -->
+<!-- EMAIL VERIFICATION MODAL (soft-block)         -->
+<!-- ============================================ -->
+<div x-show="showEmailVerification" x-cloak
+     class="fixed inset-0 flex items-center justify-center p-4"
+     style="background:rgba(0,0,0,0.75);z-index:9999">
+    <div class="rounded-2xl w-full max-w-md overflow-hidden shadow-2xl"
+         style="background:var(--color-bg-card);border:1px solid var(--color-border)"
+         @click.stop>
+        <!-- Header -->
+        <div class="px-6 py-4 text-center" style="border-bottom:1px solid var(--color-border)">
+            <div class="w-16 h-16 mx-auto mb-3 rounded-full flex items-center justify-center" style="background:rgba(26,115,232,0.1)">
+                <svg class="w-8 h-8" style="color:#1a73e8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                </svg>
+            </div>
+            <h3 class="text-lg font-bold" style="color:var(--color-text-primary)" x-text="t('verification.title')">E-posta Dogrulama</h3>
+            <p class="text-sm mt-1" style="color:var(--color-text-muted)" x-text="t('verification.desc')">Hesabinizi dogrulamak icin e-postaniza gonderilen 6 haneli kodu girin.</p>
+        </div>
+
+        <!-- Body -->
+        <div class="p-6">
+            <!-- Code input -->
+            <div class="mb-4">
+                <label class="block text-sm font-medium mb-2 text-center" style="color:var(--color-text-secondary)" x-text="t('verification.code_label')">Dogrulama Kodu</label>
+                <input type="text"
+                       x-model="verificationCode"
+                       inputmode="numeric"
+                       autocomplete="one-time-code"
+                       maxlength="6"
+                       placeholder="000000"
+                       class="w-full text-center text-2xl font-bold tracking-[8px] px-4 py-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                       style="border:2px dashed var(--color-border);color:var(--color-text-primary);background:var(--color-bg-input);letter-spacing:8px"
+                       @keydown.enter="submitVerificationCode()">
+            </div>
+
+            <!-- Error message -->
+            <div x-show="verificationError" x-cloak class="mb-3 p-2 text-sm rounded text-center"
+                 style="background:var(--color-risk-critical-bg);color:var(--color-risk-critical-text);border:1px solid var(--color-risk-critical-border)"
+                 x-text="verificationError"></div>
+
+            <!-- Success message -->
+            <div x-show="verificationSuccess" x-cloak class="mb-3 p-2 text-sm rounded text-center bg-green-50 text-green-700 border border-green-200"
+                 x-text="verificationSuccess"></div>
+
+            <!-- Verify button -->
+            <button @click="submitVerificationCode()"
+                    :disabled="verificationLoading || verificationCode.length !== 6"
+                    class="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition disabled:opacity-50 min-h-[48px]">
+                <span x-show="!verificationLoading" x-text="t('verification.verify_button')">Dogrula</span>
+                <span x-show="verificationLoading" x-cloak class="flex items-center justify-center gap-2">
+                    <svg class="animate-spin w-5 h-5" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                    <span x-text="t('verification.verify_button')">Dogrula</span>
+                </span>
+            </button>
+
+            <!-- Resend link -->
+            <div class="mt-4 text-center">
+                <button @click="resendVerificationCode()"
+                        :disabled="verificationResendCooldown > 0"
+                        class="text-sm font-medium transition min-h-[44px] px-4"
+                        :style="verificationResendCooldown > 0 ? 'color:var(--color-text-faint);cursor:default' : 'color:#1a73e8;cursor:pointer'">
+                    <span x-show="verificationResendCooldown <= 0" x-text="t('verification.resend_code')">Kodu Tekrar Gonder</span>
+                    <span x-show="verificationResendCooldown > 0" x-text="t('verification.resend_cooldown', { seconds: verificationResendCooldown })">
+                        Tekrar gonder (60s)
+                    </span>
+                </button>
+            </div>
+
+            <!-- Logout link -->
+            <div class="mt-2 text-center">
+                <button @click="window.AppAuth.logout()" class="text-xs min-h-[44px] px-4" style="color:var(--color-text-faint)" x-text="t('nav.logout')">Cikis Yap</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================ -->
 <!-- ALERT DETAIL MODAL                           -->
 <!-- ============================================ -->
-<div id="alert-detail-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-    <div class="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden shadow-xl border border-gray-200">
-        <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-            <h3 class="text-lg font-bold text-gray-900">Uyari Detayi</h3>
-            <button onclick="hideAlertDetailModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+<div id="alert-detail-modal" role="dialog" aria-modal="true" class="hidden fixed inset-0 flex items-center justify-center p-4 modal-mobile-fullscreen" style="background:var(--color-bg-overlay);z-index:var(--z-modal-backdrop)">
+    <div class="rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden shadow-xl" style="background:var(--color-bg-card);border:1px solid var(--color-border)">
+        <div class="px-6 py-4 flex items-center justify-between" style="border-bottom:1px solid var(--color-border)">
+            <h3 class="text-lg font-bold" style="color:var(--color-text-primary)" x-text="t('alerts.title')">Uyari Detayi</h3>
+            <button onclick="hideAlertDetailModal()" class="text-2xl leading-none btn-press min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg" style="color:var(--color-text-faint)" aria-label="Close">&times;</button>
         </div>
         <div class="p-6 overflow-y-auto max-h-[60vh]" id="alert-detail-content"></div>
-        <div class="px-6 py-4 border-t border-gray-200 flex gap-3 flex-wrap" id="alert-detail-actions">
-            <button onclick="acknowledgeAlert()" class="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg flex items-center justify-center gap-2 text-sm font-medium">
+        <div class="px-6 py-4 flex gap-3 flex-wrap" style="border-top:1px solid var(--color-border)" id="alert-detail-actions">
+            <button onclick="acknowledgeAlert()" class="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg flex items-center justify-center gap-2 text-sm font-medium btn-press min-h-[44px]" x-text="t('alerts.acknowledge')">
                 Onayla
             </button>
-            <button onclick="resolveAlert()" class="flex-1 px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center justify-center gap-2 text-sm font-medium">
+            <button onclick="resolveAlert()" class="flex-1 px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center justify-center gap-2 text-sm font-medium btn-press min-h-[44px]" x-text="t('alerts.resolved')">
                 Cozuldu
             </button>
-            <button onclick="dismissAlert()" class="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-sm font-medium border border-gray-200">
+            <button onclick="dismissAlert()" class="px-4 py-2.5 rounded-lg text-sm font-medium btn-press min-h-[44px]" style="background:var(--color-bg-muted);color:var(--color-text-secondary);border:1px solid var(--color-border)" x-text="t('alerts.dismiss')">
                 Reddet
             </button>
         </div>
@@ -25,11 +102,11 @@
 <!-- ============================================ -->
 <!-- OPPOSITION FILING MODAL                      -->
 <!-- ============================================ -->
-<div id="opposition-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-    <div class="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-hidden shadow-xl border border-orange-200">
-        <div class="px-6 py-4 border-b border-orange-200 bg-orange-50 flex items-center justify-between">
-            <h3 class="text-lg font-bold text-orange-800">Itiraz Basvurusu</h3>
-            <button onclick="hideOppositionModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+<div id="opposition-modal" role="dialog" aria-modal="true" class="hidden fixed inset-0 flex items-center justify-center p-4 modal-mobile-fullscreen" style="background:var(--color-bg-overlay);z-index:var(--z-modal-backdrop)">
+    <div class="rounded-2xl w-full max-w-lg max-h-[90vh] overflow-hidden shadow-xl" style="background:var(--color-bg-card);border:1px solid var(--color-risk-high-border)">
+        <div class="px-6 py-4 flex items-center justify-between" style="background:var(--color-risk-high-bg);border-bottom:1px solid var(--color-risk-high-border)">
+            <h3 class="text-lg font-bold" style="color:var(--color-risk-high-text)" x-text="t('opposition.title')">Itiraz Basvurusu</h3>
+            <button onclick="hideOppositionModal()" class="text-2xl leading-none btn-press min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg" style="color:var(--color-text-faint)" aria-label="Close">&times;</button>
         </div>
         <div class="p-6 overflow-y-auto max-h-[65vh]" id="opposition-content"></div>
     </div>
@@ -38,21 +115,21 @@
 <!-- ============================================ -->
 <!-- LEAD DETAIL MODAL                            -->
 <!-- ============================================ -->
-<div id="lead-detail-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-    <div class="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden shadow-xl border border-gray-200">
-        <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-            <h3 class="text-lg font-bold text-gray-900">Lead Detayi</h3>
-            <button onclick="hideLeadDetailModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+<div id="lead-detail-modal" role="dialog" aria-modal="true" class="hidden fixed inset-0 flex items-center justify-center p-4 modal-mobile-fullscreen" style="background:var(--color-bg-overlay);z-index:var(--z-modal-backdrop)">
+    <div class="rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden shadow-xl" style="background:var(--color-bg-card);border:1px solid var(--color-border)">
+        <div class="px-6 py-4 flex items-center justify-between" style="border-bottom:1px solid var(--color-border)">
+            <h3 class="text-lg font-bold" style="color:var(--color-text-primary)" x-text="t('leads.detail_title')">Lead Detayi</h3>
+            <button onclick="hideLeadDetailModal()" class="text-2xl leading-none btn-press min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg" style="color:var(--color-text-faint)" aria-label="Close">&times;</button>
         </div>
         <div class="p-6 overflow-y-auto max-h-[60vh]" id="lead-detail-content"></div>
-        <div class="px-6 py-4 border-t border-gray-200 flex gap-3">
-            <button onclick="markLeadContacted()" class="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg flex items-center justify-center gap-2 text-sm font-medium">
+        <div class="px-6 py-4 flex gap-3" style="border-top:1px solid var(--color-border)">
+            <button onclick="markLeadContacted()" class="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg flex items-center justify-center gap-2 text-sm font-medium btn-press min-h-[44px]" x-text="t('leads.contacted')">
                 Iletisime Gecildi
             </button>
-            <button onclick="markLeadConverted()" class="flex-1 px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center justify-center gap-2 text-sm font-medium">
+            <button onclick="markLeadConverted()" class="flex-1 px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center justify-center gap-2 text-sm font-medium btn-press min-h-[44px]" x-text="t('leads.converted')">
                 Musteri Oldu
             </button>
-            <button onclick="dismissLead()" class="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-sm font-medium border border-gray-200">
+            <button onclick="dismissLead()" class="px-4 py-2.5 rounded-lg text-sm font-medium btn-press min-h-[44px]" style="background:var(--color-bg-muted);color:var(--color-text-secondary);border:1px solid var(--color-border)" x-text="t('leads.dismiss')">
                 Reddet
             </button>
         </div>
@@ -62,23 +139,22 @@
 <!-- ============================================ -->
 <!-- AGENTIC SEARCH LOADING MODAL                -->
 <!-- ============================================ -->
-<div id="agentic-loading-modal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
+<div id="agentic-loading-modal" role="dialog" aria-modal="true" class="hidden fixed inset-0 flex items-center justify-center" style="background:var(--color-bg-overlay);z-index:var(--z-modal-backdrop)">
     <div class="bg-gray-900 rounded-2xl p-6 max-w-lg w-full mx-4 border border-amber-500/30 shadow-2xl">
         <div class="flex items-center gap-3 mb-4">
             <div class="animate-pulse text-3xl">&#x1f575;&#xfe0f;</div>
             <div>
-                <h3 class="text-xl font-bold text-amber-400">Canli Arastirma</h3>
-                <p class="text-sm text-gray-400">TurkPatent portali taraniyor...</p>
+                <h3 class="text-xl font-bold text-amber-400" x-text="t('agentic.title')">Canli Arastirma</h3>
+                <p class="text-sm text-gray-400" x-text="t('agentic.subtitle')">TurkPatent portali taraniyor...</p>
             </div>
         </div>
         <div id="agentic-log" class="bg-black rounded-xl p-4 font-mono text-sm text-green-400 h-56 overflow-y-auto border border-gray-800">
-            <div class="log-line opacity-70">&gt; Ajan baslatiliyor...</div>
         </div>
         <div class="mt-4 h-1.5 bg-gray-800 rounded-full overflow-hidden">
             <div id="agentic-progress" class="h-full bg-gradient-to-r from-amber-500 to-orange-500 rounded-full transition-all duration-500" style="width: 0%"></div>
         </div>
         <div class="mt-4 text-center">
-            <button onclick="cancelAgenticSearch()" class="text-gray-400 hover:text-white text-sm">Iptal Et</button>
+            <button onclick="cancelAgenticSearch()" class="text-gray-400 hover:text-white text-sm btn-press min-h-[44px] px-4" x-text="t('agentic.cancel')">Iptal Et</button>
         </div>
     </div>
 </div>
@@ -86,31 +162,28 @@
 <!-- ============================================ -->
 <!-- UPGRADE MODAL (403)                          -->
 <!-- ============================================ -->
-<div id="upgrade-modal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
+<div id="upgrade-modal" role="dialog" aria-modal="true" class="hidden fixed inset-0 flex items-center justify-center modal-mobile-fullscreen" style="background:var(--color-bg-overlay);z-index:var(--z-modal-backdrop)">
     <div class="bg-gray-900 rounded-2xl p-8 max-w-md w-full mx-4 border border-purple-500/30 shadow-2xl">
         <div class="text-center">
             <div class="w-20 h-20 bg-purple-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
                 <span class="text-4xl">&#x1f680;</span>
             </div>
-            <h3 class="text-2xl font-bold text-white mb-2">Gercek Zamanli Veri</h3>
-            <p class="text-gray-400 mb-6">
-                Standart arama bulten verilerini kullanir (15 gune kadar eski olabilir).
-                <span class="text-purple-400 font-semibold">Professional</span> plana yukselterek
-                TurkPatent portalindan anlik veri cekebilirsiniz.
+            <h3 class="text-2xl font-bold text-white mb-2" x-text="t('upgrade.title')">Gercek Zamanli Veri</h3>
+            <p class="text-gray-400 mb-6" x-text="t('upgrade.description')">
             </p>
             <div class="bg-gray-800/50 rounded-xl p-5 mb-6 border border-purple-500/20">
-                <div class="text-purple-400 font-bold text-lg">Professional Plan</div>
+                <div class="text-purple-400 font-bold text-lg" x-text="t('upgrade.plan_name')">Professional Plan</div>
                 <div class="text-3xl font-bold text-white my-2">&#8378;999<span class="text-lg text-gray-400">/ay</span></div>
                 <ul class="text-sm text-gray-400 text-left space-y-2 mt-4">
-                    <li class="flex items-center gap-2"><span class="text-green-400">&#x2713;</span> Ayda 50 canli arama</li>
-                    <li class="flex items-center gap-2"><span class="text-green-400">&#x2713;</span> Gercek zamanli portal erisimi</li>
-                    <li class="flex items-center gap-2"><span class="text-green-400">&#x2713;</span> Oncelikli destek</li>
-                    <li class="flex items-center gap-2"><span class="text-green-400">&#x2713;</span> Gelismis risk raporlari</li>
+                    <li class="flex items-center gap-2"><span class="text-green-400">&#x2713;</span> <span x-text="t('upgrade.feature_1')">Ayda 50 canli arama</span></li>
+                    <li class="flex items-center gap-2"><span class="text-green-400">&#x2713;</span> <span x-text="t('upgrade.feature_2')">Gercek zamanli portal erisimi</span></li>
+                    <li class="flex items-center gap-2"><span class="text-green-400">&#x2713;</span> <span x-text="t('upgrade.feature_3')">Oncelikli destek</span></li>
+                    <li class="flex items-center gap-2"><span class="text-green-400">&#x2713;</span> <span x-text="t('upgrade.feature_4')">Gelismis risk raporlari</span></li>
                 </ul>
             </div>
             <div class="flex gap-3">
-                <button onclick="hideUpgradeModal()" class="flex-1 px-4 py-3 bg-gray-700 text-white rounded-xl hover:bg-gray-600 transition-colors">Belki Sonra</button>
-                <button onclick="redirectToUpgrade()" class="flex-1 px-4 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-xl hover:from-purple-600 hover:to-pink-600 transition-all font-semibold">Yukselt</button>
+                <button onclick="hideUpgradeModal()" class="flex-1 px-4 py-3 bg-gray-700 text-white rounded-xl hover:bg-gray-600 transition-colors btn-press min-h-[48px]" x-text="t('upgrade.maybe_later')">Belki Sonra</button>
+                <button onclick="redirectToUpgrade()" class="flex-1 px-4 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-xl hover:from-purple-600 hover:to-pink-600 transition-all font-semibold btn-press min-h-[48px]" x-text="t('upgrade.upgrade_button')">Yukselt</button>
             </div>
         </div>
     </div>
@@ -119,25 +192,25 @@
 <!-- ============================================ -->
 <!-- CREDITS EXHAUSTED MODAL (402)                -->
 <!-- ============================================ -->
-<div id="credits-modal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
+<div id="credits-modal" role="dialog" aria-modal="true" class="hidden fixed inset-0 flex items-center justify-center modal-mobile-fullscreen" style="background:var(--color-bg-overlay);z-index:var(--z-modal-backdrop)">
     <div class="bg-gray-900 rounded-2xl p-8 max-w-md w-full mx-4 border border-amber-500/30 shadow-2xl">
         <div class="text-center">
             <div class="w-20 h-20 bg-amber-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
                 <span class="text-4xl">&#x26a1;</span>
             </div>
-            <h3 class="text-2xl font-bold text-white mb-2">Arama Hakki Tukendi</h3>
-            <p class="text-gray-400 mb-6" id="credits-message">Bu ay icin tum canli arama haklarinizi kullandiniz.</p>
-            <p class="text-sm text-gray-500 mb-4">Ek kredi satin almak icin satis ekibimizle iletisime gecin.</p>
+            <h3 class="text-2xl font-bold text-white mb-2" x-text="t('credits.title')">Arama Hakki Tukendi</h3>
+            <p class="text-gray-400 mb-6" id="credits-message" x-text="t('credits.message')">Bu ay icin tum canli arama haklarinizi kullandiniz.</p>
+            <p class="text-sm text-gray-500 mb-4" x-text="t('credits.buy_hint')">Ek kredi satin almak icin satis ekibimizle iletisime gecin.</p>
             <div class="space-y-3 mb-6">
                 <a href="mailto:sales@ipwatchdog.com.tr?subject=Kredi%20Satin%20Alma%20Talebi"
-                   class="block w-full px-4 py-3 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl hover:from-amber-600 hover:to-orange-600 transition-all font-semibold text-center">
-                    Satis Ekibi ile Iletisime Gec
+                   class="block w-full px-4 py-3 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl hover:from-amber-600 hover:to-orange-600 transition-all font-semibold text-center btn-press min-h-[48px]">
+                    <span x-text="t('credits.contact_sales')">Satis Ekibi ile Iletisime Gec</span>
                 </a>
-                <a href="/pricing" class="block w-full px-4 py-3 bg-gray-800 hover:bg-gray-700 text-white rounded-xl transition-colors text-center text-sm">
-                    Planlari Incele
+                <a href="/pricing" class="block w-full px-4 py-3 bg-gray-800 hover:bg-gray-700 text-white rounded-xl transition-colors text-center text-sm btn-press min-h-[48px]">
+                    <span x-text="t('credits.view_plans')">Planlari Incele</span>
                 </a>
             </div>
-            <button onclick="hideCreditsModal()" class="w-full px-4 py-3 bg-gray-700 text-white rounded-xl hover:bg-gray-600 transition-colors">Kapat</button>
+            <button onclick="hideCreditsModal()" class="w-full px-4 py-3 bg-gray-700 text-white rounded-xl hover:bg-gray-600 transition-colors btn-press min-h-[48px]" x-text="t('credits.close')">Kapat</button>
         </div>
     </div>
 </div>
@@ -164,13 +237,15 @@
             alert_frequency: 'daily',
             alert_email: true
         },
+        appNoReadonly: false,
         openWith(data) {
             this.formData.brand_name = data.name || '';
             this.formData.application_no = data.application_no || '';
             this.formData.nice_class_numbers = data.classes || [];
             this.formData.bulletin_no = data.bulletin_no || '';
             this.classesInput = (data.classes || []).join(', ');
-            this.imageUrl = data.image_path ? '/api/trademark-image/' + encodeURIComponent(data.image_path) : '';
+            this.imageUrl = data.image_path ? '/api/trademark-image/' + data.image_path.split('/').map(encodeURIComponent).join('/') : '';
+            this.appNoReadonly = !!data.application_no;
             this.error = '';
             this.submitting = false;
             this.open = true;
@@ -179,24 +254,24 @@
             this.error = '';
             this.submitting = true;
             var parsed = this.classesInput.split(',').map(function(s) { return parseInt(s.trim()); }).filter(function(n) { return !isNaN(n) && n >= 1 && n <= 45; });
-            if (parsed.length === 0) { this.error = 'En az bir Nice sinifi gerekli (1-45)'; this.submitting = false; return; }
+            if (parsed.length === 0) { this.error = t('watchlist.nice_class_required'); this.submitting = false; return; }
             this.formData.nice_class_numbers = parsed;
             try {
                 await window.AppAPI.addWatchlistItem(this.formData);
                 this.open = false;
                 userWatchlistAppNos[this.formData.application_no] = true;
                 refreshWatchlistButtons();
-                if (typeof loadPortfolio === 'function') loadPortfolio();
-                showToast('Takip listesine eklendi!', 'success');
+                if (typeof refreshWatchlistAndStats === 'function') refreshWatchlistAndStats();
+                showToast(t('watchlist.added_toast'), 'success');
             } catch (e) {
                 if (e.status === 400 && e.message && e.message.indexOf('limit') >= 0) {
                     this.open = false;
                     if (typeof showUpgradeModal === 'function') showUpgradeModal();
-                    else showToast('Plan limitine ulasildi. Lutfen planinizi yukseltin.', 'error');
+                    else showToast(t('watchlist.plan_limit'), 'error');
                 } else if (e.message && e.message.indexOf('zaten') >= 0) {
-                    this.error = 'Bu marka zaten takip listenizde.';
+                    this.error = t('watchlist.already_in_list');
                 } else {
-                    this.error = e.message || 'Bir hata olustu. Lutfen tekrar deneyin.';
+                    this.error = e.message || t('watchlist.generic_error');
                 }
             } finally {
                 this.submitting = false;
@@ -206,91 +281,292 @@
      @open-quick-watchlist.window="openWith($event.detail)"
      x-show="open"
      x-cloak
-     class="fixed inset-0 z-50 flex items-center justify-center p-4"
+     role="dialog" aria-modal="true" class="fixed inset-0 flex items-center justify-center p-4 modal-mobile-fullscreen"
+     style="display:none;background:var(--color-bg-overlay);z-index:var(--z-modal)"
      @click.self="open = false"
-     @keydown.escape.window="if (open) { open = false; }"
-     style="display: none; background-color: rgba(0,0,0,0.5);">
+     @keydown.escape.window="if (open) { open = false; }">
 
-    <div class="bg-white rounded-xl shadow-xl max-w-md w-full overflow-hidden" @click.stop>
+    <div class="rounded-xl shadow-xl max-w-md w-full overflow-hidden" style="background:var(--color-bg-card);border:1px solid var(--color-border)" @click.stop>
         <!-- Header -->
-        <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-            <h3 class="text-lg font-semibold text-gray-900">Takip Listesine Ekle</h3>
-            <button @click="open = false" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+        <div class="px-6 py-4 flex items-center justify-between" style="border-bottom:1px solid var(--color-border)">
+            <h3 class="text-lg font-semibold" style="color:var(--color-text-primary)" x-text="t('watchlist.add_title')">Takip Listesine Ekle</h3>
+            <button @click="open = false" class="text-2xl leading-none btn-press min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg" style="color:var(--color-text-faint)" aria-label="Close">&times;</button>
         </div>
 
         <div class="p-6">
             <!-- Preview card -->
-            <div class="flex items-center gap-3 p-3 bg-gray-50 rounded-lg mb-4">
-                <img x-show="imageUrl" :src="imageUrl" class="w-12 h-12 rounded object-contain bg-white border border-gray-200"
+            <div class="flex items-center gap-3 p-3 rounded-lg mb-4" style="background:var(--color-bg-muted)">
+                <img x-show="imageUrl" :src="imageUrl" class="w-12 h-12 rounded object-contain" style="background:var(--color-bg-card);border:1px solid var(--color-border)"
                      @error="imageUrl = ''">
-                <div x-show="!imageUrl" class="w-12 h-12 bg-gray-100 rounded border border-gray-200 flex items-center justify-center flex-shrink-0">
-                    <svg class="w-6 h-6 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div x-show="!imageUrl" class="w-12 h-12 rounded flex items-center justify-center flex-shrink-0" style="background:var(--color-bg-muted);border:1px solid var(--color-border)">
+                    <svg class="w-6 h-6" style="color:var(--color-text-faint)" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
                     </svg>
                 </div>
                 <div class="min-w-0 flex-1">
-                    <p class="font-medium text-gray-900 truncate" x-text="formData.brand_name"></p>
-                    <p class="text-sm text-gray-500" x-text="formData.application_no"></p>
+                    <p class="font-medium truncate" style="color:var(--color-text-primary)" x-text="formData.brand_name"></p>
+                    <p class="text-sm font-mono-id" style="color:var(--color-text-muted)" x-text="formData.application_no"></p>
                 </div>
             </div>
 
             <!-- Editable fields -->
             <div class="space-y-3">
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Marka Adi</label>
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('watchlist.brand_name')">Marka Adi</label>
                     <input type="text" x-model="formData.brand_name"
-                           class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                           class="w-full px-3 py-2 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
                 </div>
 
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Basvuru No</label>
-                    <input type="text" x-model="formData.application_no" readonly
-                           class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50 text-gray-500">
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('watchlist.application_no')">Basvuru No</label>
+                    <input type="text" x-model="formData.application_no" :readonly="appNoReadonly"
+                           placeholder="2026/01789"
+                           class="w-full px-3 py-2 rounded-lg text-sm font-mono-id"
+                           :style="appNoReadonly ? 'border:1px solid var(--color-border);color:var(--color-text-muted);background:var(--color-bg-muted)' : 'border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)'"
+                           :class="appNoReadonly ? '' : 'focus:ring-2 focus:ring-blue-500 focus:border-blue-500'">
                 </div>
 
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Nice Siniflari</label>
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('watchlist.nice_classes')">Nice Siniflari</label>
                     <input type="text" x-model="classesInput"
-                           placeholder="25, 35, 42"
-                           class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                    <p class="text-xs text-gray-400 mt-1">Virgulle ayirarak duzenleyebilirsiniz (1-45)</p>
+                           placeholder="9, 42"
+                           class="w-full px-3 py-2 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
+                    <p class="text-xs mt-1" style="color:var(--color-text-faint)" x-text="t('watchlist.nice_classes_hint')">Virgulle ayirarak duzenleyebilirsiniz (1-45)</p>
                 </div>
 
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Benzerlik Esigi</label>
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('watchlist.similarity_threshold')">Benzerlik Esigi</label>
                     <select x-model="formData.similarity_threshold"
-                            class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                        <option value="0.5">%50 - Genis</option>
-                        <option value="0.6">%60 - Normal</option>
-                        <option value="0.7">%70 - Onerilen</option>
-                        <option value="0.8">%80 - Siki</option>
-                        <option value="0.9">%90 - Cok Siki</option>
+                            class="w-full px-3 py-2 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
+                        <option value="0.5" x-text="t('watchlist.threshold_50')">%50 - Genis</option>
+                        <option value="0.6" x-text="t('watchlist.threshold_60')">%60 - Normal</option>
+                        <option value="0.7" x-text="t('watchlist.threshold_70')">%70 - Onerilen</option>
+                        <option value="0.8" x-text="t('watchlist.threshold_80')">%80 - Siki</option>
+                        <option value="0.9" x-text="t('watchlist.threshold_90')">%90 - Cok Siki</option>
                     </select>
                 </div>
 
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Aciklama (opsiyonel)</label>
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('watchlist.description')">Aciklama (opsiyonel)</label>
                     <input type="text" x-model="formData.description"
-                           placeholder="Kisa not..."
-                           class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                           :placeholder="t('watchlist.description_placeholder')"
+                           class="w-full px-3 py-2 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
                 </div>
             </div>
 
             <!-- Error message -->
-            <div x-show="error" x-cloak class="mt-3 p-2 bg-red-50 text-red-700 text-sm rounded border border-red-200" x-text="error"></div>
+            <div x-show="error" x-cloak class="mt-3 p-2 text-sm rounded" style="background:var(--color-risk-critical-bg);color:var(--color-risk-critical-text);border:1px solid var(--color-risk-critical-border)" x-text="error"></div>
 
             <!-- Actions -->
             <div class="flex justify-end gap-3 mt-5">
                 <button @click="open = false"
-                        class="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg transition">
+                        class="px-4 py-2 text-sm rounded-lg transition btn-press min-h-[44px]" style="color:var(--color-text-secondary)"
+                        x-text="t('watchlist.cancel')">
                     Iptal
                 </button>
                 <button @click="submit()"
                         :disabled="submitting"
-                        class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition disabled:opacity-50">
-                    <span x-show="!submitting">Takip Listesine Ekle</span>
-                    <span x-show="submitting" x-cloak>Ekleniyor...</span>
+                        class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition disabled:opacity-50 btn-press min-h-[44px]">
+                    <span x-show="!submitting" x-text="t('watchlist.add_button')">Takip Listesine Ekle</span>
+                    <span x-show="submitting" x-cloak x-text="t('watchlist.adding')">Ekleniyor...</span>
                 </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================ -->
+<!-- BULK WATCHLIST CONFIRMATION MODAL           -->
+<!-- ============================================ -->
+<div x-data="{
+        open: false,
+        loading: false,
+        submitting: false,
+        threshold: '0.7',
+        portfolioType: '',
+        entityId: '',
+        entityName: '',
+        totalItems: 0,
+        usageUsed: 0,
+        usageLimit: 0,
+        canAdd: 0,
+        cannotAdd: 0,
+        error: '',
+        async openWith(data) {
+            this.portfolioType = data.type || '';
+            this.entityId = data.id || '';
+            this.entityName = data.name || '';
+            this.totalItems = parseInt(data.totalCount) || 0;
+            this.threshold = '0.7';
+            this.error = '';
+            this.submitting = false;
+            this.loading = true;
+            this.open = true;
+            try {
+                var token = getAuthToken();
+                var res = await fetch('/api/v1/usage/summary', {
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                if (res.ok) {
+                    var usageData = await res.json();
+                    var wl = (usageData.usage && usageData.usage.watchlist_items) || {};
+                    this.usageUsed = wl.used || 0;
+                    this.usageLimit = wl.limit || 0;
+                    var remaining = Math.max(0, this.usageLimit - this.usageUsed);
+                    this.canAdd = Math.min(this.totalItems, remaining);
+                    this.cannotAdd = this.totalItems - this.canAdd;
+                } else {
+                    this.usageUsed = 0;
+                    this.usageLimit = 999999;
+                    this.canAdd = this.totalItems;
+                    this.cannotAdd = 0;
+                }
+            } catch(e) {
+                this.usageUsed = 0;
+                this.usageLimit = 999999;
+                this.canAdd = this.totalItems;
+                this.cannotAdd = 0;
+            }
+            this.loading = false;
+        },
+        async confirm() {
+            this.error = '';
+            this.submitting = true;
+            try {
+                var token = getAuthToken();
+                var payload = this.portfolioType === 'holder'
+                    ? { holder_id: this.entityId, similarity_threshold: parseFloat(this.threshold) }
+                    : { attorney_no: this.entityId, similarity_threshold: parseFloat(this.threshold) };
+                var res = await fetch('/api/v1/watchlist/bulk-from-portfolio', {
+                    method: 'POST',
+                    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (res.status === 401) {
+                    this.open = false;
+                    var alpineRoot = document.querySelector('[x-data]');
+                    if (alpineRoot && alpineRoot.__x) alpineRoot.__x.$data.showLoginModal = true;
+                    return;
+                }
+                if (res.status === 403) {
+                    this.open = false;
+                    _showUpgradeBanner(t('watchlist.plan_limit'));
+                    return;
+                }
+                if (!res.ok) throw new Error('Status: ' + res.status);
+                var data = await res.json();
+                this.open = false;
+                if (data.limit_reached) {
+                    _showUpgradeBanner(
+                        t('watchlist.limit_reached_detail', { created: data.created, max: data.max_allowed, total: data.total })
+                    );
+                } else if (data.created > 0) {
+                    _showBulkResultBanner(data.created, data.total, 'success');
+                } else if (data.created === 0 && data.total > 0) {
+                    _showBulkResultBanner(0, data.total, 'info');
+                }
+                if (typeof refreshWatchlistAndStats === 'function') refreshWatchlistAndStats();
+                else if (typeof loadWatchlistCache === 'function') loadWatchlistCache();
+            } catch(e) {
+                this.error = t('watchlist.generic_error');
+            } finally {
+                this.submitting = false;
+            }
+        },
+        usagePercent() {
+            if (!this.usageLimit) return 0;
+            return Math.min(100, Math.round((this.usageUsed / this.usageLimit) * 100));
+        }
+     }"
+     @open-bulk-watchlist.window="openWith($event.detail)"
+     x-show="open"
+     x-cloak
+     role="dialog" aria-modal="true" class="fixed inset-0 flex items-center justify-center p-4 modal-mobile-fullscreen"
+     style="display:none;background:var(--color-bg-overlay);z-index:var(--z-modal)"
+     @click.self="open = false"
+     @keydown.escape.window="if (open) { open = false; }">
+
+    <div class="rounded-xl shadow-xl max-w-md w-full overflow-hidden" style="background:var(--color-bg-card);border:1px solid var(--color-border)" @click.stop>
+        <!-- Header -->
+        <div class="px-6 py-4 flex items-center justify-between" style="border-bottom:1px solid var(--color-border)">
+            <h3 class="text-lg font-semibold" style="color:var(--color-text-primary)" x-text="t('watchlist.bulk_confirm_title')">Toplu Takip</h3>
+            <button @click="open = false" class="text-2xl leading-none btn-press min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg" style="color:var(--color-text-faint)" aria-label="Close">&times;</button>
+        </div>
+
+        <div class="p-6">
+            <!-- Loading state -->
+            <div x-show="loading" class="flex items-center justify-center py-8">
+                <div class="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent"></div>
+            </div>
+
+            <div x-show="!loading" x-cloak>
+                <!-- Entity name -->
+                <div class="flex items-center gap-3 p-3 rounded-lg mb-4" style="background:var(--color-bg-muted)">
+                    <div class="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0" style="background:var(--color-bg-card);border:1px solid var(--color-border)">
+                        <svg class="w-5 h-5" style="color:var(--color-text-faint)" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+                        </svg>
+                    </div>
+                    <div class="min-w-0 flex-1">
+                        <p class="font-medium truncate" style="color:var(--color-text-primary)" x-text="entityName"></p>
+                        <p class="text-sm" style="color:var(--color-text-muted)" x-text="t('watchlist.bulk_portfolio_count', { count: totalItems })"></p>
+                    </div>
+                </div>
+
+                <!-- Usage bar -->
+                <div class="mb-4">
+                    <div class="flex items-center justify-between text-sm mb-1.5">
+                        <span style="color:var(--color-text-secondary)" x-text="t('watchlist.bulk_usage_info', { used: usageUsed, limit: usageLimit >= 999999 ? t('common.unlimited') : usageLimit })"></span>
+                        <span class="font-mono text-xs" style="color:var(--color-text-faint)" x-text="usageLimit >= 999999 ? '∞' : usagePercent() + '%'"></span>
+                    </div>
+                    <div class="h-2 rounded-full overflow-hidden" style="background:var(--color-bg-muted)">
+                        <div class="h-full rounded-full transition-all duration-300"
+                             :style="'width:' + usagePercent() + '%;background:' + (usagePercent() > 90 ? 'var(--color-risk-critical-text)' : usagePercent() > 70 ? '#f59e0b' : '#3b82f6')"></div>
+                    </div>
+                </div>
+
+                <!-- Capacity info -->
+                <div class="flex gap-3 mb-4">
+                    <div class="flex-1 p-2.5 rounded-lg text-center" style="background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.2)">
+                        <div class="text-lg font-bold" style="color:#16a34a" x-text="canAdd"></div>
+                        <div class="text-xs" style="color:#16a34a" x-text="t('watchlist.bulk_can_add', { count: '' }).replace('{count}', '')">eklenebilir</div>
+                    </div>
+                    <div x-show="cannotAdd > 0" class="flex-1 p-2.5 rounded-lg text-center" style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.2)">
+                        <div class="text-lg font-bold" style="color:#d97706" x-text="cannotAdd"></div>
+                        <div class="text-xs" style="color:#d97706" x-text="t('watchlist.bulk_cannot_add', { count: '' }).replace('{count}', '')">eklenemez</div>
+                    </div>
+                </div>
+
+                <!-- Threshold selector -->
+                <div class="mb-4">
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('watchlist.bulk_threshold_label')">Benzerlik Esigi</label>
+                    <select x-model="threshold"
+                            class="w-full px-3 py-2 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
+                        <option value="0.5" x-text="t('watchlist.threshold_50')">%50 - Genis</option>
+                        <option value="0.6" x-text="t('watchlist.threshold_60')">%60 - Normal</option>
+                        <option value="0.7" x-text="t('watchlist.threshold_70')">%70 - Onerilen</option>
+                        <option value="0.8" x-text="t('watchlist.threshold_80')">%80 - Siki</option>
+                        <option value="0.9" x-text="t('watchlist.threshold_90')">%90 - Cok Siki</option>
+                    </select>
+                </div>
+
+                <!-- Error message -->
+                <div x-show="error" x-cloak class="mb-3 p-2 text-sm rounded" style="background:var(--color-risk-critical-bg);color:var(--color-risk-critical-text);border:1px solid var(--color-risk-critical-border)" x-text="error"></div>
+
+                <!-- Actions -->
+                <div class="flex justify-end gap-3">
+                    <button @click="open = false"
+                            class="px-4 py-2 text-sm rounded-lg transition btn-press min-h-[44px]" style="color:var(--color-text-secondary)"
+                            x-text="t('watchlist.cancel')">
+                        Iptal
+                    </button>
+                    <button @click="confirm()"
+                            :disabled="submitting || canAdd === 0"
+                            class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition disabled:opacity-50 btn-press min-h-[44px]">
+                        <span x-show="!submitting" x-text="t('watchlist.bulk_confirm_button')">Takip Listesine Ekle</span>
+                        <span x-show="submitting" x-cloak x-text="t('watchlist.bulk_confirming')">Ekleniyor...</span>
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -309,15 +585,15 @@
      x-transition:leave="transition ease-in duration-150"
      x-transition:leave-start="opacity-100"
      x-transition:leave-end="opacity-0"
-     class="fixed inset-0 z-50 flex items-center justify-center p-4"
+     role="dialog" aria-modal="true" class="fixed inset-0 flex items-center justify-center p-4"
+     style="display:none;background:var(--color-bg-overlay);z-index:var(--z-modal)"
      @click.self="open = false"
-     @keydown.escape.window="if (open) { open = false; }"
-     style="display: none; background-color: rgba(0,0,0,0.75);">
+     @keydown.escape.window="if (open) { open = false; }">
 
-    <div class="relative bg-white rounded-lg shadow-xl max-w-2xl w-full p-4" @click.stop>
+    <div class="relative rounded-lg shadow-xl max-w-2xl w-full p-4" style="background:var(--color-bg-card)" @click.stop>
         <!-- Close button -->
         <button @click="open = false"
-                class="absolute -top-3 -right-3 w-8 h-8 bg-white rounded-full shadow-lg flex items-center justify-center text-gray-500 hover:text-gray-700 z-10">
+                class="absolute -top-3 -right-3 w-8 h-8 rounded-full shadow-lg flex items-center justify-center z-10" style="background:var(--color-bg-card);color:var(--color-text-muted)">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
             </svg>
@@ -327,32 +603,33 @@
         <div class="flex items-center justify-center min-h-[200px]">
             <img :src="imageSrc"
                  class="max-w-full max-h-[70vh] object-contain rounded"
-                 @error="$el.src='/static/img/no-image.svg'">
+                 @error="$el.onerror=null; $el.src='/static/img/no-image.svg'">
         </div>
 
         <!-- Caption -->
         <div class="mt-3 text-center" x-show="imageTitle">
-            <p class="font-semibold text-gray-900" x-text="imageTitle"></p>
-            <p class="text-sm text-gray-500" x-text="imageSubtitle"></p>
+            <p class="font-semibold" style="color:var(--color-text-primary)" x-text="imageTitle"></p>
+            <p class="text-sm" style="color:var(--color-text-muted)" x-text="imageSubtitle"></p>
         </div>
     </div>
 </div>
 
-<!-- Holder Portfolio Modal -->
-<div id="holderPortfolioModal"
-     class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4"
-     onclick="if(event.target === this) closeHolderPortfolio()">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+<!-- Generic Entity Portfolio Modal (used for holder and attorney portfolios) -->
+<div id="entityPortfolioModal" role="dialog" aria-modal="true"
+     class="fixed inset-0 hidden flex items-center justify-center p-4 modal-mobile-fullscreen"
+     style="background:var(--color-bg-overlay);z-index:var(--z-modal)"
+     onclick="if(event.target === this) closeEntityPortfolio()">
+    <div class="rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col" style="background:var(--color-bg-card)">
 
         <!-- Modal Header -->
         <div class="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-4 flex-shrink-0">
             <div class="flex items-center justify-between">
                 <div>
-                    <h2 class="text-xl font-bold" id="holderModalTitle">Marka Portfolyu</h2>
-                    <p class="text-blue-100 text-sm mt-1" id="holderModalSubtitle">Yukleniyor...</p>
+                    <h2 class="text-xl font-bold" id="entityModalTitle">Marka Portfolyu</h2>
+                    <p class="text-blue-100 text-sm mt-1" id="entityModalSubtitle">Yukleniyor...</p>
                 </div>
-                <button onclick="closeHolderPortfolio()"
-                        class="text-white hover:bg-white/20 rounded-full p-2 transition-colors">
+                <button onclick="closeEntityPortfolio()"
+                        class="text-white hover:bg-white/20 rounded-full p-2 transition-colors btn-press min-h-[44px] min-w-[44px] flex items-center justify-center" aria-label="Close">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
                     </svg>
@@ -360,69 +637,91 @@
             </div>
         </div>
 
-        <!-- Holder Search Bar -->
-        <div id="holderSearchBar" class="px-6 py-3 border-b border-gray-200 bg-gray-50">
+        <!-- Entity Search Bar -->
+        <div id="entitySearchBar" class="px-6 py-3" style="border-bottom:1px solid var(--color-border);background:var(--color-bg-muted)">
             <div class="flex gap-2">
-                <input type="text" id="holderSearchInput"
-                       placeholder="Marka sahibi ara (min 2 karakter)..."
-                       class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                       onkeydown="handleHolderSearchKeydown(event)">
-                <button id="holderSearchBtn" onclick="performHolderSearch()"
-                        class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors">
+                <input type="text" id="entitySearchInput"
+                       :placeholder="t('holder.search_placeholder')"
+                       class="flex-1 px-3 py-2 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)"
+                       onkeydown="handleEntitySearchKeydown(event)">
+                <button id="entitySearchBtn" onclick="performEntitySearch()"
+                        class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors btn-press min-h-[44px]"
+                        x-text="t('holder.search')">
                     Ara
                 </button>
-                <button id="holderSearchClearBtn" onclick="clearHolderSearch()"
-                        class="px-4 py-2 bg-gray-200 text-gray-700 text-sm rounded-lg hover:bg-gray-300 transition-colors hidden">
+                <button id="entitySearchClearBtn" onclick="clearEntitySearch()"
+                        class="px-4 py-2 text-sm rounded-lg transition-colors hidden btn-press min-h-[44px]" style="background:var(--color-bg-muted);color:var(--color-text-secondary)"
+                        x-text="t('holder.back')">
                     &larr; Geri
                 </button>
             </div>
         </div>
-        <!-- Holder Search Results (replaces trademark list when active) -->
-        <div id="holderSearchResults" class="hidden p-6"></div>
+        <!-- Entity Search Results (replaces trademark list when active) -->
+        <div id="entitySearchResults" class="hidden p-6"></div>
 
         <!-- Modal Body -->
-        <div class="flex-1 overflow-y-auto p-6" id="holderPortfolioBody">
+        <div class="flex-1 overflow-y-auto p-6" id="entityPortfolioBody">
 
             <!-- Loading State -->
-            <div id="holderPortfolioLoading" class="flex flex-col items-center justify-center py-12">
+            <div id="entityPortfolioLoading" class="flex flex-col items-center justify-center py-12">
                 <div class="animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent"></div>
-                <p class="text-gray-500 mt-4">Portfolio yukleniyor...</p>
+                <p class="mt-4" style="color:var(--color-text-muted)" x-text="t('holder.loading')">Portfolio yukleniyor...</p>
             </div>
 
             <!-- Results -->
-            <div id="holderPortfolioResults" class="hidden">
+            <div id="entityPortfolioResults" class="hidden">
 
                 <!-- Stats Bar -->
-                <div class="flex items-center gap-6 mb-6 p-4 bg-gray-50 rounded-xl">
+                <div class="flex items-center gap-6 mb-6 p-4 rounded-xl" style="background:var(--color-bg-muted)">
                     <div class="text-center">
-                        <div class="text-2xl font-bold text-blue-600" id="holderTotalCount">0</div>
-                        <div class="text-xs text-gray-500">Toplam Marka</div>
+                        <div class="text-2xl font-bold text-blue-600" id="entityTotalCount">0</div>
+                        <div class="text-xs" style="color:var(--color-text-muted)" x-text="t('holder.total_trademarks')">Toplam Marka</div>
                     </div>
-                    <div class="h-10 w-px bg-gray-200"></div>
+                    <div class="h-10 w-px" style="background:var(--color-border)"></div>
                     <div class="text-center">
-                        <div class="text-2xl font-bold text-green-600" id="holderRegisteredCount">0</div>
-                        <div class="text-xs text-gray-500">Tescilli</div>
+                        <div class="text-2xl font-bold text-green-600" id="entityRegisteredCount">0</div>
+                        <div class="text-xs" style="color:var(--color-text-muted)" x-text="t('holder.registered')">Tescilli</div>
                     </div>
-                    <div class="h-10 w-px bg-gray-200"></div>
+                    <div class="h-10 w-px" style="background:var(--color-border)"></div>
                     <div class="text-center">
-                        <div class="text-2xl font-bold text-yellow-600" id="holderPendingCount">0</div>
-                        <div class="text-xs text-gray-500">Beklemede</div>
+                        <div class="text-2xl font-bold text-yellow-600" id="entityPendingCount">0</div>
+                        <div class="text-xs" style="color:var(--color-text-muted)" x-text="t('holder.pending')">Beklemede</div>
                     </div>
                 </div>
 
                 <!-- Trademark List -->
-                <div id="holderTrademarksList" class="space-y-3"></div>
+                <div id="entityTrademarksList" class="space-y-3"></div>
 
                 <!-- Pagination -->
-                <div id="holderPagination" class="flex items-center justify-center gap-2 mt-6"></div>
+                <div id="entityPagination" class="flex items-center justify-center gap-2 mt-6"></div>
             </div>
 
             <!-- Error State -->
-            <div id="holderPortfolioError" class="hidden text-center py-12">
+            <div id="entityPortfolioError" class="hidden text-center py-12">
                 <div class="text-5xl mb-4">&#x26a0;&#xfe0f;</div>
-                <p class="text-gray-600" id="holderErrorMessage">Bir hata olustu</p>
-                <button onclick="closeHolderPortfolio()" class="mt-4 px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300">
+                <p id="entityErrorMessage" style="color:var(--color-text-secondary)" x-text="t('holder.error_occurred')">Bir hata olustu</p>
+                <button onclick="closeEntityPortfolio()" class="mt-4 px-4 py-2 rounded-lg btn-press min-h-[44px]" style="background:var(--color-bg-muted);color:var(--color-text-secondary)"
+                        x-text="t('holder.close')">
                     Kapat
+                </button>
+            </div>
+        </div>
+
+        <!-- Footer with Watch All + CSV buttons -->
+        <div id="entityPortfolioFooter" class="hidden px-6 py-3 flex-shrink-0 flex items-center justify-between gap-2" style="border-top:1px solid var(--color-border)">
+            <span class="text-xs shrink-0" style="color:var(--color-text-muted)" id="entityFooterTotal"></span>
+            <div class="flex items-center gap-2">
+                <button id="entityWatchAllBtn" onclick="entityBulkWatchlist()"
+                        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
+                        style="background:var(--color-primary);color:white">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                    <span x-text="t('holder.add_all_to_watchlist')">Tumu Takip Et</span>
+                </button>
+                <button id="entityCsvBtn" onclick="entityDownloadCsv()"
+                        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
+                        style="background:var(--color-bg-muted);color:var(--color-text-secondary)">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                    <span x-text="t('holder.download_csv')">CSV Indir</span>
                 </button>
             </div>
         </div>
@@ -432,43 +731,44 @@
 <!-- ============================================ -->
 <!-- REPORT GENERATION MODAL                      -->
 <!-- ============================================ -->
-<div id="report-generate-modal"
-     class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4"
+<div id="report-generate-modal" role="dialog" aria-modal="true"
+     class="fixed inset-0 hidden flex items-center justify-center p-4 modal-mobile-fullscreen"
+     style="background:var(--color-bg-overlay);z-index:var(--z-modal)"
      onclick="if(event.target===this) hideReportGenerateModal()">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+    <div class="rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" style="background:var(--color-bg-card)">
 
         <!-- Header -->
-        <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-            <h3 class="text-lg font-bold text-gray-900">Yeni Rapor Olustur</h3>
+        <div class="px-6 py-4 flex items-center justify-between" style="border-bottom:1px solid var(--color-border)">
+            <h3 class="text-lg font-bold" style="color:var(--color-text-primary)" x-text="t('reports.generate_new')">Yeni Rapor Olustur</h3>
             <button onclick="hideReportGenerateModal()"
-                    class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+                    class="text-2xl leading-none btn-press min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg" style="color:var(--color-text-faint)" aria-label="Close">&times;</button>
         </div>
 
         <!-- Body -->
         <div class="p-6 space-y-4">
             <!-- Report Type -->
             <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Rapor Turu</label>
-                <select id="reportTypeSelect" class="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                    <option value="watchlist_summary">Haftalik Ozet</option>
-                    <option value="alert_digest">Aylik Ozet</option>
-                    <option value="portfolio_status">Portfoy Durumu</option>
-                    <option value="risk_assessment">Tekli Marka Raporu</option>
-                    <option value="competitor_analysis">Tam Portfoy Raporu</option>
+                <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('reports.report_type')">Rapor Turu</label>
+                <select id="reportTypeSelect" class="w-full rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
+                    <option value="watchlist_summary" x-text="t('reports.type_weekly')">Haftalik Ozet</option>
+                    <option value="alert_digest" x-text="t('reports.type_monthly')">Aylik Ozet</option>
+                    <option value="portfolio_status" x-text="t('reports.type_portfolio')">Portfoy Durumu</option>
+                    <option value="risk_assessment" x-text="t('reports.type_single')">Tekli Marka Raporu</option>
+                    <option value="competitor_analysis" x-text="t('reports.type_full')">Tam Portfoy Raporu</option>
                 </select>
             </div>
 
             <!-- Title -->
             <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Baslik</label>
-                <input type="text" id="reportTitleInput" placeholder="Rapor basligi (opsiyonel)"
-                       class="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('reports.title_label')">Baslik</label>
+                <input type="text" id="reportTitleInput" :placeholder="t('reports.title_placeholder')"
+                       class="w-full rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
             </div>
 
             <!-- Format -->
             <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Format</label>
-                <select id="reportFormatSelect" class="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('reports.format')">Format</label>
+                <select id="reportFormatSelect" class="w-full rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
                     <option value="pdf">PDF</option>
                     <option value="xlsx">Excel</option>
                 </select>
@@ -477,28 +777,196 @@
             <!-- Date Range -->
             <div class="grid grid-cols-2 gap-3">
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Baslangic Tarihi</label>
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('reports.start_date')">Baslangic Tarihi</label>
                     <input type="date" id="reportStartDate"
-                           class="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                           class="w-full rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Bitis Tarihi</label>
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('reports.end_date')">Bitis Tarihi</label>
                     <input type="date" id="reportEndDate"
-                           class="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                           class="w-full rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
                 </div>
             </div>
         </div>
 
         <!-- Footer -->
-        <div class="px-6 py-4 border-t border-gray-200 flex gap-3 justify-end">
+        <div class="px-6 py-4 flex gap-3 justify-end" style="border-top:1px solid var(--color-border)">
             <button onclick="hideReportGenerateModal()"
-                    class="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-sm font-medium border border-gray-200">
+                    class="px-4 py-2.5 rounded-lg text-sm font-medium btn-press min-h-[44px]" style="background:var(--color-bg-muted);color:var(--color-text-secondary);border:1px solid var(--color-border)"
+                    x-text="t('reports.cancel')">
                 Iptal
             </button>
             <button id="reportSubmitBtn" onclick="submitReportGeneration()"
-                    class="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors">
+                    class="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors btn-press min-h-[44px]"
+                    x-text="t('reports.create')">
                 Olustur
             </button>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================ -->
+<!-- PROFILE MODAL                                -->
+<!-- ============================================ -->
+<div x-show="showProfileModal" x-cloak
+     class="fixed inset-0 flex items-center justify-center p-4 modal-mobile-fullscreen"
+     style="background:var(--color-bg-overlay);z-index:var(--z-modal-backdrop)"
+     @keydown.escape.window="showProfileModal = false">
+    <div class="rounded-2xl w-full max-w-lg max-h-[90vh] overflow-hidden shadow-xl"
+         style="background:var(--color-bg-card);border:1px solid var(--color-border)"
+         @click.outside="showProfileModal = false"
+         x-transition>
+        <!-- Header -->
+        <div class="px-6 py-4 flex items-center justify-between" style="border-bottom:1px solid var(--color-border)">
+            <h3 class="text-lg font-bold" style="color:var(--color-text-primary)" x-text="t('profile.title')">My Profile</h3>
+            <button @click="showProfileModal = false" class="text-2xl leading-none min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg" style="color:var(--color-text-faint)">&times;</button>
+        </div>
+
+        <!-- Body -->
+        <div class="p-6 overflow-y-auto max-h-[65vh] space-y-4">
+            <!-- Avatar + user info row -->
+            <div style="display:flex;align-items:center;gap:16px;padding:16px;border-radius:12px;background:var(--color-bg-muted)">
+
+                <!-- Left: avatar column -->
+                <div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0">
+                    <!-- 60px circle — always rendered, no x-show on the circle itself -->
+                    <div @click="$refs.avatarFileInput.click()"
+                         title="JPG, PNG, WebP — max 5MB"
+                         style="position:relative;width:60px;height:60px;min-width:60px;min-height:60px;cursor:pointer;border-radius:50%;overflow:hidden;border:2.5px solid #a5b4fc;box-sizing:content-box">
+                        <!-- Initials layer — always present as background -->
+                        <div style="position:absolute;top:0;left:0;right:0;bottom:0;background:#4f46e5;display:flex;align-items:center;justify-content:center">
+                            <span style="color:white;font-size:20px;font-weight:700;letter-spacing:1px;line-height:1;text-align:center;user-select:none"
+                                  x-text="((profileData.first_name || 'U').charAt(0) + (profileData.last_name || '').charAt(0)).toUpperCase()"></span>
+                        </div>
+                        <!-- Photo layer — covers initials when photo exists -->
+                        <img x-show="profileAvatar" :src="profileAvatar ? profileAvatar : ''" alt=""
+                             style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover">
+                        <!-- Hover overlay with camera icon -->
+                        <div style="position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity 0.2s"
+                             onmouseenter="this.style.opacity='1'"
+                             onmouseleave="this.style.opacity='0'">
+                            <svg x-show="!avatarUploading" width="22" height="22" fill="none" stroke="white" stroke-width="2" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/>
+                            </svg>
+                            <svg x-show="avatarUploading" width="22" height="22" fill="none" viewBox="0 0 24 24" style="animation:spin 1s linear infinite">
+                                <circle style="opacity:0.25" cx="12" cy="12" r="10" stroke="white" stroke-width="4"></circle>
+                                <path style="opacity:0.75" fill="white" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                        </div>
+                    </div>
+                    <!-- "Upload photo" label under circle -->
+                    <button type="button" @click="$refs.avatarFileInput.click()"
+                            style="margin-top:4px;font-size:10px;line-height:1;color:#6366f1;font-weight:500;cursor:pointer;background:none;border:none;padding:0"
+                            x-text="avatarUploading ? '...' : (profileAvatar ? t('profile.change_photo') : t('profile.upload_photo'))"></button>
+                    <input type="file" x-ref="avatarFileInput" @change="uploadAvatar($event)" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none">
+                </div>
+
+                <!-- Middle: name + email + member since -->
+                <div style="flex:1;min-width:0">
+                    <div style="font-weight:600;font-size:15px;color:var(--color-text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" x-text="(profileData.first_name || '') + ' ' + (profileData.last_name || '')"></div>
+                    <div style="font-size:12px;margin-top:2px;color:var(--color-text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" x-text="profileData.email"></div>
+                    <div style="font-size:10px;margin-top:4px;color:var(--color-text-faint)" x-text="profileData.created_at ? t('profile.member_since') + ': ' + new Date(profileData.created_at).toLocaleDateString() : ''"></div>
+                </div>
+
+                <!-- Right: plan badge -->
+                <span style="flex-shrink:0;font-size:11px;padding:3px 10px;border-radius:9999px;font-weight:700;color:white;background:#4f46e5" x-text="(profileData.plan || 'free').toUpperCase()"></span>
+            </div>
+
+            <!-- Edit form -->
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="text-xs font-medium mb-1 block" style="color:var(--color-text-muted)" x-text="t('profile.first_name')">First Name</label>
+                    <input type="text" x-model="profileData.first_name"
+                           class="w-full px-3 py-2 text-sm rounded-lg" style="background:var(--color-bg-input);color:var(--color-text-primary);border:1px solid var(--color-border)">
+                </div>
+                <div>
+                    <label class="text-xs font-medium mb-1 block" style="color:var(--color-text-muted)" x-text="t('profile.last_name')">Last Name</label>
+                    <input type="text" x-model="profileData.last_name"
+                           class="w-full px-3 py-2 text-sm rounded-lg" style="background:var(--color-bg-input);color:var(--color-text-primary);border:1px solid var(--color-border)">
+                </div>
+            </div>
+
+            <div>
+                <label class="text-xs font-medium mb-1 block" style="color:var(--color-text-muted)" x-text="t('profile.email')">Email</label>
+                <input type="email" x-model="profileData.email"
+                       class="w-full px-3 py-2 text-sm rounded-lg" style="background:var(--color-bg-input);color:var(--color-text-primary);border:1px solid var(--color-border)">
+            </div>
+
+            <div>
+                <label class="text-xs font-medium mb-1 block" style="color:var(--color-text-muted)" x-text="t('profile.phone')">Phone</label>
+                <input type="tel" x-model="profileData.phone"
+                       class="w-full px-3 py-2 text-sm rounded-lg" style="background:var(--color-bg-input);color:var(--color-text-primary);border:1px solid var(--color-border)">
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="text-xs font-medium mb-1 block" style="color:var(--color-text-muted)" x-text="t('profile.job_title')">Title</label>
+                    <input type="text" x-model="profileData.title"
+                           class="w-full px-3 py-2 text-sm rounded-lg" style="background:var(--color-bg-input);color:var(--color-text-primary);border:1px solid var(--color-border)">
+                </div>
+                <div>
+                    <label class="text-xs font-medium mb-1 block" style="color:var(--color-text-muted)" x-text="t('profile.department')">Department</label>
+                    <input type="text" x-model="profileData.department"
+                           class="w-full px-3 py-2 text-sm rounded-lg" style="background:var(--color-bg-input);color:var(--color-text-primary);border:1px solid var(--color-border)">
+                </div>
+            </div>
+
+            <!-- Change password section -->
+            <details class="mt-2">
+                <summary class="text-sm font-medium cursor-pointer select-none" style="color:var(--color-text-secondary)" x-text="t('profile.change_password')">Change Password</summary>
+                <form autocomplete="off" @submit.prevent class="mt-3 space-y-3">
+                    <div>
+                        <label class="text-xs font-medium mb-1 block" style="color:var(--color-text-muted)" x-text="t('profile.current_password')">Current</label>
+                        <div class="relative">
+                        <input :type="showProfileCurrentPw ? 'text' : 'password'" x-model="profilePassword.current" autocomplete="new-password"
+                               class="w-full px-3 py-2 pr-9 text-sm rounded-lg" style="background:var(--color-bg-input);color:var(--color-text-primary);border:1px solid var(--color-border)">
+                        <button type="button" @click="showProfileCurrentPw = !showProfileCurrentPw" class="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5" style="color:var(--color-text-muted)" tabindex="-1">
+                            <svg x-show="!showProfileCurrentPw" xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.964-7.178z"/><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                            <svg x-show="showProfileCurrentPw" x-cloak xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path d="M3.98 8.223A10.477 10.477 0 001.934 12c1.292 4.338 5.31 7.5 10.066 7.5.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88"/></svg>
+                        </button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="text-xs font-medium mb-1 block" style="color:var(--color-text-muted)" x-text="t('profile.new_password')">New</label>
+                        <div class="relative">
+                        <input :type="showProfileNewPw ? 'text' : 'password'" x-model="profilePassword.newPw" autocomplete="new-password"
+                               class="w-full px-3 py-2 pr-9 text-sm rounded-lg" style="background:var(--color-bg-input);color:var(--color-text-primary);border:1px solid var(--color-border)">
+                        <button type="button" @click="showProfileNewPw = !showProfileNewPw" class="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5" style="color:var(--color-text-muted)" tabindex="-1">
+                            <svg x-show="!showProfileNewPw" xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.964-7.178z"/><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                            <svg x-show="showProfileNewPw" x-cloak xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path d="M3.98 8.223A10.477 10.477 0 001.934 12c1.292 4.338 5.31 7.5 10.066 7.5.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88"/></svg>
+                        </button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="text-xs font-medium mb-1 block" style="color:var(--color-text-muted)" x-text="t('profile.confirm_password')">Confirm</label>
+                        <div class="relative">
+                        <input :type="showProfileConfirmPw ? 'text' : 'password'" x-model="profilePassword.confirm" autocomplete="new-password"
+                               class="w-full px-3 py-2 pr-9 text-sm rounded-lg" style="background:var(--color-bg-input);color:var(--color-text-primary);border:1px solid var(--color-border)">
+                        <button type="button" @click="showProfileConfirmPw = !showProfileConfirmPw" class="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5" style="color:var(--color-text-muted)" tabindex="-1">
+                            <svg x-show="!showProfileConfirmPw" xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.964-7.178z"/><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                            <svg x-show="showProfileConfirmPw" x-cloak xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path d="M3.98 8.223A10.477 10.477 0 001.934 12c1.292 4.338 5.31 7.5 10.066 7.5.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88"/></svg>
+                        </button>
+                        </div>
+                    </div>
+                </form>
+            </details>
+
+            <!-- Error / Success messages -->
+            <div x-show="profileMessage" x-text="profileMessage" class="text-sm px-3 py-2 rounded-lg"
+                 :class="profileMessageType === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'"></div>
+        </div>
+
+        <!-- Footer -->
+        <div class="px-6 py-4 flex gap-3" style="border-top:1px solid var(--color-border)">
+            <button @click="showProfileModal = false"
+                    class="flex-1 px-4 py-2.5 rounded-lg text-sm font-medium min-h-[44px]"
+                    style="background:var(--color-bg-muted);color:var(--color-text-secondary);border:1px solid var(--color-border)"
+                    x-text="t('common.cancel')">Cancel</button>
+            <button @click="saveProfile()"
+                    class="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium min-h-[44px]"
+                    :disabled="profileSaving"
+                    x-text="profileSaving ? t('profile.saving') : t('profile.save')">Save</button>
         </div>
     </div>
 </div>
