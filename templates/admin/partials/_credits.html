@@ -1,13 +1,14 @@
-<h2 class="text-lg font-semibold text-gray-900 mb-4">Credit Management</h2>
+<h2 class="text-lg font-semibold text-gray-900 mb-1">Credit Management</h2>
+<p class="text-xs sm:text-sm text-gray-500 mb-4">Manage AI credits, logo credits, and name credits for organizations.</p>
 
 <!-- Org Selector -->
-<div class="bg-white rounded-lg border border-gray-200 p-4 mb-4">
+<div class="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 mb-4">
     <div class="flex gap-3 items-end">
         <div class="flex-1">
             <label class="text-xs font-medium text-gray-500 block mb-1">Search Organization</label>
             <input type="text" x-model.debounce.300ms="orgSearch" @input="searchOrgs()"
                    placeholder="Type org name or email..."
-                   class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                   class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 min-h-[40px]">
         </div>
     </div>
 
@@ -15,7 +16,7 @@
     <template x-if="orgResults.length > 0 && !selectedOrg">
         <div class="mt-2 border border-gray-200 rounded-lg max-h-40 overflow-auto">
             <template x-for="o in orgResults" :key="o.id">
-                <button @click="selectOrg(o)" class="w-full text-left px-3 py-2 hover:bg-gray-50 text-sm flex justify-between">
+                <button @click="selectOrg(o)" class="w-full text-left px-3 py-2.5 hover:bg-gray-50 text-sm flex justify-between min-h-[44px]">
                     <span x-text="o.name"></span>
                     <span class="text-xs text-gray-400" x-text="o.plan_name"></span>
                 </button>
@@ -27,108 +28,158 @@
 <!-- Selected Org Credit Info -->
 <template x-if="selectedOrg && credits">
     <div class="space-y-4">
-        <div class="bg-white rounded-lg border border-gray-200 p-4">
-            <div class="flex items-center justify-between mb-3">
-                <h3 class="font-medium text-gray-900" x-text="selectedOrg.name"></h3>
-                <button @click="selectedOrg = null; credits = null" class="text-xs text-gray-400 hover:text-gray-600">Clear</button>
+        <div class="bg-white rounded-lg border border-gray-200 p-3 sm:p-4">
+            <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <h3 class="font-medium text-gray-900" x-text="selectedOrg.name"></h3>
+                    <span class="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full" x-text="credits.plan"></span>
+                </div>
+                <button @click="selectedOrg = null; credits = null" class="text-xs text-gray-400 hover:text-gray-600 min-h-[32px] px-2">Clear</button>
             </div>
 
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                <div class="border rounded-lg p-3">
-                    <div class="text-xs text-gray-500">Logo Monthly</div>
-                    <div class="text-lg font-bold" x-text="credits.logo_credits?.monthly_remaining ?? 0"></div>
-                    <div class="text-[10px] text-gray-400" x-text="'Plan default: ' + (credits.logo_credits?.plan_default ?? 0)"></div>
+            <!-- AI Credits (Primary) -->
+            <div class="mb-4">
+                <h4 class="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">AI Credits (Unified)</h4>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
+                    <div class="border border-indigo-200 bg-indigo-50 rounded-lg p-2.5 sm:p-3">
+                        <div class="text-[10px] sm:text-xs text-indigo-600">Monthly Remaining</div>
+                        <div class="text-base sm:text-lg font-bold text-indigo-900" x-text="credits.ai_credits?.monthly_remaining ?? 0"></div>
+                        <div class="text-[10px] text-indigo-400" x-text="'Plan limit: ' + (credits.ai_credits?.plan_limit ?? 0)"></div>
+                    </div>
+                    <div class="border border-indigo-200 bg-indigo-50 rounded-lg p-2.5 sm:p-3">
+                        <div class="text-[10px] sm:text-xs text-indigo-600">Purchased</div>
+                        <div class="text-base sm:text-lg font-bold text-indigo-900" x-text="credits.ai_credits?.purchased ?? 0"></div>
+                        <div class="text-[10px] text-indigo-400">Extra credits bought</div>
+                    </div>
+                    <div class="border border-indigo-200 bg-indigo-50 rounded-lg p-2.5 sm:p-3">
+                        <div class="text-[10px] sm:text-xs text-indigo-600">Total Available</div>
+                        <div class="text-base sm:text-lg font-bold text-indigo-900" x-text="(credits.ai_credits?.monthly_remaining ?? 0) + (credits.ai_credits?.purchased ?? 0)"></div>
+                        <div class="text-[10px] text-indigo-400">Monthly + Purchased</div>
+                    </div>
+                    <div class="border rounded-lg p-2.5 sm:p-3">
+                        <div class="text-[10px] sm:text-xs text-gray-500">Reset Date</div>
+                        <div class="text-xs sm:text-sm font-medium" x-text="credits.ai_credits?.reset_at ? credits.ai_credits.reset_at.split(' ')[0] : 'N/A'"></div>
+                        <div class="text-[10px] text-gray-400">Monthly reset</div>
+                    </div>
                 </div>
-                <div class="border rounded-lg p-3">
-                    <div class="text-xs text-gray-500">Logo Purchased</div>
-                    <div class="text-lg font-bold" x-text="credits.logo_credits?.purchased ?? 0"></div>
-                </div>
-                <div class="border rounded-lg p-3">
-                    <div class="text-xs text-gray-500">Name Purchased</div>
-                    <div class="text-lg font-bold" x-text="credits.name_credits?.purchased ?? 0"></div>
-                </div>
-                <div class="border rounded-lg p-3">
-                    <div class="text-xs text-gray-500">Used This Month</div>
-                    <div class="text-lg font-bold" x-text="(credits.logo_credits?.used_this_month ?? 0) + ' / ' + (credits.name_credits?.used_this_month ?? 0)"></div>
-                    <div class="text-[10px] text-gray-400">Logo / Name</div>
+            </div>
+
+            <!-- Legacy Credits (Logo + Name) -->
+            <div class="mb-4">
+                <h4 class="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Legacy Credits (Logo / Name)</h4>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
+                    <div class="border rounded-lg p-2.5 sm:p-3">
+                        <div class="text-[10px] sm:text-xs text-gray-500">Logo Monthly</div>
+                        <div class="text-base sm:text-lg font-bold" x-text="credits.logo_credits?.monthly_remaining ?? 0"></div>
+                    </div>
+                    <div class="border rounded-lg p-2.5 sm:p-3">
+                        <div class="text-[10px] sm:text-xs text-gray-500">Logo Purchased</div>
+                        <div class="text-base sm:text-lg font-bold" x-text="credits.logo_credits?.purchased ?? 0"></div>
+                    </div>
+                    <div class="border rounded-lg p-2.5 sm:p-3">
+                        <div class="text-[10px] sm:text-xs text-gray-500">Name Purchased</div>
+                        <div class="text-base sm:text-lg font-bold" x-text="credits.name_credits?.purchased ?? 0"></div>
+                    </div>
+                    <div class="border rounded-lg p-2.5 sm:p-3">
+                        <div class="text-[10px] sm:text-xs text-gray-500">Used This Month</div>
+                        <div class="text-base sm:text-lg font-bold" x-text="(credits.logo_credits?.used_this_month ?? 0) + ' / ' + (credits.name_credits?.used_this_month ?? 0)"></div>
+                        <div class="text-[10px] text-gray-400">Logo / Name gens</div>
+                    </div>
                 </div>
             </div>
 
             <!-- Adjust Form -->
             <div class="border-t pt-4">
                 <h4 class="text-sm font-medium text-gray-700 mb-3">Adjust Credits</h4>
-                <div class="flex flex-wrap gap-3 items-end">
-                    <div>
+                <div class="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 sm:gap-3 items-end">
+                    <div class="col-span-1">
                         <label class="text-xs text-gray-500 block mb-1">Type</label>
-                        <select x-model="adjustForm.credit_type" class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
-                            <option value="logo_purchased">Logo Purchased</option>
-                            <option value="logo_monthly">Logo Monthly</option>
-                            <option value="name_purchased">Name Purchased</option>
+                        <select x-model="adjustForm.credit_type" class="w-full px-2 sm:px-3 py-2 border border-gray-300 rounded-lg text-sm min-h-[40px]">
+                            <optgroup label="AI Credits (Unified)">
+                                <option value="ai_monthly">AI Monthly</option>
+                                <option value="ai_purchased">AI Purchased</option>
+                            </optgroup>
+                            <optgroup label="Legacy Credits">
+                                <option value="logo_purchased">Logo Purchased</option>
+                                <option value="logo_monthly">Logo Monthly</option>
+                                <option value="name_purchased">Name Purchased</option>
+                            </optgroup>
                         </select>
                     </div>
-                    <div>
+                    <div class="col-span-1">
                         <label class="text-xs text-gray-500 block mb-1">Operation</label>
-                        <select x-model="adjustForm.operation" class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                        <select x-model="adjustForm.operation" class="w-full px-2 sm:px-3 py-2 border border-gray-300 rounded-lg text-sm min-h-[40px]">
                             <option value="add">Add</option>
                             <option value="subtract">Subtract</option>
                             <option value="set">Set</option>
                         </select>
                     </div>
-                    <div>
+                    <div class="col-span-1">
                         <label class="text-xs text-gray-500 block mb-1">Amount</label>
                         <input type="number" x-model.number="adjustForm.amount" min="0"
-                               class="w-24 px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                               class="w-full sm:w-24 px-2 sm:px-3 py-2 border border-gray-300 rounded-lg text-sm min-h-[40px]">
                     </div>
-                    <div class="flex-1 min-w-[150px]">
+                    <div class="col-span-1 sm:flex-1 sm:min-w-[150px]">
                         <label class="text-xs text-gray-500 block mb-1">Reason</label>
                         <input type="text" x-model="adjustForm.reason" placeholder="Reason..."
-                               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                               class="w-full px-2 sm:px-3 py-2 border border-gray-300 rounded-lg text-sm min-h-[40px]">
                     </div>
-                    <button @click="adjustCredits()" class="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700">Apply</button>
+                    <div class="col-span-2 sm:col-span-1">
+                        <button @click="adjustCredits()" class="w-full sm:w-auto px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 min-h-[40px]">Apply</button>
+                    </div>
                 </div>
             </div>
         </div>
 
         <!-- Bulk Operations -->
-        <div class="bg-white rounded-lg border border-gray-200 p-4">
+        <div class="bg-white rounded-lg border border-gray-200 p-3 sm:p-4">
             <h3 class="text-sm font-medium text-gray-700 mb-3">Bulk Credit Operation</h3>
-            <div class="flex flex-wrap gap-3 items-end">
-                <div>
+            <div class="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 sm:gap-3 items-end">
+                <div class="col-span-1">
                     <label class="text-xs text-gray-500 block mb-1">Plan Filter</label>
-                    <select x-model="bulkForm.plan_filter" class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                    <select x-model="bulkForm.plan_filter" class="w-full px-2 sm:px-3 py-2 border border-gray-300 rounded-lg text-sm min-h-[40px]">
                         <option value="all">All Plans</option>
                         <option value="free">Free</option>
                         <option value="starter">Starter</option>
+                        <option value="business">Business</option>
                         <option value="professional">Professional</option>
                         <option value="enterprise">Enterprise</option>
                     </select>
                 </div>
-                <div>
+                <div class="col-span-1">
                     <label class="text-xs text-gray-500 block mb-1">Type</label>
-                    <select x-model="bulkForm.credit_type" class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
-                        <option value="logo_purchased">Logo Purchased</option>
-                        <option value="logo_monthly">Logo Monthly</option>
-                        <option value="name_purchased">Name Purchased</option>
+                    <select x-model="bulkForm.credit_type" class="w-full px-2 sm:px-3 py-2 border border-gray-300 rounded-lg text-sm min-h-[40px]">
+                        <optgroup label="AI Credits (Unified)">
+                            <option value="ai_monthly">AI Monthly</option>
+                            <option value="ai_purchased">AI Purchased</option>
+                        </optgroup>
+                        <optgroup label="Legacy Credits">
+                            <option value="logo_purchased">Logo Purchased</option>
+                            <option value="logo_monthly">Logo Monthly</option>
+                            <option value="name_purchased">Name Purchased</option>
+                        </optgroup>
                     </select>
                 </div>
-                <div>
+                <div class="col-span-1">
                     <label class="text-xs text-gray-500 block mb-1">Operation</label>
-                    <select x-model="bulkForm.operation" class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                    <select x-model="bulkForm.operation" class="w-full px-2 sm:px-3 py-2 border border-gray-300 rounded-lg text-sm min-h-[40px]">
                         <option value="add">Add</option>
                         <option value="set">Set</option>
                     </select>
                 </div>
-                <div>
+                <div class="col-span-1">
                     <label class="text-xs text-gray-500 block mb-1">Amount</label>
                     <input type="number" x-model.number="bulkForm.amount" min="0"
-                           class="w-24 px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                           class="w-full sm:w-24 px-2 sm:px-3 py-2 border border-gray-300 rounded-lg text-sm min-h-[40px]">
                 </div>
-                <div class="flex-1 min-w-[120px]">
+                <div class="col-span-1 sm:flex-1 sm:min-w-[120px]">
                     <label class="text-xs text-gray-500 block mb-1">Reason</label>
                     <input type="text" x-model="bulkForm.reason" placeholder="Reason..."
-                           class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                           class="w-full px-2 sm:px-3 py-2 border border-gray-300 rounded-lg text-sm min-h-[40px]">
                 </div>
-                <button @click="bulkAdjust()" class="px-4 py-2 bg-amber-600 text-white text-sm rounded-lg hover:bg-amber-700">Bulk Apply</button>
+                <div class="col-span-1">
+                    <button @click="bulkAdjust()" class="w-full sm:w-auto px-4 py-2 bg-amber-600 text-white text-sm rounded-lg hover:bg-amber-700 min-h-[40px]">Bulk Apply</button>
+                </div>
             </div>
         </div>
     </div>

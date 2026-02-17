@@ -1,6 +1,6 @@
-<div class="flex items-center justify-between mb-4">
+<div class="flex items-center justify-between mb-4 gap-2">
     <h2 class="text-lg font-semibold text-gray-900">Discount Codes</h2>
-    <button @click="showCreate = true" class="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700">+ New Code</button>
+    <button @click="showCreate = true" class="px-3 sm:px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 min-h-[40px] whitespace-nowrap">+ New Code</button>
 </div>
 
 <template x-if="loading">
@@ -12,71 +12,101 @@
 
 <template x-if="!loading">
     <div>
-        <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
-            <table class="w-full text-sm">
-                <thead class="bg-gray-50 text-left">
-                    <tr>
-                        <th class="px-4 py-3 font-medium text-gray-600">Code</th>
-                        <th class="px-4 py-3 font-medium text-gray-600">Type</th>
-                        <th class="px-4 py-3 font-medium text-gray-600">Value</th>
-                        <th class="px-4 py-3 font-medium text-gray-600">Plan</th>
-                        <th class="px-4 py-3 font-medium text-gray-600">Uses</th>
-                        <th class="px-4 py-3 font-medium text-gray-600">Expires</th>
-                        <th class="px-4 py-3 font-medium text-gray-600 text-center">Status</th>
-                        <th class="px-4 py-3 font-medium text-gray-600">Actions</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-100">
-                    <template x-for="code in codes" :key="code.id">
-                        <tr class="hover:bg-gray-50">
-                            <td class="px-4 py-3 font-mono font-medium" x-text="code.code"></td>
-                            <td class="px-4 py-3 capitalize" x-text="code.discount_type"></td>
-                            <td class="px-4 py-3" x-text="code.discount_type === 'percentage' ? code.discount_value + '%' : '$' + code.discount_value"></td>
-                            <td class="px-4 py-3 text-xs" x-text="code.applies_to_plan || 'All'"></td>
-                            <td class="px-4 py-3 text-xs" x-text="(code.current_uses || 0) + ' / ' + (code.max_uses || 'Unlimited')"></td>
-                            <td class="px-4 py-3 text-xs text-gray-500" x-text="code.valid_until ? new Date(code.valid_until).toLocaleDateString() : 'Never'"></td>
-                            <td class="px-4 py-3 text-center">
-                                <span class="px-2 py-0.5 text-xs rounded-full"
-                                      :class="code.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'"
-                                      x-text="code.is_active ? 'Active' : 'Inactive'"></span>
-                            </td>
-                            <td class="px-4 py-3">
-                                <div class="flex gap-1">
-                                    <button @click="editCode(code)" class="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded">Edit</button>
-                                    <button x-show="code.is_active" @click="deactivateCode(code.id)" class="px-2 py-1 text-xs bg-red-50 hover:bg-red-100 text-red-700 rounded">Deactivate</button>
-                                </div>
-                            </td>
+        <!-- Mobile: Card view -->
+        <div class="sm:hidden space-y-3">
+            <template x-for="code in codes" :key="code.id">
+                <div class="bg-white rounded-lg border border-gray-200 p-3">
+                    <div class="flex items-start justify-between mb-2">
+                        <span class="font-mono font-medium text-sm" x-text="code.code"></span>
+                        <span class="px-2 py-0.5 text-xs rounded-full flex-shrink-0 ml-2"
+                              :class="code.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'"
+                              x-text="code.is_active ? 'Active' : 'Inactive'"></span>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2 mb-2 text-xs text-gray-500">
+                        <span class="capitalize" x-text="code.discount_type"></span>
+                        <span x-text="code.discount_type === 'percentage' ? code.discount_value + '%' : '$' + code.discount_value"></span>
+                        <span x-text="(code.current_uses || 0) + '/' + (code.max_uses || '∞') + ' uses'"></span>
+                        <span x-text="code.applies_to_plan || 'All plans'"></span>
+                    </div>
+                    <div class="flex flex-wrap gap-1.5">
+                        <button @click="editCode(code)" class="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 rounded min-h-[32px]">Edit</button>
+                        <button x-show="code.is_active" @click="deactivateCode(code.id)" class="px-3 py-1.5 text-xs bg-red-50 hover:bg-red-100 text-red-700 rounded min-h-[32px]">Deactivate</button>
+                    </div>
+                </div>
+            </template>
+            <template x-if="codes.length === 0">
+                <div class="py-8 text-center text-gray-500 text-sm">No discount codes</div>
+            </template>
+        </div>
+
+        <!-- Desktop: Table view -->
+        <div class="hidden sm:block bg-white rounded-lg border border-gray-200 overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm min-w-[700px]">
+                    <thead class="bg-gray-50 text-left">
+                        <tr>
+                            <th class="px-4 py-3 font-medium text-gray-600">Code</th>
+                            <th class="px-4 py-3 font-medium text-gray-600">Type</th>
+                            <th class="px-4 py-3 font-medium text-gray-600">Value</th>
+                            <th class="px-4 py-3 font-medium text-gray-600">Plan</th>
+                            <th class="px-4 py-3 font-medium text-gray-600">Uses</th>
+                            <th class="px-4 py-3 font-medium text-gray-600">Expires</th>
+                            <th class="px-4 py-3 font-medium text-gray-600 text-center">Status</th>
+                            <th class="px-4 py-3 font-medium text-gray-600">Actions</th>
                         </tr>
-                    </template>
-                    <template x-if="codes.length === 0">
-                        <tr><td colspan="8" class="px-4 py-8 text-center text-gray-500">No discount codes</td></tr>
-                    </template>
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100">
+                        <template x-for="code in codes" :key="code.id">
+                            <tr class="hover:bg-gray-50">
+                                <td class="px-4 py-3 font-mono font-medium" x-text="code.code"></td>
+                                <td class="px-4 py-3 capitalize" x-text="code.discount_type"></td>
+                                <td class="px-4 py-3" x-text="code.discount_type === 'percentage' ? code.discount_value + '%' : '$' + code.discount_value"></td>
+                                <td class="px-4 py-3 text-xs" x-text="code.applies_to_plan || 'All'"></td>
+                                <td class="px-4 py-3 text-xs" x-text="(code.current_uses || 0) + ' / ' + (code.max_uses || 'Unlimited')"></td>
+                                <td class="px-4 py-3 text-xs text-gray-500" x-text="code.valid_until ? new Date(code.valid_until).toLocaleDateString() : 'Never'"></td>
+                                <td class="px-4 py-3 text-center">
+                                    <span class="px-2 py-0.5 text-xs rounded-full"
+                                          :class="code.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'"
+                                          x-text="code.is_active ? 'Active' : 'Inactive'"></span>
+                                </td>
+                                <td class="px-4 py-3">
+                                    <div class="flex gap-1">
+                                        <button @click="editCode(code)" class="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded">Edit</button>
+                                        <button x-show="code.is_active" @click="deactivateCode(code.id)" class="px-2 py-1 text-xs bg-red-50 hover:bg-red-100 text-red-700 rounded">Deactivate</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        </template>
+                        <template x-if="codes.length === 0">
+                            <tr><td colspan="8" class="px-4 py-8 text-center text-gray-500">No discount codes</td></tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 </template>
 
 <!-- Create/Edit Modal -->
 <template x-if="showCreate || editingCode">
-    <div class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" @click.self="showCreate = false; editingCode = null">
-        <div class="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+    <div class="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" @click.self="showCreate = false; editingCode = null">
+        <div class="bg-white rounded-t-xl sm:rounded-xl shadow-xl w-full sm:max-w-md max-h-[85vh] overflow-auto p-4 sm:p-6">
             <h3 class="text-lg font-semibold mb-4" x-text="editingCode ? 'Edit Code' : 'Create Discount Code'"></h3>
             <div class="space-y-3">
                 <div x-show="!editingCode">
                     <label class="text-xs font-medium text-gray-500 block mb-1">Code</label>
                     <input type="text" x-model="form.code" placeholder="LAUNCH20"
-                           class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm uppercase">
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm uppercase min-h-[40px]">
                 </div>
                 <div>
                     <label class="text-xs font-medium text-gray-500 block mb-1">Description</label>
                     <input type="text" x-model="form.description" placeholder="Launch promotion"
-                           class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm min-h-[40px]">
                 </div>
                 <div class="grid grid-cols-2 gap-3">
                     <div>
                         <label class="text-xs font-medium text-gray-500 block mb-1">Type</label>
-                        <select x-model="form.discount_type" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                        <select x-model="form.discount_type" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm min-h-[40px]">
                             <option value="percentage">Percentage</option>
                             <option value="fixed">Fixed</option>
                         </select>
@@ -84,13 +114,13 @@
                     <div>
                         <label class="text-xs font-medium text-gray-500 block mb-1">Value</label>
                         <input type="number" x-model.number="form.discount_value" step="0.01" min="0"
-                               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm min-h-[40px]">
                     </div>
                 </div>
                 <div class="grid grid-cols-2 gap-3">
                     <div>
                         <label class="text-xs font-medium text-gray-500 block mb-1">Applies to Plan</label>
-                        <select x-model="form.applies_to_plan" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                        <select x-model="form.applies_to_plan" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm min-h-[40px]">
                             <option value="">All Plans</option>
                             <option value="starter">Starter</option>
                             <option value="professional">Professional</option>
@@ -100,18 +130,18 @@
                     <div>
                         <label class="text-xs font-medium text-gray-500 block mb-1">Max Uses</label>
                         <input type="number" x-model.number="form.max_uses" min="0" placeholder="Unlimited"
-                               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                               class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm min-h-[40px]">
                     </div>
                 </div>
                 <div>
                     <label class="text-xs font-medium text-gray-500 block mb-1">Valid Until</label>
                     <input type="date" x-model="form.valid_until"
-                           class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm min-h-[40px]">
                 </div>
             </div>
             <div class="flex justify-end gap-2 mt-4">
-                <button @click="showCreate = false; editingCode = null" class="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
-                <button @click="editingCode ? updateCode() : createCode()" class="px-4 py-2 text-sm text-white bg-indigo-600 rounded-lg hover:bg-indigo-700" x-text="editingCode ? 'Update' : 'Create'"></button>
+                <button @click="showCreate = false; editingCode = null" class="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 min-h-[40px]">Cancel</button>
+                <button @click="editingCode ? updateCode() : createCode()" class="px-4 py-2 text-sm text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 min-h-[40px]" x-text="editingCode ? 'Update' : 'Create'"></button>
             </div>
         </div>
     </div>

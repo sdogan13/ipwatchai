@@ -9,55 +9,108 @@
 
 <template x-if="!loading && stats">
     <div>
-        <!-- Stat cards -->
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <!-- Revenue & Key Metrics -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mb-6">
+            <div class="bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-lg p-4 text-white">
+                <div class="text-sm text-indigo-100">Monthly Revenue (MRR)</div>
+                <div class="text-xl sm:text-2xl font-bold" x-text="'₺' + (stats.mrr ?? 0).toLocaleString()"></div>
+                <div class="text-xs text-indigo-200 mt-1" x-text="(stats.total_active_orgs ?? 0) + ' active organizations'"></div>
+            </div>
             <div class="bg-white rounded-lg border border-gray-200 p-4">
                 <div class="text-sm text-gray-500">Active Users</div>
-                <div class="text-2xl font-bold text-gray-900" x-text="stats.total_active_users ?? 0"></div>
+                <div class="text-xl sm:text-2xl font-bold text-gray-900" x-text="stats.total_active_users ?? 0"></div>
+                <div class="text-xs text-gray-400 mt-1" x-text="'+' + (stats.new_users_7d ?? 0) + ' this week'"></div>
             </div>
             <div class="bg-white rounded-lg border border-gray-200 p-4">
-                <div class="text-sm text-gray-500">Active Orgs</div>
-                <div class="text-2xl font-bold text-gray-900" x-text="stats.total_active_orgs ?? 0"></div>
+                <div class="text-sm text-gray-500">API Calls Today</div>
+                <div class="text-xl sm:text-2xl font-bold text-gray-900" x-text="(stats.api_calls_today ?? 0).toLocaleString()"></div>
+                <div class="text-xs text-gray-400 mt-1">Quick + Live searches</div>
             </div>
             <div class="bg-white rounded-lg border border-gray-200 p-4">
-                <div class="text-sm text-gray-500">New Users (7d)</div>
-                <div class="text-2xl font-bold text-gray-900" x-text="stats.new_users_7d ?? 0"></div>
-            </div>
-            <div class="bg-white rounded-lg border border-gray-200 p-4">
-                <div class="text-sm text-gray-500">Watchlist Items</div>
-                <div class="text-2xl font-bold text-gray-900" x-text="(stats.total_watchlist_items ?? 0).toLocaleString()"></div>
+                <div class="text-sm text-gray-500">Applications (Month)</div>
+                <div class="text-xl sm:text-2xl font-bold text-gray-900" x-text="stats.applications_this_month ?? 0"></div>
+                <div class="text-xs text-gray-400 mt-1" x-text="(stats.active_overrides ?? 0) + ' active limit overrides'"></div>
             </div>
         </div>
 
-        <!-- Orgs by plan -->
-        <div class="bg-white rounded-lg border border-gray-200 p-4 mb-8">
+        <!-- Revenue by Plan -->
+        <div class="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 mb-6">
+            <h3 class="text-sm font-medium text-gray-700 mb-3">Revenue by Plan</h3>
+            <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
+                <template x-for="plan in Object.keys(stats.revenue_by_plan || {})" :key="plan">
+                    <div class="border rounded-lg p-2.5 sm:p-3"
+                         :class="{
+                             'border-gray-200': plan === 'free',
+                             'border-blue-200 bg-blue-50': plan === 'starter',
+                             'border-teal-200 bg-teal-50': plan === 'business',
+                             'border-purple-200 bg-purple-50': plan === 'professional',
+                             'border-amber-200 bg-amber-50': plan === 'enterprise',
+                             'border-red-200 bg-red-50': plan === 'superadmin',
+                         }">
+                        <div class="text-[10px] sm:text-xs font-medium text-gray-600 uppercase truncate" x-text="plan"></div>
+                        <div class="text-base sm:text-lg font-bold text-gray-900 mt-1" x-text="'₺' + ((stats.revenue_by_plan[plan]?.revenue || 0)).toLocaleString()"></div>
+                        <div class="text-[10px] sm:text-xs text-gray-500">
+                            <span x-text="stats.revenue_by_plan[plan]?.orgs || 0"></span> orgs
+                            <template x-if="stats.revenue_by_plan[plan]?.price > 0">
+                                <span class="hidden sm:inline" x-text="' @ ₺' + (stats.revenue_by_plan[plan]?.price || 0).toLocaleString()"></span>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <!-- Organizations by Plan -->
+        <div class="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 mb-6">
             <h3 class="text-sm font-medium text-gray-700 mb-3">Organizations by Plan</h3>
-            <div class="flex flex-wrap gap-4">
+            <div class="space-y-2">
                 <template x-for="plan in Object.keys(stats.orgs_by_plan || {})" :key="plan">
-                    <div class="flex items-center gap-2">
-                        <span class="px-2 py-1 text-xs font-medium rounded"
+                    <div class="flex items-center gap-2 sm:gap-3">
+                        <span class="px-2 py-1 text-[10px] sm:text-xs font-medium rounded w-16 sm:w-24 text-center flex-shrink-0"
                               :class="{
                                   'bg-gray-100 text-gray-700': plan === 'free',
                                   'bg-blue-100 text-blue-700': plan === 'starter',
+                                  'bg-teal-100 text-teal-700': plan === 'business',
                                   'bg-purple-100 text-purple-700': plan === 'professional',
                                   'bg-amber-100 text-amber-700': plan === 'enterprise',
+                                  'bg-red-100 text-red-700': plan === 'superadmin',
                               }"
                               x-text="plan"></span>
-                        <span class="text-sm font-medium" x-text="stats.orgs_by_plan[plan]"></span>
+                        <div class="flex-1 bg-gray-100 rounded-full h-4 overflow-hidden min-w-0">
+                            <div class="h-full rounded-full transition-all duration-500"
+                                 :class="{
+                                     'bg-gray-400': plan === 'free',
+                                     'bg-blue-500': plan === 'starter',
+                                     'bg-teal-500': plan === 'business',
+                                     'bg-purple-500': plan === 'professional',
+                                     'bg-amber-500': plan === 'enterprise',
+                                     'bg-red-500': plan === 'superadmin',
+                                 }"
+                                 :style="'width: ' + Math.max(3, (stats.orgs_by_plan[plan] / stats.total_active_orgs * 100)) + '%'"></div>
+                        </div>
+                        <span class="text-sm font-medium w-8 text-right flex-shrink-0" x-text="stats.orgs_by_plan[plan]"></span>
                     </div>
                 </template>
             </div>
         </div>
 
         <!-- Bottom stats -->
-        <div class="grid grid-cols-2 gap-4">
-            <div class="bg-white rounded-lg border border-gray-200 p-4">
-                <div class="text-sm text-gray-500">Total Trademarks</div>
-                <div class="text-xl font-bold text-gray-900" x-text="(stats.total_trademarks ?? 0).toLocaleString()"></div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
+            <div class="bg-white rounded-lg border border-gray-200 p-3 sm:p-4">
+                <div class="text-xs sm:text-sm text-gray-500">Total Trademarks</div>
+                <div class="text-lg sm:text-xl font-bold text-gray-900" x-text="(stats.total_trademarks ?? 0).toLocaleString()"></div>
             </div>
-            <div class="bg-white rounded-lg border border-gray-200 p-4">
-                <div class="text-sm text-gray-500">Active Alerts</div>
-                <div class="text-xl font-bold text-gray-900" x-text="(stats.total_alerts ?? 0).toLocaleString()"></div>
+            <div class="bg-white rounded-lg border border-gray-200 p-3 sm:p-4">
+                <div class="text-xs sm:text-sm text-gray-500">Active Alerts</div>
+                <div class="text-lg sm:text-xl font-bold text-gray-900" x-text="(stats.total_alerts ?? 0).toLocaleString()"></div>
+            </div>
+            <div class="bg-white rounded-lg border border-gray-200 p-3 sm:p-4">
+                <div class="text-xs sm:text-sm text-gray-500">Watchlist Items</div>
+                <div class="text-lg sm:text-xl font-bold text-gray-900" x-text="(stats.total_watchlist_items ?? 0).toLocaleString()"></div>
+            </div>
+            <div class="bg-white rounded-lg border border-gray-200 p-3 sm:p-4">
+                <div class="text-xs sm:text-sm text-gray-500">Plan Changes (7d)</div>
+                <div class="text-lg sm:text-xl font-bold text-gray-900" x-text="stats.plan_changes_7d ?? 0"></div>
             </div>
         </div>
     </div>

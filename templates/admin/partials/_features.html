@@ -1,5 +1,5 @@
-<h2 class="text-lg font-semibold text-gray-900 mb-4">Feature Flags</h2>
-<p class="text-sm text-gray-500 mb-4">Enable or disable features system-wide. Changes take effect within 60 seconds.</p>
+<h2 class="text-lg font-semibold text-gray-900 mb-1">Feature Flags</h2>
+<p class="text-xs sm:text-sm text-gray-500 mb-4">Enable or disable features system-wide. Changes take effect within 60 seconds.</p>
 
 <template x-if="loading">
     <div class="flex items-center gap-2 text-gray-500 py-8">
@@ -11,15 +11,15 @@
 <template x-if="!loading">
     <div class="bg-white rounded-lg border border-gray-200 divide-y">
         <template x-for="item in items" :key="item.key">
-            <div class="flex items-center justify-between px-4 py-4 hover:bg-gray-50">
-                <div>
-                    <div class="text-sm font-medium text-gray-900" x-text="item.key.replace('feature.', '').replace(/_/g, ' ')"></div>
-                    <div class="text-xs text-gray-500" x-text="item.description || item.key"></div>
+            <div class="flex items-center justify-between px-3 sm:px-4 py-3 sm:py-4 hover:bg-gray-50 gap-3">
+                <div class="min-w-0">
+                    <div class="text-sm font-medium text-gray-900 break-words" x-text="item.key.replace('feature.', '').replace(/_/g, ' ')"></div>
+                    <div class="text-xs text-gray-500 truncate" x-text="item.description || item.key"></div>
                 </div>
                 <button @click="toggleFeature(item)"
-                        class="w-12 h-6 rounded-full transition-colors relative flex-shrink-0"
+                        class="w-12 h-7 rounded-full transition-colors relative flex-shrink-0 min-w-[48px]"
                         :class="item.value ? 'bg-green-500' : 'bg-gray-300'">
-                    <span class="block w-5 h-5 bg-white rounded-full shadow absolute top-0.5 transition-transform"
+                    <span class="block w-5 h-5 bg-white rounded-full shadow absolute top-1 transition-transform"
                           :class="item.value ? 'translate-x-6' : 'translate-x-0.5'"></span>
                 </button>
             </div>

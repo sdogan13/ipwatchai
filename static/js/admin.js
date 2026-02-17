@@ -87,6 +87,7 @@ function adminPanel() {
         activeTab: 'overview',
         currentUser: null,
         authorized: false,
+        sidebarOpen: false,
         tabs: [
             { id: 'overview',      icon: '\u{1F4CA}', label: 'Overview' },
             { id: 'organizations', icon: '\u{1F3E2}', label: 'Organizations' },
@@ -286,7 +287,9 @@ function adminUsers() {
 function adminPlans() {
     return {
         plans: [],
+        featureCategories: {},
         loading: true,
+        expandedPlan: null,
 
         async load() {
             this.loading = true;
@@ -294,16 +297,59 @@ function adminPlans() {
             if (res && res.ok) {
                 var data = await res.json();
                 this.plans = data.plans || [];
+                this.featureCategories = data.feature_categories || {};
             }
             this.loading = false;
         },
 
-        async saveLimit(planName, feature, value) {
+        getEffective(plan, feature) {
+            if (plan.active_overrides[feature] !== undefined) return plan.active_overrides[feature];
+            return plan.code_defaults[feature];
+        },
+
+        isOverridden(plan, feature) {
+            return plan.active_overrides[feature] !== undefined;
+        },
+
+        getFeaturesForCategory(plan, category) {
+            var feats = this.featureCategories[category] || [];
+            return feats.filter(function(f) { return plan.code_defaults[f] !== undefined; });
+        },
+
+        getUncategorizedFeatures(plan) {
+            var allCategorized = {};
+            var self = this;
+            Object.keys(this.featureCategories).forEach(function(cat) {
+                (self.featureCategories[cat] || []).forEach(function(f) {
+                    allCategorized[f] = true;
+                });
+            });
+            return Object.keys(plan.code_defaults).filter(function(f) {
+                return !allCategorized[f];
+            });
+        },
+
+        categoryLabel(cat) {
+            var labels = {
+                pricing: 'Pricing',
+                search_limits: 'Search Limits',
+                content_limits: 'Content & Usage Limits',
+                boolean_flags: 'Feature Access',
+                other: 'Other Settings',
+            };
+            return labels[cat] || cat;
+        },
+
+        async saveLimit(planName, feature, newValue, originalValue) {
+            // Don't save if value hasn't changed
+            if (String(newValue) === String(originalValue)) return;
+
             // Parse value: try number, then boolean, then string
-            var parsed = value;
-            if (value === 'true') parsed = true;
-            else if (value === 'false') parsed = false;
-            else if (!isNaN(value) && value !== '') parsed = Number(value);
+            var parsed = newValue;
+            if (newValue === 'true') parsed = true;
+            else if (newValue === 'false') parsed = false;
+            else if (newValue === '' || newValue === 'null' || newValue === 'None') parsed = null;
+            else if (!isNaN(newValue) && newValue !== '') parsed = Number(newValue);
 
             var key = 'plan.' + planName + '.' + feature;
             await adminAction('/api/v1/admin/settings/' + key, {
@@ -313,7 +359,7 @@ function adminPlans() {
                     category: 'plan_limits',
                     value_type: typeof parsed === 'number' ? 'integer' : typeof parsed === 'boolean' ? 'boolean' : 'string',
                 }),
-            }, 'Saved ' + feature);
+            }, 'Saved ' + feature.replace(/_/g, ' '));
             this.load();
         },
 
@@ -330,6 +376,25 @@ function adminPlans() {
                 method: 'PUT',
                 body: JSON.stringify(updates),
             }, 'Pricing updated');
+            this.load();
+        },
+
+        async togglePlanActive(planName, isActive) {
+            var action = isActive ? 'activate' : 'deactivate';
+            if (!confirm('Really ' + action + ' the ' + planName + ' plan?')) return;
+            await this.updatePricing(planName, { is_active: isActive });
+        },
+
+        planColor(name) {
+            var colors = {
+                free: { bg: 'bg-gray-100', text: 'text-gray-700', border: 'border-gray-200' },
+                starter: { bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-blue-200' },
+                business: { bg: 'bg-teal-100', text: 'text-teal-700', border: 'border-teal-200' },
+                professional: { bg: 'bg-purple-100', text: 'text-purple-700', border: 'border-purple-200' },
+                enterprise: { bg: 'bg-amber-100', text: 'text-amber-700', border: 'border-amber-200' },
+                superadmin: { bg: 'bg-red-100', text: 'text-red-700', border: 'border-red-200' },
+            };
+            return colors[name] || { bg: 'bg-gray-100', text: 'text-gray-700', border: 'border-gray-200' };
         },
     };
 }
@@ -343,8 +408,8 @@ function adminCredits() {
         orgResults: [],
         selectedOrg: null,
         credits: null,
-        adjustForm: { credit_type: 'logo_purchased', operation: 'add', amount: 0, reason: '' },
-        bulkForm: { plan_filter: 'all', credit_type: 'logo_purchased', operation: 'add', amount: 0, reason: '' },
+        adjustForm: { credit_type: 'ai_monthly', operation: 'add', amount: 0, reason: '' },
+        bulkForm: { plan_filter: 'all', credit_type: 'ai_monthly', operation: 'add', amount: 0, reason: '' },
 
         async load() {
             // No initial load needed — user searches for an org
