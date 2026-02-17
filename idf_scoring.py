@@ -289,10 +289,20 @@ def compute_idf_weighted_score(
     t_in_q = t_tokens and q_tokens and t_tokens.issubset(q_tokens) and t_tokens != q_tokens
     breakdown["containment"] = 1.0 if q_in_t else (0.5 if t_in_q else 0.0)
 
-    # 4. Length difference (for dilution)
-    n_target = len(t_tokens)
-    n_query = len(q_tokens)
-    extra_words = abs(n_target - n_query)
+    # 4. Unmatched words (for dilution)
+    #    Count words on BOTH sides that didn't participate in any match.
+    #    This is the true measure of "extra" words — not just the token
+    #    count difference.  "ip" vs "ip watch ai" has 2 unmatched query
+    #    words, and "ip ikram pastanesi" vs "ip watch ai" has 4 unmatched
+    #    words (2 query + 2 target) despite both sides having 3 tokens.
+    _matched_q_words = set()
+    _matched_t_words = set()
+    for m in matched_words:
+        _matched_q_words.add(m.get("query_word", ""))
+        _matched_t_words.add(m.get("target_word", ""))
+    _q_unmatched = q_tokens - _matched_q_words
+    _t_unmatched = t_tokens - _matched_t_words
+    n_unmatched = len(_q_unmatched) + len(_t_unmatched)
 
     # 5. Distinctive match percentage
     if distinctive_weight_total > 0:
@@ -316,16 +326,18 @@ def compute_idf_weighted_score(
     # proportionally by their IDF class.
     # ==========================================
 
-    def _compute_length_dilution(extra_count):
-        """Per-extra-word dilution penalty for unmatched words."""
-        if extra_count <= 0:
+    def _compute_length_dilution():
+        """Per-word dilution penalty for ALL unmatched words on both sides.
+
+        Uses the pre-computed _q_unmatched / _t_unmatched sets so that
+        dilution fires even when both sides have the same token count
+        (e.g. "ip watch ai" vs "ip ikram pastanesi" — both 3 tokens
+        but 4 unmatched words).
+        """
+        if not _q_unmatched and not _t_unmatched:
             return 0.0
-        # Apply per-word penalty by examining actual extra words
-        q_unmatched = q_tokens - {m.get("target_word") or m.get("query_word") for m in matched_words}
-        t_unmatched = t_tokens - {m.get("target_word") for m in matched_words}
-        extras = q_unmatched | t_unmatched
         penalty = 0.0
-        for w in extras:
+        for w in (_q_unmatched | _t_unmatched):
             wclass = IDFLookup.get_word_class(w)
             if wclass == 'distinctive':
                 penalty += 0.06
@@ -364,7 +376,7 @@ def compute_idf_weighted_score(
             base_score = min(0.82, base_score)
 
         # Length dilution for unmatched words
-        dilution = _compute_length_dilution(extra_words)
+        dilution = _compute_length_dilution()
         final_score = max(0.50, base_score - dilution)
 
         breakdown["total"] = round(final_score, 4)
@@ -385,7 +397,7 @@ def compute_idf_weighted_score(
         final_score = min(0.92, final_score)
 
         # Length dilution
-        dilution = _compute_length_dilution(extra_words)
+        dilution = _compute_length_dilution()
         final_score = max(0.45, final_score - dilution)
 
         breakdown["total"] = round(final_score, 4)
@@ -405,7 +417,7 @@ def compute_idf_weighted_score(
         final_score = min(0.85, final_score)
 
         # Length dilution
-        dilution = _compute_length_dilution(extra_words)
+        dilution = _compute_length_dilution()
         final_score = max(0.35, final_score - dilution)
 
         breakdown["total"] = round(final_score, 4)
