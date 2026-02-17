@@ -321,6 +321,31 @@ class TestIDFWaterfall:
         assert abs(score - expected) < 0.01
         assert "F:" in breakdown["scoring_path"]
 
+    def test_bidirectional_length_ratio_discount(self):
+        """'dogan' vs 'doga' — target shorter than query gets length discount too."""
+        score_exact, _ = compute_idf_weighted_score(
+            query="DOGAN", target="DOGAN", text_sim=0.5, semantic_sim=0.5,
+        )
+        score_shorter, bd = compute_idf_weighted_score(
+            query="DOGAN", target="DOGA", text_sim=0.5, semantic_sim=0.5,
+        )
+        score_longer, _ = compute_idf_weighted_score(
+            query="DOGAN", target="OZDOGAN", text_sim=0.5, semantic_sim=0.5,
+        )
+        # Both shorter and longer targets should score less than exact
+        assert score_exact > score_shorter, (
+            f"Exact {score_exact} should beat shorter {score_shorter}"
+        )
+        assert score_exact > score_longer, (
+            f"Exact {score_exact} should beat longer {score_longer}"
+        )
+        # The fuzzy match should show the length ratio discount applied
+        matched = bd.get("matched_words", [])
+        if matched:
+            w = matched[0]["weight"]
+            # doga(4)/dogan(5) = 0.80 ratio → weight should be < 1.0
+            assert w < 0.90, f"Expected discounted weight, got {w}"
+
     def test_fuzzy_token_match(self):
         """'pepsi' vs 'pepsai' — fuzzy match ≥0.75 should score via token matching."""
         # Use words where neither is a substring of the other to avoid containment path

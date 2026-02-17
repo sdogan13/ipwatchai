@@ -308,17 +308,14 @@ def compute_idf_weighted_score(
             if best_target:
                 adjusted_weight = weight_mult * best_ratio
 
-                # Penalize substring-embedded matches: "dogan" in "ozdogan"
-                # or "erdogan". When the target word is significantly longer,
-                # the query word is embedded as a prefix/suffix/infix, NOT a
-                # near-equivalent. Apply a length ratio discount.
+                # Penalize length-mismatched fuzzy matches in BOTH directions:
+                # - "dogan" vs "ozdogan" (target longer → substring embed)
+                # - "dogan" vs "doga" (target shorter → truncation/different word)
+                # Either way the words are NOT near-equivalent.
                 len_q = len(q_word)
                 len_t = len(best_target)
-                if len_t > len_q:
-                    # Ratio of lengths: "dogan"(5) vs "ozdogan"(7) = 0.71
-                    len_ratio = len_q / len_t
-                    # Discount: at ratio 1.0 no penalty, at 0.5 → 50% discount
-                    # Formula: keep the len_ratio portion of the weight
+                if len_t != len_q:
+                    len_ratio = min(len_q, len_t) / max(len_q, len_t)
                     adjusted_weight *= len_ratio
 
                 if word_class == 'distinctive':
