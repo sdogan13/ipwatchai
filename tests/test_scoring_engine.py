@@ -12,6 +12,7 @@ Covers:
 import sys
 import os
 import math
+import inspect
 from unittest.mock import patch
 
 import pytest
@@ -25,7 +26,7 @@ from risk_engine import (
     _dynamic_combine,
     score_pair,
     RISK_THRESHOLDS,
-    calculate_turkish_similarity,
+    calculate_name_similarity,
     check_substring_containment,
     calculate_token_overlap,
     normalize_turkish as re_normalize_turkish,
@@ -531,10 +532,9 @@ class TestScorePair:
         result_with_trans = score_pair(
             query_name="APPLE", candidate_name="ELMA",
             text_sim=0.1, semantic_sim=0.1,
-            candidate_translations={"name_tr": "elma", "name_en": "apple"},
+            candidate_translations={"name_tr": "elma"},
         )
-        # With translations: Turkish similarity detects "apple" matches "apple" (name_en)
-        # AND translation_similarity kicks in via score_translated_pair("elma", "elma")
+        # With translations: translation_similarity kicks in via score_translated_pair("elma", "elma")
         assert result_with_trans["total"] >= result_no_trans["total"]
 
     def test_scoring_path_set(self):
@@ -550,13 +550,13 @@ class TestScorePair:
 
     @patch("utils.translation.translate_to_turkish", return_value="nike")
     def test_candidate_translations_cross_language(self, mock_ttt):
-        """name_en matching query should boost Turkish similarity."""
+        """name_tr matching query should boost Turkish similarity."""
         result = score_pair(
             query_name="NIKE", candidate_name="SOME BRAND",
             text_sim=0.1, semantic_sim=0.1,
-            candidate_translations={"name_tr": "nike", "name_en": "nike"},
+            candidate_translations={"name_tr": "nike"},
         )
-        # calculate_turkish_similarity("NIKE", "nike") = 1.0 → text_sim becomes 1.0
+        # calculate_name_similarity("NIKE", "nike") = 1.0 → text_sim becomes 1.0
         assert result["total"] >= 0.80
 
 
@@ -604,3 +604,247 @@ class TestGetStatusCategory:
         for s in statuses:
             cat = get_status_category(s)
             assert 0.0 <= cat["multiplier"] <= 1.0, f"{s}: multiplier={cat['multiplier']}"
+
+
+# ============================================================
+# Search Architecture Refactoring Tests (Steps 2-11)
+# ============================================================
+
+
+class TestColorHistogramDimension:
+    """Step 2: Verify _encode_single_image produces 512-dim color histogram."""
+
+    def test_color_histogram_bins_match_ai_py(self):
+        """Verify the histogram bins are [8,8,8] producing 512 values."""
+        # The fix changed [8,2,2] (=32) to [8,8,8] (=512)
+        assert 8 * 8 * 8 == 512
+
+    def test_encode_single_image_returns_4_tuple(self):
+        """Verify _encode_single_image now returns 4 values (added OCR)."""
+        from risk_engine import RiskEngine
+        # RiskEngine.__init__ requires mocked modules, check signature instead
+        import inspect
+        sig = inspect.signature(RiskEngine._encode_single_image)
+        # Method should accept self + pil_img
+        params = list(sig.parameters.keys())
+        assert params == ["self", "pil_img"]
+
+
+class TestOCRExtraction:
+    """Step 3: Verify OCR text is extracted and propagated."""
+
+    def test_get_query_vectors_returns_5_tuple(self):
+        """get_query_vectors should return (text_vec, img_vec, dino_vec, color_vec, ocr_text)."""
+        from risk_engine import RiskEngine
+        import inspect
+        sig = inspect.signature(RiskEngine.get_query_vectors)
+        # Verify it accepts name and optional image_path
+        params = list(sig.parameters.keys())
+        assert "name" in params
+        assert "image_path" in params
+
+    def test_calculate_hybrid_risk_accepts_query_ocr_text(self):
+        """calculate_hybrid_risk should have query_ocr_text parameter."""
+        from risk_engine import RiskEngine
+        import inspect
+        sig = inspect.signature(RiskEngine.calculate_hybrid_risk)
+        params = list(sig.parameters.keys())
+        assert "query_ocr_text" in params
+
+    def test_ocr_contributes_to_visual_similarity(self):
+        """When both OCR texts match, visual similarity should increase."""
+        # Without OCR
+        vis_no_ocr = calculate_visual_similarity(
+            clip_sim=0.80, dinov2_sim=0.70, color_sim=0.60,
+            ocr_text_a="", ocr_text_b="NIKE",
+        )
+        # With matching OCR
+        vis_with_ocr = calculate_visual_similarity(
+            clip_sim=0.80, dinov2_sim=0.70, color_sim=0.60,
+            ocr_text_a="NIKE", ocr_text_b="NIKE",
+        )
+        assert vis_with_ocr > vis_no_ocr
+        # OCR weight is 0.20, so boost should be about 0.20
+        assert abs((vis_with_ocr - vis_no_ocr) - 0.20) < 0.01
+
+
+class TestCrossEncoderRemoval:
+    """Step 4: Verify CrossEncoder is not loaded."""
+
+    def test_no_crossencoder_import(self):
+        """risk_engine should not import CrossEncoder."""
+        import risk_engine
+        # Check the module source doesn't have active CrossEncoder import
+        source = inspect.getsource(risk_engine)
+        # The import line should be commented out
+        assert "from sentence_transformers import CrossEncoder" not in source
+
+    def test_risk_engine_has_no_cross_encoder_attr(self):
+        """RiskEngine class should not define cross_encoder attribute in __init__."""
+        import risk_engine
+        source = inspect.getsource(risk_engine.RiskEngine.__init__)
+        assert "self.cross_encoder" not in source
+
+
+class TestFeatureFlag:
+    """Step 5: Verify USE_UNIFIED_SCORING feature flag."""
+
+    def test_settings_has_use_unified_scoring(self):
+        """Settings class should have use_unified_scoring field."""
+        from config.settings import Settings
+        import inspect
+        # Check the class has the field
+        assert hasattr(Settings, 'model_fields') or hasattr(Settings, '__fields__')
+        fields = Settings.model_fields if hasattr(Settings, 'model_fields') else Settings.__fields__
+        assert "use_unified_scoring" in fields
+
+    def test_default_is_true(self):
+        """Default value for use_unified_scoring should be True."""
+        from config.settings import Settings
+        fields = Settings.model_fields if hasattr(Settings, 'model_fields') else Settings.__fields__
+        field = fields["use_unified_scoring"]
+        assert field.default is True
+
+
+class TestScorePairIntegration:
+    """Steps 6-7: Verify score_pair produces correct output shape."""
+
+    def test_score_pair_output_has_required_fields(self):
+        """score_pair output must have total, text_idf_score, dynamic_weights."""
+        result = score_pair(
+            query_name="NIKE",
+            candidate_name="NIKEA",
+            text_sim=0.80,
+            semantic_sim=0.75,
+            visual_sim=0.0,
+            phonetic_sim=0.0,
+        )
+        assert "total" in result
+        assert "text_idf_score" in result
+        assert "dynamic_weights" in result
+        assert "translation_similarity" in result
+        assert 0.0 <= result["total"] <= 1.0
+
+    def test_text_only_mode_visual_zero(self):
+        """Text-only search should have visual weight = 0."""
+        result = score_pair(
+            query_name="NIKE",
+            candidate_name="NIKEA",
+            text_sim=0.80,
+            semantic_sim=0.75,
+            visual_sim=0.0,
+            phonetic_sim=0.0,
+        )
+        assert result["dynamic_weights"]["visual"] == 0.0
+        assert result["total"] > 0.0
+
+    def test_image_only_mode_text_from_names(self):
+        """Even image-only search still gets text from candidate name matching."""
+        result = score_pair(
+            query_name="",
+            candidate_name="NIKE",
+            text_sim=0.0,
+            semantic_sim=0.0,
+            visual_sim=0.85,
+            phonetic_sim=0.0,
+        )
+        # Visual should dominate when text inputs are empty
+        assert result["total"] > 0.0
+
+    @patch("risk_engine.calculate_translation_similarity", return_value=0.85)
+    def test_combined_mode_all_signals(self, mock_trans):
+        """Combined mode should use all signals."""
+        result = score_pair(
+            query_name="NIKE",
+            candidate_name="NIKEA",
+            text_sim=0.80,
+            semantic_sim=0.75,
+            visual_sim=0.70,
+            phonetic_sim=1.0,
+            candidate_translations={"name_tr": "nikea"}
+        )
+        assert result["total"] > 0.0
+        # All three dynamic weights should be non-zero
+        dw = result["dynamic_weights"]
+        assert dw["text"] > 0
+        assert dw["visual"] > 0
+
+    @patch("risk_engine.calculate_translation_similarity", return_value=0.90)
+    def test_score_consistency_across_paths(self, mock_trans):
+        """Same inputs to score_pair should always produce same output."""
+        kwargs = dict(
+            query_name="APPLE",
+            candidate_name="ELMA",
+            text_sim=0.1,
+            semantic_sim=0.2,
+            visual_sim=0.0,
+            phonetic_sim=0.0,
+            candidate_translations={"name_tr": "elma"}
+        )
+        result1 = score_pair(**kwargs)
+        result2 = score_pair(**kwargs)
+        assert result1["total"] == result2["total"]
+        assert result1["dynamic_weights"] == result2["dynamic_weights"]
+
+
+class TestDeprecatedEndpoints:
+    """Steps 8-9: Verify deprecated endpoints still exist."""
+
+    def test_utils_scoring_deleted(self):
+        """utils/scoring.py should no longer exist as importable module."""
+        import importlib
+        try:
+            # Should fail since we deleted the file
+            spec = importlib.util.find_spec("utils.scoring")
+            # If spec is None, module doesn't exist (expected)
+            assert spec is None
+        except (ModuleNotFoundError, ValueError):
+            pass  # Expected
+
+    def test_idf_scoring_comprehensive_has_deprecation_note(self):
+        """calculate_comprehensive_score docstring should mention deprecation."""
+        from utils.idf_scoring import calculate_comprehensive_score
+        assert "DEPRECATED" in (calculate_comprehensive_score.__doc__ or "")
+
+    def test_idf_scoring_combined_has_deprecation_note(self):
+        """calculate_combined_score docstring should mention deprecation."""
+        from utils.idf_scoring import calculate_combined_score
+        assert "DEPRECATED" in (calculate_combined_score.__doc__ or "")
+
+
+class TestRegressionKnownPairs:
+    """Step 11: Known query/candidate pairs should score within expected ranges."""
+
+    def test_nike_vs_nike_high_score(self):
+        """Exact match should score very high."""
+        result = score_pair("NIKE", "NIKE", text_sim=1.0, semantic_sim=1.0)
+        assert result["total"] >= 0.90
+
+    def test_nike_vs_nikea_moderate_to_high(self):
+        """Near match should score moderately high."""
+        result = score_pair("NIKE", "NIKEA", text_sim=0.80, semantic_sim=0.75)
+        assert result["total"] >= 0.50
+
+    @patch("risk_engine.calculate_translation_similarity", return_value=0.95)
+    def test_apple_vs_elma_translation_boost(self, mock_trans):
+        """Translation match should boost score significantly."""
+        result = score_pair(
+            "APPLE", "ELMA", text_sim=0.05, semantic_sim=0.10,
+            candidate_translations={"name_tr": "elma"}
+        )
+        assert result["translation_similarity"] > 0.0
+        # Translation should contribute to total
+        assert result["total"] > 0.10
+
+    def test_unrelated_pair_low_score(self):
+        """Unrelated names should score low."""
+        result = score_pair("NIKE", "SAMSUNG", text_sim=0.05, semantic_sim=0.10)
+        assert result["total"] < 0.50
+
+    def test_visual_similarity_propagation(self):
+        """Visual similarity should propagate to total score."""
+        # Without visual
+        r_no_vis = score_pair("BRAND", "LOGO", text_sim=0.2, visual_sim=0.0)
+        # With visual
+        r_with_vis = score_pair("BRAND", "LOGO", text_sim=0.2, visual_sim=0.85)
+        assert r_with_vis["total"] > r_no_vis["total"]

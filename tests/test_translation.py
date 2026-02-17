@@ -13,95 +13,127 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from utils.translation import (
-    detect_language,
+    detect_language_fasttext,
     translate_to_turkish,
     score_translated_pair,
     calculate_translation_similarity,
     get_translations,
     get_search_variants,
     get_cross_language_similarity,
-    COMMON_TURKISH_WORDS,
     NLLB_LANG_MAP,
-    TURKISH_CHARS,
 )
 
 
 # ============================================================
-# Language Detection
+# Language Detection (FastText-based)
 # ============================================================
 
+def _mock_fasttext_predict(text):
+    """Mock FastText predictions for common test cases."""
+    # Simulate realistic FastText responses
+    _predictions = {
+        "APPLE": ("__label__eng_Latn", [0.95]),
+        "apple": ("__label__eng_Latn", [0.95]),
+        "BRAND NAME": ("__label__eng_Latn", [0.92]),
+        "brand name": ("__label__eng_Latn", [0.92]),
+        "ÇAĞDAŞ": ("__label__tur_Latn", [0.98]),
+        "çağdaş": ("__label__tur_Latn", [0.98]),
+        "İSTANBUL": ("__label__tur_Latn", [0.97]),
+        "istanbul": ("__label__tur_Latn", [0.85]),
+        "ŞEKER": ("__label__tur_Latn", [0.99]),
+        "şeker": ("__label__tur_Latn", [0.99]),
+        "IŞIK": ("__label__tur_Latn", [0.96]),
+        "ışık": ("__label__tur_Latn", [0.96]),
+        "DOĞAN": ("__label__tur_Latn", [0.95]),
+        "doğan": ("__label__tur_Latn", [0.95]),
+        "DOĞAN electronics": ("__label__eng_Latn", [0.55]),
+        "doğan electronics": ("__label__eng_Latn", [0.55]),
+        "123": ("__label__eng_Latn", [0.30]),
+        "İstanbul City": ("__label__tur_Latn", [0.88]),
+        "istanbul city": ("__label__tur_Latn", [0.88]),
+        "پنیر": ("__label__fas_Arab", [0.94]),
+        "تفاح": ("__label__ara_Arab", [0.96]),
+        "Яблоко": ("__label__rus_Cyrl", [0.99]),
+        "яблоко": ("__label__rus_Cyrl", [0.99]),
+        "苹果": ("__label__zho_Hans", [0.99]),
+        "Äpfel": ("__label__deu_Latn", [0.91]),
+        "äpfel": ("__label__deu_Latn", [0.91]),
+        "Straße": ("__label__deu_Latn", [0.95]),
+        "straße": ("__label__deu_Latn", [0.95]),
+        "Sêv": ("__label__kmr_Latn", [0.72]),
+        "sêv": ("__label__kmr_Latn", [0.72]),
+        "gûl": ("__label__kmr_Latn", [0.75]),
+    }
+    clean = text.replace('\n', ' ').strip()
+    if clean in _predictions:
+        label, score = _predictions[clean]
+        return ([label], score)
+    # Default: English with low confidence
+    return (["__label__eng_Latn"], [0.50])
+
+
 class TestLanguageDetection:
-    """Test detect_language() heuristic chain."""
+    """Test detect_language_fasttext() — FastText-only detection."""
 
-    def test_turkish_chars_detected(self):
-        assert detect_language("ÇAĞDAŞ") == "tr"
-        assert detect_language("İSTANBUL") == "tr"
-        assert detect_language("ŞEKER") == "tr"
+    @patch("utils.translation._load_fasttext_langid")
+    def test_turkish_detected(self, mock_load):
+        mock_model = MagicMock()
+        mock_model.predict = _mock_fasttext_predict
+        mock_load.return_value = mock_model
+        iso, _, _ = detect_language_fasttext("ÇAĞDAŞ")
+        assert iso == "tr"
+        iso, _, _ = detect_language_fasttext("ŞEKER")
+        assert iso == "tr"
 
-    def test_turkish_dotless_i(self):
-        assert detect_language("IŞIK") == "tr"
-
-    def test_turkish_g_breve(self):
-        assert detect_language("DOĞAN") == "tr"
-
-    def test_english_default_for_ascii(self):
-        """Pure ASCII without Turkish words → English."""
-        assert detect_language("APPLE") == "en"
-        assert detect_language("BRAND NAME") == "en"
-
-    def test_kurdish_chars(self):
-        """Kurdish Kurmanji chars (ê, î, û)."""
-        assert detect_language("Sêv") == "ku"
-        assert detect_language("gûl") == "ku"
-
-    def test_farsi_chars(self):
-        """Farsi-specific chars (پ, چ, ژ, گ, ک, ی)."""
-        assert detect_language("پنیر") == "fa"
-
-    def test_arabic_chars(self):
-        """Arabic characters."""
-        assert detect_language("تفاح") == "ar"
-
-    def test_german_chars(self):
-        """German umlauts and ß."""
-        assert detect_language("Äpfel") == "de"
-        assert detect_language("Straße") == "de"
-
-    def test_russian_cyrillic(self):
-        assert detect_language("Яблоко") == "ru"
-
-    def test_chinese_cjk(self):
-        assert detect_language("苹果") == "zh"
-
-    def test_common_turkish_word_lookup(self):
-        """ASCII Turkish words detected via COMMON_TURKISH_WORDS set."""
-        assert detect_language("ELMA") == "tr"
-        assert detect_language("ASLAN") == "tr"
-        assert detect_language("KAPLAN") == "tr"
-        assert detect_language("SU") == "tr"
+    @patch("utils.translation._load_fasttext_langid")
+    def test_english_for_ascii(self, mock_load):
+        mock_model = MagicMock()
+        mock_model.predict = _mock_fasttext_predict
+        mock_load.return_value = mock_model
+        iso, _, _ = detect_language_fasttext("APPLE")
+        assert iso == "en"
 
     def test_empty_string(self):
-        assert detect_language("") == "unknown"
+        iso, _, _ = detect_language_fasttext("")
+        assert iso == "en"
 
     def test_none_like(self):
-        assert detect_language(None) == "unknown"
+        iso, _, _ = detect_language_fasttext(None)
+        assert iso == "en"
 
-    def test_numbers_default_english(self):
-        """Numbers only → English (no special chars)."""
-        assert detect_language("123") == "en"
+    @patch("utils.translation._load_fasttext_langid")
+    def test_low_confidence_falls_back_to_english(self, mock_load):
+        """Non-EN/non-TR with confidence < 0.7 → English fallback."""
+        mock_model = MagicMock()
+        mock_model.predict = lambda t: (["__label__pol_Latn"], [0.45])
+        mock_load.return_value = mock_model
+        iso, _, conf = detect_language_fasttext("cicek masali")
+        assert iso == "en"  # Fallback to English
 
-    def test_mixed_lang_turkish_wins(self):
-        """Turkish chars present → Turkish regardless of other chars."""
-        assert detect_language("İstanbul City") == "tr"
+    @patch("utils.translation._load_fasttext_langid")
+    def test_high_confidence_non_english_kept(self, mock_load):
+        """Non-EN/non-TR with confidence >= 0.7 → keep detected lang."""
+        mock_model = MagicMock()
+        mock_model.predict = _mock_fasttext_predict
+        mock_load.return_value = mock_model
+        iso, _, _ = detect_language_fasttext("Sêv")
+        assert iso == "ku"
 
-    def test_priority_order(self):
-        """Turkish checked before Kurdish before Arabic."""
-        # ö is in both Turkish and German, but Turkish is checked first
-        assert detect_language("Ö") == "tr"
+    @patch("utils.translation._load_fasttext_langid")
+    def test_model_unavailable_falls_back_to_english(self, mock_load):
+        """FastText model not available → English fallback."""
+        mock_load.return_value = None
+        iso, _, _ = detect_language_fasttext("any text")
+        assert iso == "en"
 
-    def test_common_turkish_words_set_has_entries(self):
-        """COMMON_TURKISH_WORDS should have a good number of entries."""
-        assert len(COMMON_TURKISH_WORDS) > 100
+    @patch("utils.translation._load_fasttext_langid")
+    def test_returns_confidence(self, mock_load):
+        mock_model = MagicMock()
+        mock_model.predict = _mock_fasttext_predict
+        mock_load.return_value = mock_model
+        iso, nllb, conf = detect_language_fasttext("APPLE")
+        assert isinstance(conf, float)
+        assert 0.0 <= conf <= 1.0
 
 
 # ============================================================
@@ -111,13 +143,16 @@ class TestLanguageDetection:
 class TestTranslateToTurkish:
     """Test translate_to_turkish() with mocked NLLB model."""
 
-    def test_already_turkish_returns_lowercase(self):
+    @patch("utils.translation._load_fasttext_langid")
+    def test_already_turkish_returns_lowercase(self, mock_load):
         """Turkish text → lowercase, no model call."""
-        # Clear lru_cache
+        mock_model = MagicMock()
+        mock_model.predict = lambda t: (["__label__tur_Latn"], [0.95])
+        mock_load.return_value = mock_model
         translate_to_turkish.cache_clear()
-        result = translate_to_turkish("ELMA")
-        # "ELMA" detected as Turkish (in COMMON_TURKISH_WORDS) → returns "elma"
-        assert result == "elma"
+        result = translate_to_turkish("ŞEKER")
+        # FastText detects as Turkish → returns turkish_lower
+        assert result == "şeker"
 
     def test_empty_returns_empty(self):
         translate_to_turkish.cache_clear()
@@ -127,23 +162,35 @@ class TestTranslateToTurkish:
         translate_to_turkish.cache_clear()
         assert translate_to_turkish("   ") == ""
 
+    @patch("utils.translation._load_fasttext_langid")
     @patch("utils.translation.translate", return_value="elma")
-    def test_english_translated(self, mock_translate):
+    def test_english_translated(self, mock_translate, mock_load):
         """English word → NLLB translates to Turkish."""
+        mock_model = MagicMock()
+        mock_model.predict = lambda t: (["__label__eng_Latn"], [0.95])
+        mock_load.return_value = mock_model
         translate_to_turkish.cache_clear()
         result = translate_to_turkish("APPLE")
         assert result == "elma"
 
+    @patch("utils.translation._load_fasttext_langid")
     @patch("utils.translation.translate", return_value=None)
-    def test_nllb_failure_fallback(self, mock_translate):
+    def test_nllb_failure_fallback(self, mock_translate, mock_load):
         """Model returns None → fallback to text.lower()."""
+        mock_model = MagicMock()
+        mock_model.predict = lambda t: (["__label__eng_Latn"], [0.90])
+        mock_load.return_value = mock_model
         translate_to_turkish.cache_clear()
         result = translate_to_turkish("BRANDX")
         assert result == "brandx"
 
+    @patch("utils.translation._load_fasttext_langid")
     @patch("utils.translation.translate", return_value="yıldız")
-    def test_caches_result(self, mock_translate):
+    def test_caches_result(self, mock_translate, mock_load):
         """Same input twice → model called only once (lru_cache)."""
+        mock_model = MagicMock()
+        mock_model.predict = lambda t: (["__label__eng_Latn"], [0.90])
+        mock_load.return_value = mock_model
         translate_to_turkish.cache_clear()
         r1 = translate_to_turkish("STAR")
         r2 = translate_to_turkish("STAR")
@@ -232,13 +279,13 @@ class TestCalculateTranslationSimilarity:
         """Old callers without candidate_name_tr → 0.0."""
         assert calculate_translation_similarity("APPLE", "ELMA") == 0.0
 
-    def test_same_language_turkish(self):
+    @patch("utils.translation.translate_to_turkish", return_value="elma")
+    def test_same_language_turkish(self, mock_ttt):
         """Turkish query + Turkish candidate → works via IDF waterfall."""
-        translate_to_turkish.cache_clear()
         score = calculate_translation_similarity(
             "ELMA", "ELMA MARKET", candidate_name_tr="elma market"
         )
-        # "ELMA" → detected Turkish → translate_to_turkish returns "elma"
+        # translate_to_turkish("ELMA") → "elma" (mocked)
         # score_translated_pair("elma", "elma market") → containment → high score
         assert score >= 0.80
 
@@ -290,7 +337,8 @@ class TestNLLBLangMap:
 class TestGetCrossLanguageSimilarity:
     """Test the legacy cross-language similarity wrapper."""
 
-    def test_returns_tuple(self):
+    @patch("utils.translation.translate_to_turkish", return_value="elma")
+    def test_returns_tuple(self, mock_ttt):
         score, match_type = get_cross_language_similarity("ELMA", "ELMA", candidate_name_tr="elma")
         assert isinstance(score, float)
         assert isinstance(match_type, str)

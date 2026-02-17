@@ -3,7 +3,7 @@ Tests for Turkish text comparison functions in risk_engine.py:
 - normalize_turkish()
 - check_substring_containment()
 - calculate_token_overlap()
-- calculate_turkish_similarity()
+- calculate_name_similarity()
 """
 import sys
 import os
@@ -16,7 +16,7 @@ from risk_engine import (
     normalize_turkish,
     check_substring_containment,
     calculate_token_overlap,
-    calculate_turkish_similarity,
+    calculate_name_similarity,
 )
 
 
@@ -25,21 +25,29 @@ from risk_engine import (
 # ============================================================
 
 class TestNormalizeTurkish:
-    """Test normalize_turkish() char replacement."""
+    """Test normalize_turkish() char replacement.
+
+    normalize_turkish now applies turkish_lower() first (İ→i, I→ı)
+    then folds all Turkish chars to ASCII, always returning lowercase.
+    """
 
     def test_g_breve(self):
         assert normalize_turkish("ğ") == "g"
-        assert normalize_turkish("Ğ") == "G"
+        assert normalize_turkish("Ğ") == "g"  # lowercased then folded
 
     def test_dotless_i(self):
         assert normalize_turkish("ı") == "i"
 
     def test_i_with_dot(self):
-        assert normalize_turkish("İ") == "I"
+        assert normalize_turkish("İ") == "i"  # İ→i (Turkish dotted)
+
+    def test_capital_i(self):
+        """Turkish: uppercase I is undotted, lowercases to ı, then folds to i."""
+        assert normalize_turkish("I") == "i"
 
     def test_o_umlaut(self):
         assert normalize_turkish("ö") == "o"
-        assert normalize_turkish("Ö") == "O"
+        assert normalize_turkish("Ö") == "o"  # lowercased then folded
 
     def test_u_umlaut(self):
         assert normalize_turkish("ü") == "u"
@@ -51,16 +59,16 @@ class TestNormalizeTurkish:
         assert normalize_turkish("ç") == "c"
 
     def test_full_word(self):
-        assert normalize_turkish("DOĞAN") == "DOGAN"
+        assert normalize_turkish("DOĞAN") == "dogan"  # always lowercase
 
     def test_empty_string(self):
         assert normalize_turkish("") == ""
 
     def test_no_turkish_chars(self):
-        assert normalize_turkish("APPLE") == "APPLE"
+        assert normalize_turkish("APPLE") == "apple"  # always lowercase
 
     def test_mixed(self):
-        assert normalize_turkish("İSTANBUL ŞEHRİ") == "ISTANBUL SEHRI"
+        assert normalize_turkish("İSTANBUL ŞEHRİ") == "istanbul sehri"
 
 
 # ============================================================
@@ -136,56 +144,56 @@ class TestCalculateTokenOverlap:
 # ============================================================
 
 class TestCalculateTurkishSimilarity:
-    """Test calculate_turkish_similarity() — max of 3 methods."""
+    """Test calculate_name_similarity() — max of 3 methods."""
 
     def test_identical_strings(self):
-        assert calculate_turkish_similarity("ELMA", "ELMA") == 1.0
+        assert calculate_name_similarity("ELMA", "ELMA") == 1.0
 
     def test_case_insensitive(self):
-        assert calculate_turkish_similarity("Nike", "NIKE") == 1.0
+        assert calculate_name_similarity("Nike", "NIKE") == 1.0
 
     def test_turkish_char_normalization(self):
         """'ÇAĞDAŞ' vs 'CAGDAS' should match after normalization."""
-        assert calculate_turkish_similarity("ÇAĞDAŞ", "CAGDAS") == 1.0
+        assert calculate_name_similarity("ÇAĞDAŞ", "CAGDAS") == 1.0
 
     def test_containment_returns_1(self):
         """'ELMA' in 'ELMA DÜNYASI' → 1.0."""
-        assert calculate_turkish_similarity("ELMA", "ELMA DÜNYASI") == 1.0
+        assert calculate_name_similarity("ELMA", "ELMA DÜNYASI") == 1.0
 
     def test_reverse_containment(self):
         """'ELMA' (target) is substring of 'ELMA DÜNYASI' (query) → 1.0."""
-        assert calculate_turkish_similarity("ELMA DÜNYASI", "ELMA") == 1.0
+        assert calculate_name_similarity("ELMA DÜNYASI", "ELMA") == 1.0
 
     def test_completely_different(self):
         """'ELMA' vs 'KAPLAN' → low score."""
-        score = calculate_turkish_similarity("ELMA", "KAPLAN")
+        score = calculate_name_similarity("ELMA", "KAPLAN")
         assert score < 0.50
 
     def test_token_overlap_partial(self):
         """'NIKE SPORTS' vs 'NIKE FASHION' → partial match."""
-        score = calculate_turkish_similarity("NIKE SPORTS", "NIKE FASHION")
+        score = calculate_name_similarity("NIKE SPORTS", "NIKE FASHION")
         assert 0.40 <= score <= 0.80
 
     def test_sequencematcher_similar(self):
         """'NIKEA' vs 'NIKE' — high sequence similarity."""
-        score = calculate_turkish_similarity("NIKEA", "NIKE")
+        score = calculate_name_similarity("NIKEA", "NIKE")
         assert score >= 0.70  # containment: "nike" in "nikea"
 
     def test_empty_query(self):
-        assert calculate_turkish_similarity("", "NIKE") == 0.0
+        assert calculate_name_similarity("", "NIKE") == 0.0
 
     def test_empty_target(self):
-        assert calculate_turkish_similarity("NIKE", "") == 0.0
+        assert calculate_name_similarity("NIKE", "") == 0.0
 
     def test_both_empty(self):
-        assert calculate_turkish_similarity("", "") == 0.0
+        assert calculate_name_similarity("", "") == 0.0
 
     def test_returns_max_of_methods(self):
         """Result should be the max of SequenceMatcher, containment, token overlap."""
         # "DOGAN PATENT" vs "D.P DOGAN PATENT"
         # Token overlap: {"dogan","patent"} vs {"d.p","dogan","patent"} → 2/2 = 1.0
         # Containment: "dogan patent" in "d.p dogan patent" → 1.0
-        score = calculate_turkish_similarity("DOGAN PATENT", "D.P DOGAN PATENT")
+        score = calculate_name_similarity("DOGAN PATENT", "D.P DOGAN PATENT")
         assert score == 1.0
 
     def test_output_between_0_and_1(self):
@@ -196,5 +204,5 @@ class TestCalculateTurkishSimilarity:
             ("KIRMIZI ELMA", "YESIL ELMA"),
         ]
         for q, t in pairs:
-            score = calculate_turkish_similarity(q, t)
+            score = calculate_name_similarity(q, t)
             assert 0.0 <= score <= 1.0, f"Score {score} out of range for ({q!r}, {t!r})"

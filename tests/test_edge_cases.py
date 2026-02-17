@@ -26,22 +26,24 @@ class TestUnicodeHandling:
 
     def test_turkish_i_variants(self):
         from risk_engine import normalize_turkish
-        # All 4 Turkish I variants
-        assert normalize_turkish("İ") == "I"   # Capital I with dot
-        assert normalize_turkish("ı") == "i"   # Lowercase dotless i
-        assert normalize_turkish("I") == "I"   # Standard I (unchanged)
+        # All 4 Turkish I variants → all fold to lowercase 'i'
+        # normalize_turkish now applies turkish_lower() first, then ASCII fold
+        assert normalize_turkish("İ") == "i"   # Capital İ (dotted) → i
+        assert normalize_turkish("ı") == "i"   # Lowercase ı (dotless) → i
+        assert normalize_turkish("I") == "i"   # Capital I → ı (Turkish) → i
         assert normalize_turkish("i") == "i"   # Standard i (unchanged)
 
     def test_combined_turkish_chars(self):
         from risk_engine import normalize_turkish
-        assert normalize_turkish("ğüşıöçİĞÜŞÖÇ") == "gusiocIGUSOC"
+        # All chars lowercased then ASCII-folded
+        assert normalize_turkish("ğüşıöçİĞÜŞÖÇ") == "gusiocigusoc"
 
     def test_emoji_in_brand_name(self):
         """Emoji shouldn't crash, just pass through."""
         from risk_engine import normalize_turkish
         result = normalize_turkish("BRAND 🎯 NAME")
-        assert "BRAND" in result
-        assert "NAME" in result
+        assert "brand" in result
+        assert "name" in result
 
     def test_rtl_arabic_chars(self):
         from risk_engine import normalize_turkish
@@ -49,19 +51,19 @@ class TestUnicodeHandling:
         assert isinstance(result, str)
 
     def test_mixed_scripts(self):
-        from risk_engine import calculate_turkish_similarity
-        score = calculate_turkish_similarity("NIKE", "ナイキ")  # Japanese
+        from risk_engine import calculate_name_similarity
+        score = calculate_name_similarity("NIKE", "ナイキ")  # Japanese
         assert 0.0 <= score <= 1.0
 
     def test_very_long_brand_name(self):
-        from risk_engine import calculate_turkish_similarity
+        from risk_engine import calculate_name_similarity
         long_name = "A" * 1000
-        score = calculate_turkish_similarity(long_name, "NIKE")
+        score = calculate_name_similarity(long_name, "NIKE")
         assert 0.0 <= score <= 1.0
 
     def test_single_char(self):
-        from risk_engine import calculate_turkish_similarity
-        score = calculate_turkish_similarity("X", "Y")
+        from risk_engine import calculate_name_similarity
+        score = calculate_name_similarity("X", "Y")
         assert 0.0 <= score <= 1.0
 
     def test_newlines_and_tabs(self):
@@ -116,13 +118,13 @@ class TestScoreClamping:
         assert 0.0 <= result["total"] <= 1.0
 
     def test_turkish_similarity_clamped(self):
-        from risk_engine import calculate_turkish_similarity
+        from risk_engine import calculate_name_similarity
         pairs = [
             ("", ""), ("A", "B"), ("NIKE", "NIKE"),
             ("X" * 500, "Y" * 500),
         ]
         for a, b in pairs:
-            score = calculate_turkish_similarity(a, b)
+            score = calculate_name_similarity(a, b)
             assert 0.0 <= score <= 1.0, f"Out of range for ({a[:20]!r}, {b[:20]!r})"
 
     def test_class_overlap_score_clamped(self):
@@ -159,10 +161,10 @@ class TestEmptyInputs:
         assert calculate_token_overlap("NIKE", "") == 0.0
 
     def test_turkish_similarity_empty(self):
-        from risk_engine import calculate_turkish_similarity
-        assert calculate_turkish_similarity("", "") == 0.0
-        assert calculate_turkish_similarity("NIKE", "") == 0.0
-        assert calculate_turkish_similarity("", "NIKE") == 0.0
+        from risk_engine import calculate_name_similarity
+        assert calculate_name_similarity("", "") == 0.0
+        assert calculate_name_similarity("NIKE", "") == 0.0
+        assert calculate_name_similarity("", "NIKE") == 0.0
 
     def test_idf_waterfall_empty_query(self):
         from idf_scoring import compute_idf_weighted_score
@@ -186,12 +188,14 @@ class TestEmptyInputs:
         assert calculate_appeal_deadline(None) is None
 
     def test_language_detect_empty(self):
-        from utils.translation import detect_language
-        assert detect_language("") == "unknown"
+        from utils.translation import detect_language_fasttext
+        iso, _, _ = detect_language_fasttext("")
+        assert iso == "en"  # Empty → English fallback
 
     def test_language_detect_none(self):
-        from utils.translation import detect_language
-        assert detect_language(None) == "unknown"
+        from utils.translation import detect_language_fasttext
+        iso, _, _ = detect_language_fasttext(None)
+        assert iso == "en"  # None → English fallback
 
 
 # ============================================================
