@@ -73,17 +73,32 @@ def get_db_connection():
     """Get database connection."""
     return psycopg2.connect(
         host=os.getenv('DB_HOST', '127.0.0.1'),
-        port=int(os.getenv('DB_PORT', 5432)),
+        port=int(os.getenv('DB_PORT', 5433)),
         database=os.getenv('DB_NAME', 'trademark_db'),
         user=os.getenv('DB_USER', 'turk_patent'),
-        password=os.getenv('DB_PASSWORD', ''),
+        password=os.getenv('DB_PASSWORD'),
         connect_timeout=30
     )
 
 
+def _parse_vec(v):
+    """Parse a vector that may be a string (halfvec from PostgreSQL) or list."""
+    if v is None:
+        return None
+    if isinstance(v, str):
+        import json
+        v = v.strip()
+        if v.startswith('['):
+            return np.array(json.loads(v), dtype=np.float32)
+        return None
+    return np.array(v, dtype=np.float32)
+
+
 def _cosine_sim(a, b):
     """Cosine similarity between two vectors."""
-    v1, v2 = np.array(a), np.array(b)
+    v1, v2 = _parse_vec(a), _parse_vec(b)
+    if v1 is None or v2 is None:
+        return 0.0
     n1, n2 = np.linalg.norm(v1), np.linalg.norm(v2)
     return float(np.dot(v1, v2) / (n1 * n2)) if n1 > 0 and n2 > 0 else 0.0
 
@@ -502,11 +517,12 @@ class UniversalScanner:
         logger.info(f"Scanning bulletin: {bulletin_no}")
 
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            # Get trademarks from bulletin
+            # Get trademarks from bulletin (skip NULL names — can't produce conflicts)
             query = """
                 SELECT id, name, application_no
                 FROM trademarks
                 WHERE bulletin_no = %s
+                  AND name IS NOT NULL AND length(name) >= 2
                 ORDER BY application_no
             """
             params: list = [bulletin_no]
@@ -521,15 +537,26 @@ class UniversalScanner:
             logger.info(f"  Found {len(trademarks)} trademarks in bulletin")
 
             total_conflicts = 0
+            errors = 0
             for i, tm in enumerate(trademarks, 1):
-                logger.info(f"\n[{i}/{len(trademarks)}] {tm['name'][:50]}")
-                conflicts = self.scan_trademark(str(tm['id']))
-                total_conflicts += len(conflicts)
+                mark_name = tm['name'] or '(no name)'
+                logger.info(f"\n[{i}/{len(trademarks)}] {mark_name[:50]}")
+                try:
+                    conflicts = self.scan_trademark(str(tm['id']))
+                    total_conflicts += len(conflicts)
+                except Exception as e:
+                    logger.error(f"  Error scanning {tm['id']}: {e}")
+                    errors += 1
+                    try:
+                        self.conn.rollback()
+                    except Exception:
+                        pass
 
             return {
                 'bulletin_no': bulletin_no,
                 'trademarks_scanned': len(trademarks),
-                'total_conflicts': total_conflicts
+                'total_conflicts': total_conflicts,
+                'errors': errors
             }
 
     def close(self):

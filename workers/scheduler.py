@@ -50,6 +50,15 @@ def start_scheduler():
         replace_existing=True,
     )
 
+    # Subscription expiry reminders at 09:00 UTC
+    scheduler.add_job(
+        check_subscription_expiry,
+        trigger=CronTrigger(hour=9, minute=0),
+        id='check_subscription_expiry',
+        name='Subscription Expiry Reminders',
+        replace_existing=True,
+    )
+
     scheduler.start()
     next_run = scheduler.get_job('daily_watchlist_scan').next_run_time
     logger.info(f"Scheduler started — next watchlist scan: {next_run}")
@@ -202,6 +211,81 @@ def daily_watchlist_scan():
 
     except Exception as e:
         logger.error(f"Daily watchlist scan failed: {e}", exc_info=True)
+
+
+def check_subscription_expiry():
+    """
+    Send reminder emails for subscriptions expiring in 7, 3, or 1 days.
+    Runs daily at 09:00 UTC.
+    """
+    logger.info("=== Subscription Expiry Check starting ===")
+
+    try:
+        from database.crud import Database
+        from notifications.service import EmailService
+        from psycopg2.extras import RealDictCursor
+
+        email_service = EmailService()
+        if not email_service.is_configured():
+            logger.warning("SMTP not configured — skipping expiry reminders")
+            return
+
+        sent = 0
+        with Database() as db:
+            cur = db.cursor(cursor_factory=RealDictCursor)
+
+            # Find orgs expiring in exactly 7, 3, or 1 days
+            cur.execute("""
+                SELECT o.id as org_id, o.name as org_name,
+                       COALESCE(sp.name, 'free') as plan_name,
+                       COALESCE(sp.display_name, sp.name, 'Free') as plan_display,
+                       o.subscription_end_date,
+                       (o.subscription_end_date::date - CURRENT_DATE) as days_remaining
+                FROM organizations o
+                LEFT JOIN subscription_plans sp ON o.subscription_plan_id = sp.id
+                WHERE o.is_active = TRUE
+                  AND o.subscription_end_date IS NOT NULL
+                  AND (o.subscription_end_date::date - CURRENT_DATE) IN (7, 3, 1)
+                  AND COALESCE(sp.name, 'free') != 'free'
+            """)
+            expiring_orgs = cur.fetchall()
+
+            if not expiring_orgs:
+                logger.info("No subscriptions expiring in 7/3/1 days")
+                return
+
+            for org in expiring_orgs:
+                days = org["days_remaining"]
+
+                # Get owner/admin users for this org
+                cur.execute("""
+                    SELECT email, first_name, COALESCE(preferred_language, 'tr') as lang
+                    FROM users
+                    WHERE organization_id = %s
+                      AND is_active = TRUE
+                      AND role IN ('owner', 'admin')
+                """, (str(org["org_id"]),))
+                users = cur.fetchall()
+
+                for user in users:
+                    try:
+                        email_service.send_subscription_expiry_reminder(
+                            to_email=user["email"],
+                            first_name=user["first_name"] or "User",
+                            plan_name=org["plan_display"],
+                            days_remaining=days,
+                            lang=user["lang"],
+                        )
+                        sent += 1
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to send expiry reminder to {user['email']}: {e}"
+                        )
+
+        logger.info(f"=== Expiry Check complete: {sent} reminders sent ===")
+
+    except Exception as e:
+        logger.error(f"Subscription expiry check failed: {e}", exc_info=True)
 
 
 # ==========================================
