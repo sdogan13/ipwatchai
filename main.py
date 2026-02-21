@@ -21,7 +21,10 @@ from PIL import Image
 import io
 import tempfile
 import os
+import time
 import torch
+import psycopg2
+import psycopg2.extras
 
 from auth.authentication import CurrentUser, get_current_user, require_role
 from config.settings import settings
@@ -1156,8 +1159,6 @@ async def search_by_image(
 
     Supports image-only and image+text (combined) modes.
     """
-    import psycopg2
-    import psycopg2.extras
 
     temp_path, pil_image = await process_uploaded_image(image)
 
@@ -1634,8 +1635,6 @@ async def legacy_text_search(request: Request, search_request: SearchRequest):
     Remove after 2026-03-10.
     """
     import time
-    import psycopg2
-    import psycopg2.extras
 
     start_time = time.time()
     search_classes = search_request.classes or []
@@ -1851,8 +1850,6 @@ def get_class_suggestions_internal(goods_description: str, trademark_name: str =
     Returns list of dicts with class_number, class_name, similarity.
     """
     import os
-    import psycopg2
-    import psycopg2.extras
     from ai import get_text_embedding_cached
 
     # Build query text - combine trademark name with description for better context
@@ -1909,8 +1906,6 @@ async def enhanced_search(request: Request, search_request: SearchRequest):
     Supports text-only and text+image (via image_url) modes.
     """
     import time
-    import psycopg2
-    import psycopg2.extras
     from ai import get_text_embedding_cached
 
     start_time = time.time()
@@ -2474,8 +2469,6 @@ async def suggest_nice_classes(request: ClassSuggestionRequest):
     """
     import time
     import os
-    import psycopg2
-    import psycopg2.extras
 
     start_time = time.time()
 

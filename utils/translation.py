@@ -172,12 +172,8 @@ def detect_language_fasttext(text: str) -> Tuple[str, str, float]:
 # TURKISH-AWARE TEXT HELPERS
 # ============================================
 
-def turkish_lower(text: str) -> str:
-    """Turkish-aware lowercase: İ→i, I→ı, then standard .lower()."""
-    if not text:
-        return ""
-    text = text.replace('İ', 'i').replace('I', 'ı')
-    return text.lower()
+# turkish_lower imported from canonical source
+from utils.idf_scoring import turkish_lower
 
 
 # ============================================

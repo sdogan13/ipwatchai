@@ -36,32 +36,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+from utils.idf_scoring import normalize_turkish, tokenize  # canonical source
 
-def normalize_turkish(text: str) -> str:
-    """Normalize Turkish characters to ASCII equivalents."""
-    if not text:
-        return ""
-    replacements = {
-        'ğ': 'g', 'Ğ': 'g',
-        'ı': 'i', 'İ': 'i', 'I': 'i',
-        'ö': 'o', 'Ö': 'o',
-        'ü': 'u', 'Ü': 'u',
-        'ş': 's', 'Ş': 's',
-        'ç': 'c', 'Ç': 'c',
-    }
-    for tr_char, en_char in replacements.items():
-        text = text.replace(tr_char, en_char)
-    return text.lower().strip()
-
-
-def tokenize(text: str) -> set:
-    """Extract unique words from text."""
-    normalized = normalize_turkish(text)
-    # Extract words (alphanumeric sequences)
-    words = set(re.findall(r'\b[a-z0-9]+\b', normalized))
-    # Filter: keep words with length > 1
-    words = {w for w in words if len(w) > 1}
-    return words
 
 
 def compute_idf_scores(update_mode: bool = False):

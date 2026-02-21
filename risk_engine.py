@@ -21,6 +21,8 @@ import ingest
 import ai  # Optimization: Reuse models loaded here
 # CENTRALIZED IDF SCORING - consistent across the entire system
 from utils.idf_scoring import (
+    normalize_turkish,
+    turkish_lower,
     calculate_text_similarity as idf_text_similarity,
     calculate_adjusted_score,
     calculate_risk_score,
@@ -162,47 +164,7 @@ def get_status_category(status):
 
 
 # ===================== TURKISH TEXT NORMALIZATION =====================
-
-def turkish_lower(text: str) -> str:
-    """
-    Turkish-aware lowercase. Python's str.lower() follows Unicode rules where
-    'I'.lower() == 'i', but in Turkish 'I' should become 'ı' and 'İ' should
-    become 'i'. This function handles the Turkish I/İ distinction correctly.
-
-    Turkish rules:
-        İ → i    (dotted capital → dotted small)
-        I → ı    (undotted capital → undotted small)
-        All other characters use standard Unicode lowercasing.
-    """
-    if not text:
-        return ""
-    # Must replace İ before I, otherwise İ's dot gets mangled
-    text = text.replace('İ', 'i').replace('I', 'ı')
-    return text.lower()
-
-
-def normalize_turkish(text: str) -> str:
-    """
-    Normalize Turkish characters to ASCII equivalents for comparison.
-    This ensures 'doğan' matches 'dogan', 'şeker' matches 'seker', etc.
-    Uses turkish_lower() for proper I/İ handling before ASCII folding.
-    """
-    if not text:
-        return ""
-    # First apply Turkish-aware lowercasing
-    text = turkish_lower(text.strip())
-    # Then fold Turkish chars to ASCII
-    replacements = {
-        'ğ': 'g',
-        'ı': 'i',
-        'ö': 'o',
-        'ü': 'u',
-        'ş': 's',
-        'ç': 'c',
-    }
-    for tr_char, en_char in replacements.items():
-        text = text.replace(tr_char, en_char)
-    return text
+# normalize_turkish and turkish_lower imported from utils.idf_scoring (canonical)
 
 
 def check_substring_containment(query: str, target: str) -> float:

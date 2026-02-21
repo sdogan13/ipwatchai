@@ -33,22 +33,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 logger = logging.getLogger(__name__)
 
+from utils.idf_scoring import normalize_turkish  # canonical source
 
-def normalize_turkish(text: str) -> str:
-    """Normalize Turkish characters to ASCII equivalents."""
-    if not text:
-        return ""
-    replacements = {
-        'ğ': 'g', 'Ğ': 'g',
-        'ı': 'i', 'İ': 'i', 'I': 'i',
-        'ö': 'o', 'Ö': 'o',
-        'ü': 'u', 'Ü': 'u',
-        'ş': 's', 'Ş': 's',
-        'ç': 'c', 'Ç': 'c',
-    }
-    for tr_char, en_char in replacements.items():
-        text = text.replace(tr_char, en_char)
-    return text.lower().strip()
 
 
 class IDFLookup:
