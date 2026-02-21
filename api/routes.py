@@ -957,17 +957,26 @@ async def watchlist_stats(
         cur = db.cursor()
         cur.execute("""
             SELECT
-                COUNT(w.id) AS total_items,
-                COUNT(w.id) FILTER (WHERE w.is_active = TRUE) AS active_items,
-                COUNT(DISTINCT w.id) FILTER (WHERE a.id IS NOT NULL AND a.status NOT IN ('dismissed', 'resolved')) AS items_with_threats,
-                COUNT(a.id) FILTER (WHERE a.severity = 'critical' AND a.status NOT IN ('dismissed', 'resolved')) AS critical_threats,
-                COUNT(a.id) FILTER (WHERE a.severity = 'high' AND a.status NOT IN ('dismissed', 'resolved')) AS high_threats,
-                COUNT(a.id) FILTER (WHERE a.severity = 'medium' AND a.status NOT IN ('dismissed', 'resolved')) AS medium_threats,
-                COUNT(a.id) FILTER (WHERE a.severity = 'low' AND a.status NOT IN ('dismissed', 'resolved')) AS low_threats,
-                COUNT(a.id) FILTER (WHERE a.status = 'new') AS new_alerts,
-                MIN(a.opposition_deadline) FILTER (WHERE a.opposition_deadline > CURRENT_DATE AND a.status NOT IN ('dismissed', 'resolved')) AS nearest_deadline
+                COUNT(DISTINCT w.id) AS total_items,
+                COUNT(DISTINCT w.id) FILTER (WHERE w.is_active = TRUE) AS active_items,
+                COUNT(DISTINCT w.id) FILTER (WHERE a.id IS NOT NULL
+                    AND a.status NOT IN ('dismissed', 'resolved')
+                    AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)) AS items_with_threats,
+                COUNT(a.id) FILTER (WHERE a.severity = 'critical' AND a.status NOT IN ('dismissed', 'resolved')
+                    AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)) AS critical_threats,
+                COUNT(a.id) FILTER (WHERE a.severity = 'high' AND a.status NOT IN ('dismissed', 'resolved')
+                    AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)) AS high_threats,
+                COUNT(a.id) FILTER (WHERE a.severity = 'medium' AND a.status NOT IN ('dismissed', 'resolved')
+                    AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)) AS medium_threats,
+                COUNT(a.id) FILTER (WHERE a.severity = 'low' AND a.status NOT IN ('dismissed', 'resolved')
+                    AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)) AS low_threats,
+                COUNT(a.id) FILTER (WHERE a.status = 'new'
+                    AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)) AS new_alerts,
+                MIN(t.appeal_deadline) FILTER (WHERE t.appeal_deadline > CURRENT_DATE
+                    AND a.status NOT IN ('dismissed', 'resolved')) AS nearest_deadline
             FROM watchlist_mt w
             LEFT JOIN alerts_mt a ON w.id = a.watchlist_item_id
+            LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
             WHERE w.organization_id = %s AND w.is_active = TRUE
         """, (str(current_user.organization_id),))
         row = cur.fetchone()
@@ -1033,7 +1042,7 @@ async def list_watchlist(
                 LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
                 WHERE a.watchlist_item_id = ANY(%s::uuid[])
                     AND a.status NOT IN ('dismissed', 'resolved')
-                    AND (t.appeal_deadline IS NULL OR t.appeal_deadline >= CURRENT_DATE)
+                    AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
                 GROUP BY a.watchlist_item_id
             """, (item_ids,))
             severity_map = {4: 'critical', 3: 'high', 2: 'medium', 1: 'low'}
@@ -2349,10 +2358,30 @@ async def get_watchlist_logo(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
 
     logo_path = item.get('logo_path')
-    if not logo_path or not os.path.isfile(logo_path):
+    if not logo_path:
         raise HTTPException(status_code=404, detail="Logo bulunamadi")
 
-    return FR(logo_path, media_type="image/png")
+    # Security: block directory traversal
+    if ".." in logo_path:
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    # Try absolute path first (user-uploaded logos)
+    if os.path.isfile(logo_path):
+        ext = os.path.splitext(logo_path)[1].lower()
+        media = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+                 ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp"}.get(ext, "image/png")
+        return FR(logo_path, media_type=media)
+
+    # Try resolving relative path from project root (copied from trademarks)
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    full_path = os.path.join(project_root, logo_path.replace("/", os.sep))
+    if os.path.isfile(full_path):
+        ext = os.path.splitext(full_path)[1].lower()
+        media = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+                 ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp"}.get(ext, "image/png")
+        return FR(full_path, media_type=media)
+
+    raise HTTPException(status_code=404, detail="Logo bulunamadi")
 
 
 @watchlist_router.delete("/{item_id}/logo", response_model=SuccessResponse)
@@ -2473,19 +2502,25 @@ async def get_alerts_summary(
     with Database() as db:
         cur = db.cursor()
         
-        # By status
+        # By status (only appealable: deadline not yet passed or pre-publication)
         cur.execute("""
-            SELECT status, COUNT(*) as count
-            FROM alerts_mt WHERE organization_id = %s
-            GROUP BY status
+            SELECT a.status, COUNT(*) as count
+            FROM alerts_mt a
+            LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
+            WHERE a.organization_id = %s
+              AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
+            GROUP BY a.status
         """, (str(current_user.organization_id),))
         by_status = {row['status']: row['count'] for row in cur.fetchall()}
-        
-        # By severity (new only)
+
+        # By severity (new only, appealable)
         cur.execute("""
-            SELECT severity, COUNT(*) as count
-            FROM alerts_mt WHERE organization_id = %s AND status = 'new'
-            GROUP BY severity
+            SELECT a.severity, COUNT(*) as count
+            FROM alerts_mt a
+            LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
+            WHERE a.organization_id = %s AND a.status = 'new'
+              AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
+            GROUP BY a.severity
         """, (str(current_user.organization_id),))
         by_severity = {row['severity']: row['count'] for row in cur.fetchall()}
         
@@ -2514,12 +2549,14 @@ async def aggregate_alerts(
             where_extra = " AND a.severity = %s"
             params.append(severity)
 
-        # Count
+        # Count (only appealable: deadline not yet passed or pre-publication)
         cur.execute("""
             SELECT COUNT(*) FROM alerts_mt a
             JOIN watchlist_mt w ON a.watchlist_item_id = w.id
+            LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
             WHERE a.organization_id = %s
                 AND a.status NOT IN ('dismissed', 'resolved')
+                AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
         """ + where_extra, params)
         total = cur.fetchone()['count']
 
@@ -2534,6 +2571,7 @@ async def aggregate_alerts(
             LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
             WHERE a.organization_id = %s
                 AND a.status NOT IN ('dismissed', 'resolved')
+                AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
         """ + where_extra + """
             ORDER BY
                 CASE WHEN a.opposition_deadline IS NOT NULL AND a.opposition_deadline > CURRENT_DATE
@@ -2746,16 +2784,34 @@ async def get_dashboard_stats(current_user: CurrentUser = Depends(get_current_us
         """, (org_id,))
         wl = cur.fetchone()
         
-        # Alert counts
+        # Alert counts (only appealable: deadline not yet passed or pre-publication)
         cur.execute("""
             SELECT
                 COUNT(*) as total,
-                COUNT(*) FILTER (WHERE status = 'new') as new,
-                COUNT(*) FILTER (WHERE severity = 'critical' AND status = 'new') as critical,
-                COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days') as this_week
-            FROM alerts_mt WHERE organization_id = %s
+                COUNT(*) FILTER (WHERE a.status = 'new') as new,
+                COUNT(*) FILTER (WHERE a.severity = 'critical' AND a.status != 'dismissed') as critical,
+                COUNT(*) FILTER (WHERE a.created_at > NOW() - INTERVAL '7 days') as this_week
+            FROM alerts_mt a
+            LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
+            WHERE a.organization_id = %s
+              AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
         """, (org_id,))
         al = cur.fetchone()
+
+        # Active deadlines & pre-publication counts (from alerts joined with trademarks)
+        cur.execute("""
+            SELECT
+                COUNT(*) FILTER (WHERE t.appeal_deadline IS NOT NULL
+                    AND t.appeal_deadline >= CURRENT_DATE
+                    AND a.status != 'dismissed') as active_deadlines,
+                COUNT(*) FILTER (WHERE t.appeal_deadline IS NULL
+                    AND (t.current_status IS NULL OR t.current_status = 'Applied')
+                    AND a.status != 'dismissed') as pre_publication
+            FROM alerts_mt a
+            LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
+            WHERE a.organization_id = %s
+        """, (org_id,))
+        dl = cur.fetchone()
         
         # Searches this month (from api_usage table)
         cur.execute("""
@@ -2791,6 +2847,8 @@ async def get_dashboard_stats(current_user: CurrentUser = Depends(get_current_us
             critical_alerts=al['critical'],
             alerts_this_week=al['this_week'],
             searches_this_month=searches_this_month,
+            active_deadline_count=dl['active_deadlines'],
+            pre_publication_count=dl['pre_publication'],
             plan_usage={
                 "watchlist": {"used": wl['active'], "limit": wl_limit},
                 "users": {"used": user_count, "limit": user_limit},

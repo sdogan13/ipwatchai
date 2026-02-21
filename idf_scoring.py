@@ -47,6 +47,23 @@ def tokenize(text: str) -> Set[str]:
     return {w for w in words if len(w) > 1}
 
 
+def _has_adjacent_transposition(w1: str, w2: str) -> bool:
+    """Check if w1 and w2 differ by exactly one adjacent character swap.
+
+    Examples:
+        "naik" / "naki" → True  (swap positions 2,3: ik→ki)
+        "nike" / "mike" → False (different characters)
+        "star" / "rats" → False (multiple swaps)
+    """
+    if len(w1) != len(w2) or len(w1) < 2:
+        return False
+    diffs = [(i, c1, c2) for i, (c1, c2) in enumerate(zip(w1, w2)) if c1 != c2]
+    if len(diffs) != 2:
+        return False
+    i, j = diffs[0][0], diffs[1][0]
+    return j == i + 1 and w1[i] == w2[j] and w1[j] == w2[i]
+
+
 def compute_idf_weighted_score(
     query: str,
     target: str,
@@ -194,12 +211,21 @@ def compute_idf_weighted_score(
             for t_word in t_tokens:
                 min_len = min(len(q_word), len(t_word))
                 if min_len <= 4:
-                    threshold = 0.85
+                    # Lowered from 0.85 to 0.75: for 4-char words, a single char
+                    # difference (e.g., "naik"/"nike", "nike"/"mike") gives 0.75.
+                    # These ARE confusingly similar in trademark law. The fuzzy-only
+                    # ceilings in Cases A (0.82) and B (0.78) prevent over-scoring.
+                    threshold = 0.75
                 elif min_len <= 5:
                     threshold = 0.80
                 else:
                     threshold = 0.75
                 ratio = SequenceMatcher(None, q_word, t_word).ratio()
+                # Adjacent transposition boost: "naik"↔"naki" is a common
+                # confusion pattern that SequenceMatcher underscores (0.75).
+                # Treat as near-exact match (0.92) regardless of threshold.
+                if _has_adjacent_transposition(q_word, t_word):
+                    ratio = max(ratio, 0.92)
                 if ratio > best_ratio and ratio >= threshold:
                     best_ratio = ratio
                     best_target = t_word
@@ -390,11 +416,32 @@ def compute_idf_weighted_score(
     # Case B: Good distinctive match (>= 50%)
     # ------------------------------------------------------------------
     elif distinctive_pct >= 0.5:
-        # Exact matches boost more than fuzzy matches
-        exact_bonus = exact_idf_ratio * 0.20  # bonus for exact coverage
-        base = max(text_sim, semantic_sim, phonetic_sim)
-        final_score = max(0.60, base + distinctive_pct * 0.15 + exact_bonus)
-        final_score = min(0.92, final_score)
+        has_exact = any(
+            m.get("match_type") == "exact" and m.get("word_class") == "distinctive"
+            for m in matched_words
+        )
+
+        if has_exact:
+            # Has exact distinctive tokens — higher ceiling
+            exact_bonus = exact_idf_ratio * 0.20
+            base = max(text_sim, semantic_sim, phonetic_sim)
+            final_score = max(0.60, base + distinctive_pct * 0.15 + exact_bonus)
+            final_score = min(0.92, final_score)
+        else:
+            # Fuzzy-only: Cap lower than exact matches. Use PHONETIC similarity
+            # as the differentiator — marks that SOUND alike are higher risk
+            # than marks that just share similar character sequences.
+            # This prevents "naıl" (phon 0.47) from scoring the same as
+            # "nike" (phon 0.86) just because both have 0.75 fuzzy ratio.
+            if phonetic_sim > 0.80:
+                ceiling = 0.80   # Words sound alike — high risk
+            elif phonetic_sim > 0.50:
+                ceiling = 0.73   # Moderate phonetic match
+            else:
+                ceiling = 0.67   # Coincidental text similarity
+            base = max(weighted_overlap, text_sim, semantic_sim, phonetic_sim)
+            final_score = max(0.50, base * 0.85)
+            final_score = min(ceiling, final_score)
 
         # Length dilution
         dilution = _compute_length_dilution()
@@ -453,7 +500,15 @@ def compute_idf_weighted_score(
     # Case F: No token match at all
     # ------------------------------------------------------------------
     else:
-        final_score = max(text_sim, semantic_sim, phonetic_sim) * 0.7
+        best_signal = max(text_sim, semantic_sim, phonetic_sim)
+        # When phonetic similarity is high (>0.80), two words sound alike
+        # even if the IDF token matching failed.  Use a gentler multiplier
+        # so that phonetic-near-misses like "NAIK"/"NAKO" (phonetic 0.92)
+        # still surface as medium risk rather than being crushed to 0.25.
+        if phonetic_sim > 0.80:
+            final_score = best_signal * 0.80
+        else:
+            final_score = best_signal * 0.70
         breakdown["total"] = round(final_score, 4)
         breakdown["scoring_path"] = "F: No token match"
         return final_score, breakdown

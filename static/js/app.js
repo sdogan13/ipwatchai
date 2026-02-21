@@ -791,10 +791,11 @@ function dashboard() {
                     this.stats = {
                         total_watched: statsData.active_watchlist || 0,
                         high_risk_count: statsData.critical_alerts || 0,
-                        pending_deadlines: statsData.new_alerts || 0,
+                        pending_deadlines: statsData.active_deadline_count || 0,
                         recent_activity_count: statsData.alerts_this_week || 0,
                         watchlist_count: statsData.watchlist_count || statsData.active_watchlist || 0,
-                        total_alerts: statsData.total_alerts || 0
+                        total_alerts: statsData.total_alerts || 0,
+                        pre_publication_count: statsData.pre_publication_count || 0
                     };
                 }
 
@@ -833,10 +834,6 @@ function dashboard() {
                 if (results[2].status === 'fulfilled' && results[2].value.ok) {
                     var summaryData = await results[2].value.json();
                     this.alertsSummary = summaryData;
-                    // Update KPI with total new alerts from summary
-                    if (summaryData.total_new !== undefined) {
-                        this.stats.pending_deadlines = Math.max(this.stats.pending_deadlines, summaryData.total_new);
-                    }
                 }
 
                 // Deadlines: use backend-computed deadline_status fields (no client-side date math)
@@ -858,21 +855,9 @@ function dashboard() {
                     });
                 this.deadlines = derivedDeadlines;
 
-                // KPI: count of alerts with active deadlines
-                var activeDeadlineCount = this.alerts.filter(function(a) {
-                    return a.deadline_status && a.deadline_status.indexOf('active') === 0;
-                }).length;
-                this.stats.pending_deadlines = activeDeadlineCount;
-
-                // Pre-publication count for info banner
-                var prePubCount = this.alerts.filter(function(a) {
-                    return a.deadline_status === 'pre_publication';
-                }).length;
-                this.stats.pre_publication_count = prePubCount;
-
-                // Chart is in watchlist tab — render only if tab is visible
-                var watchlistPanel = document.getElementById('tab-content-watchlist');
-                if (watchlistPanel && !watchlistPanel.classList.contains('hidden')) {
+                // Chart is in overview tab — render only if tab is visible
+                var overviewPanel = document.getElementById('tab-content-overview');
+                if (overviewPanel && !overviewPanel.classList.contains('hidden')) {
                     this.renderChart();
                 }
 
@@ -1137,15 +1122,23 @@ function dashboard() {
                     // C3: Unified AI Credits (name gen + logo gen share a pool)
                     var ai = usage.monthly_ai_credits || {};
                     if (ai.limit && ai.limit > 0) {
-                        var aiUsed = (ai.limit || 0) - (ai.remaining || 0);
                         var aiCard = document.getElementById('usage-ai-card');
                         var aiEl = document.getElementById('usage-ai-text');
                         var aiBar = document.getElementById('usage-ai-bar');
                         var aiRing = document.getElementById('usage-ai-ring');
-                        if (aiCard) aiCard.classList.remove('hidden');
-                        if (aiEl) aiEl.textContent = aiUsed + ' / ' + _fmtLimit(ai.limit);
-                        if (aiBar) aiBar.style.width = _fmtPct(aiUsed, ai.limit) + '%';
-                        if (aiRing) aiRing.innerHTML = window.AppComponents.renderUsageRing(aiUsed, ai.limit >= 999999 ? 1 : ai.limit, '#8b5cf6');
+                        if (ai.limit >= 999999) {
+                            // Unlimited plan — show remaining as "∞"
+                            if (aiCard) aiCard.classList.remove('hidden');
+                            if (aiEl) aiEl.textContent = '0 / ∞';
+                            if (aiBar) aiBar.style.width = '0%';
+                            if (aiRing) aiRing.innerHTML = window.AppComponents.renderUsageRing(0, 1, '#8b5cf6');
+                        } else {
+                            var aiUsed = Math.max(0, (ai.limit || 0) - (ai.remaining || 0));
+                            if (aiCard) aiCard.classList.remove('hidden');
+                            if (aiEl) aiEl.textContent = aiUsed + ' / ' + ai.limit;
+                            if (aiBar) aiBar.style.width = _fmtPct(aiUsed, ai.limit) + '%';
+                            if (aiRing) aiRing.innerHTML = window.AppComponents.renderUsageRing(aiUsed, ai.limit, '#8b5cf6');
+                        }
                     }
                 }
 
@@ -1171,9 +1164,16 @@ function dashboard() {
                 // System stats
                 if (usageResults[1].status === 'fulfilled' && usageResults[1].value.ok) {
                     var statusData = await usageResults[1].value.json();
-                    var stats = statusData.statistics || {};
+                    var sysStats = statusData.statistics || {};
                     var tmEl = document.getElementById('sys-total-trademarks');
-                    if (tmEl) tmEl.textContent = (stats.total_trademarks || 0).toLocaleString();
+                    if (tmEl) tmEl.textContent = (sysStats.total_trademarks || 0).toLocaleString();
+                    var bulletinEl = document.getElementById('sys-last-bulletin');
+                    if (bulletinEl && sysStats.last_bulletin_date) {
+                        try {
+                            var bd = new Date(sysStats.last_bulletin_date);
+                            bulletinEl.textContent = bd.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                        } catch(e) { bulletinEl.textContent = sysStats.last_bulletin_date; }
+                    }
                 }
 
                 // Scan status
@@ -2029,6 +2029,8 @@ function showDashboardTab(tabId) {
     }
     if (tabId === 'watchlist') {
         initWatchlistTab();
+    }
+    if (tabId === 'overview') {
         // Re-render chart now that the canvas is visible
         var alpineEl = document.querySelector('[x-data]');
         if (alpineEl && alpineEl.__x && alpineEl.__x.$data && typeof alpineEl.__x.$data.renderChart === 'function') {
@@ -2223,6 +2225,63 @@ async function quickDismissAlert(alertId) {
         loadWatchlistStats();
     } catch (e) {
         showToast(t('common.error') + ': ' + e.message, 'error');
+    }
+}
+
+// ============================================
+// INLINE ALERT ACTIONS (expandable watchlist cards)
+// ============================================
+async function inlineResolveAlert(alertId, watchlistItemId) {
+    try {
+        var res = await fetch('/api/v1/alerts/' + alertId + '/resolve', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + getAuthToken(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ resolution_notes: 'Resolved from watchlist' })
+        });
+        if (!res.ok) throw new Error(t('alerts.operation_failed'));
+        showToast(t('alerts.resolved_toast'), 'success');
+        _updateInlineConflictCount(watchlistItemId);
+        // Reload inline alerts for this watchlist item
+        var panel = document.getElementById('wl-alerts-' + watchlistItemId);
+        if (panel) loadInlineAlerts(watchlistItemId, panel);
+        loadWatchlistStats();
+    } catch (e) {
+        showToast(t('common.error') + ': ' + e.message, 'error');
+    }
+}
+
+async function inlineDismissAlert(alertId, watchlistItemId) {
+    try {
+        var res = await fetch('/api/v1/alerts/' + alertId + '/dismiss', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + getAuthToken(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason: 'Dismissed from watchlist' })
+        });
+        if (!res.ok) throw new Error(t('alerts.operation_failed'));
+        showToast(t('alerts.dismissed_toast'), 'success');
+        _updateInlineConflictCount(watchlistItemId);
+        // Reload inline alerts for this watchlist item
+        var panel = document.getElementById('wl-alerts-' + watchlistItemId);
+        if (panel) loadInlineAlerts(watchlistItemId, panel);
+        loadWatchlistStats();
+    } catch (e) {
+        showToast(t('common.error') + ': ' + e.message, 'error');
+    }
+}
+
+function _updateInlineConflictCount(watchlistItemId) {
+    var countEl = document.getElementById('wl-conflict-count-' + watchlistItemId);
+    if (!countEl) return;
+    var numEl = countEl.querySelector('span');
+    if (!numEl) return;
+    var cur = parseInt(numEl.textContent, 10) || 0;
+    var next = Math.max(0, cur - 1);
+    if (next === 0) {
+        countEl.remove();
+    } else {
+        var ccColor = next >= 5 ? '#dc2626' : next >= 2 ? '#ea580c' : '#ca8a04';
+        numEl.style.color = ccColor;
+        numEl.textContent = next;
     }
 }
 
@@ -3663,16 +3722,27 @@ function renderPortfolioGrid(items) {
         var classes = window.AppComponents.renderNiceClassBadges(item.nice_class_numbers, 3);
 
         // Logo with larger size for card layout
+        // Try: 1) watchlist logo endpoint (has_logo), 2) trademark image by app_no fallback, 3) placeholder
         var logoHtml;
+        var _placeholderSvg = '<svg class="w-5 h-5" style="color:var(--color-text-faint)" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>';
+        var _placeholderEsc = _placeholderSvg.replace(/"/g, '&quot;').replace(/'/g, "\\'");
+        var _imgUrl = null;
         if (item.has_logo) {
-            logoHtml = '<div class="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 cursor-pointer" style="border:1px solid var(--color-border)" '
-                + 'onclick="event.stopPropagation(); openLogoPreview(\'' + item.logo_url + '\', \'' + esc(item.brand_name).replace(/'/g, "\\'") + '\')" title="' + t('watchlist.view_logo') + '">'
-                + '<img src="' + item.logo_url + '" class="w-full h-full object-contain" style="background:var(--color-bg-card)" onerror="this.style.display=\'none\'">'
+            _imgUrl = item.logo_url;
+        } else if (item.application_no) {
+            _imgUrl = '/api/trademark-image/' + encodeURIComponent(item.application_no.replace(/\//g, '_'));
+        }
+        if (_imgUrl) {
+            var escapedBrand = esc(item.brand_name).replace(/'/g, "\\'");
+            logoHtml = '<div class="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 cursor-pointer" style="border:1px solid var(--color-border);background:var(--color-bg-muted)" '
+                + 'onclick="event.stopPropagation(); openLogoPreview(\'' + _imgUrl.replace(/'/g, "\\'") + '\', \'' + escapedBrand + '\')" title="' + t('watchlist.view_logo') + '">'
+                + '<img src="' + _imgUrl + '" class="w-full h-full object-contain" style="background:var(--color-bg-card)" '
+                + 'onerror="this.style.display=\'none\'; this.parentElement.innerHTML=\'' + _placeholderEsc + '\'; this.parentElement.style.cursor=\'default\'; this.parentElement.onclick=null;">'
                 + '</div>';
         } else {
             logoHtml = '<div class="w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0" '
                 + 'style="border:1px solid var(--color-border);background:var(--color-bg-muted)">'
-                + '<svg class="w-5 h-5" style="color:var(--color-text-faint)" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>'
+                + _placeholderSvg
                 + '</div>';
         }
 
@@ -3694,7 +3764,7 @@ function renderPortfolioGrid(items) {
         }
 
         // Conflict count for expand chevron
-        var totalConflicts = (item.conflict_summary && item.conflict_summary.total) || item.total_alerts_count || 0;
+        var totalConflicts = (item.conflict_summary && item.conflict_summary.total != null) ? item.conflict_summary.total : (item.total_alerts_count || 0);
         var chevronHtml = totalConflicts > 0
             ? '<span id="wl-chevron-' + item.id + '" class="text-xs transition-transform inline-block" style="color:var(--color-text-faint)">&#9660;</span>'
             : '';
@@ -3708,7 +3778,7 @@ function renderPortfolioGrid(items) {
         var conflictCountHtml = '';
         if (totalConflicts > 0) {
             var ccColor = totalConflicts >= 5 ? '#dc2626' : totalConflicts >= 2 ? '#ea580c' : '#ca8a04';
-            conflictCountHtml = '<div class="flex flex-col items-center mr-1">'
+            conflictCountHtml = '<div id="wl-conflict-count-' + item.id + '" class="flex flex-col items-center mr-1">'
                 + '<span class="text-lg font-bold leading-none" style="color:' + ccColor + '">' + totalConflicts + '</span>'
                 + '<span class="text-[10px] leading-tight" style="color:var(--color-text-faint)">' + t('watchlist.conflicts') + '</span>'
                 + '</div>';
@@ -3798,8 +3868,6 @@ function toggleWatchlistAlerts(watchlistItemId, brandName) {
         if (panel) panel.classList.add('hidden');
         if (chevron) chevron.style.transform = '';
         _expandedWatchlistId = null;
-        // Also clear the right-side panel
-        clearAlertFilter();
         return;
     }
 
@@ -3815,9 +3883,6 @@ function toggleWatchlistAlerts(watchlistItemId, brandName) {
     _expandedWatchlistId = watchlistItemId;
     if (panel) panel.classList.remove('hidden');
     if (chevron) chevron.style.transform = 'rotate(180deg)';
-
-    // Also update the right-side panel
-    filterAlertsByWatchlistItem(watchlistItemId, brandName);
 
     // Load inline alerts
     loadInlineAlerts(watchlistItemId, panel);
@@ -3870,6 +3935,19 @@ async function loadInlineAlerts(watchlistItemId, panel) {
                 ? window.AppComponents.getScoreColorStyle(sc.total || 0)
                 : 'background:#fee2e2;color:#991b1b';
 
+            // Deadline badge
+            var dlDays = a.deadline_days_remaining;
+            var dlBadge = '';
+            if (dlDays !== null && dlDays !== undefined) {
+                var dlColor = dlDays <= 7 ? '#dc2626' : dlDays <= 14 ? '#ca8a04' : dlDays <= 30 ? '#ca8a04' : '#16a34a';
+                var dlBg = dlDays <= 7 ? '#fef2f2' : dlDays <= 14 ? '#fefce8' : dlDays <= 30 ? '#fefce8' : '#f0fdf4';
+                dlBadge = '<span class="flex-shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style="color:' + dlColor + ';background:' + dlBg + '">'
+                    + dlDays + ' ' + t('common.days') + '</span>';
+            } else if (!a.appeal_deadline) {
+                dlBadge = '<span class="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full" style="color:#6b7280;background:var(--color-bg-card)">'
+                    + t('deadline.pre_publication') + '</span>';
+            }
+
             // Header row (clickable to expand)
             html += '<div class="rounded-lg overflow-hidden" style="background:var(--color-bg-muted)">'
                 + '<div class="flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:opacity-80" onclick="event.stopPropagation(); toggleInlineAlertDetail(\'' + a.id + '\')">'
@@ -3879,6 +3957,7 @@ async function loadInlineAlerts(watchlistItemId, panel) {
                 + '<div class="text-xs font-medium truncate" style="color:var(--color-text-primary)">' + escapeHtml(c.name || 'N/A') + '</div>'
                 + '<div class="text-xs" style="color:var(--color-text-faint)">' + escapeHtml(c.application_no || '') + (a.conflict_bulletin_no ? ' · B:' + escapeHtml(a.conflict_bulletin_no) : '') + '</div>'
                 + '</div>'
+                + dlBadge
                 + '<span id="inline-alert-chevron-' + a.id + '" class="text-xs transition-transform inline-block" style="color:var(--color-text-faint)">&#9660;</span>'
                 + '</div>';
 
@@ -3912,6 +3991,24 @@ async function loadInlineAlerts(watchlistItemId, panel) {
                 + '</div></div>'
                 + '</div>';
 
+            // Deadline bar
+            if (dlDays !== null && dlDays !== undefined) {
+                var dlBarColor = dlDays <= 7 ? '#dc2626' : dlDays <= 14 ? '#ca8a04' : dlDays <= 30 ? '#ca8a04' : '#16a34a';
+                var dlBarBg = dlDays <= 7 ? '#fef2f2' : dlDays <= 14 ? '#fefce8' : dlDays <= 30 ? '#fefce8' : '#f0fdf4';
+                var dlBarBorder = dlDays <= 7 ? '#fecaca' : dlDays <= 14 ? '#fde68a' : dlDays <= 30 ? '#fde68a' : '#bbf7d0';
+                var dlIcon = dlDays <= 7 ? '&#9888;' : dlDays <= 14 ? '&#9200;' : '&#128197;';
+                html += '<div class="flex items-center gap-2 px-2 py-1.5 mb-2 rounded-md border text-xs" style="background:' + dlBarBg + ';border-color:' + dlBarBorder + ';color:' + dlBarColor + '">'
+                    + '<span>' + dlIcon + '</span>'
+                    + '<span class="font-semibold">' + t('deadline.days_remaining', { count: dlDays }) + '</span>'
+                    + (a.appeal_deadline ? '<span style="opacity:0.7">(' + t('deadline.appeal_deadline') + ': ' + a.appeal_deadline + ')</span>' : '')
+                    + '</div>';
+            } else if (!a.appeal_deadline) {
+                html += '<div class="flex items-center gap-2 px-2 py-1.5 mb-2 rounded-md border text-xs" style="background:var(--color-bg-card);border-color:var(--color-border);color:var(--color-text-muted)">'
+                    + '<span>&#128203;</span>'
+                    + '<span>' + t('deadline.pre_publication') + '</span>'
+                    + '</div>';
+            }
+
             // Detail fields
             html += '<div class="text-xs space-y-0.5">';
             if (c.status) {
@@ -3926,7 +4023,21 @@ async function loadInlineAlerts(watchlistItemId, panel) {
             if (c.application_date) {
                 html += '<div class="flex gap-1"><span style="color:var(--color-text-muted)">' + t('landing.detail_date') + ':</span><span class="font-medium" style="color:var(--color-text-primary)">' + escapeHtml(c.application_date) + '</span></div>';
             }
-            html += '</div></div></div>';
+            html += '</div>';
+
+            // Action buttons: resolve + dismiss
+            html += '<div class="flex items-center gap-2 mt-2 pt-2" style="border-top:1px solid var(--color-border)">'
+                + '<button onclick="event.stopPropagation(); inlineResolveAlert(\'' + a.id + '\', \'' + watchlistItemId + '\')" '
+                + 'class="flex-1 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors bg-green-50 text-green-700 hover:bg-green-100 border border-green-200 flex items-center justify-center gap-1">'
+                + '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>'
+                + t('alerts.resolved') + '</button>'
+                + '<button onclick="event.stopPropagation(); inlineDismissAlert(\'' + a.id + '\', \'' + watchlistItemId + '\')" '
+                + 'class="flex-1 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200 flex items-center justify-center gap-1">'
+                + '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>'
+                + t('alerts.dismiss') + '</button>'
+                + '</div>';
+
+            html += '</div></div>';
         });
         html += '</div>';
         panel.innerHTML = html;
@@ -3996,8 +4107,8 @@ async function loadFilteredAlerts(watchlistItemId) {
         // Filter out expired appeals (deadline already passed) — only show appealable conflicts
         var today = new Date().toISOString().slice(0, 10);
         mapped = mapped.filter(function(a) {
-            if (!a.appeal_deadline) return true; // pre-publication or no deadline — show
-            return a.appeal_deadline >= today;    // only show if deadline not yet passed
+            if (!a.appeal_deadline) return false; // no deadline — not appealable, hide
+            return a.appeal_deadline >= today;     // only show if deadline not yet passed
         });
 
         // Cache alerts and render with filters

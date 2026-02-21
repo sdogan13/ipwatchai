@@ -289,12 +289,12 @@ window.AppComponents.renderThumbnail = function(imagePath, name, appNo, size) {
     var url = '/api/trademark-image/' + imagePath.split('/').map(encodeURIComponent).join('/');
     var escapedName = (name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
     var escapedAppNo = (appNo || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-    var placeholderEscaped = window.AppComponents.IMG_PLACEHOLDER_SVG.replace(/'/g, "\\'");
+    var placeholderEscaped = window.AppComponents.IMG_PLACEHOLDER_SVG.replace(/"/g, '&quot;').replace(/'/g, "\\'");
 
     return '<div class="' + size + ' rounded flex items-center justify-center flex-shrink-0 overflow-hidden cursor-pointer hover:ring-2 hover:ring-blue-300 transition" '
         + 'style="background:var(--color-bg-muted);border:1px solid var(--color-border)" '
         + 'onclick="window.dispatchEvent(new CustomEvent(\'open-lightbox\', { detail: { src: \'' + url.replace(/'/g, "\\'") + '\', title: \'' + escapedName + '\', subtitle: \'' + escapedAppNo + '\' } }))">'
-        + '<img src="' + url + '" alt="' + (name || '').replace(/"/g, '&quot;') + '" class="w-full h-full object-contain" loading="lazy"'
+        + '<img src="' + url + '" alt="' + (name || '').replace(/"/g, '&quot;') + '" class="w-full h-full object-contain"'
         + ' onerror="this.style.display=\'none\'; this.parentElement.innerHTML=\'' + placeholderEscaped + '\'; this.parentElement.style.cursor=\'default\'; this.parentElement.onclick=null;">'
         + '</div>';
 };
@@ -344,7 +344,7 @@ window.AppComponents.renderVsComparison = function(opts) {
 
     // Build party card
     function buildPartyCard(party, borderColor, bgColor, labelKey) {
-        var thumb = window.AppComponents.renderThumbnail(party.image, party.name, party.app_no, 'w-14 h-14');
+        var thumb = window.AppComponents.renderThumbnail(party.image, party.name, party.app_no, 'w-20 h-20');
         var tp = window.AppComponents.renderTurkpatentButton(party.app_no);
         var classesHtml = party.classes ? window.AppComponents.renderNiceClassBadges(party.classes, 3) : '';
         var egHtml = '';

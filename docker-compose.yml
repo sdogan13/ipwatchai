@@ -139,6 +139,8 @@ services:
       - ./config:/app/config:ro
       - ./utils:/app/utils:ro
       - ./notifications:/app/notifications:ro
+      - ./watchlist:/app/watchlist:ro
+      - ./workers:/app/workers:ro
       - ./migrations:/app/migrations:ro
     ports:
       - "127.0.0.1:8000:8000"

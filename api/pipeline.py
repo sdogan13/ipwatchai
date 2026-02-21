@@ -108,10 +108,25 @@ async def _run_pipeline_background(run_id: str, skip_download: bool, single_step
             skip_download=skip_download,
             triggered_by="api",
             single_step=single_step,
+            run_id=run_id,
         )
 
     except Exception as e:
         logger.error(f"Background pipeline failed: {e}")
+        # Update the API-created DB record so it doesn't stay stuck as 'running'
+        try:
+            with Database() as db:
+                cur = db.cursor()
+                cur.execute("""
+                    UPDATE pipeline_runs
+                    SET status = 'failed',
+                        completed_at = NOW(),
+                        error_message = %s
+                    WHERE id = %s AND status = 'running'
+                """, (f"Background task error: {e}", run_id))
+                db.conn.commit()
+        except Exception as db_err:
+            logger.warning(f"Failed to update pipeline_runs on error: {db_err}")
     finally:
         _set_running_state(None, None)
 

@@ -658,6 +658,8 @@ class DashboardStats(BaseModel):
     critical_alerts: int
     alerts_this_week: int
     searches_this_month: int
+    active_deadline_count: int = 0
+    pre_publication_count: int = 0
     plan_usage: Dict[str, Any]
 
 

@@ -500,9 +500,35 @@ async def _do_public_search(
                 image_path=image_path,
             )
 
+        # Deduplicate by normalized trademark name — keep highest-scoring entry per unique name
+        all_results = result.get("results") or []
+        seen_names = {}
+        deduped_results = []
+        # DEBUG: log first 15 raw results + any naki/nike entries
+        for idx, r in enumerate(all_results):
+            rn = (r.get("name") or "?")
+            rs = (r.get("scores") or {}).get("total", 0)
+            rpath = (r.get("scores") or {}).get("scoring_path", "")
+            if idx < 15 or rn.lower() in ('naki', 'nike'):
+                logger.info(f"  RAW[{idx}] name={rn!r} score={rs:.4f} path={rpath}")
+        for r in all_results:
+            raw_name = (r.get("trademark_name") or r.get("name") or "").strip().lower()
+            score = (r.get("scores") or {}).get("total", 0)
+            if raw_name not in seen_names or score > seen_names[raw_name]:
+                if raw_name in seen_names:
+                    # Remove the older, lower-scoring entry
+                    deduped_results = [d for d in deduped_results if (d.get("trademark_name") or d.get("name") or "").strip().lower() != raw_name]
+                seen_names[raw_name] = score
+                deduped_results.append(r)
+        # DEBUG: log first 15 deduped results
+        for idx, r in enumerate(deduped_results[:15]):
+            rn = (r.get("name") or "?")
+            rs = (r.get("scores") or {}).get("total", 0)
+            logger.info(f"  DEDUP[{idx}] name={rn!r} score={rs:.4f}")
+
         # Strip sensitive fields, return max 10 results
         safe_results = []
-        for r in (result.get("results") or [])[:10]:
+        for r in deduped_results[:10]:
             scores = r.get("scores") or {}
             # Build image URL if available
             img_path = r.get("image_path")
@@ -1407,40 +1433,34 @@ async def search_by_image(
 
 @app.get("/api/v1/status", tags=["Status"])
 async def api_status():
-    """API status with statistics"""
+    """API status with database statistics"""
     from database.crud import Database, get_db_connection
-    
+
     try:
         with Database(get_db_connection()) as db:
             cur = db.cursor()
-            
-            # Get counts
+
+            # Total trademarks in the shared database (public info — not per-tenant)
             cur.execute("SELECT COUNT(*) FROM trademarks")
             trademark_count = cur.fetchone()['count']
-            
-            cur.execute("SELECT COUNT(*) FROM users WHERE is_active = TRUE")
-            user_count = cur.fetchone()['count']
-            
-            cur.execute("SELECT COUNT(*) FROM watchlist_mt WHERE is_active = TRUE")
-            watchlist_count = cur.fetchone()['count']
 
-            cur.execute("SELECT COUNT(*) FROM alerts_mt WHERE status = 'new'")
-            pending_alerts = cur.fetchone()['count']
-            
+            # Last bulletin date for freshness indicator
+            cur.execute("SELECT MAX(bulletin_date) as latest FROM trademarks WHERE bulletin_date IS NOT NULL")
+            row = cur.fetchone()
+            last_bulletin = row['latest'].isoformat() if row and row['latest'] else None
+
             return {
                 "status": "operational",
                 "statistics": {
                     "total_trademarks": trademark_count,
-                    "active_users": user_count,
-                    "active_watchlist_items": watchlist_count,
-                    "pending_alerts": pending_alerts
+                    "last_bulletin_date": last_bulletin
                 },
                 "timestamp": datetime.utcnow().isoformat()
             }
     except Exception as e:
         return {
             "status": "error",
-            "error": str(e),
+            "statistics": {"total_trademarks": 0, "last_bulletin_date": None},
             "timestamp": datetime.utcnow().isoformat()
         }
 

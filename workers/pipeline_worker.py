@@ -524,6 +524,7 @@ class PipelineWorker:
         skip_download: bool = False,
         triggered_by: str = "manual",
         single_step: Optional[str] = None,
+        run_id: Optional[str] = None,
     ) -> PipelineResult:
         """
         Run the complete 5-step pipeline end-to-end.
@@ -532,6 +533,8 @@ class PipelineWorker:
             skip_download: If True, skip step 1 (download).
             triggered_by: Who triggered this run (schedule, manual, api).
             single_step: If set, only run this specific step.
+            run_id: If provided (e.g. from API), reuse this run ID instead
+                    of creating a new pipeline_runs record.
 
         Returns:
             PipelineResult with per-step summaries and overall status.
@@ -541,11 +544,14 @@ class PipelineWorker:
 
         # Track in database
         conn = None
-        run_id = str(uuid4())
+        if run_id is None:
+            run_id = str(uuid4())
         try:
             conn = _get_db_connection()
             _ensure_pipeline_runs_table(conn)
-            run_id = _create_pipeline_run(conn, triggered_by, skip_download)
+            if triggered_by != "api":
+                # API caller already created the record; don't duplicate
+                run_id = _create_pipeline_run(conn, triggered_by, skip_download)
         except Exception as e:
             logger.warning(f"DB tracking unavailable: {e}")
 

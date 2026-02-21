@@ -518,6 +518,17 @@ class WatchlistCRUD:
         )
         row = cur.fetchone()
         return dict(row) if row else None
+
+    @staticmethod
+    def get_by_id_internal(db: Database, item_id: UUID) -> Optional[Dict]:
+        """Get watchlist item by ID without tenant filter (trusted backend use only)."""
+        cur = db.cursor()
+        cur.execute(
+            "SELECT * FROM watchlist_mt WHERE id = %s",
+            (str(item_id),)
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
     
     @staticmethod
     def get_by_organization(
@@ -557,13 +568,20 @@ class WatchlistCRUD:
         }
         order_by = sort_map.get(sort_by, 'w.created_at DESC')
 
-        # Get items with alert counts
+        # Get items with alert counts (only non-expired, non-dismissed/resolved)
         query = f"""
             SELECT w.*,
-                   COUNT(a.id) FILTER (WHERE a.status = 'new') AS new_alerts_count,
-                   COUNT(a.id) AS total_alerts_count
+                   COUNT(a.id) FILTER (
+                       WHERE a.status = 'new'
+                       AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
+                   ) AS new_alerts_count,
+                   COUNT(a.id) FILTER (
+                       WHERE a.status NOT IN ('dismissed', 'resolved')
+                       AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
+                   ) AS total_alerts_count
             FROM watchlist_mt w
             LEFT JOIN alerts_mt a ON w.id = a.watchlist_item_id
+            LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
             WHERE {where_clause}
             GROUP BY w.id
             ORDER BY {order_by}
@@ -873,7 +891,7 @@ class AlertCRUD:
             SELECT COUNT(*) FROM alerts_mt a
             LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
             WHERE {where_clause}
-            AND (t.appeal_deadline IS NULL OR t.appeal_deadline >= CURRENT_DATE)
+            AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
         """, params)
         total = cur.fetchone()['count']
 
@@ -901,7 +919,7 @@ class AlertCRUD:
             LEFT JOIN watchlist_mt w ON a.watchlist_item_id = w.id
             LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
             WHERE a.organization_id = %s
-            AND (t.appeal_deadline IS NULL OR t.appeal_deadline >= CURRENT_DATE)
+            AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
             {"AND a.status = ANY(%s)" if status else ""}
             {"AND a.severity = ANY(%s)" if severity else ""}
             {"AND a.watchlist_item_id = %s" if watchlist_id else ""}

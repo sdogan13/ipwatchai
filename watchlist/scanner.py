@@ -282,15 +282,15 @@ class WatchlistScanner:
         """
         logger.info(f"Scanning for watchlist item {watchlist_id}")
 
-        # Get watchlist item
-        wl_item = WatchlistCRUD.get_by_id(self.db, watchlist_id)
+        # Get watchlist item (internal backend call, no tenant filter needed)
+        wl_item = WatchlistCRUD.get_by_id_internal(self.db, watchlist_id)
         if not wl_item:
             raise ValueError(f"Watchlist item {watchlist_id} not found")
 
         # Generate embedding if not exists
         if not wl_item.get('text_embedding'):
             self._update_watchlist_embedding(wl_item)
-            wl_item = WatchlistCRUD.get_by_id(self.db, watchlist_id)
+            wl_item = WatchlistCRUD.get_by_id_internal(self.db, watchlist_id)
 
         # Find similar trademarks
         candidates = self._find_similar_trademarks(wl_item, limit)
@@ -587,6 +587,7 @@ class WatchlistScanner:
             FROM trademarks t
             WHERE {class_filter}
               AND t.current_status NOT IN ('Refused', 'Withdrawn', 'Expired')
+              AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
               AND GREATEST(
                   similarity(t.name, %s),
                   similarity({turkish_norm}, %s),

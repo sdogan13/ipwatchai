@@ -60,127 +60,6 @@
         </div>
     </div>
 
-    <!-- Threats & Deadlines Section -->
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-
-        <!-- Left: Chart + Recent Alerts -->
-        <div class="lg:col-span-2 space-y-6">
-
-            <!-- Chart Section -->
-            <div class="shadow-sm rounded-xl p-6 border" style="background:var(--color-bg-card);border-color:var(--color-border)">
-                <h3 class="text-lg font-semibold mb-4" style="color:var(--color-text-primary)" x-text="t('dashboard.risk_distribution')">Risk Distribution</h3>
-                <div class="relative h-64 w-full">
-                    <canvas id="riskChart"></canvas>
-                </div>
-                <div id="alert-status-breakdown" class="flex flex-wrap gap-2 mt-3 hidden"></div>
-            </div>
-
-            <!-- Recent Alerts List -->
-            <div>
-                <div id="alert-list-header" class="flex items-center justify-between mb-4">
-                    <h3 class="text-lg font-semibold" style="color:var(--color-text-primary)" x-text="t('dashboard.recent_threats')">Son Tehditler</h3>
-                </div>
-                <div class="shadow-sm rounded-xl border divide-y" style="background:var(--color-bg-card);border-color:var(--color-border)">
-                    <template x-for="alert in alerts" :key="alert.alert_id">
-                        <div class="p-6 transition duration-150 ease-in-out">
-                            <div class="flex items-start justify-between">
-                                <div class="flex gap-4">
-                                    <!-- Risk Score Badge -->
-                                    <div class="flex-shrink-0 flex flex-col items-center justify-center h-16 w-16 rounded-lg font-bold text-xl border-2"
-                                         :style="getScoreStyle(alert.risk_score)">
-                                        <span x-text="Math.round(alert.risk_score)"></span>
-                                        <span class="text-xs font-normal opacity-75">%</span>
-                                    </div>
-
-                                    <!-- Conflicting mark thumbnail -->
-                                    <div x-html="window.AppComponents.renderThumbnail(alert.conflicting_image_path, alert.conflicting_brand, alert.conflicting_app_no, 'w-12 h-12')"></div>
-
-                                    <div>
-                                        <div class="flex items-center gap-2">
-                                            <h4 class="text-lg font-bold" style="color:var(--color-text-primary)" x-text="alert.conflicting_brand"></h4>
-                                            <span class="text-xs px-2 py-0.5 rounded" style="background:var(--color-bg-muted);color:var(--color-text-muted)" x-text="alert.conflicting_app_no"></span>
-                                            <span x-show="alert.severity" x-html="renderSeverityBadge(alert.severity)"></span>
-                                        </div>
-                                        <!-- Deadline Status Badge -->
-                                        <div x-show="alert.deadline_status" class="mt-1" x-html="renderDeadlineStatusBadge(alert)"></div>
-                                        <p class="text-sm mt-1" style="color:var(--color-text-muted)" x-text="t('dashboard.conflict_with', {brand: alert.brand_watched})"></p>
-                                        <!-- Score Breakdown -->
-                                        <div class="mt-2" x-show="alert.scores" x-html="window.AppComponents.renderSimilarityBadges(alert.scores)"></div>
-                                        <!-- Extracted goods indicator -->
-                                        <div x-show="alert.has_extracted_goods" class="mt-2">
-                                            <button @click.stop="showExtractedGoods(alert.conflicting_app_no, $event.currentTarget)"
-                                                    class="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-200 cursor-pointer transition-colors">
-                                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/>
-                                                </svg>
-                                                <span x-text="t('alerts.extracted_goods')">CIKARILMIS URUN:</span> <span class="underline" x-text="t('alerts.extracted_goods_yes')">EVET</span>
-                                            </button>
-                                        </div>
-                                        <!-- Pre-publication banner inline -->
-                                        <div x-show="alert.deadline_status === 'pre_publication'" class="mt-2 p-1.5 bg-blue-50 border border-blue-200 rounded text-xs text-blue-800" x-text="t('dashboard.pre_pub_inline')">
-                                        </div>
-                                        <p class="text-xs mt-2" style="color:var(--color-text-faint)" x-text="alert.date"></p>
-                                    </div>
-                                </div>
-                                <button @click="showAlertDetail(alert.alert_id)" class="text-sm font-medium text-indigo-600 hover:text-indigo-800">
-                                    <span x-text="t('dashboard.analyze')">Analiz</span> &rarr;
-                                </button>
-                            </div>
-                        </div>
-                    </template>
-                    <template x-if="alerts.length === 0">
-                        <div class="p-8 text-center">
-                            <img src="/static/icons/logo.jpeg" alt="IP WATⒸH AI" class="mx-auto h-12 w-12 mb-3 rounded-lg object-cover opacity-40">
-                            <p class="font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('empty.alerts_title')">No threats detected</p>
-                            <p class="text-sm" style="color:var(--color-text-faint)" x-text="t('empty.alerts_desc')">When new bulletins are scanned, threats will appear here.</p>
-                        </div>
-                    </template>
-                </div>
-            </div>
-        </div>
-
-        <!-- Right: Deadlines Widget -->
-        <div class="space-y-6">
-            <div class="shadow-sm rounded-xl border overflow-hidden" style="background:var(--color-bg-card);border-color:var(--color-border)">
-                <div class="bg-orange-50 px-6 py-4 border-b border-orange-100 flex justify-between items-center">
-                    <h3 class="text-orange-800 font-semibold" x-text="t('dashboard.action_required')">Action Required</h3>
-                    <span class="bg-orange-200 text-orange-800 text-xs px-2 py-1 rounded-full font-bold" x-text="t('dashboard.opposition')">Opposition</span>
-                </div>
-                <div class="divide-y divide-gray-100 max-h-96 overflow-y-auto">
-                    <template x-for="d in deadlines" :key="d.alert_id">
-                        <div class="p-4 hover:bg-gray-50 border-l-4"
-                             :class="d.days_left < 10 ? 'border-red-500 bg-red-50' : 'border-orange-300'">
-                            <div class="flex justify-between items-start">
-                                <div>
-                                    <p class="font-semibold" style="color:var(--color-text-primary)" x-text="d.conflicting_brand"></p>
-                                    <p class="text-xs" style="color:var(--color-text-muted)"><span x-text="t('common.app_no_label')">Basvuru No:</span> <span x-text="d.app_no"></span></p>
-                                </div>
-                                <div class="text-right">
-                                    <span class="block text-xl font-bold"
-                                          :class="d.days_left < 10 ? 'text-red-600' : 'text-orange-600'"
-                                          x-text="t('dashboard.days_text', {count: d.days_left})"></span>
-                                    <span class="text-xs" style="color:var(--color-text-muted)" x-text="t('dashboard.left')">Left</span>
-                                </div>
-                            </div>
-                            <div class="mt-2 flex justify-between items-center">
-                                <span class="text-xs" style="color:var(--color-text-faint)"><span x-text="t('dashboard.deadline_label')">Son Tarih:</span> <span x-text="d.appeal_deadline"></span></span>
-                                <button @click="showOppositionModal(d)" class="text-xs border px-2 py-1 rounded shadow-sm" style="background:var(--color-bg-card);border-color:var(--color-border);color:var(--color-text-secondary)" x-text="t('dashboard.opposition_filing')">Itiraz Basvurusu</button>
-                            </div>
-                        </div>
-                    </template>
-                    <template x-if="deadlines.length === 0">
-                        <div class="p-6 text-center text-sm" style="color:var(--color-text-muted)" x-text="t('dashboard.no_active_deadlines')">
-                            Aktif itiraz suresi yok.
-                        </div>
-                    </template>
-                </div>
-                <!-- Pre-publication note in deadline widget -->
-                <div x-show="stats.pre_publication_count > 0" class="p-3 bg-blue-50 border-t border-blue-200 text-xs text-blue-800" x-text="t('dashboard.early_warning_short', {count: stats.pre_publication_count})">
-                </div>
-            </div>
-        </div>
-    </div>
-
     <!-- Search + Sort Bar -->
     <div class="flex flex-wrap items-center gap-3 mb-4">
         <!-- Search -->
@@ -207,71 +86,22 @@
     </div>
 
     <!-- Portfolio Grid -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <!-- Left: Watchlist Items -->
-        <div>
-            <div class="shadow-sm rounded-xl border p-6" style="background:var(--color-bg-card);border-color:var(--color-border)">
-                <div id="portfolio-grid" class="space-y-2 max-h-[500px] overflow-y-auto pr-1" style="scrollbar-width:thin;scroll-behavior:smooth">
-                    <div class="text-sm text-gray-400 text-center py-4" x-text="t('dashboard.loading')">Loading...</div>
-                </div>
-                <!-- Pagination -->
-                <div id="wl-pagination" class="hidden flex items-center justify-between pt-3 mt-3" style="border-top:1px solid var(--color-border)">
-                    <button id="wl-prev-btn" onclick="wlPrevPage()" class="px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors disabled:opacity-40" style="color:var(--color-text-secondary);border-color:var(--color-border)" disabled>
-                        <span x-text="t('common.previous')">Previous</span>
-                    </button>
-                    <div id="wl-page-buttons" class="flex items-center gap-1"></div>
-                    <button id="wl-next-btn" onclick="wlNextPage()" class="px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors disabled:opacity-40" style="color:var(--color-text-secondary);border-color:var(--color-border)" disabled>
-                        <span x-text="t('common.next')">Next</span>
-                    </button>
-                </div>
-                <div id="wl-page-info" class="text-xs text-center mt-2 hidden" style="color:var(--color-text-faint)"></div>
+    <div>
+        <div class="shadow-sm rounded-xl border p-6" style="background:var(--color-bg-card);border-color:var(--color-border)">
+            <div id="portfolio-grid" class="space-y-2 max-h-[600px] overflow-y-auto pr-1" style="scrollbar-width:thin;scroll-behavior:smooth">
+                <div class="text-sm text-gray-400 text-center py-4" x-text="t('dashboard.loading')">Loading...</div>
             </div>
-        </div>
-
-        <!-- Right: Alerts for selected watchlist item -->
-        <div>
-            <div class="shadow-sm rounded-xl border overflow-hidden" style="background:var(--color-bg-card);border-color:var(--color-border)">
-                <div class="px-6 py-4 border-b" style="border-color:var(--color-border)">
-                    <div class="flex items-center justify-between">
-                        <div id="watchlist-alert-header">
-                            <h3 class="font-semibold" style="color:var(--color-text-primary)" x-text="t('dashboard.recent_threats')">Recent Threats</h3>
-                            <p class="text-xs mt-0.5" style="color:var(--color-text-faint)" x-text="t('empty.watchlist_desc')">Click an item to see its alerts</p>
-                        </div>
-                        <!-- Toggle: Selected Item / All Threats -->
-                        <div class="flex rounded-lg overflow-hidden border" style="border-color:var(--color-border)">
-                            <button id="wl-view-selected-btn" onclick="switchWlRightPanel('selected')" class="px-3 py-1.5 text-xs font-medium transition-colors" style="background:var(--color-primary);color:white" x-text="t('watchlist.view_selected')">Selected</button>
-                            <button id="wl-view-all-btn" onclick="switchWlRightPanel('all')" class="px-3 py-1.5 text-xs font-medium transition-colors" style="background:var(--color-bg-muted);color:var(--color-text-secondary)" x-text="t('watchlist.view_all_threats')">All Threats</button>
-                        </div>
-                    </div>
-                    <!-- Alert Filters -->
-                    <div id="alert-filters" class="flex flex-wrap items-center gap-2 mt-3 hidden">
-                        <select id="alert-filter-date" onchange="applyAlertFilters()" class="text-xs px-2 py-1 rounded-lg" style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
-                            <option value="all" x-text="t('watchlist.filter_all')">All</option>
-                            <option value="7" x-text="t('watchlist.filter_last_7')">Last 7</option>
-                            <option value="30" x-text="t('watchlist.filter_last_30')">Last 30</option>
-                            <option value="90" x-text="t('watchlist.filter_last_90')">Last 90</option>
-                            <option value="365" x-text="t('watchlist.filter_last_year')">Last year</option>
-                        </select>
-                        <select id="alert-filter-bulletin" onchange="applyAlertFilters()" class="text-xs px-2 py-1 rounded-lg" style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
-                            <option value="none" x-text="t('watchlist.filter_bulletin')">Bulletin</option>
-                            <option value="bulletin_desc" x-text="t('watchlist.sort_bulletin_desc')">High to Low</option>
-                            <option value="bulletin_asc" x-text="t('watchlist.sort_bulletin_asc')">Low to High</option>
-                        </select>
-                        <select id="alert-filter-sort" onchange="applyAlertFilters()" class="text-xs px-2 py-1 rounded-lg" style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
-                            <option value="date_desc" x-text="t('watchlist.sort_newest')">Newest</option>
-                            <option value="date_asc" x-text="t('watchlist.sort_oldest')">Oldest</option>
-                            <option value="risk_desc" x-text="t('watchlist.sort_risk_high')">Risk High</option>
-                            <option value="risk_asc" x-text="t('watchlist.sort_risk_low')">Risk Low</option>
-                            <option value="name_asc" x-text="t('watchlist.sort_name_az')">A-Z</option>
-                        </select>
-                    </div>
-                </div>
-                <div id="watchlist-alert-list" class="divide-y max-h-[500px] overflow-y-auto" style="border-color:var(--color-border)">
-                    <div class="p-6 text-center text-sm" style="color:var(--color-text-faint)" x-text="t('empty.alerts_desc')">
-                        Select a watchlist item to view related alerts.
-                    </div>
-                </div>
+            <!-- Pagination -->
+            <div id="wl-pagination" class="hidden flex items-center justify-between pt-3 mt-3" style="border-top:1px solid var(--color-border)">
+                <button id="wl-prev-btn" onclick="wlPrevPage()" class="px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors disabled:opacity-40" style="color:var(--color-text-secondary);border-color:var(--color-border)" disabled>
+                    <span x-text="t('common.previous')">Previous</span>
+                </button>
+                <div id="wl-page-buttons" class="flex items-center gap-1"></div>
+                <button id="wl-next-btn" onclick="wlNextPage()" class="px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors disabled:opacity-40" style="color:var(--color-text-secondary);border-color:var(--color-border)" disabled>
+                    <span x-text="t('common.next')">Next</span>
+                </button>
             </div>
+            <div id="wl-page-info" class="text-xs text-center mt-2 hidden" style="color:var(--color-text-faint)"></div>
         </div>
     </div>
 </main>

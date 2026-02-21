@@ -82,11 +82,18 @@ TARGET_LANGUAGES = ['tr']
 # Trained model (~1.2MB), NOT hardcoded character sets.
 # Accurate even for 1-2 word queries. Runs on CPU in microseconds.
 
+_FASTTEXT_UNAVAILABLE = object()  # sentinel: tried to load but failed
 _fasttext_model = None
 
 def _load_fasttext_langid():
-    """Lazy-load the FastText language identification model."""
+    """Lazy-load the FastText language identification model.
+
+    Uses a sentinel to distinguish 'never tried' (None) from 'tried and failed'
+    (_FASTTEXT_UNAVAILABLE), so we only log the warning once.
+    """
     global _fasttext_model
+    if _fasttext_model is _FASTTEXT_UNAVAILABLE:
+        return None
     if _fasttext_model is not None:
         return _fasttext_model
     try:
@@ -103,6 +110,7 @@ def _load_fasttext_langid():
         return _fasttext_model
     except Exception as e:
         logger.warning(f"FastText LangID not available: {e}")
+        _fasttext_model = _FASTTEXT_UNAVAILABLE
         return None
 
 
@@ -678,6 +686,15 @@ def calculate_translation_similarity(
     # Translate only the query (cached)
     query_tr = translate_to_turkish(query_name)
     if not query_tr:
+        return 0.0
+
+    # Deduplication: if translated query is the same as the original query
+    # (normalized), the translation didn't actually translate anything.
+    # e.g., "NAIK" → "naik" — not a real translation, just lowercasing.
+    # Returning 0.0 prevents the translation signal from redundantly
+    # inflating scores that text_sim already covers.
+    from utils.idf_scoring import normalize_turkish
+    if normalize_turkish(query_tr) == normalize_turkish(query_name):
         return 0.0
 
     result = score_translated_pair(query_tr, candidate_name_tr)

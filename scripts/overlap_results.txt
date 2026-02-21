@@ -1,0 +1,10 @@
+Found 604 data folders to scan
+  BLT: 362
+  GZ:  240
+  APP: 2
+
+  Scanned 50/604 folders, 239939 records, 213985 unique app_nos
+  Scanned 100/604 folders, 702802 records, 603406 unique app_nos
+  Scanned 150/604 folders, 1034547 records, 926564 unique app_nos
+  Scanned 200/604 folders, 1269914 records, 1161827 unique app_nos
+  Scanned 250/604 folders, 1570338 records, 1462108 unique app_nos

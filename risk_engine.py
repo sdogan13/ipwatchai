@@ -468,7 +468,7 @@ def score_pair(query_name, candidate_name,
         _penalty = 0.0
         for _w in _q_tokens:
             _matched = _w in _t_tokens or any(
-                _SM(None, _w, _tw).ratio() >= (0.85 if min(len(_w), len(_tw)) <= 4 else 0.80)
+                _SM(None, _w, _tw).ratio() >= (0.75 if min(len(_w), len(_tw)) <= 4 else 0.80)
                 for _tw in _t_tokens
             )
             if not _matched:
@@ -486,6 +486,9 @@ def score_pair(query_name, candidate_name,
     # 3b. Hard ceiling: if zero distinctive query words matched, cap at 0.25
     #     This prevents semi-generic/generic-only matches from inflating scores.
     #     Skip for containment/exact paths where distinctive_weight_matched is set.
+    #     EXCEPTION: if phonetic similarity is very high (>0.80), the words sound
+    #     alike even though IDF token matching failed — raise ceiling to preserve
+    #     phonetic signal.  e.g., "NAIK" vs "NAKKA" (phonetic 0.895).
     _dist_matched = breakdown.get('distinctive_match', 0.0)
     _dist_weight_matched = breakdown.get('distinctive_weight_matched', 0.0)
     if _dist_matched == 0.0 and _dist_weight_matched == 0.0 and _idf_total > 0.25:
@@ -493,9 +496,17 @@ def score_pair(query_name, candidate_name,
             _IDFLookup.get_word_class(w) == 'distinctive' for w in _q_tokens
         )
         if _has_distinctive:
-            _idf_total = 0.25
-            breakdown['total'] = 0.25
-            breakdown['scoring_path'] = breakdown.get('scoring_path', '') + ' > CEILING (no distinctive match)'
+            if phonetic_sim > 0.80:
+                # Phonetic-aware ceiling: words sound alike, don't crush score
+                _ceiling = min(_idf_total, phonetic_sim * 0.70)
+                _ceiling = max(0.40, _ceiling)  # floor at 0.40
+                _idf_total = _ceiling
+                breakdown['total'] = round(_ceiling, 4)
+                breakdown['scoring_path'] = breakdown.get('scoring_path', '') + f' > PHONETIC_CEILING({_ceiling:.2f})'
+            else:
+                _idf_total = 0.25
+                breakdown['total'] = 0.25
+                breakdown['scoring_path'] = breakdown.get('scoring_path', '') + ' > CEILING (no distinctive match)'
 
     # 4. Store translation in breakdown
     breakdown['translation_similarity'] = trans_sim
@@ -1111,6 +1122,71 @@ class RiskEngine:
                         all_candidates.append(match)
             except Exception as e:
                 logger.warning("OCR text search failed for query", ocr_query=ocr_q, error=str(e))
+
+        # ── Stage 4.6: Phonetic pre-screening (dmetaphone) ──
+        # Catches phonetically similar marks that all text stages miss.
+        # "NAIK" and "NIKE" share dmetaphone code "NK" but have zero trigram
+        # overlap and different characters.  This is the ONLY stage that
+        # can surface these matches.
+        # Uses PostgreSQL fuzzystrmatch extension (already installed).
+        if name_input and name_input.strip() and len(name_normalized) >= 2:
+            try:
+                qlen = len(name_input.strip())
+                phon_sql = """
+                    SELECT id, application_no, name, nice_class_numbers, image_path,
+                           0.70 as lexical_score
+                    FROM trademarks
+                    WHERE name IS NOT NULL
+                      AND length(name) BETWEEN GREATEST(2, %s - 2) AND %s + 4
+                      AND dmetaphone(
+                          LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+                          REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(name,
+                          'ğ','g'),'Ğ','g'),'ı','i'),'İ','i'),'ö','o'),'Ö','o'),
+                          'ü','u'),'Ü','u'),'ş','s'),'Ş','s'),'ç','c'),'Ç','c'))
+                      ) = dmetaphone(%s)
+                      AND current_status NOT IN ('Refused', 'Withdrawn')
+                      AND (application_date >= NOW() - INTERVAL '11 years' OR application_date IS NULL)
+                """
+                phon_params = [qlen, qlen, name_normalized]
+
+                if status_filter:
+                    phon_sql += " AND current_status = %s"
+                    phon_params.append(status_filter)
+
+                if attorney_no:
+                    phon_sql += " AND attorney_no = %s"
+                    phon_params.append(attorney_no)
+
+                if target_classes and len(target_classes) > 0:
+                    phon_sql += " AND (nice_class_numbers && %s::integer[] OR 99 = ANY(nice_class_numbers))"
+                    phon_params.append(target_classes)
+
+                phon_sql += " ORDER BY levenshtein(LOWER(name), LOWER(%s)) ASC, length(name) ASC LIMIT 100;"
+                phon_params.append(name_input)
+                cur.execute(phon_sql, phon_params)
+                phon_matches = cur.fetchall()
+
+                # DEBUG: log phonetic matches
+                logger.info(f"PHON_DEBUG: query={name_input!r} normalized={name_normalized!r} "
+                           f"total_matches={len(phon_matches)} already_seen={len(seen_ids)}")
+                for pm in phon_matches[:10]:
+                    pm_name = pm[2] if len(pm) > 2 else '?'
+                    pm_in_seen = pm[0] in seen_ids
+                    logger.info(f"  PHON_MATCH: name={pm_name!r} already_seen={pm_in_seen}")
+
+                phon_added = 0
+                for match in phon_matches:
+                    if match[0] not in seen_ids:
+                        seen_ids.add(match[0])
+                        all_candidates.append(match)
+                        phon_added += 1
+
+                if phon_added > 0:
+                    logger.info(f"PHON_ADDED: {phon_added} new candidates from phonetic pre-screen")
+                else:
+                    logger.info("PHON_ADDED: 0 new candidates (all already seen)")
+            except Exception as e:
+                logger.warning("Phonetic pre-screen failed, continuing without", error=str(e))
 
         # ── Stage 5: Trigram similarity (pg_trgm with 0.3 floor) ──
         remaining_limit = limit - len(all_candidates)

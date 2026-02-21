@@ -22,9 +22,9 @@ window.AppComponents.renderLeadCard = function(lead) {
 
     var classesHtml = window.AppComponents.renderNiceClassBadges(lead.overlapping_classes, 4);
 
-    // Thumbnails for both parties
-    var newMarkThumb = window.AppComponents.renderThumbnail(lead.new_mark_image, lead.new_mark_name, lead.new_mark_app_no, 'w-10 h-10');
-    var existMarkThumb = window.AppComponents.renderThumbnail(lead.existing_mark_image, lead.existing_mark_name, lead.existing_mark_app_no, 'w-10 h-10');
+    // Thumbnails for both parties (same approach as search result cards)
+    var newMarkThumb = window.AppComponents.renderThumbnail(lead.new_mark_image, lead.new_mark_name, lead.new_mark_app_no, 'w-14 h-14');
+    var existMarkThumb = window.AppComponents.renderThumbnail(lead.existing_mark_image, lead.existing_mark_name, lead.existing_mark_app_no, 'w-14 h-14');
 
     // 4-component score breakdown
     var breakdownScores = {
@@ -130,9 +130,9 @@ window.AppComponents.renderLeadRow = function(lead) {
     // Score ring (small)
     var scoreRing = window.AppComponents.renderScoreRing(scorePercent, 32);
 
-    // Thumbnails (small, clickable to open lightbox)
-    var newThumb = window.AppComponents.renderThumbnail(lead.new_mark_image, lead.new_mark_name, lead.new_mark_app_no, 'w-8 h-8');
-    var existThumb = window.AppComponents.renderThumbnail(lead.existing_mark_image, lead.existing_mark_name, lead.existing_mark_app_no, 'w-8 h-8');
+    // Thumbnails (same approach as search result cards)
+    var newThumb = window.AppComponents.renderThumbnail(lead.new_mark_image, lead.new_mark_name, lead.new_mark_app_no, 'w-12 h-12');
+    var existThumb = window.AppComponents.renderThumbnail(lead.existing_mark_image, lead.existing_mark_name, lead.existing_mark_app_no, 'w-12 h-12');
 
     // Nice classes (compact, max 3)
     var classesHtml = window.AppComponents.renderNiceClassBadges(lead.overlapping_classes, 3);
@@ -185,8 +185,8 @@ window.AppComponents.renderLeadRow = function(lead) {
 window.AppComponents.renderLeadMobileCard = function(lead) {
     var scorePercent = Math.round(lead.similarity_score * 100);
     var scoreRing = window.AppComponents.renderScoreRing(scorePercent, 28);
-    var newThumb = window.AppComponents.renderThumbnail(lead.new_mark_image, lead.new_mark_name, lead.new_mark_app_no, 'w-7 h-7');
-    var existThumb = window.AppComponents.renderThumbnail(lead.existing_mark_image, lead.existing_mark_name, lead.existing_mark_app_no, 'w-7 h-7');
+    var newThumb = window.AppComponents.renderThumbnail(lead.new_mark_image, lead.new_mark_name, lead.new_mark_app_no, 'w-12 h-12');
+    var existThumb = window.AppComponents.renderThumbnail(lead.existing_mark_image, lead.existing_mark_name, lead.existing_mark_app_no, 'w-12 h-12');
 
     // Urgency
     var urgencyHtml = '';

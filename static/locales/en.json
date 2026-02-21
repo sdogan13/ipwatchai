@@ -165,6 +165,7 @@
     "of_limit": "{used}/{limit}",
     "system_stats": "System",
     "total_trademarks_db": "Trademarks in DB",
+    "last_bulletin": "Last Bulletin",
     "next_scan": "Next Scan",
     "search_credits": "Search Credits",
     "quick_searches": "Quick Searches",
@@ -311,6 +312,7 @@
     "early_detection": "Early Detection:",
     "early_detection_desc": "This application has not yet been published in the Official Bulletin. The opposition period will begin from the bulletin publication date.",
     "days_remaining": "{count} days remaining",
+    "appeal_deadline": "Deadline",
     "deadline_approaching": "Opposition deadline approaching",
     "last_date": "Deadline:"
   },
