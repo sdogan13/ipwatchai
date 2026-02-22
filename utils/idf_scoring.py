@@ -416,20 +416,15 @@ def calculate_adjusted_score(
     query_weight, query_details = calculate_text_weight(query_text)
     candidate_weight, candidate_details = calculate_text_weight(candidate_text)
 
-    # Use minimum weight (most generic word determines base penalty)
     idf_weight = min(query_weight, candidate_weight)
 
     # ═══════════════════════════════════════════════════════════
     # GRADUAL PENALTY FORMULA
     # ═══════════════════════════════════════════════════════════
-    # Blend factor: how much of raw score to preserve minimum (0.3 to 0.5)
     # Higher = less aggressive penalty
     BLEND_FACTOR = 0.4  # Preserve at least 40% of raw score contribution
 
     # Calculate blended weight
-    # If idf_weight = 1.0 (distinctive): blended = 0.4 + 0.6 * 1.0 = 1.0
-    # If idf_weight = 0.5 (semi-generic): blended = 0.4 + 0.6 * 0.5 = 0.7
-    # If idf_weight = 0.1 (generic): blended = 0.4 + 0.6 * 0.1 = 0.46
     blended_weight = BLEND_FACTOR + (1 - BLEND_FACTOR) * idf_weight
 
     # Apply to raw similarity
@@ -516,7 +511,6 @@ def calculate_text_similarity(query: str, target: str) -> float:
         non_generic = {w for w in q_words if not is_generic_word(w) and len(w) >= 2}
         if not non_generic:
             # Query is entirely generic - apply gradual penalty
-            # Base score 0.85 * 0.46 (blend for generic) = ~0.39
             return 0.85 * 0.46
         ratio = len(q_clean) / len(t_clean)
         return 0.85 + (ratio * 0.15)
@@ -524,7 +518,6 @@ def calculate_text_similarity(query: str, target: str) -> float:
     # ================================================
     # CHECK 3: Reverse containment (target in query)
     # e.g., "sedat" in "sedat coffe" -> 90%+
-    # This is HIGH RISK in trademark law!
     # ================================================
     if t_clean in q_clean:
         t_words = set(t_clean.split())
@@ -552,7 +545,6 @@ def calculate_text_similarity(query: str, target: str) -> float:
     # CHECK 5: Distinctive word subset checks
     # ================================================
 
-    # Target distinctive words all in query -> HIGH RISK
     if t_distinctive and t_distinctive.issubset(q_distinctive):
         coverage = len(t_distinctive) / len(q_distinctive) if q_distinctive else 0
         return max(0.85, 0.75 + (coverage * 0.25))
@@ -607,7 +599,6 @@ def calculate_text_similarity(query: str, target: str) -> float:
     # instead of hard cap at 15%
     if not distinctive_matched:
         # Calculate average weight of matched words
-        # Use blend factor approach: score * (0.4 + 0.6 * avg_weight)
         BLEND_FACTOR = 0.4
         avg_match_weight = matched_weight / max(len([w for w in q_tokens if len(w) >= 2 and w in t_tokens]), 1) if matched_weight > 0 else 0.1
         blended_weight = BLEND_FACTOR + (1 - BLEND_FACTOR) * avg_match_weight
@@ -748,14 +739,10 @@ def calculate_combined_score(
     # RULE 3: Combined search - smart weighting
     # ═══════════════════════════════════════════════════════════════
 
-    # If image is very high (>=80%), let it dominate
     if image_sim >= 0.80:
-        # Image is clearly a match - use 80% image, 20% text
         overall = (image_sim * 0.80) + (text_sim * 0.20)
 
-    # If text is very high (>=80%), let it dominate
     elif text_sim >= 0.80:
-        # Text is clearly a match - use 80% text, 20% image
         overall = (text_sim * 0.80) + (image_sim * 0.20)
 
     # Both moderate - use balanced weighting
@@ -764,7 +751,6 @@ def calculate_combined_score(
         overall = (text_sim * 0.60) + (image_sim * 0.40)
 
     # ═══════════════════════════════════════════════════════════════
-    # RULE 4: Never let a perfect match score below thresholds
     # ═══════════════════════════════════════════════════════════════
     if image_sim >= 0.95 or text_sim >= 0.95:
         overall = max(overall, 0.85)
@@ -1031,14 +1017,11 @@ def word_similarity(word1: str, word2: str) -> float:
         shorter = w1 if len(w1) < len(w2) else w2
         longer = w2 if len(w1) < len(w2) else w1
 
-        # Prefix match: "dogan" vs "doganlar" - decent match (same root)
         if longer.startswith(shorter):
             ratio = len(shorter) / len(longer)
             return 0.65 + (0.30 * ratio)  # 0.65-0.95
 
         # Suffix match: "dogan" in "erdogan" - DIFFERENT WORDS
-        # In Turkish names, a prefix changes the word entirely
-        # "Erdoğan" and "Doğan" are DIFFERENT names, give low score
         if longer.endswith(shorter):
             ratio = len(shorter) / len(longer)
             return 0.25 + (0.15 * ratio)  # 0.25-0.40 (low score)
@@ -1101,7 +1084,6 @@ def calculate_word_match_factor(query_words: List[str], result_words: List[str])
             'word_weight': get_word_weight(qw)
         })
 
-    # Calculate factor based on match quality, weighted by word importance
     total_weight = 0
     weighted_sum = 0
 
@@ -1231,7 +1213,6 @@ def calculate_coverage_factor(query_words: List[str], result_words: List[str],
     # Normalize partial credit by total words
     partial_credit = partial_credit / max(len(query_words), 1)
 
-    # Combined factor: 55% distinctive + 20% semi-generic + 10% generic + 15% partial
     factor = (
         (0.55 * distinctive_score) +
         (0.20 * semi_generic_score) +
@@ -1240,7 +1221,6 @@ def calculate_coverage_factor(query_words: List[str], result_words: List[str],
     )
 
     # Softer penalty when only generic words match
-    # Instead of 75% penalty, apply 50% penalty with floor
     if len(found_distinctive) == 0 and total_distinctive > 0:
         if len(found_generic) > 0 or len(found_semi_generic) > 0:
             # Only generic/semi-generic words matched
@@ -1248,10 +1228,8 @@ def calculate_coverage_factor(query_words: List[str], result_words: List[str],
                 # But we have partial matches - less penalty
                 factor = max(factor * 0.65, 0.35)
             else:
-                # No partial matches either - more penalty but not extreme
                 factor = max(factor * 0.50, 0.25)
 
-    # Ensure minimum floor
     factor = max(factor, 0.25)
 
     details = {
@@ -1336,26 +1314,16 @@ def calculate_comprehensive_score(
         # ═══════════════════════════════════════════════════════════════
         # CONTAINMENT-AWARE RAW SIMILARITY
         # ═══════════════════════════════════════════════════════════════
-        # SequenceMatcher gives low scores for containment cases:
-        # - "dogan patent" vs "dogan" = 0.59 (too low!)
-        # But in trademark law, if result is contained in query (or vice versa),
-        # that's a HIGH similarity case.
 
         # Check word-level containment
         q_words = set(q_norm.split())
         r_words = set(r_norm.split())
 
-        # Case 1: Result words are subset of query words
         # e.g., "dogan" (result) in "dogan patent" (query)
-        # This is HIGH risk - the shorter mark is contained in the longer one
         if r_words and r_words.issubset(q_words):
-            # Give high raw similarity based on how much of query is covered
             coverage = len(r_words) / len(q_words)
-            # Minimum 0.85 for any containment, up to 1.0 for full match
             raw_similarity = 0.85 + (coverage * 0.15)
 
-        # Case 2: Query words are subset of result words
-        # e.g., "dogan patent" (query) in "dogan patent hizmetleri" (result)
         elif q_words and q_words.issubset(r_words):
             coverage = len(q_words) / len(r_words)
             raw_similarity = 0.85 + (coverage * 0.15)
@@ -1374,7 +1342,6 @@ def calculate_comprehensive_score(
     # BALANCED COMBINATION FORMULA
     # ═══════════════════════════════════════════════════════════════
 
-    # Weight the factors (instead of multiplying, use weighted average)
     factor_weights = {
         'word_match': 0.35,    # Most important - catches "dogan" vs "erdogan"
         'coverage': 0.30,      # Important - distinctive word coverage
@@ -1393,8 +1360,6 @@ def calculate_comprehensive_score(
     # ═══════════════════════════════════════════════════════════════
     # CRITICAL: Coverage-based penalty
     # ═══════════════════════════════════════════════════════════════
-    # When coverage is very low (distinctive words don't match),
-    # this is a strong signal of false positive - apply extra penalty
 
     coverage_penalty = 1.0
     if coverage_factor <= 0.30:
@@ -1404,18 +1369,12 @@ def calculate_comprehensive_score(
         # Some distinctive words missing - moderate penalty
         coverage_penalty = 0.72
 
-    # Apply coverage penalty to weighted factor
     adjusted_factor = weighted_factor * coverage_penalty
 
     # ═══════════════════════════════════════════════════════════════
-    # BALANCED FINAL SCORE CALCULATION (v2 - boosted for good matches)
     # ═══════════════════════════════════════════════════════════════
-    # Target ranges (UPDATED):
-    # - "dogan patent" vs "d.p dogan patent" → 90-92% (extra words)
     # - "dogan patent" vs "dogan" → 82-85% (containment)
     # - "nike" vs "nike sports" → 80-88% (containment)
-    # - "dogan patent" vs "erdogan patent ofisi" → 28-38% (substring - KEEP LOW)
-    # - "dogan patent" vs "dogru patent" → 20-30% (different word - KEEP LOW)
 
     # Use weighted factor directly but scaled properly
     # weighted_factor ranges from ~0.25 (poor) to ~1.0 (excellent)
@@ -1426,33 +1385,25 @@ def calculate_comprehensive_score(
     # BOOSTED retention for good matches (+5-8%)
     # For excellent matches (weighted >= 0.85): 93-100% retention
     # For good matches (weighted >= 0.70): 85-93% retention
-    # For medium matches (weighted >= 0.50): 35-55% retention (UNCHANGED)
-    # For poor matches (weighted < 0.50): 20-35% retention (UNCHANGED)
 
-    # Check if all distinctive words matched (even if generic words missing)
     all_distinctive_matched = (
         coverage_details.get('distinctive_score', 0) >= 0.95 and
         len(coverage_details.get('not_found_distinctive', [])) == 0
     )
 
     if weighted_factor >= 0.85:
-        # Excellent match - retain 93-100% of raw (BOOSTED from 88-95%)
         base_retention = 0.93 + (weighted_factor - 0.85) * 0.47  # 0.93 to 1.0
     elif weighted_factor >= 0.70:
-        # Good match - retain 85-93% of raw (BOOSTED from 75-90%)
         # Boost if all distinctive words matched
         if all_distinctive_matched:
             base_retention = 0.88 + (weighted_factor - 0.70) * 0.33  # 0.88 to 0.93
         else:
             base_retention = 0.82 + (weighted_factor - 0.70) * 0.73  # 0.82 to 0.93
     elif weighted_factor >= 0.50:
-        # Medium match - retain 35-55% of raw (substring cases - UNCHANGED)
         base_retention = 0.35 + (weighted_factor - 0.50) * 1.0   # 0.35 to 0.55
     else:
-        # Poor match - retain 20-35% of raw (different words - UNCHANGED)
         base_retention = 0.20 + weighted_factor * 0.30            # 0.20 to 0.35
 
-    # Apply coverage penalty for missing distinctive words (not for generic)
     if coverage_penalty < 1.0 and not all_distinctive_matched:
         base_retention *= (0.6 + 0.4 * coverage_penalty)  # Softer penalty
 
@@ -1463,7 +1414,6 @@ def calculate_comprehensive_score(
     # Calculate final score
     final_score = raw_similarity * base_retention
 
-    # Ensure 0-1 range with minimum floor
     final_score = max(0.05, min(1.0, final_score))
 
     # Determine risk level
@@ -1721,7 +1671,6 @@ if __name__ == "__main__":
     print("COMPREHENSIVE SCORING TEST (Multi-Factor)")
     print("=" * 70)
 
-    # Test cases WITHOUT hardcoded raw values - let the function calculate them
     comprehensive_tests = [
         ("dogan patent", "d.p dogan patent", "Should be 82-88% - exact 'dogan' match"),
         ("dogan patent", "dogan", "Should be 75-82% - exact distinctive match (containment)"),

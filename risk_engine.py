@@ -19,7 +19,6 @@ from dotenv import load_dotenv
 import scrapper
 import ingest
 import ai  # Optimization: Reuse models loaded here
-# CENTRALIZED IDF SCORING - consistent across the entire system
 from utils.idf_scoring import (
     normalize_turkish,
     turkish_lower,
@@ -35,7 +34,6 @@ from utils.idf_scoring import (
 from utils.translation import calculate_translation_similarity
 # Graduated phonetic scoring (replaces binary dMetaphone match)
 from utils.phonetic import calculate_phonetic_similarity
-# Class 99 (Global Brand) utilities - covers all 45 Nice classes
 from utils.class_utils import (
     GLOBAL_CLASS,
     classes_overlap,
@@ -206,7 +204,6 @@ def calculate_token_overlap(query: str, target: str) -> float:
     if not q_tokens:
         return 0.0
 
-    # How many query tokens appear in target?
     matches = q_tokens.intersection(t_tokens)
     return len(matches) / len(q_tokens)
 
@@ -247,18 +244,13 @@ def calculate_name_similarity(query: str, target: str) -> float:
     if not q_norm or not t_norm:
         return 0.0
 
-    # 1. Exact match after normalization → only case that returns 1.0
     if q_norm == t_norm:
         return 1.0
 
-    # 2. SequenceMatcher similarity
     seq_ratio = SequenceMatcher(None, q_norm, t_norm).ratio()
 
-    # 3. Token overlap
     token_overlap = calculate_token_overlap(query, target)
 
-    # Return maximum, but cap at 0.99 for non-exact matches.
-    # 1.0 is reserved for exact normalized match only.
     return min(max(seq_ratio, token_overlap), 0.99)
 
 
@@ -322,14 +314,9 @@ def _dynamic_combine(
     total = sum(signals[k] * final_weights[k] for k in final_weights)
     total = max(0.0, min(1.0, total))
 
-    # Floor: near-perfect visual match guarantees high total risk.
-    # Two logos that are 97% identical IS a trademark conflict regardless of name.
-    # Without this, a 0.24 text score drags 0.97 visual down to 0.87.
     if visual_sim >= 0.85:
         total = max(total, visual_sim)
 
-    # Floor: near-perfect translation match guarantees high total risk.
-    # e.g. APPLE ↔ ELMA with translation_sim >= 0.95 → total can't be below 0.90.
     if translation_sim >= 0.95:
         total = max(total, 0.90)
 
@@ -387,14 +374,9 @@ def score_pair(query_name, candidate_name,
         }
         return breakdown
 
-    # 1. Recalculate text similarity with Turkish normalization (original name only)
     lex_turkish = calculate_name_similarity(query_name, candidate_name)
     text_sim = max(text_sim, lex_turkish)
 
-    # 2. Translation similarity (cross-language conflict detection)
-    #    Skip entirely when query is Turkish — translation scoring is meaningless
-    #    for same-language comparisons (Turkish query vs Turkish DB records).
-    #    The text similarity already handles Turkish↔Turkish matching.
     from utils.translation import detect_language_fasttext
     query_lang, _, _ = detect_language_fasttext(query_name)
     if query_lang == 'tr':
@@ -405,7 +387,6 @@ def score_pair(query_name, candidate_name,
             query_name, candidate_name, candidate_name_tr=candidate_name_tr
         )
 
-    # 3. IDF-weighted scoring (3-tier) — produces the text component score
     _idf_total, breakdown = compute_idf_weighted_score(
         query=query_name,
         target=candidate_name,
@@ -422,10 +403,6 @@ def score_pair(query_name, candidate_name,
     _q_tokens = _tokenize(query_name) if query_name else set()
     _t_tokens = _tokenize(candidate_name) if candidate_name else set()
 
-    # 3a. Coverage adjustment: when score is high (>=0.90) but not all
-    #     query tokens are matched in the target, apply a penalty.
-    #     100% is reserved for exact normalized matches only (CHECK 1).
-    #     Penalty: ~11% per missing distinctive word, ~4% per missing other word.
     if _idf_total >= 0.90 and not breakdown.get('exact_match', False) and _q_tokens:
         _penalty = 0.0
         for _w in _q_tokens:
@@ -445,12 +422,6 @@ def score_pair(query_name, candidate_name,
             breakdown['total'] = round(_idf_total, 4)
             breakdown['scoring_path'] = breakdown.get('scoring_path', '') + ' > COVERAGE(-{:.0%})'.format(_penalty)
 
-    # 3b. Hard ceiling: if zero distinctive query words matched, cap at 0.25
-    #     This prevents semi-generic/generic-only matches from inflating scores.
-    #     Skip for containment/exact paths where distinctive_weight_matched is set.
-    #     EXCEPTION: if phonetic similarity is very high (>0.80), the words sound
-    #     alike even though IDF token matching failed — raise ceiling to preserve
-    #     phonetic signal.  e.g., "NAIK" vs "NAKKA" (phonetic 0.895).
     _dist_matched = breakdown.get('distinctive_match', 0.0)
     _dist_weight_matched = breakdown.get('distinctive_weight_matched', 0.0)
     if _dist_matched == 0.0 and _dist_weight_matched == 0.0 and _idf_total > 0.25:
@@ -470,10 +441,8 @@ def score_pair(query_name, candidate_name,
                 breakdown['total'] = 0.25
                 breakdown['scoring_path'] = breakdown.get('scoring_path', '') + ' > CEILING (no distinctive match)'
 
-    # 4. Store translation in breakdown
     breakdown['translation_similarity'] = trans_sim
 
-    # 5. Dynamic confidence-weighted combination of ALL signals
     #    Phonetic is already inside _idf_total via compute_idf_weighted_score()
     combined = _dynamic_combine(
         text_idf_score=_idf_total,
@@ -481,9 +450,6 @@ def score_pair(query_name, candidate_name,
         translation_sim=trans_sim,
     )
 
-    # 5b. Floor: visual should never LOWER the total score.
-    #     Compute text-only total (no visual) and ensure full total >= text-only total.
-    #     This guarantees watchlist scores (with logo) are always >= search scores (text-only).
     if visual_sim > 0:
         text_only = _dynamic_combine(
             text_idf_score=_idf_total,
@@ -591,7 +557,6 @@ class RiskEngine:
             color_vec = None
 
         clip_input = self.clip_preprocess(pil_img).unsqueeze(0).to(self.device)
-        # Match input precision to model (FP16 when models are .half())
         if next(self.clip_model.parameters()).dtype == torch.float16:
             clip_input = clip_input.half()
         with torch.no_grad():
@@ -670,18 +635,12 @@ class RiskEngine:
         all_candidates = []
 
         # ── Model-based translation for cross-language candidate discovery ──
-        # Uses langdetect (trained model) for language detection + NLLB for
-        # translation. No hardcoded character sets or word lists.
-        #   - Turkish query → detected as 'tr' → skip translation → single pool
-        #   - Non-Turkish query → translate to Turkish → double pool
-        # Cost: ~100ms per query for non-Turkish, ~0ms for Turkish.
         translated_name = None
         translated_normalized = None
         detected_lang = 'unknown'
         try:
             from utils.translation import auto_translate_to_turkish
             tr_result, detected_lang = auto_translate_to_turkish(name_input)
-            # Only use translation if it's meaningfully different from original
             if tr_result and normalize_turkish(tr_result) != name_normalized:
                 translated_name = tr_result
                 translated_normalized = normalize_turkish(tr_result)
@@ -692,8 +651,6 @@ class RiskEngine:
             logger.warning("Pre-screen translation failed, continuing without", error=str(e))
 
         # First, check for EXACT matches (highest priority)
-        # Use Python-side Turkish normalization for matching instead of SQL LOWER()
-        # because PostgreSQL LOWER() is not Turkish-aware (I→i instead of I→ı)
         exact_sql = """
             SELECT id, application_no, name, nice_class_numbers, image_path,
                    1.0 as lexical_score
@@ -713,7 +670,6 @@ class RiskEngine:
         """
         exact_params = [name_normalized, name_normalized]
 
-        # 11-year renewal window: exclude expired marks (renewal period is 10 years)
         exact_sql += " AND (application_date >= NOW() - INTERVAL '11 years' OR application_date IS NULL)"
 
         if status_filter:
@@ -725,7 +681,6 @@ class RiskEngine:
             exact_params.append(attorney_no)
 
         if target_classes and len(target_classes) > 0:
-            # Class 99 (Global Brand) covers ALL 45 classes - include in any class filter
             exact_sql += " AND (nice_class_numbers && %s::integer[] OR 99 = ANY(nice_class_numbers))"
             exact_params.append(target_classes)
 
@@ -738,7 +693,6 @@ class RiskEngine:
                 seen_ids.add(match[0])
                 all_candidates.append(match)
 
-        # Also check for normalized exact matches (doğan == dogan)
         if name_normalized != turkish_lower(name_input):
             # Search for Turkish variants using normalized form
             normalized_sql = """
@@ -766,7 +720,6 @@ class RiskEngine:
                 norm_params.append(attorney_no)
 
             if target_classes and len(target_classes) > 0:
-                # Class 99 (Global Brand) covers ALL 45 classes - include in any class filter
                 normalized_sql += " AND (nice_class_numbers && %s::integer[] OR 99 = ANY(nice_class_numbers))"
                 norm_params.append(target_classes)
 
@@ -779,8 +732,6 @@ class RiskEngine:
                     seen_ids.add(match[0])
                     all_candidates.append(match)
 
-        # ── Stage 1c: Exact match for translated query (non-Turkish only) ──
-        # "golden eagle" translated to "altın kartal" → exact match on name
         if translated_normalized:
             tr_exact_sql = """
                 SELECT id, application_no, name, nice_class_numbers, image_path,
@@ -825,14 +776,9 @@ class RiskEngine:
                     seen_ids.add(match[0])
                     all_candidates.append(match)
 
-        # ── Stage 2: Containment match for short queries ──
-        # Single-word search "STAR" should find "STARLIGHT", "GOLDSTAR", "MEGASTAR".
-        # Uses LIKE '%query%' on Turkish-normalized name. Only for 1-word queries
-        # (multi-word queries use the token LIKE stage below instead).
         from idf_scoring import tokenize as _tok
         from idf_lookup import IDFLookup as _IDF
         _q_tokens = _tok(name_input)
-        # Also include tokens from translated query (e.g., "golden","eagle" + "altin","kartal")
         if translated_name:
             _q_tokens = _q_tokens | _tok(translated_name)
         _distinctive_tokens = [w for w in _q_tokens if _IDF.get_word_class(w) == 'distinctive']
@@ -868,7 +814,6 @@ class RiskEngine:
                 contain_sql += " AND (nice_class_numbers && %s::integer[] OR 99 = ANY(nice_class_numbers))"
                 contain_params.append(target_classes)
 
-            # Also search translated form (e.g. "APPLE" → "elma" → find "elma bahçesi")
             if translated_normalized and _distinctive_tokens:
                 tr_dtok = normalize_turkish(translated_name) if translated_name else None
                 if tr_dtok and tr_dtok != escaped:
@@ -892,11 +837,6 @@ class RiskEngine:
                     seen_ids.add(match[0])
                     all_candidates.append(match)
 
-        # ── Stage 2.5: Token-level search for multi-word queries ──
-        # For queries like "dogan patent", the full-string pg_trgm similarity
-        # to "doğan" is too low (length mismatch). This step tokenizes the
-        # query, picks distinctive words, and searches for trademarks whose
-        # Turkish-normalized name CONTAINS any of those tokens.
         if _distinctive_tokens and len(_tok(name_input)) > 1:
             # Build LIKE clauses for each distinctive token (Turkish-normalized)
             # Escape LIKE special chars to prevent injection
@@ -936,8 +876,6 @@ class RiskEngine:
                 token_sql += " AND (nice_class_numbers && %s::integer[] OR 99 = ANY(nice_class_numbers))"
                 tok_params.append(target_classes)
 
-            # Order by name length so shorter (more relevant) names come first.
-            # "doğan" is more relevant than "hakan aydoğan h.a.-ay-med medikal..."
             token_sql += " ORDER BY length(name) ASC LIMIT 20;"
             cur.execute(token_sql, tok_params)
             token_matches = cur.fetchall()
@@ -947,10 +885,6 @@ class RiskEngine:
                     seen_ids.add(match[0])
                     all_candidates.append(match)
 
-        # ── Stage 3: Semantic vector search (MiniLM text_embedding via HNSW) ──
-        # Catches conceptual/semantic matches that text stages miss entirely.
-        # "APPLE" finds "ELMA" via embedding proximity without translation.
-        # Uses pgvector HNSW index — ~50ms for millions of rows.
         try:
             q_text_vec = self.text_model.encode(name_input).tolist()
             vec_sql = """
@@ -988,10 +922,6 @@ class RiskEngine:
         except Exception as e:
             logger.warning("Text vector search stage failed, continuing without", error=str(e))
 
-        # ── Stage 4: Image vector search (CLIP via HNSW index) ──
-        # When user uploads a logo, find visually similar trademarks.
-        # Uses CLIP only for ordering (has HNSW index, ~200ms).
-        # DINOv2 contributes to scoring later in calculate_hybrid_risk.
         if q_img_vec:
             try:
                 img_sql = """
@@ -1029,10 +959,6 @@ class RiskEngine:
             except Exception as e:
                 logger.warning("Image vector search stage failed, continuing without", error=str(e))
 
-        # ── Stage 4.5: OCR text search (logo text matching via GiST trigram) ──
-        # Searches logo_ocr_text column for: (a) the user's text query, and
-        # (b) OCR text extracted from an uploaded logo image.
-        # Catches cases like logo with "STAR" text → finds other logos containing "STAR".
         ocr_queries = set()
         if name_input and name_input.strip():
             ocr_queries.add(normalize_turkish(name_input.strip()))
@@ -1086,11 +1012,6 @@ class RiskEngine:
                 logger.warning("OCR text search failed for query", ocr_query=ocr_q, error=str(e))
 
         # ── Stage 4.6: Phonetic pre-screening (dmetaphone) ──
-        # Catches phonetically similar marks that all text stages miss.
-        # "NAIK" and "NIKE" share dmetaphone code "NK" but have zero trigram
-        # overlap and different characters.  This is the ONLY stage that
-        # can surface these matches.
-        # Uses PostgreSQL fuzzystrmatch extension (already installed).
         if name_input and name_input.strip() and len(name_normalized) >= 2:
             try:
                 qlen = len(name_input.strip())
@@ -1150,10 +1071,8 @@ class RiskEngine:
             except Exception as e:
                 logger.warning("Phonetic pre-screen failed, continuing without", error=str(e))
 
-        # ── Stage 5: Trigram similarity (pg_trgm with 0.3 floor) ──
         remaining_limit = limit - len(all_candidates)
         if remaining_limit > 0:
-            # Build translated similarity columns if we have a translation
             tr_sim_cols = ""
             tr_order_cols = ""
             tr_select_params = []
@@ -1209,7 +1128,6 @@ class RiskEngine:
                 params.append(attorney_no)
 
             if target_classes and len(target_classes) > 0:
-                # Class 99 (Global Brand) covers ALL 45 classes - include in any class filter
                 sql += " AND (nice_class_numbers && %s::integer[] OR 99 = ANY(nice_class_numbers))"
                 params.append(target_classes)
 
@@ -1280,7 +1198,6 @@ class RiskEngine:
             sql += " AND (nice_class_numbers && %s::integer[] OR 99 = ANY(nice_class_numbers))"
             params.append(target_classes)
 
-        # Duplicate vector params for ORDER BY (score_expr appears twice in query)
         order_params = []
         if q_img_vec:
             order_params.append(str(q_img_vec))
@@ -1302,7 +1219,6 @@ class RiskEngine:
 
         candidate_ids = [str(c[0]) for c in candidates]
 
-        # Build visual columns: CLIP, DINOv2, color cosine + OCR text
         clip_col = f"(1 - (t.image_embedding <=> %s::halfvec))" if query_img_vec else "0.0"
         dino_col = f"(1 - (t.dinov2_embedding <=> %s::halfvec))" if query_dino_vec else "0.0"
         color_col = f"(1 - (t.color_histogram <=> %s::halfvec))" if query_color_vec else "0.0"
@@ -1364,7 +1280,6 @@ class RiskEngine:
             has_eg = bool(r[21]) if len(r) > 21 and r[21] is not None else False
             raw_extracted_goods = r[22] if len(r) > 22 else None
 
-            # Full composite visual score (CLIP 0.35 + DINOv2 0.30 + color 0.15 + OCR 0.20)
             vis = calculate_visual_similarity(
                 clip_sim=clip_sim,
                 dinov2_sim=dino_sim,
@@ -1433,12 +1348,9 @@ class RiskEngine:
         vec_duration = (time.perf_counter() - vec_start) * 1000
         logger.debug("Query vectors generated", duration_ms=round(vec_duration, 2), has_image_vec=q_img_vec is not None, has_ocr=bool(q_ocr_text))
 
-        # Pre-screening: unified pipeline for both text and image searches
         screen_start = time.perf_counter()
         logger.debug("Pre-screen decision", name_empty=not name.strip(), has_img_vec=q_img_vec is not None, has_dino_vec=q_dino_vec is not None, has_ocr=bool(q_ocr_text))
         if not name.strip() and (q_img_vec or q_dino_vec):
-            # Image-only search: use OCR text as the text query if available
-            # This enables text stages (exact, containment, trigram) using logo text
             ocr_name = q_ocr_text.strip() if q_ocr_text else ""
             raw_candidates = self.pre_screen_candidates(ocr_name, target_classes, limit=500, status_filter=status_filter, attorney_no=attorney_no, q_img_vec=q_img_vec, q_dino_vec=q_dino_vec, q_ocr_text=q_ocr_text)
             logger.info("Pre-screening by IMAGE+OCR", candidates=len(raw_candidates), ocr_text=ocr_name[:50])
@@ -1495,7 +1407,6 @@ class RiskEngine:
         report(10, "Starting live investigation")
 
         try:
-            # Use the global scrape lock to serialize TurkPatent requests (prevent IP blocking)
             from agentic_search import _scrape_lock
 
             report(15, "Waiting for scrape queue...")

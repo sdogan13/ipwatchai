@@ -8,7 +8,6 @@ and provides fast lookups for scoring trademark similarity.
 Usage:
     from idf_lookup import IDFLookup
 
-    # Get IDF score for a word (higher = more distinctive)
     score = IDFLookup.get_idf("dogan")  # Returns ~5.0 (distinctive)
     score = IDFLookup.get_idf("patent") # Returns ~1.6 (generic)
 
