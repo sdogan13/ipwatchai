@@ -19,11 +19,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 from datetime import datetime
 
-# Ensure project root is in path
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
-
+# Path setup handled by conftest.py
 
 # ==========================================================
 # 1. SECRET KEY VALIDATION

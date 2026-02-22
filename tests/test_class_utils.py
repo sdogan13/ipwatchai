@@ -17,7 +17,6 @@ import os
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from utils.class_utils import (
     GLOBAL_CLASS,

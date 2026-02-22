@@ -17,7 +17,6 @@ from unittest.mock import patch
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from idf_scoring import compute_idf_weighted_score, tokenize, normalize_turkish
 from risk_engine import (

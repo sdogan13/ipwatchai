@@ -10,7 +10,6 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from utils.translation import (
     detect_language_fasttext,
