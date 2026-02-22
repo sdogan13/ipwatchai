@@ -101,8 +101,22 @@ class IDFLookup:
                         'doc_freq': doc_freq
                     }
 
+                # Apply FOREIGN_GENERICS_OVERRIDE: force known generic terms
+                # to IDF=2.0 regardless of their statistical rarity in DB.
+                from foreign_generics import FOREIGN_GENERICS_OVERRIDE
+                overridden = 0
+                for word in FOREIGN_GENERICS_OVERRIDE:
+                    if word in cls._cache:
+                        cls._cache[word]['idf'] = 2.0
+                        cls._cache[word]['is_generic'] = True
+                        overridden += 1
+                    else:
+                        # Word not in DB at all — insert it so lookups return 2.0
+                        cls._cache[word] = {'idf': 2.0, 'is_generic': True, 'doc_freq': 0}
+                        overridden += 1
+
                 cls._loaded = True
-                logger.info(f"IDFLookup: Loaded {len(cls._cache):,} word scores into memory")
+                logger.info(f"IDFLookup: Loaded {len(cls._cache):,} word scores into memory (overrode {overridden} generic terms)")
 
             finally:
                 conn.close()
@@ -130,6 +144,12 @@ class IDFLookup:
             cls.load()
 
         word_norm = normalize_turkish(word)
+
+        # Force known generic words (English + Turkish) to a low IDF
+        from utils.idf_scoring import FOREIGN_GENERICS_OVERRIDE
+        if word_norm in FOREIGN_GENERICS_OVERRIDE:
+            return 2.0
+
         entry = cls._cache.get(word_norm)
 
         if entry:
@@ -192,11 +212,17 @@ class IDFLookup:
         - SEMI_GENERIC: 5.3 <= IDF < 6.9 (0.1%-0.5%)
         - DISTINCTIVE: IDF >= 6.9 (<0.1%)
         """
+        from utils.idf_scoring import FOREIGN_GENERICS_OVERRIDE
+
+        word_norm = normalize_turkish(word)
+        if word_norm in FOREIGN_GENERICS_OVERRIDE:
+            return 'generic'
+
         idf = cls.get_idf(word)
 
-        if idf < 6.0:
+        if idf < 5.5:
             return 'generic'
-        elif idf < 7.5:
+        elif idf < 8.0:
             return 'semi_generic'
         else:
             return 'distinctive'

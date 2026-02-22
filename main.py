@@ -302,7 +302,6 @@ from api.routes import (
     usage_router,
 )
 from api.reports import router as reports_router
-from api.upload import router as upload_router
 from api.leads import router as leads_router
 from api.holders import router as holders_router
 try:
@@ -344,7 +343,7 @@ if attorneys_router:
 app.include_router(usage_router, prefix="/api/v1")
 
 # File upload routes
-app.include_router(upload_router)
+# (Removed upload_router as api/upload.py is empty)
 
 # Creative Suite (Name Generator + Logo Studio)
 app.include_router(creative_router)

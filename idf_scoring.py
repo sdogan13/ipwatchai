@@ -58,16 +58,10 @@ def compute_idf_weighted_score(
     phonetic_sim: float = 0.0,
     visual_sim: float = 0.0
 ) -> Tuple[float, Dict]:
-    """
-    Compute IDF-weighted similarity score between query and target.
-
-    Uses 3-tier classification:
-    - DISTINCTIVE words (weight=1.0) are most important
-    - SEMI_GENERIC words (weight=0.5) are moderately important
-    - GENERIC words (weight=0.1) are least important
+    """Compute IDF-weighted similarity score between query and target.
 
     Args:
-        query: Search query (e.g., "dogan patent")
+        query: Search query
         target: Candidate trademark name
         text_sim: Lexical similarity score (0-1)
         semantic_sim: Semantic embedding similarity (0-1)
@@ -294,13 +288,7 @@ def compute_idf_weighted_score(
     # ==========================================
 
     def _compute_length_dilution():
-        """Per-word dilution penalty for ALL unmatched words on both sides.
-
-        Uses the pre-computed _q_unmatched / _t_unmatched sets so that
-        dilution fires even when both sides have the same token count
-        (e.g. "ip watch ai" vs "ip ikram pastanesi" — both 3 tokens
-        but 4 unmatched words).
-        """
+        """Per-word dilution penalty for ALL unmatched words on both sides."""
         if not _q_unmatched and not _t_unmatched:
             return 0.0
         penalty = 0.0

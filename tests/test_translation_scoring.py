@@ -41,23 +41,23 @@ def seed_idf_lookup():
     IDFLookup._loaded = True
     IDFLookup._total_docs = 2_300_000
 
-    # Seed distinctive words (IDF >= 7.5)
+    # Seed distinctive words (IDF >= 8.0)
     distinctive = [
         "elma", "kaplan", "nike", "bmw", "motors", "dunya",
         "kirmizi", "yesil", "gunes", "dünyası",
     ]
     for w in distinctive:
-        IDFLookup._cache[w] = {"idf": 8.0, "is_generic": False, "doc_freq": 50}
+        IDFLookup._cache[w] = {"idf": 9.0, "is_generic": False, "doc_freq": 50}
 
-    # Seed generic words (IDF < 6.0)
+    # Seed generic words (IDF < 5.5)
     generic = ["ve", "ltd", "sti", "san", "tic", "market"]
     for w in generic:
         IDFLookup._cache[w] = {"idf": 2.0, "is_generic": True, "doc_freq": 500_000}
 
-    # Seed semi-generic words (6.0 <= IDF < 7.5)
+    # Seed semi-generic words (5.5 <= IDF < 8.0)
     semi = ["patent", "marka", "grup"]
     for w in semi:
-        IDFLookup._cache[w] = {"idf": 6.0, "is_generic": False, "doc_freq": 5_000}
+        IDFLookup._cache[w] = {"idf": 7.5, "is_generic": False, "doc_freq": 5_000}
 
     # Also seed utils.idf_scoring._word_data because risk engine imports it directly
     from utils.idf_scoring import _word_data
@@ -65,8 +65,8 @@ def seed_idf_lookup():
         _word_data[word] = {
             'idf': data['idf'],
             'doc_freq': data['doc_freq'],
-            'weight': 1.0 if data['idf'] >= 7.5 else (0.5 if data['idf'] >= 6.0 else 0.1),
-            'word_class': 'distinctive' if data['idf'] >= 7.5 else ('semi_generic' if data['idf'] >= 6.0 else 'generic')
+            'weight': 1.0 if data['idf'] >= 8.0 else (0.5 if data['idf'] >= 5.5 else 0.1),
+            'word_class': 'distinctive' if data['idf'] >= 8.0 else ('semi_generic' if data['idf'] >= 5.5 else 'generic')
         }
 
     yield

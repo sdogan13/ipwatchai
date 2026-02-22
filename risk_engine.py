@@ -121,12 +121,7 @@ def calculate_visual_similarity(
 
 def get_status_category(status):
     """
-    Categorizes trademark status for user guidance.
-
-    CANCELLED = WARNING (not opportunity!) because:
-    - Usually means court cancelled after legal battle
-    - Indicates the name is being actively defended
-    - Previous applicant lost in court/appeal
+    Categorizes trademark status into risk levels and returns user guidance messages.
     """
     categories = {
         # HIGH RISK - Blocks your application
@@ -265,23 +260,16 @@ def _dynamic_combine(
 ) -> dict:
     """
     Combine all scoring signals with dynamic confidence-based weighting.
-
-    Each signal has a base weight reflecting its importance. Signals with higher
-    scores get exponentially boosted weight (confident = more influence). Signals
-    with score=0 get weight=0 (dead signals don't dilute active ones). Weights
-    are normalized to sum to 1.0.
-
-    Phonetic similarity is NOT a separate signal here — it is already incorporated
-    inside compute_idf_weighted_score() as part of `base = max(text_sim, semantic_sim,
-    phonetic_sim)` in Cases B-F. Adding it here would double-count it.
+    Signals with higher scores receive exponentially boosted weights. 
+    Phonetic similarity is naturally incorporated within `text_idf_score`.
 
     Args:
-        text_idf_score: IDF-weighted text score from Cases A-F (includes phonetic)
-        visual_sim: Combined CLIP+DINOv2+color+OCR visual similarity
-        translation_sim: Cross-language translation similarity
+        text_idf_score: IDF-weighted text score
+        visual_sim: Combined visual similarity
+        translation_sim: Cross-language similarity
 
     Returns:
-        dict with 'total' and 'dynamic_weights'
+        dict: combined `total` score and applied `dynamic_weights`
     """
     BASE_WEIGHTS = {
         "text":        0.60,
@@ -783,6 +771,12 @@ class RiskEngine:
             _q_tokens = _q_tokens | _tok(translated_name)
         _distinctive_tokens = [w for w in _q_tokens if _IDF.get_word_class(w) == 'distinctive']
 
+        # Fallback: if the query consists entirely of semi-generic or generic words,
+        # use the semi-generic words for the keyword containment search so we don't
+        # rely 100% on the vector search (which might miss exact substring matches).
+        if not _distinctive_tokens:
+            _distinctive_tokens = [w for w in _q_tokens if _IDF.get_word_class(w) == 'semi_generic']
+
         if _distinctive_tokens and len(_tok(name_input)) == 1:
             # Single distinctive word — containment search
             dtok = _distinctive_tokens[0]
@@ -838,8 +832,55 @@ class RiskEngine:
                     all_candidates.append(match)
 
         if _distinctive_tokens and len(_tok(name_input)) > 1:
-            # Build LIKE clauses for each distinctive token (Turkish-normalized)
-            # Escape LIKE special chars to prevent injection
+            # 1) Search for candidates that contain ALL distinctive tokens (AND logic)
+            # This is critical for finding 'd.p. doğan patent' when searching 'dogan patent'.
+            # An OR logic query gets flooded by short single-word matches.
+            and_clauses = []
+            and_params = []
+            for dtok in _distinctive_tokens:
+                escaped = dtok.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+                and_clauses.append("""
+                    LOWER(
+                        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+                        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(name,
+                        'ğ','g'),'Ğ','g'),'ı','i'),'İ','i'),'ö','o'),'Ö','o'),
+                        'ü','u'),'Ü','u'),'ş','s'),'Ş','s'),'ç','c'),'Ç','c')
+                    ) LIKE %s ESCAPE '\\'
+                """)
+                and_params.append(f'%{escaped}%')
+
+            and_sql = """
+                SELECT id, application_no, name, nice_class_numbers, image_path,
+                       0.85 as lexical_score
+                FROM trademarks
+                WHERE (""" + " AND ".join(and_clauses) + """)
+                  AND current_status NOT IN ('Refused', 'Withdrawn')
+                  AND (application_date >= NOW() - INTERVAL '11 years' OR application_date IS NULL)
+            """
+            tok_and_params = list(and_params)
+
+            if status_filter:
+                and_sql += " AND current_status = %s"
+                tok_and_params.append(status_filter)
+
+            if attorney_no:
+                and_sql += " AND attorney_no = %s"
+                tok_and_params.append(attorney_no)
+
+            if target_classes and len(target_classes) > 0:
+                and_sql += " AND (nice_class_numbers && %s::integer[] OR 99 = ANY(nice_class_numbers))"
+                tok_and_params.append(target_classes)
+
+            and_sql += " ORDER BY length(name) ASC LIMIT 30;"
+            cur.execute(and_sql, tok_and_params)
+            and_matches = cur.fetchall()
+
+            for match in and_matches:
+                if match[0] not in seen_ids:
+                    seen_ids.add(match[0])
+                    all_candidates.append(match)
+
+            # 2) Fallback to OR logic for partial matches
             like_clauses = []
             token_params = []
             for dtok in _distinctive_tokens:

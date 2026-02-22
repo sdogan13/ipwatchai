@@ -59,9 +59,9 @@ _cache_loaded: bool = False
 
 # IDF thresholds for word classification
 # Based on analysis of Turkish trademark corpus
-IDF_THRESHOLD_GENERIC = 6.0      # IDF < 5.3 = GENERIC (>0.5% of docs)
-IDF_THRESHOLD_SEMI_GENERIC = 7.5  # 5.3 <= IDF < 6.9 = SEMI_GENERIC (0.1-0.5%)
-                                  # IDF >= 6.9 = DISTINCTIVE (<0.1%)
+IDF_THRESHOLD_GENERIC = 5.5       # IDF < 5.5 = GENERIC
+IDF_THRESHOLD_SEMI_GENERIC = 8.0  # 5.5 <= IDF < 8.0 = SEMI_GENERIC
+                                  # IDF >= 8.0 = DISTINCTIVE
 
 # Weight multipliers by class
 WEIGHT_GENERIC = 0.1       # Generic words contribute very little
@@ -70,8 +70,18 @@ WEIGHT_DISTINCTIVE = 1.0   # Unique brand names contribute fully
 
 
 # ===============================================================
+# FOREIGN GENERICS OVERRIDE
+# ===============================================================
+# Imported from standalone module to avoid circular imports with idf_lookup.py
+from foreign_generics import FOREIGN_GENERICS_OVERRIDE  # noqa: F401
+
+FOREIGN_GENERICS_OVERRIDE = FOREIGN_GENERICS_OVERRIDE  # re-export for back-compat
+
+
+# ===============================================================
 # INITIALIZATION
 # ===============================================================
+
 
 async def initialize_idf_scoring(db_pool) -> bool:
     """
@@ -122,8 +132,11 @@ async def initialize_idf_scoring(db_pool) -> bool:
                 idf = float(row['idf_score'])
                 doc_freq = int(row['document_frequency'])
 
-                # Classify word based on IDF
-                if idf < IDF_THRESHOLD_GENERIC:
+                if word in FOREIGN_GENERICS_OVERRIDE:
+                    idf = 2.0
+                    word_class = 'generic'
+                    weight = WEIGHT_GENERIC
+                elif idf < IDF_THRESHOLD_GENERIC:
                     word_class = 'generic'
                     weight = WEIGHT_GENERIC
                 elif idf < IDF_THRESHOLD_SEMI_GENERIC:
@@ -185,7 +198,11 @@ def initialize_idf_scoring_sync():
         for word, idf, doc_freq in cur.fetchall():
             idf = float(idf)
 
-            if idf < IDF_THRESHOLD_GENERIC:
+            if word in FOREIGN_GENERICS_OVERRIDE:
+                idf = 2.0
+                word_class = 'generic'
+                weight = WEIGHT_GENERIC
+            elif idf < IDF_THRESHOLD_GENERIC:
                 word_class = 'generic'
                 weight = WEIGHT_GENERIC
             elif idf < IDF_THRESHOLD_SEMI_GENERIC:
@@ -376,18 +393,9 @@ def calculate_adjusted_score(
     candidate_text: str,
     include_details: bool = False
 ) -> dict:
-    """
-    THE MAIN SCORING FUNCTION - Use this everywhere!
-
-    Adjusts raw similarity score based on IDF weights using GRADUAL PENALTY.
-    Uses blend factor to ensure scores decrease gradually, not suddenly.
-
+    """Adjusts raw similarity score based on IDF weights using a gradual penalty.
+    
     Formula: adjusted = raw * (BLEND_FACTOR + (1 - BLEND_FACTOR) * idf_weight)
-
-    This ensures:
-    - High IDF weight (1.0 distinctive) -> minimal penalty (blended = 1.0)
-    - Medium IDF weight (0.5 semi-generic) -> moderate penalty (blended = 0.7)
-    - Low IDF weight (0.1 generic) -> larger penalty but not extreme (blended = 0.46)
 
     Args:
         raw_similarity: Original similarity score (0.0 to 1.0)
@@ -396,19 +404,7 @@ def calculate_adjusted_score(
         include_details: Include word-level breakdown
 
     Returns:
-        {
-            'raw_score': 0.85,
-            'adjusted_score': 0.39,  # Gradual penalty applied
-            'idf_weight': 0.1,
-            'blended_weight': 0.46,
-            'blend_factor': 0.4,
-            'details': {...}  # if include_details=True
-        }
-
-    Examples with BLEND_FACTOR=0.4:
-        - idf_weight=1.0 (distinctive): blended=0.4+0.6*1.0=1.0 -> raw*1.0
-        - idf_weight=0.5 (semi-generic): blended=0.4+0.6*0.5=0.7 -> raw*0.7
-        - idf_weight=0.1 (generic): blended=0.4+0.6*0.1=0.46 -> raw*0.46
+        dict: Breakdown of the adjusted score
     """
     _ensure_loaded()
 
@@ -450,32 +446,14 @@ def calculate_adjusted_score(
 
 
 def calculate_text_similarity(query: str, target: str) -> float:
-    """
-    Calculate IDF-weighted text similarity between query and target.
-
-    This is the RECOMMENDED function for all text similarity calculations.
-    It combines:
-    - Turkish character normalization
-    - IDF weighting with GRADUAL PENALTY (not aggressive drops)
-    - Forward containment (query in target)
-    - Reverse containment (target in query) - CRITICAL for trademark law!
-
-    Uses blend factor approach:
-    - Distinctive match (weight=1.0): score * 1.0 (no penalty)
-    - Semi-generic match (weight=0.5): score * 0.7 (30% penalty)
-    - Generic match (weight=0.1): score * 0.46 (54% penalty)
+    """Calculate IDF-weighted text similarity between query and target.
 
     Args:
-        query: Search query or watchlist brand name
+        query: Search query
         target: Candidate trademark name
 
     Returns:
         float: Similarity score (0.0 to 1.0)
-
-    Examples:
-        "dogan patent" vs "doruk patent" -> ~0.35 (only generic matches, gradual penalty)
-        "sedat coffe" vs "sedat" -> ~0.90 (reverse containment - HIGH RISK)
-        "nike" vs "nike sports" -> ~0.90 (forward containment)
     """
     _ensure_loaded()
 
@@ -1129,15 +1107,7 @@ def calculate_length_ratio_factor(query_words: List[str], result_words: List[str
 
 def calculate_coverage_factor(query_words: List[str], result_words: List[str],
                               match_threshold: float = 0.75) -> Tuple[float, Dict]:
-    """
-    Softer coverage calculation with partial credit.
-
-    Key insight:
-    - "dogan patent" vs "erdogan patent ofisi"
-    - "dogan" gets PARTIAL credit (erdogan contains dogan)
-    - "patent" found (but it's generic)
-    - Coverage = MODERATE (partial + generic) = MODERATE PENALTY
-
+    """Calculate coverage factor evaluating partial character matches.
     Returns: (factor 0.25-1.0, details dict)
     """
     if not query_words:

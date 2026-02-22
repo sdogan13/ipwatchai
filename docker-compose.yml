@@ -27,17 +27,13 @@ services:
     container_name: ipwatch_redis
     restart: unless-stopped
     command: >
-      redis-server
-      --appendonly yes
-      --maxmemory 4gb
-      --maxmemory-policy allkeys-lru
-      ${REDIS_PASSWORD:+--requirepass ${REDIS_PASSWORD}}
+      redis-server --appendonly yes --maxmemory 4gb --maxmemory-policy allkeys-lru ${REDIS_PASSWORD:+--requirepass ${REDIS_PASSWORD}}
     volumes:
       - redis_data:/data
     ports:
       - "127.0.0.1:6379:6379"
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli ${REDIS_PASSWORD:+-a $REDIS_PASSWORD --no-auth-warning} ping | grep PONG"]
+      test: [ "CMD-SHELL", "redis-cli ${REDIS_PASSWORD:+-a $REDIS_PASSWORD --no-auth-warning} ping | grep PONG" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -132,6 +128,8 @@ services:
       - ./risk_engine.py:/app/risk_engine.py:ro
       - ./idf_scoring.py:/app/idf_scoring.py:ro
       - ./ai.py:/app/ai.py:ro
+      - ./foreign_generics.py:/app/foreign_generics.py:ro
+      - ./idf_lookup.py:/app/idf_lookup.py:ro
       # Mount API and database modules for development
       - ./api:/app/api:ro
       - ./database:/app/database:ro
@@ -145,7 +143,7 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -161,7 +159,7 @@ services:
           devices:
             - driver: nvidia
               count: 1
-              capabilities: [gpu]
+              capabilities: [ gpu ]
     networks:
       - ipwatch_network
 
@@ -181,7 +179,7 @@ services:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/health || exit 1"]
+      test: [ "CMD-SHELL", "wget -qO- http://127.0.0.1/health || exit 1" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -222,7 +220,7 @@ services:
     ports:
       - "127.0.0.1:5433:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U turk_patent -d trademark_db"]
+      test: [ "CMD-SHELL", "pg_isready -U turk_patent -d trademark_db" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -238,8 +236,8 @@ services:
       dockerfile: Dockerfile.backend
     container_name: ipwatch_worker
     restart: unless-stopped
-    profiles: ["with-worker"]  # Only start with: docker-compose --profile with-worker up
-    command: ["python", "-m", "watchlist.scanner", "--daemon"]
+    profiles: [ "with-worker" ] # Only start with: docker-compose --profile with-worker up
+    command: [ "python", "-m", "watchlist.scanner", "--daemon" ]
     environment:
       DB_HOST: ${DB_HOST:-postgres}
       DB_PORT: ${DB_PORT:-5432}
@@ -264,7 +262,7 @@ services:
           devices:
             - driver: nvidia
               count: 1
-              capabilities: [gpu]
+              capabilities: [ gpu ]
     networks:
       - ipwatch_network
 
@@ -277,8 +275,8 @@ services:
       dockerfile: Dockerfile.backend
     container_name: ipwatch_pipeline_worker
     restart: unless-stopped
-    profiles: ["with-worker"]
-    command: ["python", "-m", "workers.pipeline_scheduler"]
+    profiles: [ "with-worker" ]
+    command: [ "python", "-m", "workers.pipeline_scheduler" ]
     environment:
       DB_HOST: ${DB_HOST:-postgres}
       DB_PORT: ${DB_PORT:-5432}
@@ -310,7 +308,7 @@ services:
           devices:
             - driver: nvidia
               count: 1
-              capabilities: [gpu]
+              capabilities: [ gpu ]
     networks:
       - ipwatch_network
 
@@ -323,8 +321,8 @@ services:
       dockerfile: Dockerfile.backend
     container_name: ipwatch_credit_reset
     restart: unless-stopped
-    profiles: ["with-worker"]
-    command: ["python", "-m", "workers.credit_reset", "--daemon"]
+    profiles: [ "with-worker" ]
+    command: [ "python", "-m", "workers.credit_reset", "--daemon" ]
     environment:
       DB_HOST: ${DB_HOST:-postgres}
       DB_PORT: ${DB_PORT:-5432}
@@ -343,7 +341,7 @@ services:
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: ipwatch_pgadmin
-    profiles: ["dev"]
+    profiles: [ "dev" ]
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@ipwatchai.com}
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
@@ -358,7 +356,7 @@ services:
   redis-commander:
     image: rediscommander/redis-commander:latest
     container_name: ipwatch_redis_ui
-    profiles: ["dev"]
+    profiles: [ "dev" ]
     environment:
       - REDIS_HOSTS=local:redis:6379${REDIS_PASSWORD:+:${REDIS_PASSWORD}}
     ports:
