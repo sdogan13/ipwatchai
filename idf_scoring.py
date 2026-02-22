@@ -116,19 +116,8 @@ def compute_idf_weighted_score(
 
     # ==========================================
     # CHECK 2: Unified IDF-weighted token matching
-    #
-    # All non-exact matches flow through a single waterfall that:
-    #   1. Scores each query token as exact match (full weight) or
     #      fuzzy match (discounted weight) against target tokens
-    #   2. Classifies by IDF tier: distinctive(1.0), semi_generic(0.5), generic(0.1)
-    #   3. Computes exact_token_ratio (proportion of query tokens matched exactly)
-    #   4. Routes to Cases A-F based on distinctive % matched
-    #   5. Applies length dilution for extra unmatched words
-    #
-    # Containment (one side's tokens ⊂ the other) is detected as a
-    # signal but NOT a separate early-return path, ensuring that
     # exact token matches always outrank fuzzy matches regardless
-    # of which scoring path fires.
     # ==========================================
     q_tokens = tokenize(query)
     t_tokens = tokenize(target)
@@ -187,20 +176,12 @@ def compute_idf_weighted_score(
                 "weight": weight_mult
             })
         else:
-            # Check for fuzzy match with length-adaptive threshold.
-            # Short words (≤4 chars) need higher similarity to match because
-            # a single char diff in a 4-char word always gives 0.75, causing
-            # false positives like "nike"/"mike", "star"/"scar", "gold"/"bold".
             best_ratio = 0
             best_target = None
 
             for t_word in t_tokens:
                 min_len = min(len(q_word), len(t_word))
                 if min_len <= 4:
-                    # Lowered from 0.85 to 0.75: for 4-char words, a single char
-                    # difference (e.g., "naik"/"nike", "nike"/"mike") gives 0.75.
-                    # These ARE confusingly similar in trademark law. The fuzzy-only
-                    # ceilings in Cases A (0.82) and B (0.78) prevent over-scoring.
                     threshold = 0.75
                 elif min_len <= 5:
                     threshold = 0.80
@@ -208,8 +189,6 @@ def compute_idf_weighted_score(
                     threshold = 0.75
                 ratio = SequenceMatcher(None, q_word, t_word).ratio()
                 # Adjacent transposition boost: "naik"↔"naki" is a common
-                # confusion pattern that SequenceMatcher underscores (0.75).
-                # Treat as near-exact match (0.92) regardless of threshold.
                 if _has_adjacent_transposition(q_word, t_word):
                     ratio = max(ratio, 0.92)
                 if ratio > best_ratio and ratio >= threshold:
@@ -219,10 +198,6 @@ def compute_idf_weighted_score(
             if best_target:
                 adjusted_weight = weight_mult * best_ratio
 
-                # Penalize length-mismatched fuzzy matches in BOTH directions:
-                # - "dogan" vs "ozdogan" (target longer → substring embed)
-                # - "dogan" vs "doga" (target shorter → truncation/different word)
-                # Either way the words are NOT near-equivalent.
                 len_q = len(q_word)
                 len_t = len(best_target)
                 if len_t != len_q:
@@ -281,32 +256,20 @@ def compute_idf_weighted_score(
     # KEY METRICS for unified scoring
     # ------------------------------------------------------------------
 
-    # 1. Exact token ratio: proportion of query tokens matched EXACTLY
-    #    (not fuzzy). This is the PRIMARY signal — exact word matches
-    #    always outrank fuzzy matches.
     n_exact = sum(1 for m in matched_words if m.get("match_type") == "exact")
     n_fuzzy = sum(1 for m in matched_words if m.get("match_type") == "fuzzy")
     n_q = len(q_tokens)
     exact_token_ratio = n_exact / n_q if n_q > 0 else 0.0
 
-    # 2. Exact IDF-weighted ratio: how much of query's IDF weight is
-    #    covered by EXACT matches (not fuzzy).
     exact_weight = sum(
         m["weight"] for m in matched_words if m.get("match_type") == "exact"
     )
     exact_idf_ratio = exact_weight / total_weight if total_weight > 0 else 0.0
 
-    # 3. Containment signal (informational, not an early return)
     q_in_t = q_tokens and t_tokens and q_tokens.issubset(t_tokens)
     t_in_q = t_tokens and q_tokens and t_tokens.issubset(q_tokens) and t_tokens != q_tokens
     breakdown["containment"] = 1.0 if q_in_t else (0.5 if t_in_q else 0.0)
 
-    # 4. Unmatched words (for dilution)
-    #    Count words on BOTH sides that didn't participate in any match.
-    #    This is the true measure of "extra" words — not just the token
-    #    count difference.  "ip" vs "ip watch ai" has 2 unmatched query
-    #    words, and "ip ikram pastanesi" vs "ip watch ai" has 4 unmatched
-    #    words (2 query + 2 target) despite both sides having 3 tokens.
     _matched_q_words = set()
     _matched_t_words = set()
     for m in matched_words:
@@ -316,7 +279,6 @@ def compute_idf_weighted_score(
     _t_unmatched = t_tokens - _matched_t_words
     n_unmatched = len(_q_unmatched) + len(_t_unmatched)
 
-    # 5. Distinctive match percentage
     if distinctive_weight_total > 0:
         distinctive_pct = distinctive_match / distinctive_weight_total
     else:
@@ -328,14 +290,7 @@ def compute_idf_weighted_score(
 
     # ==========================================
     # SCORING LOGIC: Hierarchical token matching
-    #
-    # Priority order:
-    #   1. Exact token coverage (exact_token_ratio, exact_idf_ratio)
-    #   2. IDF-weighted overlap (distinctive_pct, weighted_overlap)
-    #   3. Fuzzy/semantic signals (text_sim, phonetic_sim, etc.)
-    #
     # Length dilution: extra unmatched words dilute the score
-    # proportionally by their IDF class.
     # ==========================================
 
     def _compute_length_dilution():
@@ -364,10 +319,8 @@ def compute_idf_weighted_score(
     # ------------------------------------------------------------------
     if distinctive_pct >= 0.8:
         # Sub-case A1: Has exact distinctive token matches
-        #   "d.p dogan patent" vs query "dogan patent ve danismanlik"
         #   → "dogan" exact, "patent" exact → high score
         # Sub-case A2: Fuzzy-only distinctive matches
-        #   "dogam egitim" vs query "dogan patent" → "dogam"~"dogan" fuzzy
         #   → lower ceiling than exact matches
 
         has_exact_distinctive = any(
@@ -377,8 +330,6 @@ def compute_idf_weighted_score(
 
         if has_exact_distinctive:
             # Score driven by exact coverage proportion
-            # exact_idf_ratio captures how much of the query's weight is
-            # covered by exact matches — this is the primary signal.
             base_score = max(0.90, exact_idf_ratio + 0.45, weighted_overlap + 0.20, text_sim)
             base_score = min(0.98, base_score)  # 1.0 reserved for exact match
         else:
@@ -414,11 +365,6 @@ def compute_idf_weighted_score(
             final_score = max(0.60, base + distinctive_pct * 0.15 + exact_bonus)
             final_score = min(0.92, final_score)
         else:
-            # Fuzzy-only: Cap lower than exact matches. Use PHONETIC similarity
-            # as the differentiator — marks that SOUND alike are higher risk
-            # than marks that just share similar character sequences.
-            # This prevents "naıl" (phon 0.47) from scoring the same as
-            # "nike" (phon 0.86) just because both have 0.75 fuzzy ratio.
             if phonetic_sim > 0.80:
                 ceiling = 0.80   # Words sound alike — high risk
             elif phonetic_sim > 0.50:
@@ -487,10 +433,7 @@ def compute_idf_weighted_score(
     # ------------------------------------------------------------------
     else:
         best_signal = max(text_sim, semantic_sim, phonetic_sim)
-        # When phonetic similarity is high (>0.80), two words sound alike
-        # even if the IDF token matching failed.  Use a gentler multiplier
         # so that phonetic-near-misses like "NAIK"/"NAKO" (phonetic 0.92)
-        # still surface as medium risk rather than being crushed to 0.25.
         if phonetic_sim > 0.80:
             final_score = best_signal * 0.80
         else:

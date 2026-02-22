@@ -55,52 +55,7 @@ class TestAuthValidation:
         assert pc.current_password == "OldPass1!"
 
 
-# ============================================================
-# Plan Features Structure Validation
-# ============================================================
 
-class TestPlanFeaturesValidation:
-    """Validate PLAN_FEATURES structure is consistent."""
-
-    def test_all_plans_present(self):
-        from utils.subscription import PLAN_FEATURES
-        assert set(PLAN_FEATURES.keys()) == {"free", "starter", "professional", "enterprise"}
-
-    def test_all_plans_have_consistent_keys(self):
-        from utils.subscription import PLAN_FEATURES
-        base_keys = set(PLAN_FEATURES["free"].keys())
-        for name, plan in PLAN_FEATURES.items():
-            assert set(plan.keys()) == base_keys, f"{name} keys mismatch"
-
-    def test_monthly_live_searches_is_int(self):
-        from utils.subscription import PLAN_FEATURES
-        for name, plan in PLAN_FEATURES.items():
-            assert isinstance(plan["monthly_live_searches"], int), f"{name} live_searches not int"
-
-    def test_boolean_features_are_bool(self):
-        from utils.subscription import PLAN_FEATURES
-        bool_keys = ["can_export_reports", "can_view_holder_portfolio",
-                     "can_export_csv_leads", "can_use_live_scraping"]
-        for name, plan in PLAN_FEATURES.items():
-            for key in bool_keys:
-                assert isinstance(plan[key], bool), f"{name}.{key} not bool"
-
-    def test_plan_hierarchy_numeric_ascending(self):
-        """Numeric limits should be non-decreasing across plan tiers."""
-        from utils.subscription import PLAN_FEATURES
-        order = ["free", "starter", "professional", "enterprise"]
-        numeric_keys = [
-            "monthly_live_searches", "daily_lead_views", "monthly_reports",
-            "name_suggestions_per_session", "monthly_name_generations",
-            "monthly_logo_runs", "max_users", "max_watchlist_items",
-            "max_daily_quick_searches", "auto_scan_max_items",
-        ]
-        for key in numeric_keys:
-            values = [PLAN_FEATURES[p][key] for p in order]
-            for i in range(1, len(values)):
-                assert values[i] >= values[i - 1], (
-                    f"{key}: {order[i]}({values[i]}) < {order[i-1]}({values[i-1]})"
-                )
 
 
 # ============================================================

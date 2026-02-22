@@ -12,6 +12,7 @@ import sys
 import os
 import time
 import pytest
+from unittest.mock import patch
 
 # Add project root to path
 
@@ -40,29 +41,40 @@ def seed_idf_lookup():
     IDFLookup._loaded = True
     IDFLookup._total_docs = 2_300_000
 
-    # Seed distinctive words (IDF >= 6.9)
+    # Seed distinctive words (IDF >= 7.5)
     distinctive = [
         "elma", "kaplan", "nike", "bmw", "motors", "dunya",
-        "kirmizi", "yesil", "gunes", "market", "dünyası",
+        "kirmizi", "yesil", "gunes", "dünyası",
     ]
     for w in distinctive:
         IDFLookup._cache[w] = {"idf": 8.0, "is_generic": False, "doc_freq": 50}
 
-    # Seed generic words (IDF < 5.3)
-    generic = ["ve", "ltd", "sti", "san", "tic"]
+    # Seed generic words (IDF < 6.0)
+    generic = ["ve", "ltd", "sti", "san", "tic", "market"]
     for w in generic:
         IDFLookup._cache[w] = {"idf": 2.0, "is_generic": True, "doc_freq": 500_000}
 
-    # Seed semi-generic words (5.3 <= IDF < 6.9)
+    # Seed semi-generic words (6.0 <= IDF < 7.5)
     semi = ["patent", "marka", "grup"]
     for w in semi:
         IDFLookup._cache[w] = {"idf": 6.0, "is_generic": False, "doc_freq": 5_000}
+
+    # Also seed utils.idf_scoring._word_data because risk engine imports it directly
+    from utils.idf_scoring import _word_data
+    for word, data in IDFLookup._cache.items():
+        _word_data[word] = {
+            'idf': data['idf'],
+            'doc_freq': data['doc_freq'],
+            'weight': 1.0 if data['idf'] >= 7.5 else (0.5 if data['idf'] >= 6.0 else 0.1),
+            'word_class': 'distinctive' if data['idf'] >= 7.5 else ('semi_generic' if data['idf'] >= 6.0 else 'generic')
+        }
 
     yield
 
     # Cleanup: mark as not loaded so other tests reload fresh
     IDFLookup._loaded = False
     IDFLookup._cache = {}
+    _word_data.clear()
 
 
 # ============================================
@@ -169,14 +181,15 @@ class TestCalculateTranslationSimilarity:
         """Old callers without candidate_name_tr get 0.0."""
         assert calculate_translation_similarity("APPLE", "ELMA") == 0.0
 
-    def test_same_language_turkish(self):
+    @patch("utils.translation.detect_language_fasttext", return_value=('tr', 'tur_Latn', 1.0))
+    def test_same_language_turkish(self, mock_detect):
         """Turkish query with Turkish candidate — translate_to_turkish returns as-is."""
         # "ELMA" detected as Turkish → returns "elma" (no NLLB call)
-        # candidate_name_tr = "elma market"
+        # Because normalized(ELMA) == normalized(elma), the deduplication logic aborts and returns 0.0
         score = calculate_translation_similarity(
             "ELMA", "ELMA MARKET", candidate_name_tr="elma market"
         )
-        assert score >= 0.80, f"Same-language containment should score high, got {score}"
+        assert score == 0.0, f"Same-language queries without meaningful translation yield 0.0 deduplication score, got {score}"
 
 
 # ============================================

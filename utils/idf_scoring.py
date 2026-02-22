@@ -59,8 +59,8 @@ _cache_loaded: bool = False
 
 # IDF thresholds for word classification
 # Based on analysis of Turkish trademark corpus
-IDF_THRESHOLD_GENERIC = 5.3      # IDF < 5.3 = GENERIC (>0.5% of docs)
-IDF_THRESHOLD_SEMI_GENERIC = 6.9  # 5.3 <= IDF < 6.9 = SEMI_GENERIC (0.1-0.5%)
+IDF_THRESHOLD_GENERIC = 6.0      # IDF < 5.3 = GENERIC (>0.5% of docs)
+IDF_THRESHOLD_SEMI_GENERIC = 7.5  # 5.3 <= IDF < 6.9 = SEMI_GENERIC (0.1-0.5%)
                                   # IDF >= 6.9 = DISTINCTIVE (<0.1%)
 
 # Weight multipliers by class

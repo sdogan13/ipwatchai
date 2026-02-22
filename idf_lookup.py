@@ -194,9 +194,9 @@ class IDFLookup:
         """
         idf = cls.get_idf(word)
 
-        if idf < 5.3:
+        if idf < 6.0:
             return 'generic'
-        elif idf < 6.9:
+        elif idf < 7.5:
             return 'semi_generic'
         else:
             return 'distinctive'
