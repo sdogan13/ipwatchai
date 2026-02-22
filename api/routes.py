@@ -1,13 +1,12 @@
-"""
-API Routes
-All REST endpoints for the Trademark Risk Assessment System
+﻿"""
+API Routes â€” Router registry
+Imports domain routers from focused modules and re-exports them
+for backward compatibility with main.py and tests.
 """
 import io
 import os
 import re
 import logging
-import secrets
-import hashlib
 from datetime import datetime, timedelta
 from typing import List, Optional
 from uuid import UUID, uuid4
@@ -24,16 +23,12 @@ from openpyxl.styles import Font, PatternFill, Alignment
 
 from config.settings import settings
 from auth.authentication import (
-    CurrentUser, TokenPair, UserLogin, UserRegister, PasswordChange,
-    PasswordReset, PasswordResetConfirm, VerifyEmailRequest,
-    get_current_user, require_role, create_token_pair, decode_token,
-    hash_password, verify_password, generate_verification_token
+    CurrentUser, get_current_user, require_role,
+    hash_password, verify_password,
 )
 from models.schemas import (
     # Organization
     OrganizationCreate, OrganizationUpdate, OrganizationResponse, OrganizationStats,
-    # User
-    UserCreate, UserUpdate, UserResponse, UserProfile, UserRole,
     # Watchlist
     WatchlistItemCreate, WatchlistItemUpdate, WatchlistItemResponse,
     WatchlistBulkImport, WatchlistBulkImportResult,
@@ -43,8 +38,6 @@ from models.schemas import (
     # Alerts
     AlertResponse, AlertUpdate, AlertAcknowledge, AlertResolve, AlertDismiss,
     AlertStatus, AlertSeverity, AlertDigest,
-    # Reports
-    ReportRequest, ReportResponse,
     # Common
     PaginatedResponse, SuccessResponse, DashboardStats
 )
@@ -55,17 +48,28 @@ from database.crud import (
 
 logger = logging.getLogger(__name__)
 
-# Rate limiter (IP-based for auth, user-based elsewhere)
+# Rate limiter
 limiter = Limiter(key_func=get_remote_address)
 
 
 # ==========================================
-# Router Instances
+# Import domain routers from focused modules
 # ==========================================
 
-auth_router = APIRouter(prefix="/auth", tags=["Authentication"])
-users_router = APIRouter(prefix="/users", tags=["Users"])
-user_profile_router = APIRouter(prefix="/user", tags=["User Profile"])
+# Auth: login, register, password, email verification
+from api.auth_routes import auth_router
+
+# User profile + user management: profile CRUD, avatar, org profile, admin user ops
+from api.user_profile_routes import user_profile_router, users_router
+
+# Re-export request models for backward compatibility
+from api.user_profile_routes import ProfileUpdateRequest, OrganizationProfileUpdate
+
+
+# ==========================================
+# Remaining routers defined inline (to be extracted in future)
+# ==========================================
+
 org_router = APIRouter(prefix="/organization", tags=["Organization"])
 watchlist_router = APIRouter(prefix="/watchlist", tags=["Watchlist"])
 alerts_router = APIRouter(prefix="/alerts", tags=["Alerts"])
@@ -85,740 +89,10 @@ class ThresholdUpdateRequest(PydanticBaseModel):
     threshold: float
 
 
-class ProfileUpdateRequest(PydanticBaseModel):
-    """Request model for profile update"""
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    email: Optional[str] = None
-    phone: Optional[str] = None
-    title: Optional[str] = None
-    department: Optional[str] = None
-    linkedin: Optional[str] = None
-    avatar_url: Optional[str] = None
-    current_password: Optional[str] = None
-    new_password: Optional[str] = None
 
-
-class OrganizationProfileUpdate(PydanticBaseModel):
-    """Request model for organization profile update"""
-    name: Optional[str] = None
-    tax_id: Optional[str] = None
-    industry: Optional[str] = None
-    address: Optional[str] = None
-    phone: Optional[str] = None
-    website: Optional[str] = None
-    risk_threshold: Optional[float] = None
-    email_notifications: Optional[bool] = None
-    weekly_report: Optional[bool] = None
-
-
-# ==========================================
-# Authentication Routes
-# ==========================================
-
-@auth_router.post("/register", response_model=TokenPair)
-@limiter.limit(lambda: get_rate_limit_value("rate_limit.register", "5/minute"))
-async def register(request: Request, data: UserRegister):
-    """
-    Register new user and organization.
-    Creates organization if organization_name provided, otherwise joins existing.
-    """
-    with Database() as db:
-        try:
-            # Check if email exists
-            existing = UserCRUD.get_by_email(db, data.email)
-            if existing:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Email already registered"
-                )
-            
-            # Create or get organization
-            if data.organization_name:
-                # Create new organization
-                slug = data.organization_name.lower().replace(" ", "-")
-                org = OrganizationCRUD.create(db, OrganizationCreate(
-                    name=data.organization_name,
-                    slug=slug,
-                    email=data.email
-                ))
-                role = UserRole.OWNER
-            elif data.organization_slug:
-                # Join existing organization
-                org = OrganizationCRUD.get_by_slug(db, data.organization_slug)
-                if not org:
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Organization not found"
-                    )
-                role = UserRole.MEMBER
-            else:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Must provide organization_name or organization_slug"
-                )
-            
-            # Create user
-            user = UserCRUD.create(db, UUID(org['id']), UserCreate(
-                email=data.email,
-                password=data.password,
-                first_name=data.first_name,
-                last_name=data.last_name,
-                role=role
-            ))
-            
-            # Generate tokens
-            ip = request.client.host if request.client else "unknown"
-            logger.info(f"New registration: user={user['id']} email={data.email} org={user['organization_id']} IP={ip}")
-
-            # Generate email verification code (6-digit, same pattern as password reset)
-            verification_code = f"{secrets.randbelow(1000000):06d}"
-            code_hash = hashlib.sha256(verification_code.encode()).hexdigest()
-            verification_expires = datetime.utcnow() + timedelta(hours=24)
-
-            cur = db.cursor()
-            cur.execute(
-                """INSERT INTO email_verification_tokens (id, user_id, token_hash, expires_at, created_at)
-                   VALUES (gen_random_uuid(), %s, %s, %s, NOW())""",
-                (str(user['id']), code_hash, verification_expires)
-            )
-            db.commit()
-
-            # Send welcome + verification email (non-blocking, don't fail registration if email fails)
-            try:
-                from notifications.service import EmailService
-                email_svc = EmailService()
-                if email_svc.is_configured():
-                    email_svc.send_welcome(
-                        to_email=data.email,
-                        first_name=data.first_name,
-                        plan_name="Free",
-                        lang=getattr(data, 'lang', 'tr'),
-                        verification_code=verification_code
-                    )
-            except Exception as e:
-                logger.error(f"Failed to send welcome email to {data.email}: {e}")
-
-            return create_token_pair(
-                str(user['id']),
-                str(user['organization_id']),
-                user['role']
-            )
-
-        except ValueError as e:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-
-@auth_router.post("/login", response_model=TokenPair)
-@limiter.limit(lambda: get_rate_limit_value("rate_limit.login", "5/minute"))
-async def login(request: Request):
-    """Login with email and password. Accepts JSON or form-urlencoded."""
-    ip = request.client.host if request.client else "unknown"
-
-    # Parse email/password from JSON or form-urlencoded
-    content_type = (request.headers.get("content-type") or "").lower()
-    if "application/json" in content_type:
-        body = await request.json()
-        email = body.get("email", "")
-        password = body.get("password", "")
-    else:
-        # form-urlencoded: frontend sends 'username' field (OAuth2 convention)
-        form = await request.form()
-        email = form.get("username", "") or form.get("email", "")
-        password = form.get("password", "")
-
-    if not email or not password:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Email and password are required"
-        )
-
-    with Database() as db:
-        user = UserCRUD.get_by_email(db, email)
-
-        if not user:
-            logger.warning(f"Failed login: email={email} IP={ip} reason=user_not_found")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid credentials"
-            )
-
-        if not user['is_active']:
-            logger.warning(f"Failed login: email={email} IP={ip} reason=account_deactivated")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Account is deactivated"
-            )
-
-        if not verify_password(password, user['password_hash']):
-            logger.warning(f"Failed login: email={email} IP={ip} reason=wrong_password")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid credentials"
-            )
-
-        # Update last login
-        UserCRUD.update_login(db, UUID(user['id']))
-
-        logger.info(f"Successful login: user={user['id']} email={email} IP={ip}")
-        return create_token_pair(
-            str(user['id']),
-            str(user['organization_id']),
-            user['role']
-        )
-
-
-class RefreshTokenRequest(PydanticBaseModel):
-    refresh_token: str
-
-
-@auth_router.post("/refresh", response_model=TokenPair)
-@limiter.limit(lambda: get_rate_limit_value("rate_limit.login", "5/minute"))
-async def refresh_token(request: Request, data: RefreshTokenRequest):
-    """
-    Refresh access token using a valid refresh token.
-    Does NOT require the Authorization header — the refresh token is sent in the body.
-    """
-    from psycopg2.extras import RealDictCursor
-
-    payload = decode_token(data.refresh_token)
-    if payload is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired refresh token"
-        )
-
-    if payload.type != "refresh":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token type — expected refresh token"
-        )
-
-    # Verify user still exists and is active
-    with Database() as db:
-        cur = db.cursor()
-        cur.execute(
-            "SELECT id, role, is_active FROM users WHERE id = %s",
-            (payload.sub,)
-        )
-        user = cur.fetchone()
-        if user is None or not user['is_active']:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User not found or deactivated"
-            )
-
-        # Verify org is active
-        cur.execute(
-            "SELECT id, is_active FROM organizations WHERE id = %s",
-            (payload.org,)
-        )
-        org = cur.fetchone()
-        if org is None or not org['is_active']:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Organization is deactivated"
-            )
-
-    logger.info(f"Token refresh: user={payload.sub}")
-    return create_token_pair(
-        payload.sub,
-        payload.org,
-        user['role']
-    )
-
-
-@auth_router.post("/change-password", response_model=SuccessResponse)
-async def change_password(
-    data: PasswordChange,
-    current_user: CurrentUser = Depends(get_current_user)
-):
-    """Change password for current user"""
-    with Database() as db:
-        user = UserCRUD.get_by_email(db, current_user.email)
-        
-        if not verify_password(data.current_password, user['password_hash']):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Current password is incorrect"
-            )
-        
-        # Update password
-        cur = db.cursor()
-        cur.execute(
-            "UPDATE users SET password_hash = %s WHERE id = %s",
-            (hash_password(data.new_password), str(current_user.id))
-        )
-        db.commit()
-        
-        return SuccessResponse(message="Password changed successfully")
-
-
-@auth_router.post("/forgot-password", response_model=SuccessResponse)
-@limiter.limit(lambda: get_rate_limit_value("rate_limit.login", "3/minute"))
-async def forgot_password(request: Request, data: PasswordReset):
-    """Request a password reset. Generates a 6-digit code stored in DB."""
-    import secrets, hashlib
-    from datetime import datetime, timedelta
-
-    with Database() as db:
-        user = UserCRUD.get_by_email(db, data.email)
-        if not user:
-            # Don't reveal whether the email exists
-            return SuccessResponse(message="If this email is registered, a reset code has been generated.")
-
-        # Generate a 6-digit code
-        code = f"{secrets.randbelow(1000000):06d}"
-        code_hash = hashlib.sha256(code.encode()).hexdigest()
-        expires = datetime.utcnow() + timedelta(minutes=15)
-
-        cur = db.cursor()
-        # Delete any existing tokens for this user
-        cur.execute("DELETE FROM password_reset_tokens WHERE user_id = %s", (str(user['id']),))
-        # Insert new token
-        cur.execute(
-            """INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at, created_at)
-               VALUES (gen_random_uuid(), %s, %s, %s, NOW())""",
-            (str(user['id']), code_hash, expires)
-        )
-        db.commit()
-
-        logger.info(f"Password reset requested: email={data.email} user_id={user['id']}")
-
-        # Send code via email
-        try:
-            from notifications.service import EmailService
-            email_svc = EmailService()
-            if email_svc.is_configured():
-                email_svc.send_password_reset(to_email=data.email, code=code, lang=getattr(data, 'lang', 'tr'))
-            else:
-                logger.warning("SMTP not configured — password reset code not emailed")
-        except Exception as e:
-            logger.error(f"Failed to send password reset email: {e}")
-
-        return SuccessResponse(message="If this email is registered, a reset code has been sent.")
-
-
-@auth_router.post("/reset-password", response_model=SuccessResponse)
-@limiter.limit(lambda: get_rate_limit_value("rate_limit.login", "5/minute"))
-async def reset_password(request: Request, data: PasswordResetConfirm):
-    """Verify the 6-digit reset code and set a new password."""
-    import hashlib
-    from datetime import datetime
-
-    code_hash = hashlib.sha256(data.token.encode()).hexdigest()
-
-    with Database() as db:
-        cur = db.cursor()
-        cur.execute(
-            """SELECT prt.id, prt.user_id, prt.expires_at, prt.used_at
-               FROM password_reset_tokens prt
-               WHERE prt.token_hash = %s""",
-            (code_hash,)
-        )
-        token_row = cur.fetchone()
-
-        if not token_row:
-            raise HTTPException(status_code=400, detail="Invalid or expired reset code")
-
-        if token_row['used_at'] is not None:
-            raise HTTPException(status_code=400, detail="This reset code has already been used")
-
-        if token_row['expires_at'] < datetime.utcnow():
-            raise HTTPException(status_code=400, detail="Reset code has expired")
-
-        # Update password
-        new_hash = hash_password(data.new_password)
-        cur.execute(
-            "UPDATE users SET password_hash = %s, password_changed_at = NOW() WHERE id = %s",
-            (new_hash, str(token_row['user_id']))
-        )
-        # Mark token as used
-        cur.execute(
-            "UPDATE password_reset_tokens SET used_at = NOW() WHERE id = %s",
-            (str(token_row['id']),)
-        )
-        db.commit()
-
-        logger.info(f"Password reset completed: user_id={token_row['user_id']}")
-        return SuccessResponse(message="Password has been reset successfully")
-
-
-@auth_router.post("/verify-email", response_model=SuccessResponse)
-@limiter.limit(lambda: get_rate_limit_value("rate_limit.login", "5/minute"))
-async def verify_email(request: Request, data: VerifyEmailRequest, current_user: CurrentUser = Depends(get_current_user)):
-    """Verify email with 6-digit code sent during registration."""
-    code_hash = hashlib.sha256(data.code.encode()).hexdigest()
-
-    with Database() as db:
-        cur = db.cursor()
-        cur.execute(
-            """SELECT evt.id, evt.user_id, evt.expires_at, evt.used_at
-               FROM email_verification_tokens evt
-               WHERE evt.token_hash = %s AND evt.user_id = %s""",
-            (code_hash, str(current_user.id))
-        )
-        token_row = cur.fetchone()
-
-        if not token_row:
-            raise HTTPException(status_code=400, detail="Invalid verification code")
-
-        if token_row['used_at'] is not None:
-            raise HTTPException(status_code=400, detail="This code has already been used")
-
-        if token_row['expires_at'] < datetime.utcnow():
-            raise HTTPException(status_code=400, detail="Verification code has expired")
-
-        # Mark email as verified
-        UserCRUD.verify_email(db, current_user.id)
-        # Mark token as used
-        cur.execute(
-            "UPDATE email_verification_tokens SET used_at = NOW() WHERE id = %s",
-            (str(token_row['id']),)
-        )
-        db.commit()
-
-        logger.info(f"Email verified: user_id={current_user.id}")
-        return SuccessResponse(message="Email verified successfully")
-
-
-@auth_router.post("/resend-verification", response_model=SuccessResponse)
-@limiter.limit(lambda: get_rate_limit_value("rate_limit.login", "2/minute"))
-async def resend_verification(request: Request, current_user: CurrentUser = Depends(get_current_user)):
-    """Resend email verification code. Invalidates previous codes."""
-    with Database() as db:
-        # Check if already verified
-        user = UserCRUD.get_by_id(db, current_user.id)
-        if user.get('is_email_verified'):
-            return SuccessResponse(message="Email is already verified")
-
-        cur = db.cursor()
-        # Delete old verification tokens for this user
-        cur.execute("DELETE FROM email_verification_tokens WHERE user_id = %s", (str(current_user.id),))
-
-        # Generate new 6-digit code
-        verification_code = f"{secrets.randbelow(1000000):06d}"
-        code_hash = hashlib.sha256(verification_code.encode()).hexdigest()
-        expires = datetime.utcnow() + timedelta(hours=24)
-
-        cur.execute(
-            """INSERT INTO email_verification_tokens (id, user_id, token_hash, expires_at, created_at)
-               VALUES (gen_random_uuid(), %s, %s, %s, NOW())""",
-            (str(current_user.id), code_hash, expires)
-        )
-        db.commit()
-
-        # Send combined welcome + verification email
-        try:
-            from notifications.service import EmailService
-            email_svc = EmailService()
-            if email_svc.is_configured():
-                email_svc.send_welcome(
-                    to_email=current_user.email,
-                    first_name=current_user.first_name or "User",
-                    plan_name="Free",
-                    lang="tr",
-                    verification_code=verification_code
-                )
-        except Exception as e:
-            logger.error(f"Failed to send verification email to {current_user.email}: {e}")
-
-        logger.info(f"Verification code resent: user_id={current_user.id}")
-        return SuccessResponse(message="Verification code sent")
-
-
-@auth_router.get("/me", response_model=UserProfile)
-async def get_current_user_profile(current_user: CurrentUser = Depends(get_current_user)):
-    """Get current user profile with organization info"""
-    with Database() as db:
-        user = UserCRUD.get_by_id(db, current_user.id)
-        org = OrganizationCRUD.get_by_id(db, current_user.organization_id)
-
-        # Map is_email_verified to is_verified for schema compatibility
-        user_data = dict(user)
-        user_data['is_verified'] = user_data.pop('is_email_verified', False)
-
-        # Enrich org with plan details from subscription_plans
-        org_data = dict(org)
-        if org_data.get('subscription_plan_id'):
-            cur = db.cursor()
-            cur.execute(
-                "SELECT name, max_watchlist_items, max_api_calls_per_day FROM subscription_plans WHERE id = %s",
-                (str(org_data['subscription_plan_id']),)
-            )
-            plan_row = cur.fetchone()
-            if plan_row:
-                org_data['plan'] = plan_row['name']
-                org_data['max_watchlist_items'] = plan_row['max_watchlist_items']
-                org_data['max_monthly_searches'] = plan_row['max_api_calls_per_day'] * 30
-
-        # Super admins get unlimited access
-        if current_user.is_superadmin:
-            from utils.subscription import PLAN_FEATURES
-            sa = PLAN_FEATURES['superadmin']
-            org_data['plan'] = 'enterprise'
-            org_data['max_watchlist_items'] = sa['max_watchlist_items']
-            org_data['max_monthly_searches'] = sa['monthly_live_searches']
-            org_data['max_users'] = sa['max_users']
-
-        return UserProfile(
-            **user_data,
-            organization=OrganizationResponse(**org_data),
-            permissions=[]
-        )
-
-
-# ==========================================
-# User Profile Routes (Self-service)
-# ==========================================
-
-@user_profile_router.get("/profile")
-async def get_user_profile(current_user: CurrentUser = Depends(get_current_user)):
-    """Get current user's profile information"""
-    with Database() as db:
-        user = UserCRUD.get_by_id(db, current_user.id)
-        return {
-            "id": str(user["id"]),
-            "email": user.get("email", ""),
-            "first_name": user.get("first_name", ""),
-            "last_name": user.get("last_name", ""),
-            "phone": user.get("phone", ""),
-            "title": user.get("title", ""),
-            "department": user.get("department", ""),
-            "linkedin": user.get("linkedin", ""),
-            "avatar_url": user.get("avatar_url", ""),
-            "created_at": user.get("created_at").isoformat() if user.get("created_at") else None,
-            "is_email_verified": bool(user.get("is_email_verified", False))
-        }
-
-
-@user_profile_router.put("/profile")
-async def update_user_profile(
-    data: ProfileUpdateRequest,
-    current_user: CurrentUser = Depends(get_current_user)
-):
-    """Update current user's profile"""
-    try:
-        with Database() as db:
-            # Get current user data to compare email
-            current_user_data = UserCRUD.get_by_id(db, current_user.id)
-
-            # Build update fields
-            update_data = {}
-            if data.first_name is not None:
-                update_data["first_name"] = data.first_name
-            if data.last_name is not None:
-                update_data["last_name"] = data.last_name
-            # Only update email if it changed (avoid unique constraint violation)
-            if data.email is not None and data.email != current_user_data.get("email"):
-                # Check if new email is already taken
-                existing = UserCRUD.get_by_email(db, data.email)
-                if existing and str(existing["id"]) != str(current_user.id):
-                    raise HTTPException(status_code=400, detail="Bu e-posta adresi zaten kullaniliyor")
-                update_data["email"] = data.email
-            if data.phone is not None:
-                update_data["phone"] = data.phone
-            if data.title is not None:
-                update_data["title"] = data.title
-            if data.department is not None:
-                update_data["department"] = data.department
-            if data.linkedin is not None:
-                update_data["linkedin"] = data.linkedin
-            if data.avatar_url is not None:
-                update_data["avatar_url"] = data.avatar_url
-
-            # Handle password change
-            if data.new_password:
-                if not data.current_password:
-                    raise HTTPException(status_code=400, detail="Mevcut sifre gerekli")
-
-                if not verify_password(data.current_password, current_user_data["password_hash"]):
-                    raise HTTPException(status_code=400, detail="Mevcut sifre yanlis")
-
-                update_data["password_hash"] = hash_password(data.new_password)
-
-            # Update user
-            if update_data:
-                UserCRUD.update(db, current_user.id, update_data)
-
-            return {"success": True, "message": "Profil guncellendi"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Sunucu hatasi: {str(e)}")
-
-
-@user_profile_router.post("/avatar")
-async def upload_avatar(
-    file: UploadFile = File(...),
-    current_user: CurrentUser = Depends(get_current_user)
-):
-    """Upload user avatar image"""
-    import os
-    import uuid as uuid_module
-
-    # Validate file type
-    allowed_types = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
-    if file.content_type not in allowed_types:
-        raise HTTPException(status_code=400, detail="Sadece resim dosyalari yuklenebilir (JPEG, PNG, GIF, WebP)")
-
-    # Validate file size (max 5MB)
-    contents = await file.read()
-    if len(contents) > 5 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="Dosya boyutu 5MB'dan buyuk olamaz")
-
-    # Create uploads directory if not exists
-    upload_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static', 'avatars')
-    os.makedirs(upload_dir, exist_ok=True)
-
-    # Generate unique filename
-    ext = file.filename.split('.')[-1] if '.' in file.filename else 'jpg'
-    filename = f"{current_user.id}_{uuid_module.uuid4().hex[:8]}.{ext}"
-    filepath = os.path.join(upload_dir, filename)
-
-    # Save file
-    with open(filepath, 'wb') as f:
-        f.write(contents)
-
-    # Generate URL
-    avatar_url = f"/static/avatars/{filename}"
-
-    # Update user's avatar_url in database
-    with Database() as db:
-        UserCRUD.update(db, current_user.id, {"avatar_url": avatar_url})
-
-    return {"success": True, "avatar_url": avatar_url}
-
-
-@user_profile_router.get("/organization")
-async def get_user_organization(current_user: CurrentUser = Depends(get_current_user)):
-    """Get current user's organization information"""
-    with Database() as db:
-        org = OrganizationCRUD.get_by_id(db, current_user.organization_id)
-        return {
-            "id": str(org["id"]),
-            "name": org.get("name", ""),
-            "tax_id": org.get("tax_id", ""),
-            "industry": org.get("industry", ""),
-            "address": org.get("address", ""),
-            "phone": org.get("phone", ""),
-            "website": org.get("website", ""),
-            "risk_threshold": org.get("default_alert_threshold", 0.7),
-            "email_notifications": org.get("email_notifications", True),
-            "weekly_report": org.get("weekly_report", True)
-        }
-
-
-@user_profile_router.put("/organization")
-async def update_user_organization(
-    data: OrganizationProfileUpdate,
-    current_user: CurrentUser = Depends(get_current_user)
-):
-    """Update organization settings (for org admins/owners)"""
-    with Database() as db:
-        # Build update fields
-        update_data = {}
-        if data.name is not None:
-            update_data["name"] = data.name
-        if data.tax_id is not None:
-            update_data["tax_id"] = data.tax_id
-        if data.industry is not None:
-            update_data["industry"] = data.industry
-        if data.address is not None:
-            update_data["address"] = data.address
-        if data.phone is not None:
-            update_data["phone"] = data.phone
-        if data.website is not None:
-            update_data["website"] = data.website
-        if data.risk_threshold is not None:
-            update_data["default_alert_threshold"] = data.risk_threshold
-        if data.email_notifications is not None:
-            update_data["email_notifications"] = data.email_notifications
-        if data.weekly_report is not None:
-            update_data["weekly_report"] = data.weekly_report
-
-        # Update organization
-        if update_data:
-            OrganizationCRUD.update(db, current_user.organization_id, update_data)
-            db.commit()
-
-        return {"success": True, "message": "Sirket bilgileri guncellendi"}
-
-
-# ==========================================
-# User Management Routes
-# ==========================================
-
-@users_router.get("", response_model=List[UserResponse])
-async def list_users(
-    current_user: CurrentUser = Depends(require_role(["owner", "admin"]))
-):
-    """List all users in organization (admin only)"""
-    with Database() as db:
-        users = UserCRUD.get_by_organization(db, current_user.organization_id)
-        return [UserResponse(**u) for u in users]
-
-
-@users_router.post("", response_model=UserResponse)
-async def create_user(
-    data: UserCreate,
-    current_user: CurrentUser = Depends(require_role(["owner", "admin"]))
-):
-    """Create new user in organization (admin only)"""
-    with Database() as db:
-        try:
-            user = UserCRUD.create(db, current_user.organization_id, data)
-            return UserResponse(**user)
-        except ValueError as e:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-
-@users_router.get("/{user_id}", response_model=UserResponse)
-async def get_user(
-    user_id: UUID,
-    current_user: CurrentUser = Depends(require_role(["owner", "admin"]))
-):
-    """Get user details (admin only)"""
-    with Database() as db:
-        user = UserCRUD.get_by_id(db, user_id)
-        if not user or user['organization_id'] != str(current_user.organization_id):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-        return UserResponse(**user)
-
-
-@users_router.put("/{user_id}", response_model=UserResponse)
-async def update_user(
-    user_id: UUID,
-    data: UserUpdate,
-    current_user: CurrentUser = Depends(get_current_user)
-):
-    """Update user (self or admin)"""
-    # Users can update themselves, admins can update anyone in org
-    if user_id != current_user.id and current_user.role not in ["owner", "admin"]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
-    
-    with Database() as db:
-        user = UserCRUD.update(db, user_id, data)
-        if not user:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-        return UserResponse(**user)
-
-
-@users_router.delete("/{user_id}", response_model=SuccessResponse)
-async def deactivate_user(
-    user_id: UUID,
-    current_user: CurrentUser = Depends(require_role(["owner", "admin"]))
-):
-    """Deactivate user (admin only)"""
-    if user_id == current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot deactivate yourself"
-        )
-    
-    with Database() as db:
-        UserCRUD.deactivate(db, user_id)
-        return SuccessResponse(message="User deactivated")
+# NOTE: Auth routes (register, login, password, email verification) â†’ api/auth_routes.py
+# NOTE: User profile routes (profile CRUD, avatar, org profile) â†’ api/user_profile_routes.py
+# NOTE: User management routes (list/create/update/deactivate users) â†’ api/user_profile_routes.py
 
 
 # ==========================================
@@ -1086,7 +360,7 @@ async def create_watchlist_item(
     background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(get_current_user)
 ):
-    """Add trademark to watchlist — auto-copies AI embeddings & logo from trademarks DB when application_no is provided."""
+    """Add trademark to watchlist â€” auto-copies AI embeddings & logo from trademarks DB when application_no is provided."""
     # Check logo tracking eligibility
     if getattr(data, 'monitor_visual', False):
         from utils.subscription import get_user_plan, get_plan_limit
@@ -1377,26 +651,26 @@ async def bulk_import_from_portfolio(
 # ==========================================
 
 BRAND_NAME_VARIANTS = [
-    'marka adı', 'marka adi', 'marka', 'trademark_name', 'trademark name',
+    'marka adÄ±', 'marka adi', 'marka', 'trademark_name', 'trademark name',
     'brand name', 'brand_name', 'name', 'isim'
 ]
 
 APP_NO_VARIANTS = [
-    'başvuru no', 'başvuru numarası', 'başvuru no.',
+    'baÅŸvuru no', 'baÅŸvuru numarasÄ±', 'baÅŸvuru no.',
     'basvuru no', 'basvuru numarasi', 'basvuru no.',
     'application no', 'application number', 'application_no',
     'app no', 'app_no', 'application'
 ]
 
 CLASS_VARIANTS = [
-    'sınıf', 'sınıflar', 'sınıf no', 'sınıf numarası',
+    'sÄ±nÄ±f', 'sÄ±nÄ±flar', 'sÄ±nÄ±f no', 'sÄ±nÄ±f numarasÄ±',
     'sinif', 'siniflar', 'sinif no', 'sinif numarasi',
     'nice class', 'nice classes', 'nice_class', 'nice_classes',
     'class', 'classes', 'class no'
 ]
 
 BULLETIN_VARIANTS = [
-    'bülten no', 'bülten numarası', 'bülten',
+    'bÃ¼lten no', 'bÃ¼lten numarasÄ±', 'bÃ¼lten',
     'bulten no', 'bulten numarasi', 'bulten',
     'bulletin no', 'bulletin number', 'bulletin'
 ]
@@ -1437,10 +711,10 @@ async def download_template():
 
     # Headers - mark required with *
     headers = [
-        ("Marka Adı *", True),      # Required
-        ("Başvuru No *", True),     # Required
-        ("Sınıflar *", True),       # Required
-        ("Bülten No", False)        # Optional
+        ("Marka AdÄ± *", True),      # Required
+        ("BaÅŸvuru No *", True),     # Required
+        ("SÄ±nÄ±flar *", True),       # Required
+        ("BÃ¼lten No", False)        # Optional
     ]
 
     # Style headers
@@ -1456,9 +730,9 @@ async def download_template():
 
     # Sample data
     sample_data = [
-        ["ÖRNEK MARKA 1", "2023/12345", "9, 35", "305"],
-        ["ÖRNEK MARKA 2", "2023/67890", "25, 35, 42", "306"],
-        ["ÖRNEK MARKA 3", "2022/11111", "30, 43", ""],
+        ["Ã–RNEK MARKA 1", "2023/12345", "9, 35", "305"],
+        ["Ã–RNEK MARKA 2", "2023/67890", "25, 35, 42", "306"],
+        ["Ã–RNEK MARKA 3", "2022/11111", "30, 43", ""],
     ]
 
     for row_idx, row_data in enumerate(sample_data, 2):
@@ -1466,10 +740,10 @@ async def download_template():
             ws.cell(row=row_idx, column=col_idx, value=value)
 
     # Instructions
-    ws.cell(row=6, column=1, value="* Zorunlu sütunlar. Bülten No opsiyoneldir.")
+    ws.cell(row=6, column=1, value="* Zorunlu sÃ¼tunlar. BÃ¼lten No opsiyoneldir.")
     ws.cell(row=6, column=1).font = Font(italic=True, color="666666")
 
-    ws.cell(row=7, column=1, value="Sınıflar: Virgülle ayırarak yazın (örn: 9, 35, 42)")
+    ws.cell(row=7, column=1, value="SÄ±nÄ±flar: VirgÃ¼lle ayÄ±rarak yazÄ±n (Ã¶rn: 9, 35, 42)")
     ws.cell(row=7, column=1).font = Font(italic=True, color="666666")
 
     # Column widths
@@ -1706,12 +980,12 @@ async def upload_with_mapping(
                     ))
                     continue
 
-                # Application number (optional — auto-generate if missing)
+                # Application number (optional â€” auto-generate if missing)
                 app_no = str(row.get('application_no', '')).strip()
                 if not app_no or app_no.lower() in ['nan', 'none', '']:
                     app_no = f"WL-{uuid4().hex[:8].upper()}"
 
-                # Nice classes (optional — default to empty list)
+                # Nice classes (optional â€” default to empty list)
                 classes_raw = row.get('nice_classes', '') if 'nice_classes' in df.columns else ''
                 classes_str = str(classes_raw).strip() if classes_raw is not None else ''
                 if classes_str and classes_str.lower() not in ['nan', 'none', '']:
@@ -1813,8 +1087,8 @@ async def upload_file(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
                     "error": "unsupported_format",
-                    "message": "Desteklenmeyen dosya formatı",
-                    "detail": "Lütfen Excel (.xlsx, .xls) veya CSV (.csv) dosyası yükleyin."
+                    "message": "Desteklenmeyen dosya formatÄ±",
+                    "detail": "LÃ¼tfen Excel (.xlsx, .xls) veya CSV (.csv) dosyasÄ± yÃ¼kleyin."
                 }
             )
     except HTTPException:
@@ -1824,7 +1098,7 @@ async def upload_file(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "error": "parse_error",
-                "message": "Dosya okunamadı",
+                "message": "Dosya okunamadÄ±",
                 "detail": str(e)
             }
         )
@@ -1834,7 +1108,7 @@ async def upload_file(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "error": "empty_file",
-                "message": "Dosya boş"
+                "message": "Dosya boÅŸ"
             }
         )
 
@@ -1855,23 +1129,23 @@ async def upload_file(
 
     if not brand_col:
         missing_columns.append({
-            "column": "Marka Adı",
-            "variants": "marka adı, brand name, name, isim",
-            "reason": "Hangi markaların izleneceğini belirler"
+            "column": "Marka AdÄ±",
+            "variants": "marka adÄ±, brand name, name, isim",
+            "reason": "Hangi markalarÄ±n izleneceÄŸini belirler"
         })
 
     if not app_no_col:
         missing_columns.append({
-            "column": "Başvuru No",
-            "variants": "başvuru no, application no, app no",
-            "reason": "Mükerrer kontrol ve çakışma filtreleme için gerekli"
+            "column": "BaÅŸvuru No",
+            "variants": "baÅŸvuru no, application no, app no",
+            "reason": "MÃ¼kerrer kontrol ve Ã§akÄ±ÅŸma filtreleme iÃ§in gerekli"
         })
 
     if not class_col:
         missing_columns.append({
-            "column": "Sınıflar",
-            "variants": "sınıf, sınıflar, nice class, classes",
-            "reason": "Hangi sınıflarda arama yapılacağını belirler"
+            "column": "SÄ±nÄ±flar",
+            "variants": "sÄ±nÄ±f, sÄ±nÄ±flar, nice class, classes",
+            "reason": "Hangi sÄ±nÄ±flarda arama yapÄ±lacaÄŸÄ±nÄ± belirler"
         })
 
     if missing_columns:
@@ -1879,22 +1153,22 @@ async def upload_file(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "error": "missing_mandatory_columns",
-                "message": f"{len(missing_columns)} zorunlu sütun eksik",
+                "message": f"{len(missing_columns)} zorunlu sÃ¼tun eksik",
                 "missing_columns": missing_columns,
                 "found_columns": original_columns,
                 "required_columns": [
-                    {"name": "Marka Adı", "variants": "marka adı, brand name, name"},
-                    {"name": "Başvuru No", "variants": "başvuru no, application no"},
-                    {"name": "Sınıflar", "variants": "sınıf, sınıflar, nice class, classes"}
+                    {"name": "Marka AdÄ±", "variants": "marka adÄ±, brand name, name"},
+                    {"name": "BaÅŸvuru No", "variants": "baÅŸvuru no, application no"},
+                    {"name": "SÄ±nÄ±flar", "variants": "sÄ±nÄ±f, sÄ±nÄ±flar, nice class, classes"}
                 ],
                 "optional_columns": [
-                    {"name": "Bülten No", "variants": "bülten no, bulletin no"}
+                    {"name": "BÃ¼lten No", "variants": "bÃ¼lten no, bulletin no"}
                 ],
                 "example": {
-                    "headers": ["Marka Adı", "Başvuru No", "Sınıflar", "Bülten No"],
+                    "headers": ["Marka AdÄ±", "BaÅŸvuru No", "SÄ±nÄ±flar", "BÃ¼lten No"],
                     "rows": [
-                        ["ÖRNEK MARKA", "2023/12345", "9, 35, 42", "305"],
-                        ["DİĞER MARKA", "2023/67890", "25, 35", "306"]
+                        ["Ã–RNEK MARKA", "2023/12345", "9, 35, 42", "305"],
+                        ["DÄ°ÄžER MARKA", "2023/67890", "25, 35", "306"]
                     ]
                 }
             }
@@ -1904,8 +1178,8 @@ async def upload_file(
     warnings = []
     if not bulletin_col:
         warnings.append(FileUploadWarning(
-            column="Bülten No",
-            message="Bülten numarası sütunu bulunamadı. Bu opsiyonel bir alandır."
+            column="BÃ¼lten No",
+            message="BÃ¼lten numarasÄ± sÃ¼tunu bulunamadÄ±. Bu opsiyonel bir alandÄ±r."
         ))
 
     # Get organization ID
@@ -1967,7 +1241,7 @@ async def upload_file(
                     error_count += 1
                     error_items.append(FileUploadErrorItem(
                         row=row_num,
-                        error="Marka adı boş"
+                        error="Marka adÄ± boÅŸ"
                     ))
                     continue
 
@@ -1978,7 +1252,7 @@ async def upload_file(
                     error_items.append(FileUploadErrorItem(
                         row=row_num,
                         brand_name=brand_name,
-                        error="Başvuru numarası boş"
+                        error="BaÅŸvuru numarasÄ± boÅŸ"
                     ))
                     continue
 
@@ -1990,7 +1264,7 @@ async def upload_file(
                     error_items.append(FileUploadErrorItem(
                         row=row_num,
                         brand_name=brand_name,
-                        error="Sınıf bilgisi boş veya geçersiz"
+                        error="SÄ±nÄ±f bilgisi boÅŸ veya geÃ§ersiz"
                     ))
                     continue
 
@@ -2047,9 +1321,9 @@ async def upload_file(
     # Build message
     message_parts = [f"{added_count} marka eklendi"]
     if skipped_count > 0:
-        message_parts.append(f"{skipped_count} zaten mevcut (atlandı)")
+        message_parts.append(f"{skipped_count} zaten mevcut (atlandÄ±)")
     if error_count > 0:
-        message_parts.append(f"{error_count} hatalı satır")
+        message_parts.append(f"{error_count} hatalÄ± satÄ±r")
 
     return FileUploadResult(
         success=True,
@@ -2108,7 +1382,7 @@ async def trigger_scan_all(
 
     msg = f"{len(items_to_scan)} marka taramaya alindi (toplam: {total})"
     if len(items_to_scan) < len(items):
-        msg += f" — plan limitiniz nedeniyle {_scan_max} marka tarandi"
+        msg += f" â€” plan limitiniz nedeniyle {_scan_max} marka tarandi"
     return SuccessResponse(message=msg)
 
 
@@ -2439,7 +1713,7 @@ def _process_watchlist_logo(item_id: UUID, filepath: str):
 def _scan_watchlist_item(item_id: UUID):
     """Background task to scan watchlist item - uses singleton scanner for performance"""
     import traceback
-    logger.info(f"🔍 [SCAN START] Scanning watchlist item {item_id}")
+    logger.info(f"ðŸ” [SCAN START] Scanning watchlist item {item_id}")
     try:
         from watchlist.scanner import get_scanner
         scanner = get_scanner()  # Reuse cached scanner with loaded models
@@ -2449,9 +1723,9 @@ def _scan_watchlist_item(item_id: UUID):
         except Exception:
             pass
         alerts_count = scanner.scan_single_watchlist(item_id)
-        logger.info(f"✅ [SCAN COMPLETE] Item {item_id}: {alerts_count} alerts created")
+        logger.info(f"âœ… [SCAN COMPLETE] Item {item_id}: {alerts_count} alerts created")
     except Exception as e:
-        logger.error(f"❌ [SCAN FAILED] Item {item_id}: {e}")
+        logger.error(f"âŒ [SCAN FAILED] Item {item_id}: {e}")
         logger.error(f"   Traceback: {traceback.format_exc()}")
         # Reset singleton scanner to get fresh connection on next scan
         from watchlist.scanner import reset_scanner
