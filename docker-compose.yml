@@ -59,7 +59,7 @@ services:
       DEBUG: ${DEBUG:-false}
       HOST: "0.0.0.0"
       PORT: "8000"
-      WORKERS: ${WORKERS:-4}
+      WORKERS: ${WORKERS:-2}
 
       # Database - Always use Docker network hostname (not host .env values)
       DB_HOST: "postgres"
@@ -139,7 +139,8 @@ services:
       - ./notifications:/app/notifications:ro
       - ./watchlist:/app/watchlist:ro
       - ./workers:/app/workers:ro
-      - ./migrations:/app/migrations:ro
+    command: >
+      python -m uvicorn main:app  --host 0.0.0.0  --port 8000  --workers ${WORKERS:-2}  --loop uvloop  --http httptools  --log-level info
     ports:
       - "127.0.0.1:8000:8000"
     healthcheck:
@@ -194,17 +195,19 @@ services:
     image: cloudflare/cloudflared:latest
     container_name: ipwatch_tunnel
     restart: unless-stopped
-    command: tunnel --config /etc/cloudflared/config.yml run
+    command: tunnel --edge-ip-version auto --protocol http2 --config /etc/cloudflared/config.yml run
     volumes:
       - ./cloudflared:/etc/cloudflared:ro
+    dns:
+      - 10.192.3.13
+      - 1.1.1.1
     depends_on:
       - nginx
     networks:
       - ipwatch_network
-
-  # ==========================================
-  # PostgreSQL with pgvector
-  # ==========================================
+    # ==========================================
+    # PostgreSQL with pgvector
+    # ==========================================
   postgres:
     image: pgvector/pgvector:pg16
     container_name: ipwatch_postgres

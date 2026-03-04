@@ -1,61 +1,98 @@
-# Environment files (secrets)
+# ============================================
+# IP Watch AI - Git Ignore
+# ============================================
+
+# Environment & Secrets
 .env
 .env.*
-!.env.production.example
-.token
+!.env.example
 
-# Temp files
-tmp_*
+# Cloudflare credentials (contains tunnel secret)
+cloudflared/*.json
 
-# Python cache
+# Database dumps
+*.dump
+*.sql.gz
+
+# Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
 
 # Virtual environments
 venv/
 .venv/
+env/
 
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
+# Model caches (downloaded at runtime)
+*.pt
+*.bin
+*.onnx
+*.safetensors
 
-# OS files
-.DS_Store
-Thumbs.db
-
-# Test / Coverage
-.pytest_cache/
-.coverage
-htmlcov/
-
-# Large data
+# Data directories (too large for git)
 bulletins/
-pgdata/
-pgsql/
-backup_*/
-*.exe
-
-# Logs
-*.log
-logs/
-
-# Docker volumes
-config-backup-*/
-
-# Client data (sensitive)
 clients/
 
-# Misc temp/junk files
-C*Users*turk_patent*
-Users*turk_patent*
-openapi_*.json
-Start-Sleep
+# Logs
+logs/
+*.log
+
+# Uploads & Generated content
+uploads/
+reports/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Docker volumes
+postgres_data/
+redis_data/
+pgdata/
+
+# Config backups
+config-backup-*/
+
+# Node modules (if any frontend)
+node_modules/
+
+# Gemini/Agent artifacts
+.gemini/
+
+# Backups
+backup_*/
+
+# Temp files
+tmp_*
+*.tmp
+
+# Windows reserved filenames
 nul
-test_avatar.png
+NUL
+
+# Embedded Python installation (huge, not needed on server)
 python/
-.py/
-*.gemini/
+
+# Local PostgreSQL installation (not needed on server)
+pgsql/
+
+# Binary executables
+*.exe
+*.dll
+
+# Chisel tunnel binary
+scripts/chisel*

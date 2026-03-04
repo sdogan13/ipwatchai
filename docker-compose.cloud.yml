@@ -1,0 +1,246 @@
+# ============================================
+# IP Watch AI - Cloud Docker Compose
+# CPU-only deployment for Hetzner CX32
+# ============================================
+#
+# Usage:
+#   docker-compose -f docker-compose.cloud.yml --env-file .env.cloud up -d
+#   docker-compose -f docker-compose.cloud.yml --env-file .env.cloud logs -f backend
+#   docker-compose -f docker-compose.cloud.yml --env-file .env.cloud down
+#
+# ============================================
+
+services:
+  # ==========================================
+  # Redis Cache & Message Broker
+  # ==========================================
+  redis:
+    image: redis:7-alpine
+    container_name: ipwatch_redis
+    restart: unless-stopped
+    command: >
+      redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru ${REDIS_PASSWORD:+--requirepass ${REDIS_PASSWORD}}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: [ "CMD-SHELL", "redis-cli ${REDIS_PASSWORD:+-a $REDIS_PASSWORD --no-auth-warning} ping | grep PONG" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ipwatch_network
+
+  # ==========================================
+  # PostgreSQL with pgvector
+  # ==========================================
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: ipwatch_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: turk_patent
+      POSTGRES_PASSWORD: "${DB_PASSWORD}"
+      POSTGRES_DB: trademark_db
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./deploy/schema.sql:/docker-entrypoint-initdb.d/02-schema.sql:ro
+    ports:
+      # Exposed for remote ingestion from local PC (restrict via UFW firewall)
+      - "0.0.0.0:5433:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U turk_patent -d trademark_db" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ipwatch_network
+
+  # ==========================================
+  # FastAPI Backend (CPU-only)
+  # ==========================================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.cloud
+    container_name: ipwatch_backend
+    restart: unless-stopped
+    env_file:
+      - .env.cloud
+    environment:
+      # Application
+      APP_NAME: "IP Watch AI"
+      APP_VERSION: "1.0.0"
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      DEBUG: ${DEBUG:-false}
+      HOST: "0.0.0.0"
+      PORT: "8000"
+      WORKERS: ${WORKERS:-2}
+
+      # Database - Docker network hostname
+      DB_HOST: "postgres"
+      DB_PORT: "5432"
+      DB_NAME: "${DB_NAME:-trademark_db}"
+      DB_USER: "${DB_USER:-turk_patent}"
+      DB_PASSWORD: "${DB_PASSWORD}"
+
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:-}"
+      REDIS_URL: "redis://${REDIS_PASSWORD:+:${REDIS_PASSWORD}@}redis:6379/0"
+
+      # Auth
+      AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:?AUTH_SECRET_KEY is required}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
+      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+
+      # AI Settings — CPU-only, NO FP16
+      AI_DEVICE: "cpu"
+      USE_FP16: "false"
+      USE_TF32: "false"
+      CLIP_BATCH_SIZE: "${CLIP_BATCH_SIZE:-16}"
+      DINO_BATCH_SIZE: "${DINO_BATCH_SIZE:-8}"
+      TEXT_BATCH_SIZE: "${TEXT_BATCH_SIZE:-64}"
+
+      # Model cache paths (Linux paths inside container)
+      TORCH_HOME: "/root/.cache/torch"
+      HF_HOME: "/root/.cache/huggingface"
+      EASYOCR_MODULE_PATH: "/root/.EasyOCR"
+
+      # Creative Suite (Gemini AI)
+      CREATIVE_GOOGLE_API_KEY: ${CREATIVE_GOOGLE_API_KEY:-}
+
+      # CORS
+      CORS_ORIGINS: '${CORS_ORIGINS:-["https://ipwatchai.com","https://www.ipwatchai.com"]}'
+
+      # Paths (inside container)
+      DATA_ROOT: "/app/bulletins/Marka"
+      UPLOAD_DIR: "/app/uploads"
+      REPORT_DIR: "/app/reports"
+      LOG_DIR: "/app/logs"
+    volumes:
+      # Data directories
+      - ${DATA_PATH:-/opt/ipwatch/bulletins}:/app/bulletins
+      - ${CLIENTS_PATH:-/opt/ipwatch/clients}:/app/clients
+      - ./models:/app/models:ro
+      - uploads_data:/app/uploads
+      - generated_logos:/app/uploads/generated/logos
+      - reports_data:/app/reports
+      - logs_data:/app/logs
+      # Model cache for faster startup
+      - ${HF_HOME:-/opt/ipwatch/cache/huggingface}:/root/.cache/huggingface
+      - ${TORCH_HOME:-/opt/ipwatch/cache/torch}:/root/.cache/torch
+      - ${EASYOCR_HOME:-/opt/ipwatch/cache/easyocr}:/root/.EasyOCR
+      - playwright_cache:/root/.cache/ms-playwright
+      # Mount source code for hot-reloading (optional on cloud, can bake into image)
+      - ./main.py:/app/main.py:ro
+      - ./scrapper.py:/app/scrapper.py:ro
+      - ./templates:/app/templates:ro
+      - ./static:/app/static:ro
+      - ./static/avatars:/app/static/avatars
+      - ./agentic_search.py:/app/agentic_search.py:ro
+      - ./risk_engine.py:/app/risk_engine.py:ro
+      - ./idf_scoring.py:/app/idf_scoring.py:ro
+      - ./ai.py:/app/ai.py:ro
+      - ./foreign_generics.py:/app/foreign_generics.py:ro
+      - ./idf_lookup.py:/app/idf_lookup.py:ro
+      - ./api:/app/api:ro
+      - ./database:/app/database:ro
+      - ./auth:/app/auth:ro
+      - ./config:/app/config:ro
+      - ./utils:/app/utils:ro
+      - ./notifications:/app/notifications:ro
+      - ./watchlist:/app/watchlist:ro
+      - ./workers:/app/workers:ro
+    command: >
+      python -m uvicorn main:app  --host 0.0.0.0  --port 8000  --workers ${WORKERS:-2}  --loop uvloop  --http httptools  --log-level info
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 600s
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    # NO GPU reservation - CPU only
+    networks:
+      - ipwatch_network
+
+  # ==========================================
+  # Nginx Reverse Proxy
+  # ==========================================
+  nginx:
+    image: nginx:alpine
+    container_name: ipwatch_nginx
+    restart: unless-stopped
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - nginx_logs:/var/log/nginx
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -qO- http://127.0.0.1/health || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - ipwatch_network
+
+  # ==========================================
+  # Cloudflare Tunnel (HTTPS via Cloudflare)
+  # ==========================================
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: ipwatch_tunnel
+    restart: unless-stopped
+    command: tunnel --edge-ip-version auto --protocol http2 --config /etc/cloudflared/config.yml run
+    volumes:
+      - ./cloudflared:/etc/cloudflared:ro
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    depends_on:
+      - nginx
+    networks:
+      - ipwatch_network
+
+# ==========================================
+# Networks
+# ==========================================
+networks:
+  ipwatch_network:
+    driver: bridge
+    name: ipwatch_network
+
+# ==========================================
+# Volumes
+# ==========================================
+volumes:
+  postgres_data:
+    name: ipwatch_postgres_data
+  redis_data:
+    name: ipwatch_redis_data
+  uploads_data:
+    name: ipwatch_uploads
+  reports_data:
+    name: ipwatch_reports
+  logs_data:
+    name: ipwatch_logs
+  generated_logos:
+    name: ipwatch_generated_logos
+  nginx_logs:
+    name: ipwatch_nginx_logs
+  playwright_cache:
+    name: ipwatch_playwright_cache

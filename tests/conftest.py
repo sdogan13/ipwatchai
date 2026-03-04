@@ -135,7 +135,7 @@ def seed_idf_lookup():
         "dünyası", "vatan", "yildiz", "su", "ay", "ayakkabi",
     ]
     for w in distinctive:
-        IDFLookup._cache[w] = {"idf": 8.0, "is_generic": False, "doc_freq": 50}
+        IDFLookup._cache[w] = {"idf": 9.0, "is_generic": False, "doc_freq": 50}
 
     # Semi-generic words (5.3 <= IDF < 6.9)
     semi_generic = [
@@ -144,7 +144,7 @@ def seed_idf_lookup():
         "fashion", "sports", "tech",
     ]
     for w in semi_generic:
-        IDFLookup._cache[w] = {"idf": 6.0, "is_generic": False, "doc_freq": 5_000}
+        IDFLookup._cache[w] = {"idf": 7.0, "is_generic": False, "doc_freq": 5_000}
 
     # Generic words (IDF < 5.3)
     generic = [

@@ -59,9 +59,9 @@ _cache_loaded: bool = False
 
 # IDF thresholds for word classification
 # Based on analysis of Turkish trademark corpus
-IDF_THRESHOLD_GENERIC = 5.5       # IDF < 5.5 = GENERIC
-IDF_THRESHOLD_SEMI_GENERIC = 8.0  # 5.5 <= IDF < 8.0 = SEMI_GENERIC
-                                  # IDF >= 8.0 = DISTINCTIVE
+IDF_THRESHOLD_GENERIC = 6.0       # IDF < 6.0 = GENERIC
+IDF_THRESHOLD_SEMI_GENERIC = 8.5  # 6.0 <= IDF < 8.5 = SEMI_GENERIC
+                                  # IDF >= 8.5 = DISTINCTIVE
 
 # Weight multipliers by class
 WEIGHT_GENERIC = 0.1       # Generic words contribute very little
@@ -246,20 +246,16 @@ def turkish_lower(text: str) -> str:
 
 def normalize_turkish(text: str) -> str:
     """
-    Normalize Turkish characters to ASCII equivalents.
+    Normalize Turkish characters to ASCII equivalents and strip punctuation.
     Uses turkish_lower() for proper I/İ handling.
-
-    Examples:
-        "doğan" -> "dogan"
-        "şedat" -> "sedat"
-        "İSTANBUL" -> "istanbul"
     """
     if not text:
         return ""
 
     # First apply Turkish-aware lowercasing
     text = turkish_lower(text.strip())
-    # Then fold Turkish chars to ASCII
+    
+    # Fold Turkish chars to ASCII
     replacements = {
         'ğ': 'g',
         'ı': 'i',
@@ -271,6 +267,12 @@ def normalize_turkish(text: str) -> str:
 
     for tr_char, en_char in replacements.items():
         text = text.replace(tr_char, en_char)
+
+    # Replace all non-alphanumeric characters with spaces
+    text = re.sub(r'[^a-z0-9\s]', ' ', text)
+    
+    # Collapse multiple spaces
+    text = re.sub(r'\s+', ' ', text).strip()
 
     return text
 
@@ -330,7 +332,7 @@ def get_word_idf(word: str) -> float:
         return _word_data[word_norm]['idf']
 
     # Unknown word gets high IDF (distinctive)
-    return 8.0
+    return 9.0
 
 
 def get_doc_frequency(word: str) -> int:
@@ -393,197 +395,19 @@ def calculate_adjusted_score(
     candidate_text: str,
     include_details: bool = False
 ) -> dict:
-    """Adjusts raw similarity score based on IDF weights using a gradual penalty.
-    
-    Formula: adjusted = raw * (BLEND_FACTOR + (1 - BLEND_FACTOR) * idf_weight)
-
-    Args:
-        raw_similarity: Original similarity score (0.0 to 1.0)
-        query_text: Search query or watchlist brand name
-        candidate_text: Matching trademark name
-        include_details: Include word-level breakdown
-
-    Returns:
-        dict: Breakdown of the adjusted score
-    """
-    _ensure_loaded()
-
-    # Get weights for both texts
-    query_weight, query_details = calculate_text_weight(query_text)
-    candidate_weight, candidate_details = calculate_text_weight(candidate_text)
-
-    idf_weight = min(query_weight, candidate_weight)
-
-    # ═══════════════════════════════════════════════════════════
-    # GRADUAL PENALTY FORMULA
-    # ═══════════════════════════════════════════════════════════
-    # Higher = less aggressive penalty
-    BLEND_FACTOR = 0.4  # Preserve at least 40% of raw score contribution
-
-    # Calculate blended weight
-    blended_weight = BLEND_FACTOR + (1 - BLEND_FACTOR) * idf_weight
-
-    # Apply to raw similarity
-    adjusted_score = raw_similarity * blended_weight
-
-    result = {
-        'raw_score': round(raw_similarity, 4),
-        'adjusted_score': round(adjusted_score, 4),
-        'idf_weight': round(idf_weight, 4),
-        'blended_weight': round(blended_weight, 4),
-        'blend_factor': BLEND_FACTOR,
-        'query_weight': round(query_weight, 4),
-        'candidate_weight': round(candidate_weight, 4)
-    }
-
+    """DEPRECATED. Wraps new Hierarchical scorer."""
+    from idf_scoring import compute_idf_weighted_score
+    score, breakdown = compute_idf_weighted_score(query_text, candidate_text, raw_similarity)
+    result = {'raw_score': round(raw_similarity, 4), 'adjusted_score': round(score, 4), 'idf_weight': 1.0, 'blended_weight': score, 'blend_factor': 0.0, 'query_weight': 1.0, 'candidate_weight': 1.0}
     if include_details:
-        result['details'] = {
-            'query_words': query_details,
-            'candidate_words': candidate_details
-        }
-
+        result['details'] = {'query_words': breakdown.get("matched_words", []), 'candidate_words': breakdown.get("scoring_path", ""), 'breakdown': breakdown}
     return result
 
-
 def calculate_text_similarity(query: str, target: str) -> float:
-    """Calculate IDF-weighted text similarity between query and target.
-
-    Args:
-        query: Search query
-        target: Candidate trademark name
-
-    Returns:
-        float: Similarity score (0.0 to 1.0)
-    """
-    _ensure_loaded()
-
-    if not query or not target:
-        return 0.0
-
-    # Normalize Turkish characters
-    q_norm = normalize_turkish(query)
-    t_norm = normalize_turkish(target)
-
-    # Clean punctuation
-    q_clean = re.sub(r'[^a-z0-9\s]', ' ', q_norm)
-    t_clean = re.sub(r'[^a-z0-9\s]', ' ', t_norm)
-    q_clean = ' '.join(q_clean.split())
-    t_clean = ' '.join(t_clean.split())
-
-    if not q_clean or not t_clean:
-        return 0.0
-
-    # ================================================
-    # CHECK 1: Exact match
-    # ================================================
-    if q_clean == t_clean:
-        return 1.0
-
-    # ================================================
-    # CHECK 2: Forward containment (query in target)
-    # e.g., "nike" in "nike sports" -> 90%+
-    # If query is entirely generic, apply gradual penalty
-    # ================================================
-    if q_clean in t_clean:
-        q_words = set(q_clean.split())
-        non_generic = {w for w in q_words if not is_generic_word(w) and len(w) >= 2}
-        if not non_generic:
-            # Query is entirely generic - apply gradual penalty
-            return 0.85 * 0.46
-        ratio = len(q_clean) / len(t_clean)
-        return 0.85 + (ratio * 0.15)
-
-    # ================================================
-    # CHECK 3: Reverse containment (target in query)
-    # e.g., "sedat" in "sedat coffe" -> 90%+
-    # ================================================
-    if t_clean in q_clean:
-        t_words = set(t_clean.split())
-        non_generic = {w for w in t_words if not is_generic_word(w) and len(w) >= 2}
-        if not non_generic:
-            # Target is entirely generic - apply gradual penalty
-            return 0.85 * 0.46
-        ratio = len(t_clean) / len(q_clean)
-        return 0.85 + (ratio * 0.15)
-
-    # ================================================
-    # CHECK 4: Tokenize and get distinctive words
-    # ================================================
-    q_tokens = set(q_clean.split())
-    t_tokens = set(t_clean.split())
-
-    if not q_tokens:
-        return 0.0
-
-    # Get distinctive words only
-    q_distinctive = {w for w in q_tokens if not is_generic_word(w) and len(w) >= 2}
-    t_distinctive = {w for w in t_tokens if not is_generic_word(w) and len(w) >= 2}
-
-    # ================================================
-    # CHECK 5: Distinctive word subset checks
-    # ================================================
-
-    if t_distinctive and t_distinctive.issubset(q_distinctive):
-        coverage = len(t_distinctive) / len(q_distinctive) if q_distinctive else 0
-        return max(0.85, 0.75 + (coverage * 0.25))
-
-    # Query distinctive words all in target -> HIGH
-    if q_distinctive and q_distinctive.issubset(t_distinctive):
-        coverage = len(q_distinctive) / len(t_distinctive) if t_distinctive else 0
-        return max(0.85, 0.75 + (coverage * 0.25))
-
-    # ================================================
-    # CHECK 6: IDF-weighted token matching
-    # ================================================
-    total_weight = 0.0
-    matched_weight = 0.0
-    distinctive_matched = False
-
-    for q_word in q_tokens:
-        if len(q_word) < 2:
-            continue
-
-        word_weight = get_word_weight(q_word)
-        total_weight += word_weight
-
-        # Exact word match
-        if q_word in t_tokens:
-            matched_weight += word_weight
-            if word_weight == WEIGHT_DISTINCTIVE:
-                distinctive_matched = True
-        else:
-            # Fuzzy match for distinctive words only
-            if word_weight == WEIGHT_DISTINCTIVE:
-                best_ratio = 0
-                for t_word in t_tokens:
-                    if not is_generic_word(t_word) and len(t_word) >= 2:
-                        ratio = SequenceMatcher(None, q_word, t_word).ratio()
-                        if ratio > best_ratio and ratio >= 0.80:
-                            best_ratio = ratio
-
-                if best_ratio > 0:
-                    matched_weight += word_weight * best_ratio
-                    distinctive_matched = True
-
-    if total_weight == 0:
-        return 0.0
-
-    base_score = matched_weight / total_weight
-
-    # ================================================
-    # GRADUAL PENALTY for non-distinctive matches
-    # ================================================
-    # If NO distinctive words matched, apply gradual penalty
-    # instead of hard cap at 15%
-    if not distinctive_matched:
-        # Calculate average weight of matched words
-        BLEND_FACTOR = 0.4
-        avg_match_weight = matched_weight / max(len([w for w in q_tokens if len(w) >= 2 and w in t_tokens]), 1) if matched_weight > 0 else 0.1
-        blended_weight = BLEND_FACTOR + (1 - BLEND_FACTOR) * avg_match_weight
-        return base_score * blended_weight
-
-    return base_score
-
+    """DEPRECATED. Wraps new Hierarchical scorer."""
+    from idf_scoring import compute_idf_weighted_score
+    score, _ = compute_idf_weighted_score(query, target)
+    return score
 
 def calculate_risk_score(
     text_similarity: float,
@@ -1248,178 +1072,27 @@ def calculate_comprehensive_score(
     raw_similarity: float = None,
     include_details: bool = False,
 ) -> Dict:
-    """
-    DEPRECATED: Use risk_engine.score_pair() instead.
-    Kept as fallback behind USE_UNIFIED_SCORING=false feature flag.
-
-    BALANCED COMPREHENSIVE SCORING FUNCTION
-
-    Uses weighted average instead of multiplication to prevent
-    scores from dropping too dramatically.
-
-    Formula:
-        weighted_factor = sum(factor * weight) / sum(weights)
-        final = (raw * 0.35) + (raw * weighted_factor * 0.65)
-
-    This blends 35% of raw score with 65% factor-adjusted score,
-    ensuring scores don't drop to near-zero.
-
-    Expected Results:
-        - "dogan patent" vs "d.p dogan patent" → 82-88% (Critical)
-        - "nike" vs "nike sports" → 70-78% (High)
-        - "dogan patent" vs "erdogan patent ofisi" → 28-38% (Low/Medium)
-        - "dogan patent" vs "dogru patent" → 20-30% (Low)
-    """
-    _ensure_loaded()
-
-    # Tokenize
-    query_words = list(tokenize(query_text))
-    result_words = list(tokenize(result_text))
-
-    # Calculate raw similarity if not provided
-    if raw_similarity is None:
-        q_norm = normalize_turkish(query_text)
-        r_norm = normalize_turkish(result_text)
-
-        # ═══════════════════════════════════════════════════════════════
-        # CONTAINMENT-AWARE RAW SIMILARITY
-        # ═══════════════════════════════════════════════════════════════
-
-        # Check word-level containment
-        q_words = set(q_norm.split())
-        r_words = set(r_norm.split())
-
-        # e.g., "dogan" (result) in "dogan patent" (query)
-        if r_words and r_words.issubset(q_words):
-            coverage = len(r_words) / len(q_words)
-            raw_similarity = 0.85 + (coverage * 0.15)
-
-        elif q_words and q_words.issubset(r_words):
-            coverage = len(q_words) / len(r_words)
-            raw_similarity = 0.85 + (coverage * 0.15)
-
-        # Case 3: No containment - use SequenceMatcher
-        else:
-            raw_similarity = SequenceMatcher(None, q_norm, r_norm).ratio()
-
-    # Calculate all factors
-    word_match_factor, word_match_details = calculate_word_match_factor(query_words, result_words)
-    length_ratio_factor = calculate_length_ratio_factor(query_words, result_words)
-    coverage_factor, coverage_details = calculate_coverage_factor(query_words, result_words)
-    idf_factor, idf_details = calculate_idf_blended_factor(query_text, result_text)
-
-    # ═══════════════════════════════════════════════════════════════
-    # BALANCED COMBINATION FORMULA
-    # ═══════════════════════════════════════════════════════════════
-
-    factor_weights = {
-        'word_match': 0.35,    # Most important - catches "dogan" vs "erdogan"
-        'coverage': 0.30,      # Important - distinctive word coverage
-        'idf': 0.20,           # Moderate - generic word penalty
-        'length': 0.15         # Least important - extra words
-    }
-
-    # Calculate weighted average of factors
-    weighted_factor = (
-        word_match_factor * factor_weights['word_match'] +
-        coverage_factor * factor_weights['coverage'] +
-        idf_factor * factor_weights['idf'] +
-        length_ratio_factor * factor_weights['length']
-    )
-
-    # ═══════════════════════════════════════════════════════════════
-    # CRITICAL: Coverage-based penalty
-    # ═══════════════════════════════════════════════════════════════
-
-    coverage_penalty = 1.0
-    if coverage_factor <= 0.30:
-        # Distinctive words didn't match well - heavy penalty
-        coverage_penalty = 0.50
-    elif coverage_factor <= 0.50:
-        # Some distinctive words missing - moderate penalty
-        coverage_penalty = 0.72
-
-    adjusted_factor = weighted_factor * coverage_penalty
-
-    # ═══════════════════════════════════════════════════════════════
-    # ═══════════════════════════════════════════════════════════════
-    # - "dogan patent" vs "dogan" → 82-85% (containment)
-    # - "nike" vs "nike sports" → 80-88% (containment)
-
-    # Use weighted factor directly but scaled properly
-    # weighted_factor ranges from ~0.25 (poor) to ~1.0 (excellent)
-
-    # Base formula: final = raw * blended_retention
-    # Where blended_retention = base + (range * weighted_factor)
-
-    # BOOSTED retention for good matches (+5-8%)
-    # For excellent matches (weighted >= 0.85): 93-100% retention
-    # For good matches (weighted >= 0.70): 85-93% retention
-
-    all_distinctive_matched = (
-        coverage_details.get('distinctive_score', 0) >= 0.95 and
-        len(coverage_details.get('not_found_distinctive', [])) == 0
-    )
-
-    if weighted_factor >= 0.85:
-        base_retention = 0.93 + (weighted_factor - 0.85) * 0.47  # 0.93 to 1.0
-    elif weighted_factor >= 0.70:
-        # Boost if all distinctive words matched
-        if all_distinctive_matched:
-            base_retention = 0.88 + (weighted_factor - 0.70) * 0.33  # 0.88 to 0.93
-        else:
-            base_retention = 0.82 + (weighted_factor - 0.70) * 0.73  # 0.82 to 0.93
-    elif weighted_factor >= 0.50:
-        base_retention = 0.35 + (weighted_factor - 0.50) * 1.0   # 0.35 to 0.55
-    else:
-        base_retention = 0.20 + weighted_factor * 0.30            # 0.20 to 0.35
-
-    if coverage_penalty < 1.0 and not all_distinctive_matched:
-        base_retention *= (0.6 + 0.4 * coverage_penalty)  # Softer penalty
-
-    # Apply length penalty (softer)
-    length_adjusted = 0.75 + (0.25 * length_ratio_factor)
-    base_retention *= length_adjusted
-
-    # Calculate final score
-    final_score = raw_similarity * base_retention
-
-    final_score = max(0.05, min(1.0, final_score))
-
-    # Determine risk level
-    if final_score >= 0.70:
-        risk_level = 'critical'
-    elif final_score >= 0.50:
-        risk_level = 'high'
-    elif final_score >= 0.30:
-        risk_level = 'medium'
-    else:
-        risk_level = 'low'
-
+    """DEPRECATED. Wraps new Hierarchical scorer."""
+    from idf_scoring import compute_idf_weighted_score
+    raw = raw_similarity if raw_similarity is not None else 0.0
+    score, breakdown = compute_idf_weighted_score(query_text, result_text, raw)
+    
+    risk_level = "low"
+    if score >= 0.70: risk_level = "critical"
+    elif score >= 0.50: risk_level = "high"
+    elif score >= 0.30: risk_level = "medium"
+    
     result = {
-        'raw_score': round(raw_similarity, 3),
-        'final_score': round(final_score, 3),
-        'factors': {
-            'word_match': round(word_match_factor, 3),
-            'length_ratio': round(length_ratio_factor, 3),
-            'coverage': round(coverage_factor, 3),
-            'idf': round(idf_factor, 3)
-        },
-        'weighted_factor': round(weighted_factor, 3),
+        'raw_score': round(raw, 3),
+        'final_score': round(score, 3),
+        'factors': {'word_match': 0.0, 'length_ratio': 0.0, 'coverage': 0.0, 'idf': 0.0},
+        'weighted_factor': round(score, 3),
         'risk_level': risk_level
     }
-
+    
     if include_details:
-        result['details'] = {
-            'query_words': query_words,
-            'result_words': result_words,
-            'word_match': word_match_details,
-            'coverage': coverage_details,
-            'idf': idf_details
-        }
-
+        result['details'] = breakdown
     return result
-
 
 def calculate_alert_risk_score(
     query_text: str,

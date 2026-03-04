@@ -34,9 +34,23 @@ function Write-Log {
 function Test-Url {
     param([string]$Url, [int]$TimeoutSec = 10)
     try {
-        $response = Invoke-WebRequest -Uri $Url -TimeoutSec $TimeoutSec -UseBasicParsing -ErrorAction Stop
-        return $response.StatusCode -eq 200
-    } catch {
+        $maxRetries = 3
+        $retryWait = 2
+        for ($i = 0; $i -lt $maxRetries; $i++) {
+            try {
+                $response = Invoke-WebRequest -Uri $Url -TimeoutSec $TimeoutSec -UseBasicParsing -ErrorAction Stop
+                if ($response.StatusCode -eq 200) { return $true }
+            }
+            catch {
+                if ($i -lt $maxRetries - 1) {
+                    Write-Log "Retry $($i + 1)/$maxRetries for $Url failed. Waiting ${retryWait}s..." "DEBUG"
+                    Start-Sleep -Seconds $retryWait
+                }
+            }
+        }
+        return $false
+    }
+    catch {
         return $false
     }
 }
@@ -65,7 +79,8 @@ $dockerOk = $false
 try {
     $null = docker info 2>&1
     if ($LASTEXITCODE -eq 0) { $dockerOk = $true }
-} catch {}
+}
+catch {}
 
 if (-not $dockerOk) {
     $issues += "Docker daemon is not running"
@@ -90,14 +105,16 @@ if (-not $dockerOk) {
                     Write-Log "Docker daemon is ready after ${waited}s" "INFO"
                     break
                 }
-            } catch {}
+            }
+            catch {}
         }
 
         if (-not $dockerOk) {
             Write-Log "Docker daemon failed to start after 120s. Aborting." "CRITICAL"
             exit 1
         }
-    } else {
+    }
+    else {
         Write-Log "Docker Desktop not found at expected path. Cannot auto-recover." "CRITICAL"
         exit 1
     }
@@ -118,7 +135,8 @@ foreach ($name in $requiredContainers) {
         if ($LASTEXITCODE -eq 0) {
             $actions += "Restarted $name"
             Write-Log "Restarted $name" "ACTION"
-        } else {
+        }
+        else {
             Write-Log "Failed to restart $name. Attempting docker-compose up..." "ERROR"
             Set-Location $ProjectRoot
             docker-compose up -d 2>&1 | Out-Null
@@ -148,7 +166,7 @@ foreach ($name in $healthContainers) {
 # ============================================
 # CHECK 4: Backend HTTP health endpoint
 # ============================================
-$backendHealthy = Test-Url "http://127.0.0.1:8000/health"
+$backendHealthy = Test-Url "http://127.0.0.1:8000/health" -TimeoutSec 30
 if (-not $backendHealthy) {
     $issues += "Backend /health endpoint not responding"
     Write-Log "Backend /health not responding on port 8000" "WARN"
@@ -158,15 +176,17 @@ if (-not $backendHealthy) {
     try {
         $startedAt = [DateTime]::Parse($backendUptime)
         $uptimeSeconds = ((Get-Date).ToUniversalTime() - $startedAt).TotalSeconds
-        if ($uptimeSeconds -lt 120) {
-            Write-Log "Backend started ${uptimeSeconds}s ago (within 120s startup grace period). Skipping restart." "INFO"
-        } else {
+        if ($uptimeSeconds -lt 300) {
+            Write-Log "Backend started ${uptimeSeconds}s ago (within 300s startup grace period). Skipping restart." "INFO"
+        }
+        else {
             Write-Log "Backend has been up for ${uptimeSeconds}s but /health fails. Restarting..." "ERROR"
             docker restart ipwatch_backend 2>&1 | Out-Null
             $actions += "Restarted backend (health check failed)"
             Write-Log "Restarted ipwatch_backend" "ACTION"
         }
-    } catch {
+    }
+    catch {
         Write-Log "Could not parse backend uptime. Restarting as precaution." "WARN"
         docker restart ipwatch_backend 2>&1 | Out-Null
         $actions += "Restarted backend"
@@ -176,7 +196,7 @@ if (-not $backendHealthy) {
 # ============================================
 # CHECK 5: Nginx proxy
 # ============================================
-$nginxOk = Test-Url "http://127.0.0.1:8080/health"
+$nginxOk = Test-Url "http://127.0.0.1:8080/health" -TimeoutSec 15
 if (-not $nginxOk -and $backendHealthy) {
     $issues += "Nginx proxy not responding"
     Write-Log "Nginx not responding on port 8080 (backend is healthy). Restarting nginx..." "ERROR"
@@ -193,15 +213,18 @@ if (-not $publicOk) {
     $issues += "Public website (ipwatchai.com) not accessible"
     Write-Log "Public website NOT accessible via Cloudflare tunnel" "ERROR"
 
-    # Check tunnel container specifically
-    $tunnelStatus = docker inspect --format '{{.State.Status}}' ipwatch_tunnel 2>&1
-    if ($tunnelStatus -ne "running") {
-        docker restart ipwatch_tunnel 2>&1 | Out-Null
-        $actions += "Restarted Cloudflare tunnel"
-        Write-Log "Restarted ipwatch_tunnel" "ACTION"
-    } else {
-        # Tunnel is running but site not accessible - could be upstream issue
-        Write-Log "Cloudflare tunnel container is running but site not accessible. May be DNS/Cloudflare issue." "WARN"
+    # Tunnel logic: restart if site is down, regardless of container status
+    $tunnelInfo = docker inspect ipwatch_tunnel 2>$null | ConvertFrom-Json
+    if ($tunnelInfo) {
+        $startedAt = [DateTime]::Parse($tunnelInfo.State.StartedAt)
+        $uptimeSeconds = ((Get-Date).ToUniversalTime() - $startedAt).TotalSeconds
+        if ($uptimeSeconds -lt 300) {
+            Write-Log "Public site down, but tunnel started only ${uptimeSeconds}s ago. Skipping proactive restart." "INFO"
+        } else {
+            Write-Log "Public site down and tunnel hasn't connected after ${uptimeSeconds}s. Proactively restarting tunnel..." "ACTION"
+            docker restart ipwatch_tunnel 2>&1 | Out-Null
+            $actions += "Restarted Cloudflare tunnel (proactive recovery after grace period)"
+        }
     }
 }
 
@@ -227,7 +250,8 @@ if ($freeGB -lt 10) {
 # ============================================
 if ($issues.Count -eq 0) {
     Write-Log "All checks passed. Services healthy." "OK"
-} else {
+}
+else {
     Write-Log ("Issues found: " + ($issues -join "; ")) "SUMMARY"
     if ($actions.Count -gt 0) {
         Write-Log ("Actions taken: " + ($actions -join "; ")) "SUMMARY"

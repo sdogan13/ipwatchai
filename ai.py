@@ -105,7 +105,7 @@ logger.info("Loading OpenCLIP model", model=CLIP_MODEL, pretrained=CLIP_PRETRAIN
 clip_model, _, clip_preprocess = open_clip.create_model_and_transforms(
     CLIP_MODEL, pretrained=CLIP_PRETRAINED, device=device
 )
-if USE_FP16:
+if USE_FP16 and device == 'cuda':
     clip_model.eval().half()
 else:
     clip_model.eval()
@@ -114,7 +114,7 @@ logger.info("OpenCLIP loaded", duration_ms=round((time.perf_counter() - _model_l
 _model_load_start = time.perf_counter()
 logger.info("Loading DINOv2 model", model=DINO_MODEL, fp16=USE_FP16)
 dinov2_model = torch.hub.load('facebookresearch/dinov2', DINO_MODEL)
-if USE_FP16:
+if USE_FP16 and device == 'cuda':
     dinov2_model.to(device).half().eval()
 else:
     dinov2_model.to(device).eval()
@@ -335,7 +335,9 @@ def get_clip_embedding_cached(image_path: str) -> list:
     # Generate embedding (always needed if not in cache)
     def _generate_embedding():
         pil_image = _load_and_preprocess_image(image_path)
-        tensor = clip_preprocess(pil_image).unsqueeze(0).to(device).half()
+        tensor = clip_preprocess(pil_image).unsqueeze(0).to(device)
+        if USE_FP16 and device == 'cuda':
+            tensor = tensor.half()
         feat = clip_model.encode_image(tensor)
         feat /= feat.norm(dim=-1, keepdim=True)
         return feat.float().cpu().squeeze().tolist()
@@ -409,7 +411,9 @@ def get_clip_embeddings_batch_cached(image_paths: list) -> list:
                 continue
 
         if tensors:
-            batch_tensor = torch.stack(tensors).to(device).half()
+            batch_tensor = torch.stack(tensors).to(device)
+            if USE_FP16 and device == 'cuda':
+                batch_tensor = batch_tensor.half()
             feats = clip_model.encode_image(batch_tensor)
             feats /= feats.norm(dim=-1, keepdim=True)
             feats_list = feats.float().cpu().tolist()
@@ -437,7 +441,9 @@ def get_dino_embedding_cached(image_path: str) -> list:
     # Generate embedding (always needed if not in cache)
     def _generate_embedding():
         pil_image = _load_and_preprocess_image(image_path)
-        tensor = dinov2_preprocess(pil_image).unsqueeze(0).to(device).half()
+        tensor = dinov2_preprocess(pil_image).unsqueeze(0).to(device)
+        if USE_FP16 and device == 'cuda':
+            tensor = tensor.half()
         feat = dinov2_model(tensor)
         return feat.float().cpu().squeeze().tolist()
 
@@ -510,7 +516,9 @@ def get_dino_embeddings_batch_cached(image_paths: list) -> list:
                 continue
 
         if tensors:
-            batch_tensor = torch.stack(tensors).to(device).half()
+            batch_tensor = torch.stack(tensors).to(device)
+            if USE_FP16 and device == 'cuda':
+                batch_tensor = batch_tensor.half()
             feats = dinov2_model(batch_tensor)
             feats_list = feats.float().cpu().tolist()
 

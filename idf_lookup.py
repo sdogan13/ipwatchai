@@ -48,7 +48,7 @@ class IDFLookup:
     _cache: Dict[str, dict] = {}
     _loaded: bool = False
     _total_docs: int = 0
-    _default_idf: float = 5.0  # Default for unknown words (treat as distinctive)
+    _default_idf: float = 9.0  # Default for unknown words (treat as distinctive)
 
     def __new__(cls):
         if cls._instance is None:
@@ -127,6 +127,26 @@ class IDFLookup:
             cls._loaded = True  # Mark as loaded to prevent repeated failures
 
     @classmethod
+    def _get_entry_with_fallback(cls, word_norm: str) -> dict:
+        """
+        Get entry for a word, with fallback for Turkish morphological suffixes.
+        Only strips suffixes if the resulting root is a known generic word.
+        """
+        entry = cls._cache.get(word_norm)
+        if entry:
+            return entry
+
+        # Morphological fallback: safe suffix stripping if the root is known in the DB
+        for suffix in ('leri', 'ları', 'ler', 'lar', 'si', 'sı', 'i', 'ı', 'in', 'ın', 'nin', 'nın', 'ye', 'ya', 'e', 'a'):
+            if word_norm.endswith(suffix):
+                stem = word_norm[:-len(suffix)]
+                if len(stem) >= 3:
+                    stem_entry = cls._cache.get(stem)
+                    if stem_entry is not None:
+                        return stem_entry
+        return None
+
+    @classmethod
     def get_idf(cls, word: str) -> float:
         """
         Get IDF score for a word.
@@ -144,13 +164,7 @@ class IDFLookup:
             cls.load()
 
         word_norm = normalize_turkish(word)
-
-        # Force known generic words (English + Turkish) to a low IDF
-        from utils.idf_scoring import FOREIGN_GENERICS_OVERRIDE
-        if word_norm in FOREIGN_GENERICS_OVERRIDE:
-            return 2.0
-
-        entry = cls._cache.get(word_norm)
+        entry = cls._get_entry_with_fallback(word_norm)
 
         if entry:
             return entry['idf']
@@ -173,10 +187,10 @@ class IDFLookup:
             cls.load()
 
         word_norm = normalize_turkish(word)
-        entry = cls._cache.get(word_norm)
+        entry = cls._get_entry_with_fallback(word_norm)
 
         if entry:
-            return entry['is_generic']
+            return entry.get('is_generic', False)
         else:
             # Unknown word - treat as distinctive
             return False
@@ -196,9 +210,9 @@ class IDFLookup:
             cls.load()
 
         word_norm = normalize_turkish(word)
-        entry = cls._cache.get(word_norm)
+        entry = cls._get_entry_with_fallback(word_norm)
 
-        return entry['doc_freq'] if entry else 0
+        return entry.get('doc_freq', 0) if entry else 0
 
     @classmethod
     def get_word_class(cls, word: str) -> str:
@@ -208,21 +222,15 @@ class IDFLookup:
         Returns one of: 'generic', 'semi_generic', 'distinctive'
 
         Classification based on IDF thresholds:
-        - GENERIC: IDF < 5.3 (>0.5% of docs)
-        - SEMI_GENERIC: 5.3 <= IDF < 6.9 (0.1%-0.5%)
-        - DISTINCTIVE: IDF >= 6.9 (<0.1%)
+        - GENERIC: IDF < 6.0 (>0.5% of docs)
+        - SEMI_GENERIC: 6.0 <= IDF < 8.5 (0.1%-0.5%)
+        - DISTINCTIVE: IDF >= 8.5 (<0.1%)
         """
-        from utils.idf_scoring import FOREIGN_GENERICS_OVERRIDE
-
-        word_norm = normalize_turkish(word)
-        if word_norm in FOREIGN_GENERICS_OVERRIDE:
-            return 'generic'
-
         idf = cls.get_idf(word)
 
-        if idf < 5.5:
+        if idf < 6.0:
             return 'generic'
-        elif idf < 8.0:
+        elif idf < 8.5:
             return 'semi_generic'
         else:
             return 'distinctive'

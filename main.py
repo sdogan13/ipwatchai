@@ -1977,6 +1977,15 @@ async def enhanced_search(request: Request, search_request: SearchRequest):
         # CANDIDATE RETRIEVAL (3-stage funnel)
         # Fetch text_embedding, name_tr, logo_ocr_text + visual vectors
         # =========================================================
+        # Prepare tokenized AND matching logic
+        tokens = [t for t in name_normalized.split() if len(t) > 2]
+        token_clauses_simple = "FALSE"
+        token_params = []
+        if len(tokens) > 1:
+            # Multi-word AND search (supports concatenated matches like "doganpatent")
+            token_clauses_simple = "(" + " AND ".join([f"{normalize_sql} LIKE %s" for _ in tokens]) + ")"
+            token_params = [f"%{t}%" for t in tokens]
+
         base_select = f"""
             SELECT
                 t.id,
@@ -2003,11 +2012,14 @@ async def enhanced_search(request: Request, search_request: SearchRequest):
                     similarity(LOWER(t.name), LOWER(%s)),
                     similarity({normalize_sql}, LOWER(%s)),
                     CASE WHEN LOWER(t.name) LIKE LOWER(%s) THEN 0.9 ELSE 0 END,
-                    CASE WHEN {normalize_sql} LIKE LOWER(%s) THEN 0.9 ELSE 0 END
+                    CASE WHEN {normalize_sql} LIKE LOWER(%s) THEN 0.9 ELSE 0 END,
+                    CASE WHEN {token_clauses_simple} THEN 0.85 ELSE 0 END
                 ) as score,
                 (dmetaphone(t.name) = dmetaphone(%s)) as phonetic_match
             FROM trademarks t
         """
+
+        token_where_clause = f" OR {token_clauses_simple}" if len(tokens) > 1 else ""
 
         where_clause = f"""
             WHERE (
@@ -2015,18 +2027,19 @@ async def enhanced_search(request: Request, search_request: SearchRequest):
                 OR {normalize_sql} LIKE LOWER(%s)
                 OR similarity(LOWER(t.name), LOWER(%s)) > 0.2
                 OR similarity({normalize_sql}, LOWER(%s)) > 0.2
+                {token_where_clause}
             )
         """
 
         base_params = [
             search_request.name, name_normalized,
             f'%{search_request.name}%', f'%{name_normalized}%',
-            search_request.name,
-        ]
+        ] + token_params + [search_request.name]
+
         where_params = [
             f'%{search_request.name}%', f'%{name_normalized}%',
             search_request.name, name_normalized,
-        ]
+        ] + token_params
 
         if search_classes:
             where_clause += " AND (t.nice_class_numbers && %s::integer[] OR 99 = ANY(t.nice_class_numbers))"
@@ -2150,6 +2163,9 @@ async def enhanced_search(request: Request, search_request: SearchRequest):
                 score_val = scoring['final_score']
                 similarity_pct = round(score_val * 100, 1)
 
+            if 'dent patent' in target_name.lower():
+                logger.error(f"DEBUG_API_INJECT | name: {target_name} | use_unified: {use_unified} | score_val: {score_val} | similarity_pct: {similarity_pct} | semantic_sim: {semantic_sim} | pg_text_sim: {pg_text_sim} | phon_match: {phon_match}")
+
             results.append(TrademarkResult(
                 id=str(row['id']),
                 name=row['name'],
@@ -2177,7 +2193,10 @@ async def enhanced_search(request: Request, search_request: SearchRequest):
         # Re-sort by score and limit
         results.sort(key=lambda x: x.similarity, reverse=True)
         total_found = len(results)
-        results = results[:MAX_RESULTS]
+        
+        # Use user-requested limit or default to 100
+        limit = search_request.limit if getattr(search_request, 'limit', None) else 100
+        results = results[:limit]
 
         search_time = (time.time() - start_time) * 1000
 

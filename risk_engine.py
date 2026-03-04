@@ -371,9 +371,10 @@ def score_pair(query_name, candidate_name,
         trans_sim = 0.0
     else:
         candidate_name_tr = (candidate_translations or {}).get('name_tr') or ''
-        trans_sim = calculate_translation_similarity(
+        trans_res = calculate_translation_similarity(
             query_name, candidate_name, candidate_name_tr=candidate_name_tr
         )
+        trans_sim = trans_res if isinstance(trans_res, float) else trans_res.get("translation_similarity", 0.0)
 
     _idf_total, breakdown = compute_idf_weighted_score(
         query=query_name,
@@ -384,50 +385,7 @@ def score_pair(query_name, candidate_name,
         visual_sim=visual_sim
     )
 
-    # --- Post-IDF adjustments (shared imports) ---
-    from idf_lookup import IDFLookup as _IDFLookup
-    from idf_scoring import tokenize as _tokenize
-    from difflib import SequenceMatcher as _SM
-    _q_tokens = _tokenize(query_name) if query_name else set()
-    _t_tokens = _tokenize(candidate_name) if candidate_name else set()
-
-    if _idf_total >= 0.90 and not breakdown.get('exact_match', False) and _q_tokens:
-        _penalty = 0.0
-        for _w in _q_tokens:
-            _matched = _w in _t_tokens or any(
-                _SM(None, _w, _tw).ratio() >= (0.75 if min(len(_w), len(_tw)) <= 4 else 0.80)
-                for _tw in _t_tokens
-            )
-            if not _matched:
-                _wc = _IDFLookup.get_word_class(_w)
-                if _wc == 'distinctive':
-                    _penalty += 0.11
-                else:
-                    _penalty += 0.04
-
-        if _penalty > 0:
-            _idf_total = max(0.0, _idf_total - _penalty)
-            breakdown['total'] = round(_idf_total, 4)
-            breakdown['scoring_path'] = breakdown.get('scoring_path', '') + ' > COVERAGE(-{:.0%})'.format(_penalty)
-
-    _dist_matched = breakdown.get('distinctive_match', 0.0)
-    _dist_weight_matched = breakdown.get('distinctive_weight_matched', 0.0)
-    if _dist_matched == 0.0 and _dist_weight_matched == 0.0 and _idf_total > 0.25:
-        _has_distinctive = any(
-            _IDFLookup.get_word_class(w) == 'distinctive' for w in _q_tokens
-        )
-        if _has_distinctive:
-            if phonetic_sim > 0.80:
-                # Phonetic-aware ceiling: words sound alike, don't crush score
-                _ceiling = min(_idf_total, phonetic_sim * 0.70)
-                _ceiling = max(0.40, _ceiling)  # floor at 0.40
-                _idf_total = _ceiling
-                breakdown['total'] = round(_ceiling, 4)
-                breakdown['scoring_path'] = breakdown.get('scoring_path', '') + f' > PHONETIC_CEILING({_ceiling:.2f})'
-            else:
-                _idf_total = 0.25
-                breakdown['total'] = 0.25
-                breakdown['scoring_path'] = breakdown.get('scoring_path', '') + ' > CEILING (no distinctive match)'
+    # No post-IDF adjustments needed: HierarchicalTextScorer natively handles missing tokens.
 
     breakdown['translation_similarity'] = trans_sim
 
@@ -451,6 +409,7 @@ def score_pair(query_name, candidate_name,
     breakdown['text_idf_score'] = _idf_total
     breakdown['dynamic_weights'] = combined['dynamic_weights']
 
+    logger.info(f"LIVE_API_SCORE: {query_name} vs {candidate_name} | text={text_sim}, semantic={semantic_sim} | idf_total={_idf_total} | score={breakdown['total']}")
     return breakdown
 
 
@@ -776,8 +735,13 @@ class RiskEngine:
         # rely 100% on the vector search (which might miss exact substring matches).
         if not _distinctive_tokens:
             _distinctive_tokens = [w for w in _q_tokens if _IDF.get_word_class(w) == 'semi_generic']
+            
+        # Add back high value semi-generics to the distinctive list for the AND search
+        # so queries like 'dogan patent' don't get flooded by 'dogan' alone
+        elif len(_distinctive_tokens) == 1 and len([w for w in _q_tokens if _IDF.get_word_class(w) == 'semi_generic']) > 0:
+            _distinctive_tokens.extend([w for w in _q_tokens if _IDF.get_word_class(w) == 'semi_generic'])
 
-        if _distinctive_tokens and len(_tok(name_input)) == 1:
+        if _distinctive_tokens and len(_distinctive_tokens) == 1:
             # Single distinctive word — containment search
             dtok = _distinctive_tokens[0]
             escaped = dtok.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
@@ -831,13 +795,22 @@ class RiskEngine:
                     seen_ids.add(match[0])
                     all_candidates.append(match)
 
-        if _distinctive_tokens and len(_tok(name_input)) > 1:
-            # 1) Search for candidates that contain ALL distinctive tokens (AND logic)
+        # Try to gather tokens for the AND search based STRICTLY on the original input. 
+        # Including translation tokens (like "patenti" for "patent") breaks AND searches 
+        # because candidates won't contain both the English and Turkish suffix at the same time.
+        _base_tokens = list(_tok(name_input))
+        
+        # We want to AND both distinctive and high-value semi-generic words
+        # so queries like "dogan patent" mandate both words, preventing floods of "dogan" alone.
+        _and_search_tokens = [w for w in _base_tokens if _IDF.get_word_class(w) in ['distinctive', 'semi_generic']]
+        
+        if _and_search_tokens and len(_base_tokens) > 1:
+            # 1) Search for candidates that contain ALL important tokens (AND logic)
             # This is critical for finding 'd.p. doğan patent' when searching 'dogan patent'.
             # An OR logic query gets flooded by short single-word matches.
             and_clauses = []
             and_params = []
-            for dtok in _distinctive_tokens:
+            for dtok in _and_search_tokens:
                 escaped = dtok.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
                 and_clauses.append("""
                     LOWER(
@@ -871,7 +844,7 @@ class RiskEngine:
                 and_sql += " AND (nice_class_numbers && %s::integer[] OR 99 = ANY(nice_class_numbers))"
                 tok_and_params.append(target_classes)
 
-            and_sql += " ORDER BY length(name) ASC LIMIT 30;"
+            and_sql += " ORDER BY length(name) ASC LIMIT 50;"
             cur.execute(and_sql, tok_and_params)
             and_matches = cur.fetchall()
 

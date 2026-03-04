@@ -29,7 +29,7 @@ FOREIGN_GENERICS_OVERRIDE = frozenset({
     "fashion", "style", "wear", "apparel", "clothing", "garment",
 
     # ── English: Products & materials ────────────────────────────────────
-    "jewelry", "jewellery", "jewel", "jewels", "gold", "silver", "diamond", "diamonds",
+    "jewelry", "jewellery", "jewelery", "jewellry", "jewel", "jewels", "gold", "silver", "diamond", "diamonds",
     "metal", "metals", "steel", "iron", "aluminium",
     "plastic", "plastics", "polymer", "chemical", "chemicals",
     "textile", "textiles", "fabric", "cotton", "silk",
@@ -71,4 +71,8 @@ FOREIGN_GENERICS_OVERRIDE = frozenset({
     "mobilya", "dekorasyon",
     "medya", "yayin", "eglence",
     "finans", "sermaye", "kredi",
+    # ── structural legal & administrative ─────────────────────────────────
+    "patent", "patents", "patenti", "patents", "paten", "trademarks",
+    "ofis", "ofisi", "ticaret", "sirket", "sirketi",
+    "grup", "grubu", "merkez", "merkezi"
 })
