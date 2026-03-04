@@ -86,7 +86,10 @@ services:
       DB_USER: "${DB_USER:-turk_patent}"
       DB_PASSWORD: "${DB_PASSWORD}"
 
-      # Redis - values come from .env.cloud (REDIS_HOST, REDIS_PORT, REDIS_PASSWORD, REDIS_URL)
+      # Redis
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: "${REDIS_PASSWORD}"
 
       # Auth
       AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:?AUTH_SECRET_KEY is required}
