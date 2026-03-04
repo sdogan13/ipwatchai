@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     postgresql-client \
     # Image processing
-    libgl1-mesa-glx \
+    libgl1 \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
@@ -43,13 +43,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxfixes3 \
     libxrandr2 \
     libgbm1 \
-    libasound2 \
+    libasound2-data \
     libpango-1.0-0 \
     libcairo2 \
     # Archive extraction
     p7zip-full \
-    p7zip-rar \
-    7zip \
     unrar-free \
     # Utilities
     curl \
@@ -91,9 +89,9 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=600s --retries=3 \
 
 # Default command - run FastAPI with uvicorn
 CMD ["python", "-m", "uvicorn", "main:app", \
-     "--host", "0.0.0.0", \
-     "--port", "8000", \
-     "--workers", "2", \
-     "--loop", "uvloop", \
-     "--http", "httptools", \
-     "--log-level", "info"]
+    "--host", "0.0.0.0", \
+    "--port", "8000", \
+    "--workers", "2", \
+    "--loop", "uvloop", \
+    "--http", "httptools", \
+    "--log-level", "info"]
