@@ -856,7 +856,7 @@ async def health_check():
     # Check Redis
     try:
         import redis
-        r = redis.Redis(host=settings.redis.host, port=settings.redis.port)
+        r = redis.Redis(host=settings.redis.host, port=settings.redis.port, password=settings.redis.password)
         r.ping()
         health_status["checks"]["redis"] = "ok"
     except Exception as e:

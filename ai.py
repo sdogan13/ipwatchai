@@ -51,6 +51,7 @@ try:
     REDIS_HOST = settings.redis.host
     REDIS_PORT = settings.redis.port
     REDIS_DB = settings.redis.cache_db
+    REDIS_PASSWORD = settings.redis.password
 
     # AI settings from config
     CLIP_MODEL = settings.ai.clip_model
@@ -73,6 +74,7 @@ except ImportError:
     REDIS_HOST = "localhost"
     REDIS_PORT = 6379
     REDIS_DB = 0
+    REDIS_PASSWORD = None
 
     CLIP_MODEL = "ViT-B-32"
     CLIP_PRETRAINED = "laion2b_s34b_b79k"
@@ -221,7 +223,7 @@ REDIS_AVAILABLE = False
 
 try:
     logger.info("Connecting to Redis", host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB)
-    redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB)
+    redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, password=REDIS_PASSWORD)
     # Test connection
     redis_client.ping()
     REDIS_AVAILABLE = True

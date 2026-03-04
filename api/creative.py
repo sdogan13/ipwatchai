@@ -67,6 +67,7 @@ def _get_redis():
             _redis_client = redis.Redis(
                 host=settings.redis.host,
                 port=settings.redis.port,
+                password=settings.redis.password,
                 db=settings.creative.generation_cache_db,
             )
             _redis_client.ping()
