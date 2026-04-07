@@ -252,8 +252,8 @@ Full technical documentation available in `docs/SYSTEM_DOCUMENTATION.md`
 
 ## License
 
-Copyright 2026 Dogan Patent. All rights reserved.
+Copyright 2026 IP WATCH AI. All rights reserved.
 
 ## Contact
-
-- **Technical Support:** tech@doganpatent.com
+- www.ipwatchai.com
+- info@ipwatchai.com
