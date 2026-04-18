@@ -1,22 +1,10 @@
 from __future__ import annotations
 
 import hashlib
-import time
 from datetime import datetime, timezone
 
 from database.crud import Database, UserCRUD
-from tests.live.helpers.client import LiveClient
-from tests.live.helpers.config import load_live_config
-
-
-def _retry_after_seconds(response) -> float:
-    retry_after = response.headers.get("Retry-After")
-    if retry_after:
-        try:
-            return max(1.0, float(retry_after))
-        except ValueError:
-            pass
-    return 15.0
+from tests.live.helpers.test_accounts import delete_test_account, ensure_managed_persona_account
 
 
 def create_verified_browser_account(
@@ -27,39 +15,18 @@ def create_verified_browser_account(
     last_name: str = "Reset",
     organization_name: str,
 ) -> None:
-    config = load_live_config()
-    client = LiveClient(config)
-    payload = {
-        "email": email,
-        "password": password,
-        "first_name": first_name,
-        "last_name": last_name,
-        "organization_name": organization_name,
-        "lang": "en",
-    }
+    ensure_managed_persona_account(
+        "free",
+        email=email,
+        password=password,
+        organization_name=organization_name,
+        first_name=first_name,
+        last_name=last_name,
+    )
 
-    response = None
-    for attempt in range(1, 6):
-        response = client.post("/api/v1/auth/register", json_data=payload, token=False)
-        if response.status_code == 200:
-            break
-        if response.status_code == 429 and attempt < 5:
-            time.sleep(_retry_after_seconds(response))
-            continue
-        raise AssertionError(f"unexpected register status for {email}: {response.status_code}")
 
-    with Database() as db:
-        user = UserCRUD.get_by_email(db, email)
-        if not user:
-            raise AssertionError(f"registered user not found for {email}")
-        if not user.get("is_email_verified"):
-            UserCRUD.verify_email(db, user["id"])
-            cur = db.cursor()
-            cur.execute(
-                "UPDATE email_verification_tokens SET used_at = NOW() WHERE user_id = %s AND used_at IS NULL",
-                (str(user["id"]),),
-            )
-            db.commit()
+def delete_browser_test_account(email: str) -> dict[str, int]:
+    return delete_test_account(email)
 
 
 def lookup_password_reset_code(email: str) -> str:

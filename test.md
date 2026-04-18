@@ -31,6 +31,8 @@ Secondary goals:
 - Keep live suites idempotent.
 - Clean up any created test data in the same run.
 - Prefer seeded test accounts over ad hoc local accounts.
+- Reuse managed smoke personas for routine free/paid/business coverage instead of creating a fresh account on every run.
+- Any browser flow that must register a fresh account must delete that account and its organization before the run if needed, and tear it down after the run.
 - Do not rely on one shared "member" account as proof of role or plan coverage.
 - Treat browser coverage as separate from API/live HTTP coverage.
 - Any production-facing flow moved during the reorganization needs at least one live verification path.
@@ -593,6 +595,9 @@ Environment Notes:
 
 ### 2026-04-18
 
+- Reworked the live/browser/nightly persona provisioning helpers to reuse deterministic managed free, starter, and professional smoke accounts when explicit persona creds are not supplied, instead of registering a new random account on every aggregate run.
+- Reworked the browser-only registration helpers so the forgot-password success account is reset and reused, while the real registration and checkout-registration journeys now use deterministic emails with teardown before and after the run.
+- Added `scripts/devtools/purge_test_accounts.py` plus shared DB cleanup helpers to audit and purge the historical disposable smoke accounts created by the older harness.
 - Expanded `tests/browser/helpers/auth_state.py` with email-verification code lookup so the public browser suite can drive the real dashboard verification modal using the stored 6-digit code.
 - Expanded `tests/browser/test_public_browser_smoke.py` so the registration journey now proves the verification modal appears after redirect, then added the full resend-and-verify email-verification modal journey.
 - The public verification browser step now asserts resend cooldown, successful `/api/v1/auth/verify-email`, modal dismissal, and `GET /api/v1/auth/me` returning `is_verified=true`.
@@ -647,6 +652,17 @@ Environment Notes:
 - Hardened `tests/browser/test_billing_browser.py` so recoverable checkout-login `429` responses no longer fail the browser lane once the retry path succeeds.
 - Hardened `tests/test_browser_e2e.py` to provision shared free/paid/business personas once per aggregate run, pass those creds into all browser delegates, and wait for `/health` recovery between delegates.
 - Hardened `tests/test_nightly_e2e.py` to provision the same shared personas once for the nightly lane, pass them into both the live and browser smoke phases, and wait for server recovery between live smoke, browser smoke, and the stateful lane.
+- Added `tests/live/helpers/test_accounts.py` so routine smoke coverage reuses deterministic managed free/starter/professional personas instead of self-registering random one-off accounts on every run.
+- Reworked `tests/live/helpers/personas.py`, `tests/browser/helpers/auth_state.py`, `tests/browser/test_public_browser_smoke.py`, and `tests/browser/test_billing_browser.py` so the aggregate live/browser/nightly lanes stop growing the `users` table and browser-only registration flows delete their temporary accounts before and after the run.
+- Expanded `tests/live/helpers/cleanup.py` and `tests/live/features/test_reports_live.py` so quota-based managed-account coverage resets its dedicated report state before and after execution; this fixed the free-plan reports quota regression that appeared once the harness stopped using fresh accounts every time.
+- Added `scripts/devtools/purge_test_accounts.py` so the backlog of legacy disposable smoke accounts can be audited in dry-run mode or purged deliberately with `--apply`.
+- Verified the managed-account churn fix with:
+  - `python -m py_compile tests/live/helpers/test_accounts.py tests/live/helpers/personas.py tests/browser/helpers/auth_state.py tests/browser/test_public_browser_smoke.py tests/browser/test_billing_browser.py tests/live/helpers/cleanup.py tests/live/features/test_reports_live.py scripts/devtools/purge_test_accounts.py`
+  - `python tests/test_live_app_e2e.py` before purge (`14/14`, disposable count stayed `1068 -> 1068`)
+  - `python tests/test_browser_e2e.py` (`11/11`, disposable count stayed `1068 -> 1068`)
+  - `python tests/test_nightly_e2e.py` (`3/3`, disposable count stayed `1068 -> 1068`)
+  - `python scripts/devtools/purge_test_accounts.py --apply` (`1068` disposable accounts and `1068` disposable orgs purged)
+  - `python tests/test_live_app_e2e.py` after purge (`14/14`, disposable count stayed `0 -> 0`)
 - Restarted Docker Desktop twice during this slice after failed aggregate runs wedged the live backend and the Docker API; both reruns below were executed only after `/health` recovered to `200`.
 - Verified the alert/filter and aggregate-hardening slice with:
   - `python tests/browser/test_public_browser_smoke.py` (`11/11`)

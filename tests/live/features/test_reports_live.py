@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
 
 from tests.live.helpers.assertions import LiveReporter
 from tests.live.helpers.client import LiveClient
+from tests.live.helpers.cleanup import cleanup_reports_by_prefix
 from tests.live.helpers.config import load_live_config
 from tests.live.helpers.personas import PersonaSession, fetch_authenticated_json, resolve_free_persona_session
 
@@ -37,6 +38,18 @@ def ensure_free_session() -> PersonaSession | None:
         FREE_RESOLVED = True
         FREE_SESSION = resolve_free_persona_session(REPORTER, label="reports free user")
     return FREE_SESSION
+
+
+def cleanup_managed_reports() -> None:
+    session = ensure_free_session()
+    if session is None:
+        return
+    cleanup_reports_by_prefix(
+        REPORTER,
+        session.organization_id,
+        prefix=None,
+        name="DELETE stale managed reports",
+    )
 
 
 def test_reports_auth_gate():
@@ -168,12 +181,16 @@ def test_download_report_permission_path():
 def main() -> None:
     REPORTER.print_heading("REPORTS FEATURE LIVE SUITE", server=CONFIG.base_url)
 
-    test_reports_auth_gate()
-    test_reports_list_happy_path()
-    test_generate_report_invalid_payload()
-    test_generate_report_happy_path()
-    test_get_generated_report()
-    test_download_report_permission_path()
+    try:
+        cleanup_managed_reports()
+        test_reports_auth_gate()
+        test_reports_list_happy_path()
+        test_generate_report_invalid_payload()
+        test_generate_report_happy_path()
+        test_get_generated_report()
+        test_download_report_permission_path()
+    finally:
+        cleanup_managed_reports()
 
     sys.exit(0 if REPORTER.summary("REPORTS FEATURE SUMMARY") == 0 else 1)
 

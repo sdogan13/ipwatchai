@@ -84,7 +84,7 @@ def cleanup_applications_by_prefix(
 def cleanup_reports_by_prefix(
     reporter: LiveReporter,
     organization_id: str | None,
-    prefix: str,
+    prefix: str | None = None,
     *,
     name: str = "DELETE stale E2E reports",
 ) -> bool:
@@ -94,19 +94,28 @@ def cleanup_reports_by_prefix(
 
     deleted = 0
     removed_files = 0
-    like_value = f"{prefix}%"
-
     try:
         with Database() as db:
             cur = db.cursor()
-            cur.execute(
-                """
-                SELECT id, file_path, report_name
-                FROM reports
-                WHERE organization_id = %s AND report_name LIKE %s
-                """,
-                (str(organization_id), like_value),
-            )
+            if prefix is None:
+                cur.execute(
+                    """
+                    SELECT id, file_path, report_name
+                    FROM reports
+                    WHERE organization_id = %s
+                    """,
+                    (str(organization_id),),
+                )
+            else:
+                like_value = f"{prefix}%"
+                cur.execute(
+                    """
+                    SELECT id, file_path, report_name
+                    FROM reports
+                    WHERE organization_id = %s AND report_name LIKE %s
+                    """,
+                    (str(organization_id), like_value),
+                )
             rows = cur.fetchall()
 
             for row in rows:
@@ -119,7 +128,14 @@ def cleanup_reports_by_prefix(
                     path.unlink()
                     removed_files += 1
 
-            if rows:
+            if rows and prefix is None:
+                cur.execute(
+                    "DELETE FROM reports WHERE organization_id = %s",
+                    (str(organization_id),),
+                )
+                deleted = cur.rowcount or 0
+                db.commit()
+            elif rows:
                 cur.execute(
                     "DELETE FROM reports WHERE organization_id = %s AND report_name LIKE %s",
                     (str(organization_id), like_value),

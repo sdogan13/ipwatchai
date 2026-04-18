@@ -8,6 +8,7 @@ Run directly:
 from __future__ import annotations
 
 import io
+import os
 import sys
 import time
 from pathlib import Path
@@ -25,6 +26,7 @@ from playwright.sync_api import sync_playwright
 from tests.browser.helpers.assertions import run_browser_step
 from tests.browser.helpers.auth_state import (
     create_verified_browser_account,
+    delete_browser_test_account,
     lookup_email_verification_code,
     lookup_password_reset_code,
 )
@@ -36,6 +38,14 @@ from tests.live.helpers.config import DEFAULT_PASSWORD
 
 CONFIG = load_browser_config()
 REPORTER = LiveReporter()
+FORGOT_SUCCESS_EMAIL = os.environ.get(
+    "TEST_BROWSER_FORGOT_SUCCESS_EMAIL",
+    "managed-browser-forgot-success@example.com",
+)
+REGISTRATION_EMAIL = os.environ.get(
+    "TEST_BROWSER_REGISTER_EMAIL",
+    "managed-browser-register@example.com",
+)
 pytestmark = pytest.mark.skip(reason="Browser E2E script; run directly with python tests/browser/test_public_browser_smoke.py")
 
 
@@ -304,7 +314,7 @@ def main() -> None:
             )
 
             forgot_email = f"browser-forgot-{uuid4().hex[:10]}@example.com"
-            forgot_success_email = f"browser-forgot-success-{uuid4().hex[:10]}@example.com"
+            forgot_success_email = FORGOT_SUCCESS_EMAIL
             forgot_success_password = DEFAULT_PASSWORD
             forgot_success_new_password = "Reset9876!"
             create_verified_browser_account(
@@ -455,8 +465,9 @@ def main() -> None:
                 ),
             )
 
-            registration_email = f"browser-register-{uuid4().hex[:10]}@example.com"
+            registration_email = REGISTRATION_EMAIL
             registration_password = DEFAULT_PASSWORD
+            delete_browser_test_account(registration_email)
 
             def register_account() -> None:
                 _clear_auth(page)
@@ -576,6 +587,7 @@ def main() -> None:
         finally:
             context.close()
             browser.close()
+            delete_browser_test_account(REGISTRATION_EMAIL)
 
     sys.exit(0 if REPORTER.summary("PUBLIC BROWSER SUMMARY") == 0 else 1)
 
