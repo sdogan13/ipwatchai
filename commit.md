@@ -303,12 +303,12 @@ Current note:
 - explicit review decisions for the review-first set:
   - `.env.cloud`: `Delete intentionally` because it is a tracked secret-bearing environment file and should not remain in source history
   - `config-backup-20260210-151337/`: `Delete intentionally` because it is a timestamped backup artifact rather than an active source path
-  - `Dockerfile.cloud`: `Ignore for now` because it is still part of the older cloud CPU deployment path referenced by `scripts/setup_cloud_server.sh`
-  - `docker-compose.cloud.yml`: `Ignore for now` because it is still referenced by `scripts/setup_cloud_server.sh` and deleting it would strand that legacy flow without a reviewed replacement
+  - `Dockerfile.cloud`: `Delete intentionally` after the canonical prod deploy path was fixed and `scripts/setup_cloud_server.sh` stopped pointing at the legacy cloud stack
+  - `docker-compose.cloud.yml`: `Delete intentionally` after the canonical prod deploy path was fixed and no tracked scripts still referenced the cloud-only compose file
   - `deploy/Dockerfile.cpu`: `Delete intentionally` after later review because it has no live repo references outside this tracker, is not used by the current compose paths, and duplicates older CPU-only deployment scaffolding
-  - `deploy/setup-server.sh`: `Ignore for now` because the newer prod/deploy path still needs a separate cleanup and there is no reviewed replacement bootstrap flow yet
+  - `deploy/setup-server.sh`: `Delete intentionally` after the canonical prod deploy path replaced its bootstrap commands and no tracked scripts still referenced it
   - `CLAUDE.md`: `Ignore for now` because it is a local repo note, not part of the reviewed source-history cleanup
-- the committed Batch 6 scope is limited to the reviewed deletions that were clearly safe at that point: `.env.cloud` and `config-backup-20260210-151337/`
+- the committed Batch 6 scope was limited to the reviewed deletions that were clearly safe at that point: `.env.cloud` and `config-backup-20260210-151337/`
 
 Exit criteria:
 - every path is classified as `keep`, `delete intentionally`, `move`, or `ignore for now`
@@ -647,6 +647,33 @@ Current note:
   - `docker-compose.cloud.yml`
   - `deploy/setup-server.sh`
 
+### Batch 16: Remove Legacy Cloud Deploy Path
+Status: Completed
+
+Scope:
+- remove the retired cloud-only Dockerfile and compose stack
+- remove the superseded server bootstrap helper under `deploy/`
+- keep the canonical prod deploy path as the only reviewed deployment route in-source
+
+Likely paths:
+- `Dockerfile.cloud`
+- `docker-compose.cloud.yml`
+- `deploy/setup-server.sh`
+
+Verification:
+- repo reference review confirmed the remaining legacy deploy files were no longer referenced outside `commit.md`
+- `docker compose --env-file deploy/.env.prod -f docker-compose.yml -f deploy/docker-compose.prod.yml config`
+
+Commit message target:
+- `infra: remove legacy cloud deploy path`
+
+Current note:
+- the Batch 16 path set was committed as `infra: remove legacy cloud deploy path`
+- the staged batch removes the legacy cloud-only deployment path after Batch 15 established the canonical `docker-compose.yml + deploy/docker-compose.prod.yml` replacement and rewired the remaining bootstrap helper to that flow
+- verification passed for the staged batch before commit:
+  - repo reference review for `Dockerfile.cloud`, `docker-compose.cloud.yml`, and `deploy/setup-server.sh`
+  - `docker compose --env-file deploy/.env.prod -f docker-compose.yml -f deploy/docker-compose.prod.yml config`
+
 ## Execution Order
 
 Recommended order:
@@ -666,6 +693,7 @@ Recommended order:
 14. Batch 13 for the API endpoint coverage expansion slice
 15. Batch 14 for the isolated unused CPU deploy Dockerfile deletion
 16. Batch 15 for the canonical prod deploy path fix
+17. Batch 16 for the legacy cloud deploy path removal
 
 ## Staging Method
 
@@ -735,3 +763,6 @@ This commit plan is complete when:
 - Staged the Batch 15 prod-deploy replacement slice around the broken prod compose overlay and the remaining bootstrap helper that still pointed at the legacy cloud stack.
 - Verified the staged Batch 15 set with `docker compose --env-file deploy/.env.prod -f docker-compose.yml -f deploy/docker-compose.prod.yml config`.
 - Committed Batch 15 as `infra: fix prod deploy bootstrap path`.
+- Re-reviewed the last legacy cloud deployment files after Batch 15 and confirmed they no longer had live repo references outside `commit.md`.
+- Verified the staged Batch 16 deletion set with repo reference review and `docker compose --env-file deploy/.env.prod -f docker-compose.yml -f deploy/docker-compose.prod.yml config`.
+- Committed Batch 16 as `infra: remove legacy cloud deploy path`.
