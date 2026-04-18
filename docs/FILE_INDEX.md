@@ -7,10 +7,10 @@ Quick reference of all files in the project.
 | File | Path | Purpose | Lines |
 |------|------|---------|-------|
 | main.py | /turk_patent/main.py | FastAPI entry point | ~2060 |
-| ai.py | /turk_patent/ai.py | AI embedding pipeline | ~635 |
+| pipeline/ai.py | /turk_patent/pipeline/ai.py | AI embedding pipeline | ~635 |
 | risk_engine.py | /turk_patent/risk_engine.py | Risk assessment engine | ~843 |
 | scrapper.py | /turk_patent/scrapper.py | TurkPatent web scraper | ~693 |
-| ingest.py | /turk_patent/ingest.py | Data ingestion pipeline | ~800 |
+| pipeline/ingest.py | /turk_patent/pipeline/ingest.py | Data ingestion pipeline | ~800 |
 | metadata.py | /turk_patent/metadata.py | SQL dump parser | ~562 |
 | agentic_search.py | /turk_patent/agentic_search.py | Intelligent search orchestrator | ~760 |
 
@@ -113,7 +113,7 @@ Quick reference of all files in the project.
 |------|------|---------|
 | compute_idf.py | /turk_patent/compute_idf.py | IDF computation |
 | idf_lookup.py | /turk_patent/idf_lookup.py | IDF lookup |
-| idf_scoring.py | /turk_patent/idf_scoring.py | IDF scoring |
+| services/scoring_service.py | /turk_patent/services/scoring_service.py | IDF scoring |
 | pipeline.py | /turk_patent/pipeline.py | Pipeline orchestrator |
 | worker.py | /turk_patent/worker.py | Background worker |
 | logging_config.py | /turk_patent/logging_config.py | Logging configuration |

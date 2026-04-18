@@ -6,6 +6,7 @@
 .env
 .env.*
 !.env.example
+.token
 
 # Cloudflare credentials (contains tunnel secret)
 cloudflared/*.json

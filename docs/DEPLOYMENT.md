@@ -373,10 +373,10 @@ python pipeline.py --extract
 python metadata.py --process-all
 
 # Generate embeddings
-python ai.py --batch-process
+python -m pipeline.ai
 
 # Ingest to database
-python ingest.py --full
+python -m pipeline.ingest
 ```
 
 ### Pipeline Orchestration

@@ -112,7 +112,7 @@ TOTAL:                                    37 fields
 | Opposition radar (leads)   | api/leads.py             | 8 endpoints /leads/*    | leads panel | ACTIVE  |
 | Risk scoring (unified)     | risk_engine.py           | All search endpoints    | score badges| ACTIVE  |
 | Watchlist monitoring        | watchlist/scanner.py     | 18 endpoints /watchlist/*| watchlist UI| ACTIVE  |
-| IDF scoring (3-tier)        | idf_scoring.py           | /admin/idf-*           | admin panel | ACTIVE  |
+| IDF scoring (3-tier)        | services/scoring_service.py | /admin/idf-*        | admin panel | ACTIVE  |
 | Image serving               | main.py                  | /api/trademark-image/*  | thumbnails  | ACTIVE  |
 | Export/download             | api/reports.py           | /reports/generate+download| reports UI | ACTIVE  |
 | Nice class descriptions     | risk_engine.py           | /api/suggest-classes    | class select| ACTIVE  |

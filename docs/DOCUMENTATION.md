@@ -155,8 +155,8 @@ User Query
 
 ---
 
-#### ai.py
-**Path:** `C:\Users\701693\turk_patent\ai.py`
+#### pipeline/ai.py
+**Path:** `C:\Users\701693\turk_patent\pipeline\ai.py`
 **Lines:** 635
 **Purpose:** GPU-accelerated AI pipeline for embeddings
 
@@ -218,8 +218,8 @@ User Query
 
 ---
 
-#### ingest.py
-**Path:** `C:\Users\701693\turk_patent\ingest.py`
+#### pipeline/ingest.py
+**Path:** `C:\Users\701693\turk_patent\pipeline\ingest.py`
 **Lines:** 800
 **Purpose:** Data ingestion pipeline
 

@@ -8,6 +8,7 @@ bulletins/
 clients/
 models/
 backup_20260207/
+phase12_backups/
 .py/
 python/
 cloudflared/
@@ -107,8 +108,7 @@ htmlcov/
 *.7z
 *.rar
 
-# Reports (generated at runtime)
-reports/
+# Reports package contains runtime code; only generated uploads stay out of image
 uploads/
 
 # Environment files (secrets)

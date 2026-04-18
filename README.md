@@ -56,7 +56,7 @@ turk_patent/
 ├── ingest.py                    # Load to PostgreSQL
 ├── scrapper.py                  # Live on-demand scraping
 ├── risk_engine.py               # Risk analysis + agentic search
-├── idf_scoring.py               # IDF-weighted scoring
+├── services/scoring_service.py  # IDF-weighted scoring
 ├── idf_lookup.py                # Fast IDF word lookup
 ├── agentic_search.py            # API router for search
 ├── customer_pipeline.py         # End-to-end customer processing
@@ -129,10 +129,10 @@ python zip.py --root "bulletins/Marka"
 python metadata.py
 
 # Step 4: Generate embeddings
-python ai.py "bulletins/Marka"
+python -m pipeline.ai
 
 # Step 5: Ingest to database
-python ingest.py
+python -m pipeline.ingest
 ```
 
 ### Customer Portfolio Analysis
@@ -163,7 +163,7 @@ result = engine.assess_brand_risk_full("Nike", target_classes=[25])
 ### 1. Scheduled Data Pipeline (Daily)
 
 ```
-data_collection.py -> zip.py -> metadata.py -> ai.py -> ingest.py
+data_collection.py -> zip.py -> metadata.py -> pipeline.ai -> pipeline.ingest
      |                 |           |          |          |
      v                 v           v          v          v
   Download         Extract      Parse      Generate   Insert to
@@ -178,7 +178,7 @@ User Query -> risk_engine.py -> Database Search -> Score >= 75%?
                               +---------------------+---------------------+
                               v                                           v
                          YES: Return                              NO: Live Investigation
-                         Result                                   (scrapper.py -> ai.py -> ingest.py)
+                         Result                                   (scrapper.py -> pipeline.ai -> pipeline.ingest)
 ```
 
 ### 3. Customer Portfolio Analysis
