@@ -257,7 +257,7 @@ Current note:
 - because the Docker-backed live app bind-mounts source without `uvicorn --reload`, the backend had to be refreshed with `docker compose up -d --force-recreate backend nginx` before the live/browser/nightly verification could exercise the watchlist logo gate fix
 
 ### Batch 5: Docs And Repo Hygiene
-Status: Not started
+Status: Completed
 
 Scope:
 - docs updates
@@ -279,8 +279,13 @@ Verification:
 Commit message target:
 - `docs: update repo guidance and tracking files`
 
+Current note:
+- the Batch 5 path set was committed as `docs: update repo guidance and tracking files`
+- the staged batch updated the repo guidance and reference docs to point at the canonical pipeline/service paths, tightened the local ignore files for the post-reorg workspace, and added `commit.md` itself to source control as the cleanup tracker
+- verification for this batch was staged-diff review only; no code tests were required
+
 ### Batch 6: Review-First Infra Decision
-Status: Not started
+Status: Completed
 
 Scope:
 - make a deliberate decision on cloud/deploy-specific deletions and local tooling files
@@ -293,6 +298,17 @@ Likely paths:
 - `deploy/setup-server.sh`
 - `config-backup-20260210-151337/`
 - `CLAUDE.md`
+
+Current note:
+- explicit review decisions for the review-first set:
+  - `.env.cloud`: `Delete intentionally` because it is a tracked secret-bearing environment file and should not remain in source history
+  - `config-backup-20260210-151337/`: `Delete intentionally` because it is a timestamped backup artifact rather than an active source path
+  - `Dockerfile.cloud`: `Ignore for now` because it is still part of the older cloud CPU deployment path referenced by `scripts/setup_cloud_server.sh`
+  - `docker-compose.cloud.yml`: `Ignore for now` because it is still referenced by `scripts/setup_cloud_server.sh` and deleting it would strand that legacy flow without a reviewed replacement
+  - `deploy/Dockerfile.cpu`: `Ignore for now` because it belongs to the newer prod/deploy path and its deletion was not justified by the current repo cleanup
+  - `deploy/setup-server.sh`: `Ignore for now` because it points at the newer `docker-compose.yml + deploy/docker-compose.prod.yml` deployment path and should not be removed casually
+  - `CLAUDE.md`: `Ignore for now` because it is a local repo note, not part of the reviewed source-history cleanup
+- the committed Batch 6 scope is limited to the reviewed deletions that were clearly safe: `.env.cloud` and `config-backup-20260210-151337/`
 
 Exit criteria:
 - every path is classified as `keep`, `delete intentionally`, `move`, or `ignore for now`
