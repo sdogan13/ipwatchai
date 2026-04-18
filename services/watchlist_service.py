@@ -1328,6 +1328,8 @@ async def store_watchlist_logo_upload(
     logos_dir=None,
     make_dirs=None,
     write_bytes=None,
+    user_plan_getter=None,
+    plan_limit_getter=None,
 ):
     """Persist an uploaded watchlist logo and return its stored path."""
     if database_factory is None:
@@ -1347,6 +1349,12 @@ async def store_watchlist_logo_upload(
         item = watchlist_crud.get_by_id(db, item_id, current_user.organization_id)
         if not item:
             _raise_watchlist_item_not_found()
+        _ensure_logo_tracking_allowed(
+            db,
+            current_user.id,
+            user_plan_getter=user_plan_getter,
+            plan_limit_getter=plan_limit_getter,
+        )
 
     if not content_type or not content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Dosya bir gorsel olmali (PNG, JPG, WEBP)")
