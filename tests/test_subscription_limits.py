@@ -58,7 +58,7 @@ class TestPlanFeaturesConsistency:
         "priority_support", "api_access", "dedicated_account_manager",
     ]
 
-    PLAN_NAMES = ["free", "starter", "business", "professional", "enterprise", "superadmin"]
+    PLAN_NAMES = ["free", "starter", "professional", "enterprise", "superadmin"]
 
     def test_all_plans_exist(self):
         for plan in self.PLAN_NAMES:
@@ -79,14 +79,15 @@ class TestPlanFeaturesConsistency:
         assert free["auto_scan_max_items"] == 0
         assert free["can_export_reports"] is False
         assert free["can_track_logos"] is False
-        assert free["can_view_holder_portfolio"] is False
+        assert free["can_view_holder_portfolio"] is True
+        assert free["can_download_portfolio"] is False
         assert free["can_export_csv_leads"] is False
         assert free["can_use_live_scraping"] is False
         assert free["api_access"] is False
 
     def test_limits_increase_with_plan_tier(self):
         """Higher plans should have >= limits of lower plans."""
-        ordered = ["free", "starter", "business", "professional", "enterprise"]
+        ordered = ["free", "starter", "professional", "enterprise"]
         numeric_keys = [
             "monthly_live_searches", "daily_lead_views", "monthly_reports",
             "monthly_ai_credits", "monthly_applications",
@@ -150,9 +151,6 @@ class TestWatchlistLimits:
 
     def test_starter_plan_max_15_items(self):
         assert PLAN_FEATURES["starter"]["max_watchlist_items"] == 15
-
-    def test_business_plan_max_50_items(self):
-        assert PLAN_FEATURES["business"]["max_watchlist_items"] == 50
 
     def test_professional_plan_max_1000_items(self):
         assert PLAN_FEATURES["professional"]["max_watchlist_items"] == 1000
@@ -252,9 +250,6 @@ class TestLeadAccessLimits:
     def test_starter_no_lead_access(self):
         assert PLAN_FEATURES["starter"]["daily_lead_views"] == 0
 
-    def test_business_5_daily_leads(self):
-        assert PLAN_FEATURES["business"]["daily_lead_views"] == 5
-
     def test_professional_10_daily_leads(self):
         assert PLAN_FEATURES["professional"]["daily_lead_views"] == 10
 
@@ -268,8 +263,8 @@ class TestLeadAccessLimits:
         assert access["daily_limit"] == 0
 
     @patch("utils.subscription.get_user_plan")
-    def test_lead_access_granted_for_business_plan(self, mock_plan):
-        mock_plan.return_value = {"plan_name": "business", "display_name": "Business", "can_use_live_search": True, "monthly_limit": 30}
+    def test_lead_access_granted_for_professional_plan(self, mock_plan):
+        mock_plan.return_value = {"plan_name": "professional", "display_name": "Professional", "can_use_live_search": True, "monthly_limit": 100}
         db = MagicMock()
         cursor = MagicMock()
         db.cursor.return_value = cursor
@@ -277,8 +272,8 @@ class TestLeadAccessLimits:
 
         access = get_lead_access(db, "user-123")
         assert access["can_access"]
-        assert access["daily_limit"] == 5
-        assert access["remaining"] == 3  # 5 - 2
+        assert access["daily_limit"] == 10
+        assert access["remaining"] == 8  # 10 - 2
 
 
 # ===========================================================================
@@ -363,7 +358,7 @@ class TestApplicationLimits:
         can_create, reason, details = check_application_eligibility(db, "user-123", "org-123")
         assert can_create
         assert reason == "ok"
-        assert details["remaining"] == 3  # 5 - 2
+        assert details["remaining"] == 1  # 3 - 2
 
 
 # ===========================================================================
@@ -376,8 +371,8 @@ class TestAICreditLimits:
     def test_free_no_ai_credits(self):
         assert PLAN_FEATURES["free"]["monthly_ai_credits"] == 0
 
-    def test_starter_30_ai_credits(self):
-        assert PLAN_FEATURES["starter"]["monthly_ai_credits"] == 30
+    def test_starter_10_ai_credits(self):
+        assert PLAN_FEATURES["starter"]["monthly_ai_credits"] == 10
 
     @patch("utils.subscription._reset_monthly_ai_credits_if_needed")
     @patch("utils.subscription.get_org_plan")
@@ -420,9 +415,6 @@ class TestAutoScanLimits:
     def test_starter_15_auto_scan(self):
         assert PLAN_FEATURES["starter"]["auto_scan_max_items"] == 15
 
-    def test_business_50_auto_scan(self):
-        assert PLAN_FEATURES["business"]["auto_scan_max_items"] == 50
-
     def test_professional_100_auto_scan(self):
         assert PLAN_FEATURES["professional"]["auto_scan_max_items"] == 100
 
@@ -432,19 +424,23 @@ class TestAutoScanLimits:
 # ===========================================================================
 
 class TestPortfolioAccess:
-    """Verify holder/attorney portfolio access per plan."""
+    """Verify holder/attorney portfolio view and download access per plan."""
 
-    def test_free_no_portfolio_access(self):
-        assert PLAN_FEATURES["free"]["can_view_holder_portfolio"] is False
+    def test_all_plans_can_view_portfolio(self):
+        for plan_name in ["free", "starter", "professional", "enterprise"]:
+            assert PLAN_FEATURES[plan_name]["can_view_holder_portfolio"] is True
 
-    def test_starter_no_portfolio_access(self):
-        assert PLAN_FEATURES["starter"]["can_view_holder_portfolio"] is False
+    def test_free_no_portfolio_download(self):
+        assert PLAN_FEATURES["free"]["can_download_portfolio"] is False
 
-    def test_business_has_portfolio_access(self):
-        assert PLAN_FEATURES["business"]["can_view_holder_portfolio"] is True
+    def test_starter_no_portfolio_download(self):
+        assert PLAN_FEATURES["starter"]["can_download_portfolio"] is False
 
-    def test_professional_has_portfolio_access(self):
-        assert PLAN_FEATURES["professional"]["can_view_holder_portfolio"] is True
+    def test_professional_has_portfolio_download(self):
+        assert PLAN_FEATURES["professional"]["can_download_portfolio"] is True
+
+    def test_enterprise_has_portfolio_download(self):
+        assert PLAN_FEATURES["enterprise"]["can_download_portfolio"] is True
 
 
 # ===========================================================================
@@ -471,14 +467,11 @@ class TestCSVExport:
     def test_free_no_csv_export(self):
         assert PLAN_FEATURES["free"]["can_export_csv_leads"] is False
 
-    def test_starter_no_csv_export(self):
-        assert PLAN_FEATURES["starter"]["can_export_csv_leads"] is False
+    def test_starter_has_csv_export(self):
+        assert PLAN_FEATURES["starter"]["can_export_csv_leads"] is True
 
-    def test_business_no_csv_export(self):
-        assert PLAN_FEATURES["business"]["can_export_csv_leads"] is False
-
-    def test_professional_no_csv_export(self):
-        assert PLAN_FEATURES["professional"]["can_export_csv_leads"] is False
+    def test_professional_has_csv_export(self):
+        assert PLAN_FEATURES["professional"]["can_export_csv_leads"] is True
 
     def test_enterprise_has_csv_export(self):
         assert PLAN_FEATURES["enterprise"]["can_export_csv_leads"] is True
@@ -568,7 +561,7 @@ class TestPricing:
 
     def test_annual_cheaper_than_monthly(self):
         """Annual price per month should be < monthly price for paid plans."""
-        for plan_name in ["starter", "business", "professional", "enterprise"]:
+        for plan_name in ["starter", "professional", "enterprise"]:
             features = PLAN_FEATURES[plan_name]
             monthly = features["price_monthly"]
             annual = features["price_annual_monthly"]
@@ -695,11 +688,11 @@ class TestReportDownloadChecks:
     """Verify report download checks can_export_reports."""
 
     def test_download_report_checks_export_permission(self):
-        from api.reports import download_report
+        from services.report_service import build_report_download_response
         import inspect
-        source = inspect.getsource(download_report)
+        source = inspect.getsource(build_report_download_response)
         assert "can_export_reports" in source, (
-            "download_report must check can_export_reports"
+            "build_report_download_response must check can_export_reports"
         )
 
 

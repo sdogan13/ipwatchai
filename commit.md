@@ -451,6 +451,39 @@ Current note:
   - the product-plan/auth test realignment
   - the devtools/download helper and infra review batches
 
+### Batch 10: Product And Auth Test Realignment
+Status: Completed
+
+Scope:
+- align the auth, subscription, and plan-feature tests to the current product model
+- remove references to the retired `business` tier in the targeted test files
+- update the auth-role expectations from `owner` to `admin`
+- reflect the current portfolio, CSV export, AI credit, and application limits in the focused test suite
+
+Likely paths:
+- `tests/test_auth.py`
+- `tests/test_plan_features.py`
+- `tests/test_subscription.py`
+- `tests/test_subscription_limits.py`
+
+Verification:
+- `python -m py_compile tests/test_auth.py tests/test_plan_features.py tests/test_subscription.py tests/test_subscription_limits.py`
+- `python -m pytest tests/test_auth.py tests/test_plan_features.py tests/test_subscription.py tests/test_subscription_limits.py -q`
+
+Commit message target:
+- `tests: align auth and subscription expectations`
+
+Current note:
+- the Batch 10 path set was committed as `tests: align auth and subscription expectations`
+- the staged batch updates the focused auth and subscription tests to the live product model: JWT roles now use `admin`, the legacy `business` tier is treated as the `professional` alias, portfolio view/download and CSV export permissions follow the current plan matrix, and the subscription-credit assertions match the current unified AI-credit and application limits
+- verification passed for the staged batch before commit:
+  - `python -m py_compile tests/test_auth.py tests/test_plan_features.py tests/test_subscription.py tests/test_subscription_limits.py`
+  - `python -m pytest tests/test_auth.py tests/test_plan_features.py tests/test_subscription.py tests/test_subscription_limits.py -q`
+- intentionally left out for later follow-up batches:
+  - the large mixed `tests/test_api_endpoints.py` change set
+  - the devtools/download helper additions
+  - the infra/bootstrap review batch
+
 ## Execution Order
 
 Recommended order:
@@ -464,6 +497,7 @@ Recommended order:
 8. Batch 7 for the post-plan event/status foundation slice
 9. Batch 8 for the post-plan path-normalization helper slice
 10. Batch 9 for the post-plan scoring/translation alignment slice
+11. Batch 10 for the post-plan auth/subscription test realignment slice
 
 ## Staging Method
 
@@ -513,3 +547,6 @@ This commit plan is complete when:
 - Staged the Batch 9 scoring/translation slice around translated IDF lookup support, `final_status`-aware helper queries, and the translation/similarity tests that reflect the current scoring behavior.
 - Verified the staged Batch 9 set with `python -m py_compile` on the scoring/helper files and `python -m pytest tests/test_translation.py tests/test_translation_scoring.py tests/test_turkish_similarity.py -q`.
 - Committed Batch 9 as `scoring: align translated IDF and final-status helpers`.
+- Staged the Batch 10 product/auth test slice around the focused auth, plan-feature, and subscription expectation updates that now match the current code and plan matrix.
+- Verified the staged Batch 10 set with `python -m py_compile` on the four focused test files and `python -m pytest tests/test_auth.py tests/test_plan_features.py tests/test_subscription.py tests/test_subscription_limits.py -q`.
+- Committed Batch 10 as `tests: align auth and subscription expectations`.

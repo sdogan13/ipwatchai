@@ -86,19 +86,19 @@ class TestJWTTokens:
     def test_create_access_token(self):
         user_id = str(uuid.uuid4())
         org_id = str(uuid.uuid4())
-        token = create_access_token(user_id, org_id, "owner")
+        token = create_access_token(user_id, org_id, "admin")
         assert isinstance(token, str)
         assert len(token) > 0
 
     def test_decode_valid_access_token(self):
         user_id = str(uuid.uuid4())
         org_id = str(uuid.uuid4())
-        token = create_access_token(user_id, org_id, "owner")
+        token = create_access_token(user_id, org_id, "admin")
         payload = decode_token(token)
         assert payload is not None
         assert payload.sub == user_id
         assert payload.org == org_id
-        assert payload.role == "owner"
+        assert payload.role == "admin"
         assert payload.type == "access"
 
     def test_create_refresh_token(self):
@@ -128,7 +128,7 @@ class TestJWTTokens:
     def test_create_token_pair(self):
         user_id = str(uuid.uuid4())
         org_id = str(uuid.uuid4())
-        pair = create_token_pair(user_id, org_id, "owner")
+        pair = create_token_pair(user_id, org_id, "admin")
         assert isinstance(pair, TokenPair)
         assert pair.token_type == "bearer"
         assert pair.expires_in > 0
@@ -138,7 +138,7 @@ class TestJWTTokens:
     def test_token_pair_tokens_are_different(self):
         user_id = str(uuid.uuid4())
         org_id = str(uuid.uuid4())
-        pair = create_token_pair(user_id, org_id, "owner")
+        pair = create_token_pair(user_id, org_id, "admin")
         assert pair.access_token != pair.refresh_token
 
     def test_access_token_type_is_access(self):
@@ -257,11 +257,11 @@ class TestAuthModels:
             email="test@example.com",
             first_name="John",
             last_name="Doe",
-            role="owner",
+            role="admin",
             is_superadmin=False,
             permissions=["watchlist.write"],
         )
-        assert user.role == "owner"
+        assert user.role == "admin"
         assert user.is_superadmin is False
 
     def test_current_user_superadmin_default_false(self):
@@ -280,7 +280,7 @@ class TestAuthModels:
         tp = TokenPayload(
             sub="user-123",
             org="org-456",
-            role="owner",
+            role="admin",
             exp=datetime.utcnow(),
             type="access",
         )

@@ -9,7 +9,7 @@ from utils.subscription import PLAN_FEATURES, get_plan_limit
 
 def test_all_plans_exist():
     assert set(PLAN_FEATURES.keys()) == {
-        "free", "starter", "professional", "business", "enterprise", "superadmin"
+        "free", "starter", "professional", "enterprise", "superadmin"
     }
 
 
@@ -48,7 +48,7 @@ def test_enterprise_fully_unlimited():
     """Enterprise should have 999999 for all numeric limits and True for all booleans."""
     enterprise = PLAN_FEATURES["enterprise"]
     for key, value in enterprise.items():
-        if key in ("price_monthly", "price_annual_monthly", "auto_scan_frequency"):
+        if key in ("price_monthly", "price_annual_monthly", "auto_scan_frequency", "monthly_ai_credits", "monthly_applications"):
             continue
         if isinstance(value, bool):
             assert value is True, f"enterprise.{key} should be True"
@@ -85,11 +85,6 @@ def test_free_has_no_live_search():
     assert get_plan_limit("free", "can_use_live_scraping") is False
 
 
-def test_business_has_live_search():
-    assert get_plan_limit("business", "monthly_live_searches") > 0
-    assert get_plan_limit("business", "can_use_live_scraping") is True
-
-
 def test_starter_has_live_search():
     assert get_plan_limit("starter", "monthly_live_searches") == 10
     assert get_plan_limit("starter", "can_use_live_scraping") is True
@@ -101,19 +96,19 @@ def test_free_auto_scan_disabled():
 
 
 def test_daily_quick_search_limits_ascending():
-    plans = ["free", "starter", "business", "professional", "enterprise"]
+    plans = ["free", "starter", "professional", "enterprise"]
     limits = [get_plan_limit(p, "max_daily_quick_searches") for p in plans]
     assert limits == sorted(limits), f"Quick search limits not ascending: {limits}"
 
 
 def test_monthly_ai_credits_ascending():
-    plans = ["free", "starter", "business", "professional", "enterprise"]
+    plans = ["free", "starter", "professional", "enterprise"]
     limits = [get_plan_limit(p, "monthly_ai_credits") for p in plans]
     assert limits == sorted(limits), f"AI credits not ascending: {limits}"
 
 
 def test_monthly_applications_ascending():
-    plans = ["free", "starter", "business", "professional", "enterprise"]
+    plans = ["free", "starter", "professional", "enterprise"]
     limits = [get_plan_limit(p, "monthly_applications") for p in plans]
     assert limits == sorted(limits), f"Applications not ascending: {limits}"
 
@@ -122,26 +117,7 @@ def test_can_track_logos():
     assert get_plan_limit("free", "can_track_logos") is False
     assert get_plan_limit("starter", "can_track_logos") is True
     assert get_plan_limit("professional", "can_track_logos") is True
-    assert get_plan_limit("business", "can_track_logos") is True
     assert get_plan_limit("enterprise", "can_track_logos") is True
-
-
-def test_business_between_starter_and_professional():
-    """Business tier values should be between Starter and Professional."""
-    business = PLAN_FEATURES["business"]
-    starter = PLAN_FEATURES["starter"]
-    professional = PLAN_FEATURES["professional"]
-
-    for key in ("max_daily_quick_searches", "max_watchlist_items", "monthly_live_searches",
-                "monthly_ai_credits", "monthly_applications", "max_users"):
-        assert starter[key] <= business[key] <= professional[key], (
-            f"business.{key} ({business[key]}) not between starter ({starter[key]}) and professional ({professional[key]})"
-        )
-
-
-def test_business_price():
-    assert PLAN_FEATURES["business"]["price_monthly"] == 799
-    assert PLAN_FEATURES["business"]["price_annual_monthly"] == 639
 
 
 def test_professional_updated_limits():

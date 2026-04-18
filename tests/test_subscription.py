@@ -67,6 +67,26 @@ class TestGetUserPlan:
         assert result["can_use_live_search"] is False
         assert result["monthly_limit"] == 0
 
+    @patch("utils.subscription.get_plan_limit")
+    def test_uses_canonical_live_search_limits_even_if_db_flag_is_stale(self, mock_get_plan_limit):
+        db, cursor = _make_db({
+            "plan_name": "starter",
+            "display_name": "Starter",
+            "can_use_live_search": False,
+            "is_superadmin": False,
+            "subscription_end_date": None,
+        })
+        mock_get_plan_limit.side_effect = lambda plan_name, feature: {
+            "monthly_live_searches": 10,
+            "can_use_live_scraping": True,
+        }[feature]
+
+        result = get_user_plan(db, str(uuid.uuid4()))
+
+        assert result["plan_name"] == "starter"
+        assert result["can_use_live_search"] is True
+        assert result["monthly_limit"] == 10
+
 
 # ============================================================
 # check_live_search_eligibility
@@ -135,7 +155,7 @@ class TestCheckQuickSearchEligibility:
         can, reason, details = check_quick_search_eligibility(db, "user1")
         assert can is True
         assert reason == "ok"
-        assert details["remaining"] == 50
+        assert details["remaining"] == 5
 
     @patch("utils.subscription.get_daily_quick_searches", return_value=50)
     @patch("utils.subscription.get_user_plan")
@@ -157,9 +177,10 @@ class TestCheckQuickSearchEligibility:
 # ============================================================
 
 class TestCheckNameGenerationEligibility:
+    @patch("utils.subscription.check_ai_credit_eligibility", return_value=(True, "ok", {"monthly_limit": 50, "total_remaining": 50}))
     @patch("utils.subscription.get_monthly_name_generations", return_value=0)
     @patch("utils.subscription.get_org_plan")
-    def test_eligible_under_both_limits(self, mock_plan, mock_monthly):
+    def test_eligible_under_both_limits(self, mock_plan, mock_monthly, mock_ai):
         mock_plan.return_value = {
             "plan_name": "professional",
             "display_name": "Professional",
@@ -213,9 +234,10 @@ class TestCheckNameGenerationEligibility:
         assert can is True
         assert details.get("using_purchased_credits") is True
 
+    @patch("utils.subscription.check_ai_credit_eligibility", return_value=(True, "ok", {"monthly_limit": 999999, "total_remaining": 999999}))
     @patch("utils.subscription.get_monthly_name_generations", return_value=0)
     @patch("utils.subscription.get_org_plan")
-    def test_enterprise_unlimited_session(self, mock_plan, mock_monthly):
+    def test_enterprise_unlimited_session(self, mock_plan, mock_monthly, mock_ai):
         mock_plan.return_value = {
             "plan_name": "enterprise",
             "display_name": "Enterprise",
@@ -331,8 +353,9 @@ class TestCreditDeduction:
         """Monthly fails (None), falls back to purchased."""
         db = MagicMock()
         cursor = MagicMock()
-        # First fetchone: monthly fails, second: purchased succeeds
-        cursor.fetchone.side_effect = [None, {"logo_credits_purchased": 4}]
+        # First fetchone: monthly update fails, second: balance check succeeds,
+        # third: purchased-credit update succeeds.
+        cursor.fetchone.side_effect = [None, {"logo_credits_purchased": 6}, {"ai_credits_purchased": 1}]
         db.cursor.return_value = cursor
         db.commit = MagicMock()
         result = deduct_logo_credit(db, "org1")
