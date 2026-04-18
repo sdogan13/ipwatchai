@@ -6,7 +6,6 @@
 # Prerequisites:
 # - Docker Desktop with WSL2 backend
 # - NVIDIA Container Toolkit installed
-# - Cloudflare tunnel credentials in ./cloudflared/
 #
 # Usage:
 #   docker-compose up -d              # Start all services
@@ -27,7 +26,7 @@ services:
     container_name: ipwatch_redis
     restart: unless-stopped
     command: >
-      redis-server --appendonly yes --maxmemory 4gb --maxmemory-policy allkeys-lru ${REDIS_PASSWORD:+--requirepass ${REDIS_PASSWORD}}
+      redis-server --appendonly yes --maxmemory 8gb --maxmemory-policy allkeys-lru --io-threads 4 --save "" ${REDIS_PASSWORD:+--requirepass ${REDIS_PASSWORD}}
     volumes:
       - redis_data:/data
     ports:
@@ -59,7 +58,7 @@ services:
       DEBUG: ${DEBUG:-false}
       HOST: "0.0.0.0"
       PORT: "8000"
-      WORKERS: ${WORKERS:-2}
+      WORKERS: ${WORKERS:-4}
 
       # Database - Always use Docker network hostname (not host .env values)
       DB_HOST: "postgres"
@@ -101,7 +100,7 @@ services:
       # Paths (inside container)
       DATA_ROOT: "/app/bulletins/Marka"
       UPLOAD_DIR: "/app/uploads"
-      REPORT_DIR: "/app/reports"
+      REPORT_DIR: "/app/uploads/reports"
       LOG_DIR: "/app/logs"
     volumes:
       # Mount existing data directories from host
@@ -110,15 +109,33 @@ services:
       - ./models:/app/models:ro
       - uploads_data:/app/uploads
       - generated_logos:/app/uploads/generated/logos
-      - reports_data:/app/reports
       - logs_data:/app/logs
       # Mount model cache for faster startup (rw so container can update cache)
       - ${HF_HOME:-C:/Users/701693/.cache/huggingface}:/root/.cache/huggingface
       - ${TORCH_HOME:-C:/Users/701693/.cache/torch}:/root/.cache/torch
       - ${EASYOCR_HOME:-C:/Users/701693/.EasyOCR}:/root/.EasyOCR
       - playwright_cache:/root/.cache/ms-playwright
-      # Mount main.py for hot-reloading code changes
+      # Mount root app entry modules for hot-reloading code changes
       - ./main.py:/app/main.py:ro
+      - ./legacy_main.py:/app/legacy_main.py:ro
+      - ./app_admin_scoring_routes.py:/app/app_admin_scoring_routes.py:ro
+      - ./app_assets.py:/app/app_assets.py:ro
+      - ./app_enhanced_search_routes.py:/app/app_enhanced_search_routes.py:ro
+      - ./app_errors.py:/app/app_errors.py:ro
+      - ./app_factory.py:/app/app_factory.py:ro
+      - ./app_image_routes.py:/app/app_image_routes.py:ro
+      - ./app_image_search_routes.py:/app/app_image_search_routes.py:ro
+      - ./app_legacy_rollback_routes.py:/app/app_legacy_rollback_routes.py:ro
+      - ./app_legacy_search_routes.py:/app/app_legacy_search_routes.py:ro
+      - ./app_lifecycle.py:/app/app_lifecycle.py:ro
+      - ./app_middleware.py:/app/app_middleware.py:ro
+      - ./app_nice_class_routes.py:/app/app_nice_class_routes.py:ro
+      - ./app_public_portfolio_routes.py:/app/app_public_portfolio_routes.py:ro
+      - ./app_public_search_routes.py:/app/app_public_search_routes.py:ro
+      - ./app_rate_limit.py:/app/app_rate_limit.py:ro
+      - ./app_router_registry.py:/app/app_router_registry.py:ro
+      - ./app_search_meta_routes.py:/app/app_search_meta_routes.py:ro
+      - ./app_system_routes.py:/app/app_system_routes.py:ro
       - ./scrapper.py:/app/scrapper.py:ro
       # Mount templates and static for landing page development
       - ./templates:/app/templates:ro
@@ -126,21 +143,25 @@ services:
       - ./static/avatars:/app/static/avatars
       - ./agentic_search.py:/app/agentic_search.py:ro
       - ./risk_engine.py:/app/risk_engine.py:ro
-      - ./idf_scoring.py:/app/idf_scoring.py:ro
-      - ./ai.py:/app/ai.py:ro
+      - ./pipeline:/app/pipeline:ro
       - ./foreign_generics.py:/app/foreign_generics.py:ro
       - ./idf_lookup.py:/app/idf_lookup.py:ro
+      - ./data_collection.py:/app/data_collection.py:ro
+      - ./pdf_extract.py:/app/pdf_extract.py:ro
       # Mount API and database modules for development
       - ./api:/app/api:ro
       - ./database:/app/database:ro
       - ./auth:/app/auth:ro
       - ./config:/app/config:ro
       - ./utils:/app/utils:ro
+      - ./services:/app/services:ro
+      - ./reports:/app/reports:ro
       - ./notifications:/app/notifications:ro
       - ./watchlist:/app/watchlist:ro
       - ./workers:/app/workers:ro
+    init: true
     command: >
-      python -m uvicorn main:app  --host 0.0.0.0  --port 8000  --workers ${WORKERS:-2}  --loop uvloop  --http httptools  --log-level info
+      python -m uvicorn main:app  --host 0.0.0.0  --port 8000  --workers ${WORKERS:-4}  --loop uvloop  --http httptools  --log-level info
     ports:
       - "127.0.0.1:8000:8000"
     healthcheck:
@@ -198,16 +219,14 @@ services:
     command: tunnel --edge-ip-version auto --protocol http2 --config /etc/cloudflared/config.yml run
     volumes:
       - ./cloudflared:/etc/cloudflared:ro
-    dns:
-      - 10.192.3.13
-      - 1.1.1.1
     depends_on:
       - nginx
     networks:
       - ipwatch_network
-    # ==========================================
-    # PostgreSQL with pgvector
-    # ==========================================
+
+  # ==========================================
+  # PostgreSQL with pgvector
+  # ==========================================
   postgres:
     image: pgvector/pgvector:pg16
     container_name: ipwatch_postgres
@@ -217,6 +236,22 @@ services:
       POSTGRES_PASSWORD: "${DB_PASSWORD}"
       POSTGRES_DB: trademark_db
       PGDATA: /var/lib/postgresql/data/pgdata
+    command: >
+      postgres
+      -c shared_buffers=8GB
+      -c effective_cache_size=32GB
+      -c work_mem=256MB
+      -c maintenance_work_mem=2GB
+      -c max_worker_processes=16
+      -c max_parallel_workers_per_gather=8
+      -c max_parallel_workers=16
+      -c max_parallel_maintenance_workers=8
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c wal_buffers=64MB
+      -c checkpoint_completion_target=0.9
+      -c huge_pages=off
+    shm_size: '8gb'
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./deploy/schema.sql:/docker-entrypoint-initdb.d/02-schema.sql:ro
@@ -387,8 +422,6 @@ volumes:
     name: ipwatch_redis_data
   uploads_data:
     name: ipwatch_uploads
-  reports_data:
-    name: ipwatch_reports
   logs_data:
     name: ipwatch_logs
   generated_logos:

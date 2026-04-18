@@ -518,6 +518,45 @@ Current note:
   - the devtools move-set
   - the infra/bootstrap review batch
 
+### Batch 12: Bootstrap Schema And Compose Alignment
+Status: Completed
+
+Scope:
+- align the bootstrap schema with the event/status and translated-IDF model already in source
+- repair the `universal_conflicts` deadline design so fresh installs and migrations match runtime query behavior
+- align the local Docker compose bootstrap mounts and runtime paths with the canonical repo layout
+
+Likely paths:
+- `deploy/schema.sql`
+- `docker-compose.yml`
+- `migrations/add_universal_conflicts.sql`
+- `migrations/fix_days_until_deadline.sql`
+- `migrations/trademark_applications.sql`
+
+Verification:
+- `docker compose config`
+- `git diff --cached --check`
+- temporary PostgreSQL verification inside the running `ipwatch_postgres` container:
+  - confirmed PostgreSQL rejects the original partial-index predicate form using `CURRENT_DATE`
+  - confirmed the corrected plain `opposition_deadline` index definition succeeds
+
+Commit message target:
+- `infra: align bootstrap schema and compose`
+
+Current note:
+- the Batch 12 path set was committed as `infra: align bootstrap schema and compose`
+- the staged batch brings the bootstrap SQL into line with the already-committed event/status pipeline and scoring changes by adding translated-IDF bootstrap state, event-derived trademark columns and indexes, opposition-target application fields, and a working dynamic-deadline model for `universal_conflicts`
+- the batch also updates local `docker-compose.yml` so the backend bind mounts and runtime paths match the current canonical module layout and report/output locations
+- verification surfaced a real PostgreSQL rule: `CURRENT_DATE` cannot be used in the partial-index predicate for `idx_uc_opposition_deadline` because index predicates must be immutable; the batch was corrected before commit to use a plain `opposition_deadline` index instead
+- verification passed for the staged batch before commit:
+  - `docker compose config`
+  - `git diff --cached --check`
+  - temporary `psql` index-definition checks against the running `ipwatch_postgres` container
+- intentionally left out for later follow-up batches:
+  - the review-first cloud/deploy deletions
+  - `tests/test_api_endpoints.py`
+  - local-only helper scripts and the remaining devtools additions
+
 ## Execution Order
 
 Recommended order:
@@ -533,6 +572,7 @@ Recommended order:
 10. Batch 9 for the post-plan scoring/translation alignment slice
 11. Batch 10 for the post-plan auth/subscription test realignment slice
 12. Batch 11 for the bulletin download/recovery helper slice
+13. Batch 12 for the schema/bootstrap alignment slice
 
 ## Staging Method
 
@@ -588,3 +628,7 @@ This commit plan is complete when:
 - Staged the Batch 11 bulletin-ops helper slice around the new URL scraping, PDF download, multi-volume GZ recovery, and image-path repair scripts.
 - Verified the staged Batch 11 set with `python -m py_compile` on the operational helper files; there is no dedicated repo test coverage for these standalone scripts yet.
 - Committed Batch 11 as `scripts: add bulletin download and recovery helpers`.
+- Staged the Batch 12 schema/bootstrap slice around the local compose alignment, bootstrap schema drift, and the follow-up migrations that now match the event/status and opposition-application model.
+- Verified the staged Batch 12 set with `docker compose config`, `git diff --cached --check`, and temporary `psql` DDL checks against the running `ipwatch_postgres` container.
+- Verification exposed a real PostgreSQL constraint: the new `idx_uc_opposition_deadline` partial-index predicate using `CURRENT_DATE` was invalid because index predicates must be immutable; corrected the batch before commit to use a plain `opposition_deadline` index.
+- Committed Batch 12 as `infra: align bootstrap schema and compose`.

@@ -40,7 +40,8 @@ CREATE TABLE IF NOT EXISTS universal_conflicts (
     bulletin_no VARCHAR(50),
     bulletin_date DATE,
     opposition_deadline DATE NOT NULL,         -- Bulletin Date + 2 months
-    days_until_deadline INTEGER GENERATED ALWAYS AS (opposition_deadline - CURRENT_DATE) STORED,
+    -- days_until_deadline: computed dynamically as (opposition_deadline - CURRENT_DATE) in queries
+    -- Cannot use GENERATED ALWAYS AS STORED because CURRENT_DATE is not immutable
 
     -- Lead Status
     lead_status VARCHAR(50) DEFAULT 'new',     -- 'new', 'viewed', 'contacted', 'converted', 'dismissed'
@@ -65,8 +66,8 @@ CREATE TABLE IF NOT EXISTS universal_conflicts (
 -- Primary query: "Show me urgent high-value leads"
 CREATE INDEX IF NOT EXISTS idx_uc_deadline_score ON universal_conflicts(opposition_deadline ASC, similarity_score DESC);
 
--- Filter by urgency
-CREATE INDEX IF NOT EXISTS idx_uc_days_until ON universal_conflicts(days_until_deadline) WHERE days_until_deadline > 0;
+-- Filter by urgency (uses opposition_deadline directly since days_until_deadline is computed in queries)
+CREATE INDEX IF NOT EXISTS idx_uc_opposition_deadline ON universal_conflicts(opposition_deadline);
 
 -- Filter by Nice class
 CREATE INDEX IF NOT EXISTS idx_uc_overlapping_classes ON universal_conflicts USING GIN(overlapping_classes);
@@ -129,10 +130,11 @@ CREATE INDEX IF NOT EXISTS idx_lal_conflict ON lead_access_log(conflict_id);
 CREATE OR REPLACE VIEW active_leads AS
 SELECT
     uc.*,
+    (uc.opposition_deadline - CURRENT_DATE) as days_until_deadline,
     CASE
-        WHEN uc.days_until_deadline <= 7 THEN 'critical'
-        WHEN uc.days_until_deadline <= 14 THEN 'urgent'
-        WHEN uc.days_until_deadline <= 30 THEN 'soon'
+        WHEN (uc.opposition_deadline - CURRENT_DATE) <= 7 THEN 'critical'
+        WHEN (uc.opposition_deadline - CURRENT_DATE) <= 14 THEN 'urgent'
+        WHEN (uc.opposition_deadline - CURRENT_DATE) <= 30 THEN 'soon'
         ELSE 'normal'
     END as urgency_level
 FROM universal_conflicts uc
@@ -147,9 +149,9 @@ ORDER BY uc.opposition_deadline ASC, uc.similarity_score DESC;
 CREATE OR REPLACE VIEW lead_statistics AS
 SELECT
     COUNT(*) as total_leads,
-    COUNT(*) FILTER (WHERE days_until_deadline <= 7) as critical_leads,
-    COUNT(*) FILTER (WHERE days_until_deadline <= 14) as urgent_leads,
-    COUNT(*) FILTER (WHERE days_until_deadline <= 30) as upcoming_leads,
+    COUNT(*) FILTER (WHERE (opposition_deadline - CURRENT_DATE) <= 7) as critical_leads,
+    COUNT(*) FILTER (WHERE (opposition_deadline - CURRENT_DATE) <= 14) as urgent_leads,
+    COUNT(*) FILTER (WHERE (opposition_deadline - CURRENT_DATE) <= 30) as upcoming_leads,
     COUNT(*) FILTER (WHERE lead_status = 'new') as new_leads,
     COUNT(*) FILTER (WHERE lead_status = 'viewed') as viewed_leads,
     COUNT(*) FILTER (WHERE lead_status = 'contacted') as contacted_leads,

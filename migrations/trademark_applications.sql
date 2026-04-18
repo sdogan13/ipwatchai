@@ -77,6 +77,18 @@ CREATE TABLE IF NOT EXISTS trademark_applications_mt (
     completed_at TIMESTAMPTZ
 );
 
+-- Opposition-specific columns (appeal type)
+-- NOTE: For fresh installs these are in the CREATE TABLE above.
+-- For existing DBs run this block:
+ALTER TABLE trademark_applications_mt
+    ADD COLUMN IF NOT EXISTS opposition_target_app_no VARCHAR(255),
+    ADD COLUMN IF NOT EXISTS opposition_target_brand TEXT,
+    ADD COLUMN IF NOT EXISTS opposition_target_holder TEXT,
+    ADD COLUMN IF NOT EXISTS opposition_target_bulletin_no VARCHAR(50),
+    ADD COLUMN IF NOT EXISTS opposition_target_bulletin_date DATE,
+    ADD COLUMN IF NOT EXISTS opposition_target_classes INTEGER[] DEFAULT '{}',
+    ADD COLUMN IF NOT EXISTS opposition_grounds TEXT;
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_tma_org_id ON trademark_applications_mt(organization_id);
 CREATE INDEX IF NOT EXISTS idx_tma_user_id ON trademark_applications_mt(user_id);

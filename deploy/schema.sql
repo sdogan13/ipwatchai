@@ -18,9 +18,9 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- ==========================================
 DO $$ BEGIN
     CREATE TYPE tm_status AS ENUM (
-        'Applied', 'Published', 'Opposed', 'Registered',
-        'Refused', 'Withdrawn', 'Transferred', 'Renewed',
-        'Partial Refusal', 'Expired', 'Unknown'
+        'Başvuruldu', 'Yayında', 'İtiraz Edildi', 'Tescil Edildi',
+        'Reddedildi', 'Geri Çekildi', 'Devredildi', 'Yenilendi',
+        'Kısmi Red', 'Süresi Doldu', 'Bilinmiyor'
     );
 EXCEPTION
     WHEN duplicate_object THEN null;
@@ -133,6 +133,20 @@ CREATE TABLE IF NOT EXISTS word_idf (
     document_frequency INTEGER DEFAULT 0
 );
 
+-- Word IDF table for TRANSLATED names (computed from trademarks.name_tr, populated by compute_idf.py)
+-- Used by dual-path scoring: Path B scores query against translated name with its own IDF weights
+CREATE TABLE IF NOT EXISTS word_idf_tr (
+    word VARCHAR(255) PRIMARY KEY,
+    idf_score FLOAT DEFAULT 0,
+    doc_frequency INTEGER DEFAULT 0,
+    word_class VARCHAR(50) DEFAULT 'common',
+    is_generic BOOLEAN DEFAULT FALSE,
+    document_frequency INTEGER DEFAULT 0,
+    total_documents INTEGER DEFAULT 0,
+    weight_multiplier FLOAT DEFAULT 1.0,
+    updated_at TIMESTAMP
+);
+
 -- ==========================================
 -- 3. TRADEMARKS (main data table)
 -- ==========================================
@@ -141,7 +155,7 @@ CREATE TABLE IF NOT EXISTS trademarks (
     application_no VARCHAR(255) UNIQUE NOT NULL,
     registration_no VARCHAR(255),
     wipo_no VARCHAR(255),
-    current_status tm_status DEFAULT 'Published',
+    current_status tm_status DEFAULT 'Yayında',
     holder_id UUID REFERENCES holders(id),
     name TEXT,
     nice_class_numbers INTEGER[],
@@ -170,6 +184,20 @@ CREATE TABLE IF NOT EXISTS trademarks (
     appeal_deadline DATE,
     last_event_date DATE,
     availability_status VARCHAR(100),
+    -- Event-derived columns (computed by ingest_events.py)
+    effective_status tm_status,
+    active_restriction_count INTEGER DEFAULT 0,
+    current_holder_name TEXT,
+    holder_changed_at DATE,
+    renewal_expiry DATE,
+    last_event_type VARCHAR(50),
+    has_restrictions BOOLEAN DEFAULT FALSE,
+    event_flags JSONB DEFAULT '{}',
+    total_event_count INTEGER DEFAULT 0,
+    -- Unified final status (reconciled from current_status + effective_status)
+    final_status tm_status,
+    final_status_at DATE,
+    final_status_source VARCHAR(10),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -199,6 +227,16 @@ CREATE INDEX IF NOT EXISTS idx_trademarks_name_tr_trgm ON trademarks USING gin(n
 CREATE INDEX IF NOT EXISTS idx_trademarks_name_en_trgm ON trademarks USING gin(name_en gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_trademarks_name_ku_trgm ON trademarks USING gin(name_ku gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_trademarks_name_fa_trgm ON trademarks USING gin(name_fa gin_trgm_ops);
+-- Event-derived indexes
+CREATE INDEX IF NOT EXISTS idx_tm_effective_status ON trademarks(effective_status)
+    WHERE effective_status IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_tm_restrictions ON trademarks(active_restriction_count)
+    WHERE active_restriction_count > 0;
+CREATE INDEX IF NOT EXISTS idx_tm_holder_changed ON trademarks(holder_changed_at)
+    WHERE holder_changed_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_tm_event_flags ON trademarks USING GIN (event_flags)
+    WHERE event_flags != '{}';
+CREATE INDEX IF NOT EXISTS idx_tm_final_status ON trademarks(final_status);
 
 -- Trademark history (partitioned)
 CREATE TABLE IF NOT EXISTS trademark_history (
@@ -345,7 +383,7 @@ CREATE TABLE IF NOT EXISTS users (
     notify_sms BOOLEAN DEFAULT FALSE,
     notify_webhook BOOLEAN DEFAULT FALSE,
     webhook_url TEXT,
-    alert_threshold FLOAT DEFAULT 0.7,
+    alert_threshold FLOAT DEFAULT 0.5,
     digest_frequency VARCHAR(20) DEFAULT 'daily',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -415,7 +453,7 @@ CREATE TABLE IF NOT EXISTS watchlist_mt (
     logo_color_histogram halfvec(512),
     logo_ocr_text TEXT,
     text_embedding halfvec(384),
-    alert_threshold FLOAT DEFAULT 0.7,
+    alert_threshold FLOAT DEFAULT 0.5,
     monitor_new_applications BOOLEAN DEFAULT TRUE,
     monitor_registrations BOOLEAN DEFAULT TRUE,
     monitor_similar_names BOOLEAN DEFAULT TRUE,
@@ -693,7 +731,7 @@ CREATE TABLE IF NOT EXISTS universal_conflicts (
     bulletin_no VARCHAR(50),
     bulletin_date DATE,
     opposition_deadline DATE NOT NULL,
-    days_until_deadline INTEGER GENERATED ALWAYS AS (opposition_deadline - CURRENT_DATE) STORED,
+    -- days_until_deadline: computed dynamically as (opposition_deadline - CURRENT_DATE) in queries
     lead_status VARCHAR(50) DEFAULT 'new',
     viewed_by UUID[],
     contacted_at TIMESTAMP,
@@ -705,7 +743,7 @@ CREATE TABLE IF NOT EXISTS universal_conflicts (
     CONSTRAINT unique_conflict UNIQUE(new_mark_id, existing_mark_id)
 );
 CREATE INDEX IF NOT EXISTS idx_uc_deadline_score ON universal_conflicts(opposition_deadline ASC, similarity_score DESC);
-CREATE INDEX IF NOT EXISTS idx_uc_days_until ON universal_conflicts(days_until_deadline) WHERE days_until_deadline > 0;
+CREATE INDEX IF NOT EXISTS idx_uc_opposition_deadline ON universal_conflicts(opposition_deadline);
 CREATE INDEX IF NOT EXISTS idx_uc_overlapping_classes ON universal_conflicts USING GIN(overlapping_classes);
 CREATE INDEX IF NOT EXISTS idx_uc_risk_level ON universal_conflicts(risk_level, similarity_score DESC);
 CREATE INDEX IF NOT EXISTS idx_uc_lead_status ON universal_conflicts(lead_status, created_at DESC);
@@ -992,10 +1030,11 @@ LEFT JOIN holders h ON t.holder_id = h.id;
 CREATE OR REPLACE VIEW active_leads AS
 SELECT
     uc.*,
+    (uc.opposition_deadline - CURRENT_DATE) as days_until_deadline,
     CASE
-        WHEN uc.days_until_deadline <= 7 THEN 'critical'
-        WHEN uc.days_until_deadline <= 14 THEN 'urgent'
-        WHEN uc.days_until_deadline <= 30 THEN 'soon'
+        WHEN (uc.opposition_deadline - CURRENT_DATE) <= 7 THEN 'critical'
+        WHEN (uc.opposition_deadline - CURRENT_DATE) <= 14 THEN 'urgent'
+        WHEN (uc.opposition_deadline - CURRENT_DATE) <= 30 THEN 'soon'
         ELSE 'normal'
     END as urgency_level
 FROM universal_conflicts uc
@@ -1007,9 +1046,9 @@ ORDER BY uc.opposition_deadline ASC, uc.similarity_score DESC;
 CREATE OR REPLACE VIEW lead_statistics AS
 SELECT
     COUNT(*) as total_leads,
-    COUNT(*) FILTER (WHERE days_until_deadline <= 7) as critical_leads,
-    COUNT(*) FILTER (WHERE days_until_deadline <= 14) as urgent_leads,
-    COUNT(*) FILTER (WHERE days_until_deadline <= 30) as upcoming_leads,
+    COUNT(*) FILTER (WHERE (opposition_deadline - CURRENT_DATE) <= 7) as critical_leads,
+    COUNT(*) FILTER (WHERE (opposition_deadline - CURRENT_DATE) <= 14) as urgent_leads,
+    COUNT(*) FILTER (WHERE (opposition_deadline - CURRENT_DATE) <= 30) as upcoming_leads,
     COUNT(*) FILTER (WHERE lead_status = 'new') as new_leads,
     COUNT(*) FILTER (WHERE lead_status = 'viewed') as viewed_leads,
     COUNT(*) FILTER (WHERE lead_status = 'contacted') as contacted_leads,
