@@ -8,21 +8,35 @@ Does NOT require a live database.
 import sys
 import os
 import json
+import uuid
 import pytest
 from datetime import datetime, date
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 from psycopg2.extras import Json
 
-# Force re-import of real ingest module (conftest mocks it as MagicMock)
-sys.modules.pop("ingest", None)
+# Force a fresh import of the canonical packaged ingest module.
+sys.modules.pop("pipeline.ingest", None)
 
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 import shutil
 
-import ingest
-from ingest import (
+from pipeline import ingest
+
+TEST_TEMP_ROOT = Path("C:/Users/701693/turk_patent/.tmp_pytest_base")
+TEST_TEMP_ROOT.mkdir(parents=True, exist_ok=True)
+
+
+@contextmanager
+def temp_dir():
+    temp_path = TEST_TEMP_ROOT / f"tmp_{uuid.uuid4().hex}"
+    temp_path.mkdir(parents=True, exist_ok=True)
+    try:
+        yield temp_path
+    finally:
+        shutil.rmtree(temp_path, ignore_errors=True)
+from pipeline.ingest import (
     sanitize,
     _trunc,
     _resolve_image_path,
@@ -325,7 +339,7 @@ class TestCoalesceDirection:
         Shared fields: CASE WHEN APP/GZ THEN COALESCE(existing, new) ELSE COALESCE(new, existing).
         GZ-owned fields: never touch.  BLT-owned fields: COALESCE(new, existing).
         """
-        from ingest import _build_update_sql
+        from pipeline.ingest import _build_update_sql
         blt_sql = _build_update_sql('BLT')
 
         # Shared fields must protect APP_/GZ_ data (existing first when higher source)
@@ -352,7 +366,7 @@ class TestCoalesceDirection:
         Shared fields: CASE WHEN APP THEN COALESCE(existing, new) ELSE COALESCE(new, existing).
         BLT-owned fields: never touch.  GZ-owned fields: COALESCE(new, existing).
         """
-        from ingest import _build_update_sql
+        from pipeline.ingest import _build_update_sql
         gz_sql = _build_update_sql('GZ')
 
         # Shared fields must protect APP_ data (existing first when APP_ source)
@@ -375,7 +389,7 @@ class TestCoalesceDirection:
         APP_ UPDATE SQL must overwrite all shared fields.
         BLT/GZ-owned fields: never touch.
         """
-        from ingest import _build_update_sql
+        from pipeline.ingest import _build_update_sql
         app_sql = _build_update_sql('APP')
 
         # Shared fields: APP_ always wins — COALESCE(new, existing)
@@ -399,7 +413,7 @@ class TestCoalesceDirection:
 
     def test_attorney_fields_in_all_update_value_aliases(self):
         """All 3 UPDATE paths must include attorney_name and attorney_no in VALUES aliases."""
-        from ingest import _build_update_sql
+        from pipeline.ingest import _build_update_sql
 
         for source_type in ['APP', 'GZ', 'BLT']:
             sql = _build_update_sql(source_type)
@@ -644,19 +658,19 @@ class TestResolveImagePath:
     """Test _resolve_image_path() finds images in correct locations."""
 
     def test_none_image_field_returns_none(self):
-        with TemporaryDirectory() as tmp:
+        with temp_dir() as tmp:
             root = Path(tmp) / "bulletins" / "Marka"
             root.mkdir(parents=True)
             assert _resolve_image_path("BLT_253", None, root) is None
 
     def test_empty_image_field_returns_none(self):
-        with TemporaryDirectory() as tmp:
+        with temp_dir() as tmp:
             root = Path(tmp) / "bulletins" / "Marka"
             root.mkdir(parents=True)
             assert _resolve_image_path("BLT_253", "", root) is None
 
     def test_dirty_image_field_returns_none(self):
-        with TemporaryDirectory() as tmp:
+        with temp_dir() as tmp:
             root = Path(tmp) / "bulletins" / "Marka"
             root.mkdir(parents=True)
             assert _resolve_image_path("BLT_253", "null", root) is None
@@ -664,7 +678,7 @@ class TestResolveImagePath:
 
     def test_per_folder_images_jpg(self):
         """Per-folder images/ directory is searched first."""
-        with TemporaryDirectory() as tmp:
+        with temp_dir() as tmp:
             root = Path(tmp) / "bulletins" / "Marka"
             img_dir = root / "BLT_253" / "images"
             img_dir.mkdir(parents=True)
@@ -675,7 +689,7 @@ class TestResolveImagePath:
 
     def test_per_folder_images_jpeg(self):
         """JPEG extension is also detected."""
-        with TemporaryDirectory() as tmp:
+        with temp_dir() as tmp:
             root = Path(tmp) / "bulletins" / "Marka"
             img_dir = root / "BLT_253" / "images"
             img_dir.mkdir(parents=True)
@@ -686,7 +700,7 @@ class TestResolveImagePath:
 
     def test_per_folder_images_png(self):
         """PNG extension is also detected."""
-        with TemporaryDirectory() as tmp:
+        with temp_dir() as tmp:
             root = Path(tmp) / "bulletins" / "Marka"
             img_dir = root / "BLT_253" / "images"
             img_dir.mkdir(parents=True)
@@ -697,7 +711,7 @@ class TestResolveImagePath:
 
     def test_logos_fallback(self):
         """Falls back to LOGOS folder when per-folder images/ has no match."""
-        with TemporaryDirectory() as tmp:
+        with temp_dir() as tmp:
             root = Path(tmp) / "bulletins" / "Marka"
             logos_dir = root / "LOGOS"
             logos_dir.mkdir(parents=True)
@@ -708,7 +722,7 @@ class TestResolveImagePath:
 
     def test_per_folder_preferred_over_logos(self):
         """Per-folder images take precedence over LOGOS."""
-        with TemporaryDirectory() as tmp:
+        with temp_dir() as tmp:
             root = Path(tmp) / "bulletins" / "Marka"
             # Create both
             img_dir = root / "BLT_253" / "images"
@@ -723,7 +737,7 @@ class TestResolveImagePath:
 
     def test_not_found_returns_none(self):
         """No image on disk → returns None."""
-        with TemporaryDirectory() as tmp:
+        with temp_dir() as tmp:
             root = Path(tmp) / "bulletins" / "Marka"
             root.mkdir(parents=True)
             result = _resolve_image_path("BLT_253", "2011_41714", root)
@@ -731,7 +745,7 @@ class TestResolveImagePath:
 
     def test_forward_slashes_always(self):
         """Returned path must use forward slashes even on Windows."""
-        with TemporaryDirectory() as tmp:
+        with temp_dir() as tmp:
             root = Path(tmp) / "bulletins" / "Marka"
             img_dir = root / "BLT_253" / "images"
             img_dir.mkdir(parents=True)
@@ -743,7 +757,7 @@ class TestResolveImagePath:
 
     def test_gz_folder(self):
         """Works for GZ_ folders too."""
-        with TemporaryDirectory() as tmp:
+        with temp_dir() as tmp:
             root = Path(tmp) / "bulletins" / "Marka"
             logos_dir = root / "LOGOS"
             logos_dir.mkdir(parents=True)
@@ -754,7 +768,7 @@ class TestResolveImagePath:
 
     def test_whitespace_image_field_stripped(self):
         """Leading/trailing whitespace in image_field is stripped by sanitize."""
-        with TemporaryDirectory() as tmp:
+        with temp_dir() as tmp:
             root = Path(tmp) / "bulletins" / "Marka"
             logos_dir = root / "LOGOS"
             logos_dir.mkdir(parents=True)
@@ -783,20 +797,20 @@ class TestHasTmbulletinSource:
     """Test detection of tmbulletin source files for metadata regeneration."""
 
     def test_no_files_returns_false(self):
-        with TemporaryDirectory() as tmp:
+        with temp_dir() as tmp:
             folder = Path(tmp) / "BLT_100"
             folder.mkdir()
             assert _has_tmbulletin_source(folder) is False
 
     def test_script_file_returns_true(self):
-        with TemporaryDirectory() as tmp:
+        with temp_dir() as tmp:
             folder = Path(tmp) / "BLT_100"
             folder.mkdir()
             (folder / "tmbulletin.script").write_text("CREATE TABLE...", encoding='utf-8')
             assert _has_tmbulletin_source(folder) is True
 
     def test_log_file_returns_true(self):
-        with TemporaryDirectory() as tmp:
+        with temp_dir() as tmp:
             folder = Path(tmp) / "BLT_100"
             folder.mkdir()
             (folder / "tmbulletin.log").write_text("INSERT INTO...", encoding='utf-8')
@@ -804,7 +818,7 @@ class TestHasTmbulletinSource:
 
     def test_nested_data_dir_returns_true(self):
         """Some folders have tmbulletin files in a nested data/ subdirectory."""
-        with TemporaryDirectory() as tmp:
+        with temp_dir() as tmp:
             folder = Path(tmp) / "BLT_100"
             data_dir = folder / "data"
             data_dir.mkdir(parents=True)
@@ -812,14 +826,14 @@ class TestHasTmbulletinSource:
             assert _has_tmbulletin_source(folder) is True
 
     def test_gazete_txt_returns_true(self):
-        with TemporaryDirectory() as tmp:
+        with temp_dir() as tmp:
             folder = Path(tmp) / "GZ_315"
             folder.mkdir()
             (folder / "gazete_data.txt").write_text("INSERT INTO...", encoding='utf-8')
             assert _has_tmbulletin_source(folder) is True
 
     def test_unrelated_files_returns_false(self):
-        with TemporaryDirectory() as tmp:
+        with temp_dir() as tmp:
             folder = Path(tmp) / "BLT_100"
             folder.mkdir()
             (folder / "metadata.json").write_text("[]", encoding='utf-8')
@@ -836,7 +850,7 @@ class TestRepairCorruptMetadata:
 
     def test_no_source_returns_unrecoverable(self):
         """Folder with no tmbulletin source → unrecoverable."""
-        with TemporaryDirectory() as tmp:
+        with temp_dir() as tmp:
             folder = Path(tmp) / "BLT_DEAD"
             folder.mkdir()
             meta = folder / "metadata.json"
@@ -850,7 +864,7 @@ class TestRepairCorruptMetadata:
 
     def test_backup_created_on_repair(self):
         """Corrupt file is backed up before repair attempt."""
-        with TemporaryDirectory() as tmp:
+        with temp_dir() as tmp:
             folder = Path(tmp) / "BLT_TEST"
             folder.mkdir()
             meta = folder / "metadata.json"
@@ -858,7 +872,7 @@ class TestRepairCorruptMetadata:
             # Create a fake tmbulletin source
             (folder / "tmbulletin.script").write_text("-- empty", encoding='utf-8')
 
-            with patch('ingest._repair_corrupt_metadata.__module__', 'ingest'):
+            with patch('pipeline.ingest._repair_corrupt_metadata.__module__', 'pipeline.ingest'):
                 # Mock the metadata regeneration to succeed
                 with patch('metadata.process_single_folder') as mock_regen:
                     mock_regen.return_value = {"status": "success", "records": 5}
@@ -875,7 +889,7 @@ class TestRepairCorruptMetadata:
 
     def test_multiple_backups_dont_overwrite(self):
         """Multiple corruption events create numbered backups."""
-        with TemporaryDirectory() as tmp:
+        with temp_dir() as tmp:
             folder = Path(tmp) / "BLT_TEST"
             folder.mkdir()
             meta = folder / "metadata.json"
@@ -897,7 +911,7 @@ class TestRepairCorruptMetadata:
 
     def test_regen_failure_restores_backup(self):
         """If metadata.py fails, the corrupt file is restored from backup."""
-        with TemporaryDirectory() as tmp:
+        with temp_dir() as tmp:
             folder = Path(tmp) / "BLT_TEST"
             folder.mkdir()
             meta = folder / "metadata.json"
@@ -923,7 +937,7 @@ class TestPreScanAndRepair:
 
     def test_all_valid_returns_empty_stats(self):
         """All valid files → no repairs needed."""
-        with TemporaryDirectory() as tmp:
+        with temp_dir() as tmp:
             base = Path(tmp)
             f1 = base / "BLT_100"
             f1.mkdir()
@@ -936,7 +950,7 @@ class TestPreScanAndRepair:
 
     def test_detects_corrupt_file(self):
         """Corrupt JSON is detected by pre-scan."""
-        with TemporaryDirectory() as tmp:
+        with temp_dir() as tmp:
             base = Path(tmp)
             f1 = base / "BLT_CORRUPT"
             f1.mkdir()
@@ -949,7 +963,7 @@ class TestPreScanAndRepair:
 
     def test_non_list_json_detected_as_corrupt(self):
         """metadata.json with a dict root (not list) is treated as corrupt."""
-        with TemporaryDirectory() as tmp:
+        with temp_dir() as tmp:
             base = Path(tmp)
             f1 = base / "BLT_DICT"
             f1.mkdir()
@@ -960,7 +974,7 @@ class TestPreScanAndRepair:
 
     def test_empty_dir_no_crash(self):
         """Base dir with no metadata.json files → no crash."""
-        with TemporaryDirectory() as tmp:
+        with temp_dir() as tmp:
             stats = pre_scan_and_repair(Path(tmp))
             assert stats["repaired"] == []
 
@@ -1073,7 +1087,7 @@ class TestIngestionSortOrder:
     """Test that folders are sorted BLT → GZ → APP, latest bulletin first within each group."""
 
     def _sort_key(self, p):
-        """Replicate the sort_key from ingest.py run_ingest/main."""
+        """Replicate the sort_key from pipeline.ingest run_ingest/main."""
         import re as _re
         name = p.parent.name.upper()
         m = _re.search(r'_(\d+)', p.parent.name)
@@ -1151,16 +1165,16 @@ class TestIngestionSortOrder:
 # ============================================================
 
 class TestPipelineSortKey:
-    """Test the folder_sort_key from pipeline_parallel.py."""
+    """Test the folder_sort_key from pipeline.parallel."""
 
     def test_import_and_order(self):
-        from pipeline_parallel import folder_sort_key, _extract_folder_number
+        from pipeline.parallel import folder_sort_key, _extract_folder_number
         folders = ["APP_1", "GZ_488", "BLT_200", "GZ_300", "BLT_499", "GZ_499"]
         result = sorted(folders, key=folder_sort_key)
         assert result == ["BLT_499", "BLT_200", "GZ_499", "GZ_488", "GZ_300", "APP_1"]
 
     def test_extract_folder_number(self):
-        from pipeline_parallel import _extract_folder_number
+        from pipeline.parallel import _extract_folder_number
         assert _extract_folder_number("GZ_499") == 499
         assert _extract_folder_number("BLT_127") == 127
         assert _extract_folder_number("GZ_449_2017-09-30") == 449
@@ -1169,7 +1183,7 @@ class TestPipelineSortKey:
 
     def test_same_number_different_family(self):
         """BLT_500 should come before GZ_500 which comes before APP_500."""
-        from pipeline_parallel import folder_sort_key
+        from pipeline.parallel import folder_sort_key
         folders = ["APP_500", "GZ_500", "BLT_500"]
         result = sorted(folders, key=folder_sort_key)
         assert result == ["BLT_500", "GZ_500", "APP_500"]
@@ -1223,8 +1237,8 @@ class TestSourceAuthorityDecision:
         import inspect
         source = inspect.getsource(ingest.process_file_batch)
         # Lower authority → skip entirely
-        assert "# Lower authority" in source
-        assert "skipped_count += 1" in source
+        assert "should_update = True" in source
+        assert "final_status = curr_status" in source
 
     def test_no_status_rank_in_decision_logic(self):
         """The update decision should NOT use get_status_rank — purely source-based."""
@@ -1237,7 +1251,7 @@ class TestSourceAuthorityDecision:
         import inspect
         source = inspect.getsource(ingest.process_file_batch)
         assert "strong_statuses" in source
-        assert "'Registered'" in source
+        assert "'Tescil Edildi'" in source
 
 
 # ============================================================

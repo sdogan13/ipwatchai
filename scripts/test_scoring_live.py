@@ -19,7 +19,7 @@ TOKEN = open(os.path.join(os.path.dirname(__file__), "tmp_token.txt")).read().st
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
 
 # Also test IDF scoring directly for precise pair-level checks
-from idf_scoring import compute_idf_weighted_score, tokenize
+from services.scoring_service import compute_idf_weighted_score, tokenize
 from risk_engine import score_pair
 
 PASS = 0

@@ -11,7 +11,7 @@ import shutil
 from pathlib import Path
 from collections import Counter
 
-from ai import process_folder
+from pipeline.ai import process_folder
 
 DATA_ROOT = Path("/app/bulletins/Marka")
 

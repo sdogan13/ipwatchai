@@ -180,6 +180,8 @@ def determine_status(folder_name, status_raw, reg_no_val=None):
 
     if status_lower:
         refused_keywords = ['geÃ§ersiz', 'gecersiz', 'marka baÅŸvurusu/tescili geÃ§ersiz', 'baÅŸvuru geÃ§ersiz', 'basvuru gecersiz', 'tescil geÃ§ersiz', 'tescil gecersiz', 'reddedildi', 'red edildi', 'ret kararÄ±', 'red kararÄ±', 'refused', 'rejected']
+        if 'başvuru geçersiz' in status_lower or 'marka başvurusu/tescili geçersiz' in status_lower or 'tescil geçersiz' in status_lower or 'ret kararı' in status_lower:
+            return 'Reddedildi'
         if any(kw in status_lower for kw in refused_keywords): return 'Reddedildi'
 
         withdrawn_keywords = ['feragat edildi', 'feragat', 'geri Ã§ekildi', 'geri cekildi', 'geri alÄ±ndÄ±', 'geri alindi', 'vazgeÃ§ildi', 'vazgecildi', 'withdrawn']

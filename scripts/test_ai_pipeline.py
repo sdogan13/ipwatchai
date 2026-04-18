@@ -12,8 +12,8 @@ import shutil
 from pathlib import Path
 from collections import Counter
 
-# Import the actual ai.py pipeline function
-from ai import process_folder
+# Import the actual pipeline.ai function
+from pipeline.ai import process_folder
 
 DATA_ROOT = Path("/app/bulletins/Marka")
 
@@ -24,7 +24,7 @@ for prefix in ['BLT_', 'GZ_', 'APP_']:
     if found:
         test_folders.append(found[0])
 
-print(f"Testing {len(test_folders)} folders through ai.py process_folder()")
+print(f"Testing {len(test_folders)} folders through pipeline.ai process_folder()")
 print("=" * 80)
 
 for folder in test_folders:
@@ -66,7 +66,7 @@ for folder in test_folders:
     shutil.copy2(meta_path, backup_path)
 
     # Clear name_tr and detected_lang for our sample records
-    # to force ai.py to re-process them
+    # to force pipeline.ai to re-process them
     for idx in sample_indices:
         data[idx]["name_tr"] = None
         data[idx]["detected_lang"] = None
@@ -77,7 +77,7 @@ for folder in test_folders:
 
     print(f"\n  Cleared {len(sample_indices)} records, running process_folder()...")
 
-    # Run the actual ai.py pipeline
+    # Run the actual pipeline.ai pipeline
     start = time.time()
     process_folder(folder)
     elapsed = time.time() - start

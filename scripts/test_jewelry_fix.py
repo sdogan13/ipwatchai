@@ -18,7 +18,7 @@ sys.path.insert(0, "/app")
 import utils.idf_scoring as s
 s.initialize_idf_scoring_sync()
 
-from idf_scoring import compute_idf_weighted_score
+from services.scoring_service import compute_idf_weighted_score
 
 test_cases = [
     ("landra jewelry", "alexandra gold jewelry"),

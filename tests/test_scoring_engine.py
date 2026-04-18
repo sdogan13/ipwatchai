@@ -18,7 +18,7 @@ from unittest.mock import patch
 import pytest
 
 
-from idf_scoring import compute_idf_weighted_score, tokenize, normalize_turkish
+from services.scoring_service import compute_idf_weighted_score, tokenize, normalize_turkish
 from risk_engine import (
     get_risk_level,
     calculate_visual_similarity,
@@ -289,8 +289,8 @@ class TestIDFWaterfall:
             text_sim=0.2, semantic_sim=0.2,
         )
         # "nike" fuzzy-matches "nikea" (≥0.75), others don't match
-        # distinctive_pct = ~0.33 → Case C
-        assert score >= 0.35
+        # IDF-weighted coverage: 1/3 distinctive words matched → ~0.30 (harmonic of 1/3 × 1/3)
+        assert score >= 0.25
         assert "TIER_4" in breakdown["scoring_path"]
 
     def test_tier_6_semi_generic_safeguard(self):
@@ -428,98 +428,84 @@ class TestIDFWaterfall:
 # ============================================================
 
 class TestDynamicCombine:
-    """Test _dynamic_combine() — confidence-weighted 3-signal combination."""
+    """Test _dynamic_combine() — confidence-weighted 2-signal combination (text+visual)."""
 
     def test_all_zeros(self):
-        result = _dynamic_combine(0.0, 0.0, 0.0)
+        result = _dynamic_combine(0.0, 0.0)
         assert result["total"] == 0.0
         assert all(v == 0.0 for v in result["dynamic_weights"].values())
 
     def test_single_text_signal(self):
         """Only text active → total ≈ text score."""
-        result = _dynamic_combine(text_idf_score=0.80, visual_sim=0.0, translation_sim=0.0)
+        result = _dynamic_combine(text_idf_score=0.80, visual_sim=0.0)
         assert abs(result["total"] - 0.80) < 0.01
 
     def test_single_visual_signal(self):
         """Only visual active → total ≈ visual score."""
-        result = _dynamic_combine(text_idf_score=0.0, visual_sim=0.70, translation_sim=0.0)
+        result = _dynamic_combine(text_idf_score=0.0, visual_sim=0.70)
         assert abs(result["total"] - 0.70) < 0.01
-
-    def test_single_translation_signal(self):
-        """Only translation active → total ≈ translation score."""
-        result = _dynamic_combine(text_idf_score=0.0, visual_sim=0.0, translation_sim=0.60)
-        assert abs(result["total"] - 0.60) < 0.01
 
     def test_dead_signal_gets_no_weight(self):
         """visual=0.0 should not dilute the total."""
-        result = _dynamic_combine(text_idf_score=0.80, visual_sim=0.0, translation_sim=0.0)
+        result = _dynamic_combine(text_idf_score=0.80, visual_sim=0.0)
         assert result["dynamic_weights"].get("visual", 0.0) == 0.0
 
-    def test_all_signals_active(self):
-        """All three signals active → weighted combination."""
-        result = _dynamic_combine(text_idf_score=0.80, visual_sim=0.50, translation_sim=0.60)
-        # Total should be between min and max of inputs
+    def test_both_signals_active(self):
+        """Both signals active → weighted combination."""
+        result = _dynamic_combine(text_idf_score=0.80, visual_sim=0.50)
         assert 0.50 <= result["total"] <= 0.85
 
     def test_exponential_boosting(self):
         """Higher scores get more weight."""
-        result = _dynamic_combine(text_idf_score=0.90, visual_sim=0.10, translation_sim=0.0)
+        result = _dynamic_combine(text_idf_score=0.90, visual_sim=0.10)
         weights = result["dynamic_weights"]
-        # Text (0.90) should get much more weight than visual (0.10)
         assert weights.get("text", 0) > weights.get("visual", 0)
 
     def test_output_clamped_0_to_1(self):
         """Result should always be between 0 and 1."""
         test_cases = [
-            (1.0, 1.0, 1.0),
-            (0.99, 0.99, 0.99),
-            (0.01, 0.01, 0.01),
-            (0.5, 0.0, 0.0),
+            (1.0, 1.0),
+            (0.99, 0.99),
+            (0.01, 0.01),
+            (0.5, 0.0),
         ]
-        for t, v, tr in test_cases:
-            result = _dynamic_combine(t, v, tr)
-            assert 0.0 <= result["total"] <= 1.0, f"total={result['total']} for ({t},{v},{tr})"
+        for t, v in test_cases:
+            result = _dynamic_combine(t, v)
+            assert 0.0 <= result["total"] <= 1.0, f"total={result['total']} for ({t},{v})"
 
-    def test_translation_floor_at_095(self):
-        """translation_sim >= 0.95 → total ≥ 0.90."""
-        result = _dynamic_combine(text_idf_score=0.0, visual_sim=0.0, translation_sim=0.98)
-        assert result["total"] >= 0.90
-
-    def test_translation_floor_not_applied_below_095(self):
-        """translation_sim < 0.95 → floor NOT applied."""
-        result = _dynamic_combine(text_idf_score=0.0, visual_sim=0.0, translation_sim=0.50)
-        assert result["total"] < 0.90
-
-    def test_floor_does_not_lower_high_total(self):
-        """Floor should only raise, never lower."""
-        result = _dynamic_combine(text_idf_score=0.98, visual_sim=0.0, translation_sim=0.98)
+    def test_visual_floor_at_085(self):
+        """visual_sim >= 0.85 → total >= visual."""
+        result = _dynamic_combine(text_idf_score=0.0, visual_sim=0.90)
         assert result["total"] >= 0.90
 
     def test_weights_sum_to_1_when_active(self):
         """Active weights should sum to ~1.0."""
-        result = _dynamic_combine(0.80, 0.50, 0.30)
+        result = _dynamic_combine(0.80, 0.50)
         active_weights = {k: v for k, v in result["dynamic_weights"].items() if v > 0}
         total = sum(active_weights.values())
         assert abs(total - 1.0) < 0.01
 
-    def test_has_3_weight_keys(self):
-        """dynamic_weights dict should always have text, visual, translation."""
-        result = _dynamic_combine(0.5, 0.5, 0.5)
-        assert set(result["dynamic_weights"].keys()) == {"text", "visual", "translation"}
+    def test_has_2_weight_keys(self):
+        """dynamic_weights dict should have text and visual."""
+        result = _dynamic_combine(0.5, 0.5)
+        assert set(result["dynamic_weights"].keys()) == {"text", "visual"}
 
     def test_no_phonetic_key(self):
         """Phonetic should NOT be in dynamic weights."""
-        result = _dynamic_combine(0.5, 0.5, 0.5)
+        result = _dynamic_combine(0.5, 0.5)
         assert "phonetic" not in result["dynamic_weights"]
 
+    def test_no_translation_key(self):
+        """Translation is no longer a separate signal in _dynamic_combine."""
+        result = _dynamic_combine(0.5, 0.5)
+        assert "translation" not in result["dynamic_weights"]
+
     def test_base_weights_ratio(self):
-        """With equal scores, weights should reflect base ratios 0.60:0.25:0.15."""
-        result = _dynamic_combine(0.50, 0.50, 0.50)
+        """With equal scores, weights should reflect base ratios 0.70:0.30."""
+        result = _dynamic_combine(0.50, 0.50)
         w = result["dynamic_weights"]
-        # With equal scores, exponential boosting is equal → base ratios preserved
-        assert abs(w["text"] - 0.60) < 0.01
-        assert abs(w["visual"] - 0.25) < 0.01
-        assert abs(w["translation"] - 0.15) < 0.01
+        assert abs(w["text"] - 0.70) < 0.01
+        assert abs(w["visual"] - 0.30) < 0.01
 
 
 # ============================================================
@@ -611,14 +597,17 @@ class TestScorePair:
 
     @patch("utils.translation.translate_to_turkish", return_value="elma")
     def test_candidate_translations_cross_language(self, mock_ttt):
-        """name_tr matching query should boost Turkish similarity."""
+        """name_tr matching query should boost score via Path B."""
         result = score_pair(
             query_name="APPLE", candidate_name="SOME BRAND",
             text_sim=0.1, semantic_sim=0.1,
-            candidate_translations={"name_tr": "elma"},
+            candidate_translations={"name_tr": "APPLE"},
         )
-        # calculate_name_similarity("NIKE", "nike") = 1.0 → text_sim becomes 1.0
+        # Path B: "APPLE" vs "APPLE" (name_tr) → exact match → score ≈ 1.0
+        # Path A: "APPLE" vs "SOME BRAND" → very low
+        # Final = max(A, B) → Path B wins
         assert result["total"] >= 0.80
+        assert result["scoring_path_source"] == "TRANSLATED"
 
 
 # ============================================================
@@ -812,9 +801,8 @@ class TestScorePairIntegration:
         # Visual should dominate when text inputs are empty
         assert result["total"] > 0.0
 
-    @patch("risk_engine.calculate_translation_similarity", return_value=0.85)
-    def test_combined_mode_all_signals(self, mock_trans):
-        """Combined mode should use all signals."""
+    def test_combined_mode_all_signals(self):
+        """Combined mode should use text and visual signals."""
         result = score_pair(
             query_name="NIKE",
             candidate_name="NIKEA",
@@ -825,13 +813,28 @@ class TestScorePairIntegration:
             candidate_translations={"name_tr": "nikea"}
         )
         assert result["total"] > 0.0
-        # All three dynamic weights should be non-zero
+        # Both dynamic weights should be non-zero
         dw = result["dynamic_weights"]
         assert dw["text"] > 0
         assert dw["visual"] > 0
 
-    @patch("risk_engine.calculate_translation_similarity", return_value=0.90)
-    def test_score_consistency_across_paths(self, mock_trans):
+    def test_dual_path_scoring_path_source(self):
+        """score_pair should report which path won."""
+        result = score_pair(
+            query_name="APPLE",
+            candidate_name="ELMA",
+            text_sim=0.1,
+            semantic_sim=0.2,
+            visual_sim=0.0,
+            phonetic_sim=0.0,
+            candidate_translations={"name_tr": "APPLE"}
+        )
+        assert "scoring_path_source" in result
+        assert result["scoring_path_source"] in ("ORIGINAL", "TRANSLATED")
+        assert "path_a_score" in result
+        assert "path_b_score" in result
+
+    def test_score_consistency_across_paths(self):
         """Same inputs to score_pair should always produce same output."""
         kwargs = dict(
             query_name="APPLE",
@@ -886,15 +889,15 @@ class TestRegressionKnownPairs:
         result = score_pair("NIKE", "NIKEA", text_sim=0.80, semantic_sim=0.75)
         assert result["total"] >= 0.50
 
-    @patch("risk_engine.calculate_translation_similarity", return_value=0.95)
-    def test_apple_vs_elma_translation_boost(self, mock_trans):
-        """Translation match should boost score significantly."""
+    def test_apple_vs_elma_translation_boost(self):
+        """Dual-path: query matching name_tr should boost score via Path B."""
         result = score_pair(
             "APPLE", "ELMA", text_sim=0.05, semantic_sim=0.10,
-            candidate_translations={"name_tr": "elma"}
+            candidate_translations={"name_tr": "APPLE"}
         )
-        assert result["translation_similarity"] > 0.0
-        # Translation should contribute to total
+        # Path B: "APPLE" vs "APPLE" → exact match → high score
+        assert result["path_b_score"] > 0.0
+        # Translation should contribute to total via Path B winning
         assert result["total"] > 0.10
 
     def test_unrelated_pair_low_score(self):

@@ -21,6 +21,104 @@ from datetime import datetime
 
 # Path setup handled by conftest.py
 
+REPO_ROOT = os.path.dirname(os.path.dirname(__file__))
+APP_IMPLEMENTATION_FILES = ("legacy_main.py", "main.py")
+APP_FACTORY_IMPLEMENTATION_FILES = ("app_factory.py",) + APP_IMPLEMENTATION_FILES
+MIDDLEWARE_IMPLEMENTATION_FILES = ("app_middleware.py",) + APP_IMPLEMENTATION_FILES
+ERROR_IMPLEMENTATION_FILES = ("app_errors.py",) + APP_IMPLEMENTATION_FILES
+PORTFOLIO_IMPLEMENTATION_FILES = (
+    os.path.join("services", "search_service.py"),
+    "app_public_portfolio_routes.py",
+) + APP_IMPLEMENTATION_FILES
+WATCHLIST_IMPLEMENTATION_FILES = (
+    os.path.join("api", "watchlist_routes.py"),
+    os.path.join("api", "routes.py"),
+)
+ADMIN_IMPLEMENTATION_FILES = (
+    os.path.join("services", "admin_service.py"),
+    os.path.join("api", "admin.py"),
+)
+INGEST_IMPLEMENTATION_FILES = (
+    os.path.join("pipeline", "ingest.py"),
+)
+
+
+def _read_repo_text(*parts):
+    with open(os.path.join(REPO_ROOT, *parts), 'r', encoding='utf-8') as f:
+        return f.read()
+
+
+def _read_app_implementation_text():
+    for relpath in APP_IMPLEMENTATION_FILES:
+        full_path = os.path.join(REPO_ROOT, relpath)
+        if os.path.exists(full_path):
+            with open(full_path, 'r', encoding='utf-8') as f:
+                return f.read()
+    raise FileNotFoundError("Could not find the app implementation file")
+
+
+def _read_app_factory_implementation_text():
+    for relpath in APP_FACTORY_IMPLEMENTATION_FILES:
+        full_path = os.path.join(REPO_ROOT, relpath)
+        if os.path.exists(full_path):
+            with open(full_path, 'r', encoding='utf-8') as f:
+                return f.read()
+    raise FileNotFoundError("Could not find the app factory implementation file")
+
+
+def _read_middleware_implementation_text():
+    for relpath in MIDDLEWARE_IMPLEMENTATION_FILES:
+        full_path = os.path.join(REPO_ROOT, relpath)
+        if os.path.exists(full_path):
+            with open(full_path, 'r', encoding='utf-8') as f:
+                return f.read()
+    raise FileNotFoundError("Could not find the middleware implementation file")
+
+
+def _read_error_implementation_text():
+    for relpath in ERROR_IMPLEMENTATION_FILES:
+        full_path = os.path.join(REPO_ROOT, relpath)
+        if os.path.exists(full_path):
+            with open(full_path, 'r', encoding='utf-8') as f:
+                return f.read()
+    raise FileNotFoundError("Could not find the error implementation file")
+
+
+def _read_public_portfolio_implementation_text():
+    for relpath in PORTFOLIO_IMPLEMENTATION_FILES:
+        full_path = os.path.join(REPO_ROOT, relpath)
+        if os.path.exists(full_path):
+            with open(full_path, 'r', encoding='utf-8') as f:
+                return f.read()
+    raise FileNotFoundError("Could not find the public portfolio implementation file")
+
+
+def _read_watchlist_implementation_text():
+    for relpath in WATCHLIST_IMPLEMENTATION_FILES:
+        full_path = os.path.join(REPO_ROOT, relpath)
+        if os.path.exists(full_path):
+            with open(full_path, 'r', encoding='utf-8') as f:
+                return f.read()
+    raise FileNotFoundError("Could not find the watchlist implementation file")
+
+
+def _read_admin_implementation_text():
+    for relpath in ADMIN_IMPLEMENTATION_FILES:
+        full_path = os.path.join(REPO_ROOT, relpath)
+        if os.path.exists(full_path):
+            with open(full_path, 'r', encoding='utf-8') as f:
+                return f.read()
+    raise FileNotFoundError("Could not find the admin implementation file")
+
+
+def _read_ingest_implementation_text():
+    for relpath in INGEST_IMPLEMENTATION_FILES:
+        full_path = os.path.join(REPO_ROOT, relpath)
+        if os.path.exists(full_path):
+            with open(full_path, 'r', encoding='utf-8') as f:
+                return f.read()
+    raise FileNotFoundError("Could not find the ingest implementation file")
+
 # ==========================================================
 # 1. SECRET KEY VALIDATION
 # ==========================================================
@@ -74,39 +172,34 @@ class TestSQLIdentifierSafety:
     """Verify psycopg2.sql module is used for dynamic column names."""
 
     def test_admin_credits_uses_sql_identifier(self):
-        """api/admin.py should use psycopg2.sql for column interpolation."""
-        fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'api', 'admin.py')
-        content = open(fpath, 'r', encoding='utf-8').read()
+        """The admin pricing implementation should use psycopg2.sql for column interpolation."""
+        content = _read_admin_implementation_text()
         assert 'psql.Identifier(column)' in content or 'psql.Identifier' in content, \
-            "admin.py should use psycopg2.sql.Identifier for column names"
+            "The admin implementation should use psycopg2.sql.Identifier for column names"
 
     def test_main_portfolio_uses_sql_identifier(self):
-        """main.py portfolio query should use psycopg2.sql for where_col."""
-        fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'main.py')
-        content = open(fpath, 'r', encoding='utf-8').read()
+        """The public portfolio implementation should use psycopg2.sql for where_col."""
+        content = _read_public_portfolio_implementation_text()
         assert 'psql.Identifier(where_col)' in content, \
-            "main.py should use psycopg2.sql.Identifier for where_col"
+            "The public portfolio implementation should use psycopg2.sql.Identifier for where_col"
 
     def test_routes_bulk_import_uses_sql_identifier(self):
-        """api/routes.py bulk import should use psycopg2.sql."""
-        fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'api', 'routes.py')
-        content = open(fpath, 'r', encoding='utf-8').read()
+        """The watchlist bulk import implementation should use psycopg2.sql."""
+        content = _read_watchlist_implementation_text()
         assert 'psql.Identifier(where_col)' in content, \
-            "routes.py should use psycopg2.sql.Identifier for where_col"
+            "The watchlist bulk import implementation should use psycopg2.sql.Identifier for where_col"
 
     def test_ingest_ddl_uses_sql_identifier(self):
-        """ingest.py ALTER TABLE should use psycopg2.sql.Identifier for column names."""
-        fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'ingest.py')
-        content = open(fpath, 'r', encoding='utf-8').read()
+        """The ingest implementation should use psycopg2.sql.Identifier for ALTER TABLE."""
+        content = _read_ingest_implementation_text()
         assert 'psql.Identifier(col_name)' in content, \
-            "ingest.py should use psycopg2.sql.Identifier for ALTER TABLE"
+            "The ingest implementation should use psycopg2.sql.Identifier for ALTER TABLE"
 
     def test_ingest_ddl_whitelist(self):
-        """ingest.py should whitelist allowed column types for DDL."""
-        fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'ingest.py')
-        content = open(fpath, 'r', encoding='utf-8').read()
+        """The ingest implementation should whitelist allowed column types for DDL."""
+        content = _read_ingest_implementation_text()
         assert 'ALLOWED_COL_TYPES' in content, \
-            "ingest.py should have ALLOWED_COL_TYPES whitelist"
+            "The ingest implementation should have an ALLOWED_COL_TYPES whitelist"
 
 
 # ==========================================================
@@ -156,15 +249,13 @@ class TestFileUploadValidation:
     """Verify magic byte validation for uploaded files."""
 
     def test_image_magic_bytes_validator_exists(self):
-        """validate_image_magic_bytes function must exist in main."""
-        fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'main.py')
-        content = open(fpath, 'r', encoding='utf-8').read()
+        """validate_image_magic_bytes must exist in the app implementation."""
+        content = _read_app_implementation_text()
         assert 'def validate_image_magic_bytes' in content
 
     def test_image_upload_checks_magic_bytes(self):
         """process_uploaded_image must call validate_image_magic_bytes."""
-        fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'main.py')
-        content = open(fpath, 'r', encoding='utf-8').read()
+        content = _read_app_implementation_text()
         assert 'validate_image_magic_bytes(content)' in content
 
     def test_valid_jpeg_magic_bytes(self):
@@ -194,16 +285,14 @@ class TestFileUploadValidation:
         assert validate_image_magic_bytes(b'') is False
 
     def test_spreadsheet_magic_bytes_in_upload(self):
-        """upload.py must validate XLSX PK magic bytes."""
-        fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'api', 'upload.py')
-        content = open(fpath, 'r', encoding='utf-8').read()
+        """Upload validation must check XLSX PK magic bytes."""
+        content = _read_repo_text('services', 'upload_service.py')
         assert "PK\\x03\\x04" in content or "b'PK" in content, \
-            "upload.py should check XLSX ZIP magic bytes"
+            "upload_service.py should check XLSX ZIP magic bytes"
 
     def test_upload_image_size_reduced(self):
         """Image upload max should be 10MB, not 100MB."""
-        fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'main.py')
-        content = open(fpath, 'r', encoding='utf-8').read()
+        content = _read_app_implementation_text()
         # Should contain 10 * 1024 * 1024, not 100 * 1024 * 1024
         assert '10 * 1024 * 1024' in content, "MAX_IMAGE_SIZE should be 10MB"
         assert '100 * 1024 * 1024  # 100MB max' not in content, \
@@ -211,8 +300,7 @@ class TestFileUploadValidation:
 
     def test_upload_no_internal_error_leak(self):
         """Upload error handler should not expose internal exception details."""
-        fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'api', 'upload.py')
-        content = open(fpath, 'r', encoding='utf-8').read()
+        content = _read_repo_text('api', 'upload.py')
         # Should NOT have: detail=f"... {str(e)}" pattern in error handler
         assert 'detail=f"Dosya isleme hatasi: {str(e)}"' not in content, \
             "Upload error should not leak internal exception to client"
@@ -226,9 +314,8 @@ class TestSecurityHeaders:
     """Verify security headers are set on responses."""
 
     def test_security_headers_middleware_exists(self):
-        """SecurityHeadersMiddleware must be defined in main.py."""
-        fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'main.py')
-        content = open(fpath, 'r', encoding='utf-8').read()
+        """SecurityHeadersMiddleware must exist in the middleware assembly layer."""
+        content = _read_middleware_implementation_text()
         assert 'class SecurityHeadersMiddleware' in content
         assert 'X-Content-Type-Options' in content
         assert 'X-Frame-Options' in content
@@ -237,8 +324,7 @@ class TestSecurityHeaders:
 
     def test_cors_methods_restricted(self):
         """CORS should not use allow_methods=["*"]."""
-        fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'main.py')
-        content = open(fpath, 'r', encoding='utf-8').read()
+        content = _read_middleware_implementation_text()
         # Find the CORSMiddleware block — should NOT have allow_methods=["*"]
         import re
         cors_block = re.search(r'CORSMiddleware.*?(?=\n\n|\nclass|\n#)', content, re.DOTALL)
@@ -249,14 +335,12 @@ class TestSecurityHeaders:
 
     def test_openapi_disabled_in_production(self):
         """OpenAPI JSON endpoint should be disabled when not in debug mode."""
-        fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'main.py')
-        content = open(fpath, 'r', encoding='utf-8').read()
+        content = _read_app_factory_implementation_text()
         assert 'openapi_url="/openapi.json" if settings.debug else None' in content
 
     def test_global_exception_no_error_leak(self):
         """Global exception handler should not leak errors in production."""
-        fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'main.py')
-        content = open(fpath, 'r', encoding='utf-8').read()
+        content = _read_error_implementation_text()
         # Should use debug flag check before including error details
         assert '"debug_error"' in content or 'if settings.debug' in content
 
@@ -352,18 +436,27 @@ class TestLikeInjection:
     """ILIKE patterns should escape metacharacters."""
 
     def test_holders_search_escapes_like(self):
-        """holders.py search should escape % and _ in ILIKE patterns."""
-        fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'api', 'holders.py')
+        """Holder search should escape % and _ in ILIKE patterns."""
+        fpath = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            'services',
+            'holder_service.py',
+        )
         content = open(fpath, 'r', encoding='utf-8').read()
-        assert "ESCAPE" in content, "holders.py ILIKE should have ESCAPE clause"
+        assert "ESCAPE" in content, "holder_service.py ILIKE should have ESCAPE clause"
         assert '.replace("%"' in content or 'replace("%"' in content, \
-            "holders.py should escape % in search input"
+            "holder_service.py should escape % in search input"
 
     def test_watchlist_search_escapes_like(self):
-        """crud.py watchlist search should escape ILIKE metacharacters."""
-        fpath = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'database', 'crud.py')
+        """Watchlist repository search should escape ILIKE metacharacters."""
+        fpath = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            'database',
+            'repositories',
+            'watchlist_repository.py',
+        )
         content = open(fpath, 'r', encoding='utf-8').read()
-        assert "ESCAPE" in content, "crud.py ILIKE should have ESCAPE clause"
+        assert "ESCAPE" in content, "watchlist_repository.py ILIKE should have ESCAPE clause"
 
 
 # ==========================================================

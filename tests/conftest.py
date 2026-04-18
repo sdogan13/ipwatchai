@@ -1,7 +1,7 @@
 """
 Shared test fixtures and module mocks.
 
-IMPORTANT: This file mocks heavy modules (ai, scrapper, ingest) so tests
+IMPORTANT: This file mocks heavy modules (pipeline.ai, scrapper) so tests
 run without GPU models, database, or network. Module mocks must happen
 BEFORE any project code is imported.
 """
@@ -14,6 +14,17 @@ from unittest.mock import MagicMock, patch, PropertyMock
 from datetime import datetime, date, timedelta
 
 import pytest
+
+# ============================================================
+# 0. Test environment defaults
+# ============================================================
+# These defaults keep unit tests isolated from developer machine state
+# while still allowing settings/bootstrap imports to succeed.
+os.environ.setdefault("DB_PASSWORD", "test-db-password")
+os.environ.setdefault(
+    "AUTH_SECRET_KEY",
+    "test-auth-secret-key-with-at-least-32-characters",
+)
 
 # ============================================================
 # 1. Add project root to path
@@ -57,7 +68,7 @@ _ensure_mock("easyocr")
 _ensure_mock("transformers")
 
 # --- Project heavy modules ---
-# Mock the 'ai' module (loads CLIP, DINOv2, MiniLM at import time)
+# Mock the packaged AI module (loads CLIP, DINOv2, MiniLM at import time)
 _mock_ai = MagicMock()
 _mock_ai.device = "cpu"
 _mock_ai.text_model = MagicMock()
@@ -66,13 +77,10 @@ _mock_ai.clip_preprocess = MagicMock()
 _mock_ai.dinov2_model = MagicMock()
 _mock_ai.dinov2_preprocess = MagicMock()
 _mock_ai.process_folder = MagicMock()
-_ensure_mock("ai", _mock_ai)
+_ensure_mock("pipeline.ai", _mock_ai)
 
 # Mock scrapper (Playwright, browser automation)
 _ensure_mock("scrapper")
-
-# Mock ingest (DB bulk writes)
-_ensure_mock("ingest")
 
 # Mock logging_config (structured logging setup)
 _mock_logging = MagicMock()
@@ -184,7 +192,7 @@ def sample_trademark():
         "id": str(uuid.uuid4()),
         "application_no": "2024/123456",
         "name": "NIKEA",
-        "current_status": "Published",
+        "final_status": "Published",
         "holder_name": "ACME TEXTILES LTD",
         "holder_tpe_client_id": "12345",
         "nice_class_numbers": [25, 35],
@@ -207,14 +215,14 @@ def sample_trademarks(sample_trademark):
     """Multiple trademarks for search result testing."""
     base = sample_trademark.copy()
     variants = [
-        {"name": "NIKE", "application_no": "2020/000001", "current_status": "Registered", "name_tr": "nike"},
-        {"name": "NIKEA", "application_no": "2024/123456", "current_status": "Published", "name_tr": "nikea"},
-        {"name": "NIKE SPORTS", "application_no": "2022/050000", "current_status": "Registered", "name_tr": "nike spor"},
-        {"name": "NYKE", "application_no": "2023/080000", "current_status": "Published", "name_tr": "nyke"},
-        {"name": "MARKET PLUS", "application_no": "2024/200000", "current_status": "Published", "name_tr": "market plus"},
-        {"name": "ELMA", "application_no": "2023/090000", "current_status": "Registered", "name_tr": "elma"},
-        {"name": "APPLE TECH", "application_no": "2024/300000", "current_status": "Published", "name_tr": "elma teknoloji"},
-        {"name": "GÜNEŞ", "application_no": "2021/040000", "current_status": "Registered", "name_tr": "güneş"},
+        {"name": "NIKE", "application_no": "2020/000001", "final_status": "Registered", "name_tr": "nike"},
+        {"name": "NIKEA", "application_no": "2024/123456", "final_status": "Published", "name_tr": "nikea"},
+        {"name": "NIKE SPORTS", "application_no": "2022/050000", "final_status": "Registered", "name_tr": "nike spor"},
+        {"name": "NYKE", "application_no": "2023/080000", "final_status": "Published", "name_tr": "nyke"},
+        {"name": "MARKET PLUS", "application_no": "2024/200000", "final_status": "Published", "name_tr": "market plus"},
+        {"name": "ELMA", "application_no": "2023/090000", "final_status": "Registered", "name_tr": "elma"},
+        {"name": "APPLE TECH", "application_no": "2024/300000", "final_status": "Published", "name_tr": "elma teknoloji"},
+        {"name": "GÜNEŞ", "application_no": "2021/040000", "final_status": "Registered", "name_tr": "güneş"},
     ]
     trademarks = []
     for v in variants:
@@ -232,7 +240,7 @@ def sample_user():
         "id": str(uuid.uuid4()),
         "email": "test@example.com",
         "organization_id": str(uuid.uuid4()),
-        "role": "owner",
+        "role": "admin",
         "plan": "professional",
         "is_active": True,
         "is_superadmin": False,
@@ -280,7 +288,7 @@ def sample_alert():
         "semantic_similarity": 0.80,
         "visual_similarity": 0.0,
         "translation_similarity": 0.0,
-        "severity": "very_high",
+        "severity": "high",
         "status": "new",
         "detected_at": datetime(2024, 7, 1),
     }
@@ -330,7 +338,7 @@ def client():
         email="test@example.com",
         first_name="Test",
         last_name="User",
-        role="owner",
+        role="admin",
         is_superadmin=False,
         permissions=["watchlist.write", "watchlist.read"],
     )
@@ -366,7 +374,7 @@ def superadmin_client():
         email="admin@example.com",
         first_name="Admin",
         last_name="User",
-        role="owner",
+        role="admin",
         is_superadmin=True,
         permissions=[],
     )
