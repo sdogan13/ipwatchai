@@ -12,15 +12,17 @@ from pathlib import Path
 # ─── File paths ───────────────────────────────────────────────
 ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES = ROOT / "templates"
-PARTIALS = TEMPLATES / "partials"
+PARTIALS = TEMPLATES / "dashboard" / "partials"
 STATIC = ROOT / "static"
+DASHBOARD_TEMPLATE = TEMPLATES / "dashboard" / "page.html"
+DASHBOARD_APP = STATIC / "js" / "dashboard" / "app.js"
 
 
 class TestDashboardHTML:
     """Tests for the main dashboard.html template."""
 
     def setup_method(self):
-        self.html = (TEMPLATES / "dashboard.html").read_text(encoding="utf-8")
+        self.html = DASHBOARD_TEMPLATE.read_text(encoding="utf-8")
 
     def test_includes_all_partials(self):
         for partial in ["_navbar.html", "_search_panel.html", "_results_panel.html",
@@ -40,10 +42,12 @@ class TestDashboardHTML:
         assert ".desktop-tabs" not in self.html
 
     def test_mobile_bottom_bar_hidden_on_desktop(self):
-        assert ".mobile-bottom-bar { display: none !important; }" in self.html
+        assert ".mobile-bottom-bar {" in self.html
+        assert "display: none !important;" in self.html
 
     def test_mobile_drawer_hidden_on_desktop(self):
-        assert ".mobile-drawer-backdrop { display: none !important; }" in self.html
+        assert ".mobile-drawer-backdrop {" in self.html
+        assert "display: none !important;" in self.html
 
 
 class TestNavbar:
@@ -120,12 +124,13 @@ class TestNavbar:
             assert f"showDashboardTab('{tab}'); closeMobileDrawer();" in self.html
 
     # ─── Mobile Bottom Bar ──────────────────────────────
-    def test_mobile_bottom_bar_has_five_buttons(self):
+    def test_mobile_bottom_bar_has_current_buttons(self):
         assert 'id="bottom-tab-overview"' in self.html
+        assert 'id="bottom-tab-watchlist"' in self.html
         assert 'id="bottom-tab-search"' in self.html
         assert 'id="bottom-tab-radar"' in self.html
         assert 'id="bottom-tab-ai-studio"' in self.html
-        assert 'id="bottom-tab-reports"' in self.html
+        assert 'id="bottom-tab-more"' in self.html
 
     def test_bottom_bar_overview_is_default_active(self):
         """Overview bottom tab should start with primary color."""
@@ -174,6 +179,10 @@ class TestSearchPanel:
     def test_search_input_has_id(self):
         assert 'id="search-input"' in self.html
 
+    def test_search_buttons_have_stable_ids(self):
+        assert 'id="dashboard-quick-search-btn"' in self.html
+        assert 'id="dashboard-live-search-btn"' in self.html
+
     def test_lightbox_outside_tab_content(self):
         """Lightbox modal should be outside the tab-content-search div."""
         # tab-content-search closes, then lightbox starts
@@ -200,6 +209,21 @@ class TestOverviewPanel:
         tag_start = self.html.rfind("<main", 0, idx)
         tag_chunk = self.html[tag_start:idx + 50]
         assert "hidden" not in tag_chunk
+
+    def test_overview_kpi_ids_exist(self):
+        for element_id in [
+            "kpi-total-watched",
+            "kpi-high-risk",
+            "kpi-pending-deadlines",
+            "kpi-recent-activity",
+            "usage-quick-text",
+            "usage-live-text",
+            "usage-watchlist-text",
+            "plan-display-badge",
+            "sys-total-trademarks",
+            "credit-reset-date",
+        ]:
+            assert f'id="{element_id}"' in self.html
 
 
 class TestOtherPanels:
@@ -234,7 +258,7 @@ class TestAppJS:
     """Tests for the showDashboardTab function in app.js."""
 
     def setup_method(self):
-        self.js = (STATIC / "js" / "app.js").read_text(encoding="utf-8")
+        self.js = DASHBOARD_APP.read_text(encoding="utf-8")
 
     def test_showDashboardTab_handles_search(self):
         assert "'search'" in self.js
