@@ -6,7 +6,7 @@
 set -e
 
 echo "============================================"
-echo "IP Watch AI - Cloud Server Setup"
+echo "IP Watch AI - Production Server Setup"
 echo "============================================"
 
 # 1. Update system
@@ -71,8 +71,9 @@ echo "============================================"
 echo ""
 echo "Next steps:"
 echo "  1. Clone your repo:    git clone <repo-url> /opt/ipwatch/app"
-echo "  2. Copy credentials:   scp .env.cloud cloudflared/ to /opt/ipwatch/app/"
-echo "  3. Import database:    See scripts/export_db.sh on your local PC"
-echo "  4. Start services:     cd /opt/ipwatch/app && docker compose -f docker-compose.cloud.yml --env-file .env.cloud up -d"
-echo "  5. Open Postgres port: ufw allow from YOUR_IP to any port 5433"
+echo "  2. Review config:      edit /opt/ipwatch/app/deploy/.env.prod"
+echo "  3. Build backend:      cd /opt/ipwatch/app && docker compose --env-file deploy/.env.prod -f docker-compose.yml -f deploy/docker-compose.prod.yml build backend"
+echo "  4. Start core stack:   docker compose --env-file deploy/.env.prod -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d"
+echo "  5. Optional tunnel:    docker compose --env-file deploy/.env.prod -f docker-compose.yml -f deploy/docker-compose.prod.yml --profile with-tunnel up -d cloudflared"
+echo "  6. Open Postgres port: ufw allow from YOUR_IP to any port 5432"
 echo ""

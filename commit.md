@@ -617,6 +617,36 @@ Current note:
   - `deploy/setup-server.sh`
   - local-only helper scripts and ad hoc devtools files
 
+### Batch 15: Canonical Prod Deploy Path
+Status: Completed
+
+Scope:
+- make the `docker-compose.yml + deploy/docker-compose.prod.yml` overlay the real replacement for the legacy cloud path
+- remove broken prod-only references to missing bootstrap files
+- retarget the remaining server bootstrap helper to the canonical prod commands
+
+Likely paths:
+- `deploy/docker-compose.prod.yml`
+- `scripts/setup_cloud_server.sh`
+
+Verification:
+- `docker compose --env-file deploy/.env.prod -f docker-compose.yml -f deploy/docker-compose.prod.yml config`
+- staged diff review for the replacement-path command and mount changes
+
+Commit message target:
+- `infra: fix prod deploy bootstrap path`
+
+Current note:
+- the Batch 15 path set was committed as `infra: fix prod deploy bootstrap path`
+- the staged batch turns the prod overlay into the reviewed replacement path by removing the broken `deploy/initdb/*` bind mounts, aligning PostgreSQL interpolation with `DB_*` values from `deploy/.env.prod`, and dropping the stale `/app/reports` override so report output stays under `/app/uploads/reports`
+- the batch also rewires `scripts/setup_cloud_server.sh` to use the canonical commands with `--env-file deploy/.env.prod`, plus the optional `with-tunnel` profile instead of the deleted cloud-specific compose stack
+- verification passed for the staged batch before commit:
+  - `docker compose --env-file deploy/.env.prod -f docker-compose.yml -f deploy/docker-compose.prod.yml config`
+- intentionally left out for the next follow-up batch:
+  - `Dockerfile.cloud`
+  - `docker-compose.cloud.yml`
+  - `deploy/setup-server.sh`
+
 ## Execution Order
 
 Recommended order:
@@ -635,6 +665,7 @@ Recommended order:
 13. Batch 12 for the schema/bootstrap alignment slice
 14. Batch 13 for the API endpoint coverage expansion slice
 15. Batch 14 for the isolated unused CPU deploy Dockerfile deletion
+16. Batch 15 for the canonical prod deploy path fix
 
 ## Staging Method
 
@@ -701,3 +732,6 @@ This commit plan is complete when:
 - Re-reviewed the remaining tracked infra deletions and narrowed the safe deletion set further: `Dockerfile.cloud`, `docker-compose.cloud.yml`, and `deploy/setup-server.sh` still need a dedicated infra cleanup, but `deploy/Dockerfile.cpu` was confirmed unreferenced and redundant.
 - Verified the staged Batch 14 deletion with repo reference review and `docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml config`.
 - Committed Batch 14 as `infra: drop unused cpu deploy dockerfile`.
+- Staged the Batch 15 prod-deploy replacement slice around the broken prod compose overlay and the remaining bootstrap helper that still pointed at the legacy cloud stack.
+- Verified the staged Batch 15 set with `docker compose --env-file deploy/.env.prod -f docker-compose.yml -f deploy/docker-compose.prod.yml config`.
+- Committed Batch 15 as `infra: fix prod deploy bootstrap path`.
