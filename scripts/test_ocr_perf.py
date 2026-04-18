@@ -24,7 +24,7 @@ for q in bench:
         SELECT id, name FROM trademarks
         WHERE logo_ocr_text IS NOT NULL AND logo_ocr_text != ''
           AND LOWER(logo_ocr_text) LIKE %s ESCAPE '\\'
-          AND current_status NOT IN ('Refused', 'Withdrawn')
+          AND final_status NOT IN ('Refused', 'Withdrawn')
           {DATE_FILTER}
         ORDER BY length(name) ASC LIMIT 20
     """, (f'%{escaped}%',))

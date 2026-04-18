@@ -409,6 +409,48 @@ Current note:
   - the status/scoring and product-plan test churn
   - the broader infra/bootstrap changes
 
+### Batch 9: Scoring And Translation Alignment
+Status: Completed
+
+Scope:
+- add translated-name IDF lookup support for the current scoring model
+- align helper scripts to query `final_status` instead of the older `current_status`
+- update the translation and Turkish-similarity tests to match the live Path B and containment behavior
+
+Likely paths:
+- `idf_lookup.py`
+- `scripts/test_full_light.py`
+- `scripts/test_full_pipeline.py`
+- `scripts/test_image_only.py`
+- `scripts/test_image_vector.py`
+- `scripts/test_img_stage4.py`
+- `scripts/test_normalization.py`
+- `scripts/test_ocr_perf.py`
+- `scripts/test_ocr_search.py`
+- `scripts/test_prescreen_light.py`
+- `scripts/test_vector_search.py`
+- `tests/test_translation.py`
+- `tests/test_translation_scoring.py`
+- `tests/test_turkish_similarity.py`
+
+Verification:
+- `python -m py_compile idf_lookup.py scripts/test_full_light.py scripts/test_full_pipeline.py scripts/test_image_only.py scripts/test_image_vector.py scripts/test_img_stage4.py scripts/test_normalization.py scripts/test_ocr_perf.py scripts/test_ocr_search.py scripts/test_prescreen_light.py scripts/test_vector_search.py tests/test_translation.py tests/test_translation_scoring.py tests/test_turkish_similarity.py`
+- `python -m pytest tests/test_translation.py tests/test_translation_scoring.py tests/test_turkish_similarity.py -q`
+
+Commit message target:
+- `scoring: align translated IDF and final-status helpers`
+
+Current note:
+- the Batch 9 path set was committed as `scoring: align translated IDF and final-status helpers`
+- the staged batch adds translated-corpus IDF caching in `idf_lookup.py`, retargets the scoring helper scripts to filter on `final_status`, and updates the translation/similarity expectations to the currently implemented Path B and multi-level containment behavior
+- verification passed for the staged batch before commit:
+  - `python -m py_compile idf_lookup.py scripts/test_full_light.py scripts/test_full_pipeline.py scripts/test_image_only.py scripts/test_image_vector.py scripts/test_img_stage4.py scripts/test_normalization.py scripts/test_ocr_perf.py scripts/test_ocr_search.py scripts/test_prescreen_light.py scripts/test_vector_search.py tests/test_translation.py tests/test_translation_scoring.py tests/test_turkish_similarity.py`
+  - `python -m pytest tests/test_translation.py tests/test_translation_scoring.py tests/test_turkish_similarity.py -q`
+- intentionally left out for later follow-up batches:
+  - `deploy/schema.sql` and `migrations/trademark_applications.sql`
+  - the product-plan/auth test realignment
+  - the devtools/download helper and infra review batches
+
 ## Execution Order
 
 Recommended order:
@@ -421,6 +463,7 @@ Recommended order:
 7. Batch 6 only after explicit review
 8. Batch 7 for the post-plan event/status foundation slice
 9. Batch 8 for the post-plan path-normalization helper slice
+10. Batch 9 for the post-plan scoring/translation alignment slice
 
 ## Staging Method
 
@@ -467,3 +510,6 @@ This commit plan is complete when:
 - Staged the Batch 8 path-normalization helper slice around the remaining Phase 10-style collector, extractor, and legacy sample scripts that still carried machine-local bulletin roots.
 - Verified the staged Batch 8 set with `python -m py_compile` on the normalized helper files and the full `python -m pytest tests/test_phase0_smoke.py -q` smoke suite.
 - The normal commit path for Batch 8 was blocked by the large-deletion guard on `.py/test.py`; after reviewing the staged rewrite and the passing smoke coverage, committed Batch 8 as `pipeline: normalize local bulletin utility paths` with the one-time hook override.
+- Staged the Batch 9 scoring/translation slice around translated IDF lookup support, `final_status`-aware helper queries, and the translation/similarity tests that reflect the current scoring behavior.
+- Verified the staged Batch 9 set with `python -m py_compile` on the scoring/helper files and `python -m pytest tests/test_translation.py tests/test_translation_scoring.py tests/test_turkish_similarity.py -q`.
+- Committed Batch 9 as `scoring: align translated IDF and final-status helpers`.

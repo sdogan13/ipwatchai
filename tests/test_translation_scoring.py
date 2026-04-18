@@ -213,37 +213,49 @@ class TestPerformance:
 # ============================================
 
 class TestTranslationScoreFloor:
-    """Test that near-perfect translation match floors total at 0.90."""
+    """Test that near-perfect translation match via Path B produces high total.
+    Translation floor was removed from _dynamic_combine — it's now handled by
+    dual-path scoring in score_pair() where Path B (translated) can match exactly.
+    """
 
-    def test_floor_applied_when_trans_sim_high(self):
-        """translation_sim >= 0.95 should floor total at 0.90."""
-        from risk_engine import _dynamic_combine
-        result = _dynamic_combine(
-            text_idf_score=0.0,
+    def test_path_b_high_when_name_tr_matches_query(self):
+        """Path B should score high when name_tr exactly matches query."""
+        from risk_engine import score_pair
+        result = score_pair(
+            query_name="APPLE",
+            candidate_name="ELMA MEYVE",
+            text_sim=0.05,
+            semantic_sim=0.1,
             visual_sim=0.0,
-            translation_sim=0.98,
+            candidate_translations={"name_tr": "APPLE"},
         )
         assert result["total"] >= 0.90, \
-            f"Translation floor should give total >= 0.90, got {result['total']}"
+            f"Path B exact match should give total >= 0.90, got {result['total']}"
 
-    def test_floor_not_applied_when_trans_sim_below_threshold(self):
-        """translation_sim < 0.95 should NOT apply the floor."""
-        from risk_engine import _dynamic_combine
-        result = _dynamic_combine(
-            text_idf_score=0.0,
+    def test_path_b_low_when_name_tr_does_not_match(self):
+        """Path B should not boost when name_tr doesn't match query."""
+        from risk_engine import score_pair
+        result = score_pair(
+            query_name="APPLE",
+            candidate_name="ELMA MEYVE",
+            text_sim=0.05,
+            semantic_sim=0.1,
             visual_sim=0.0,
-            translation_sim=0.50,
+            candidate_translations={"name_tr": "PORTAKAL"},
         )
-        assert result["total"] < 0.90, \
-            f"Below threshold should not floor, got {result['total']}"
+        assert result["total"] < 0.50, \
+            f"Non-matching name_tr should not boost, got {result['total']}"
 
-    def test_floor_does_not_lower_existing_high_total(self):
-        """Floor should only raise, never lower."""
-        from risk_engine import _dynamic_combine
-        result = _dynamic_combine(
-            text_idf_score=0.98,
+    def test_path_b_does_not_lower_path_a(self):
+        """Path B should only raise, never lower the final score."""
+        from risk_engine import score_pair
+        result = score_pair(
+            query_name="ELMA",
+            candidate_name="ELMA",
+            text_sim=0.9,
+            semantic_sim=0.8,
             visual_sim=0.0,
-            translation_sim=0.98,
+            candidate_translations={"name_tr": "WRONG"},
         )
         assert result["total"] >= 0.90
 
@@ -330,27 +342,27 @@ class TestPhoneticNotDoubleCounted:
     """Verify phonetic is only in IDF waterfall, not in _dynamic_combine."""
 
     def test_dynamic_combine_has_no_phonetic_weight(self):
-        """_dynamic_combine should only have text, visual, translation."""
+        """_dynamic_combine should only have text and visual (no phonetic, no translation)."""
         from risk_engine import _dynamic_combine
         result = _dynamic_combine(
             text_idf_score=0.80,
             visual_sim=0.50,
-            translation_sim=0.30,
         )
         weights = result["dynamic_weights"]
         assert "phonetic" not in weights
         assert "text" in weights
         assert "visual" in weights
-        assert "translation" in weights
+        assert "translation" not in weights  # Translation is now handled by dual-path
 
-    def test_dynamic_combine_3_params_only(self):
-        """_dynamic_combine should reject phonetic_sim parameter."""
+    def test_dynamic_combine_2_params_only(self):
+        """_dynamic_combine should accept only text_idf_score and visual_sim."""
         from risk_engine import _dynamic_combine
         import inspect
         sig = inspect.signature(_dynamic_combine)
         param_names = list(sig.parameters.keys())
         assert "phonetic_sim" not in param_names
-        assert len(param_names) == 3  # text_idf_score, visual_sim, translation_sim
+        assert "translation_sim" not in param_names
+        assert len(param_names) == 2  # text_idf_score, visual_sim
 
     def test_score_pair_still_has_phonetic_in_breakdown(self):
         """score_pair() should still include phonetic_similarity in breakdown."""

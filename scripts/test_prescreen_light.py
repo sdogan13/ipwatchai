@@ -37,7 +37,7 @@ for word in ["star", "apple", "dogan", "gold", "nike"]:
                similarity(name, %s) as sim
         FROM trademarks
         WHERE {NORMALIZE_SQL} LIKE %s ESCAPE '\\'
-          AND current_status NOT IN ('Refused', 'Withdrawn')
+          AND final_status NOT IN ('Refused', 'Withdrawn')
           {DATE_FILTER}
         ORDER BY length(name) ASC
         LIMIT 30
@@ -57,7 +57,7 @@ for word in ["STAR", "APPLE", "DOĞAN", "SAMSUNG", "NIKE", "ZARA"]:
         SELECT id, name, nice_class_numbers,
                GREATEST(similarity(name, %s), COALESCE(similarity(name_tr, %s), 0)) as sim
         FROM trademarks
-        WHERE current_status NOT IN ('Refused', 'Withdrawn')
+        WHERE final_status NOT IN ('Refused', 'Withdrawn')
           {DATE_FILTER}
           AND GREATEST(similarity(name, %s), COALESCE(similarity(name_tr, %s), 0)) >= 0.3
         ORDER BY GREATEST(similarity(name, %s), COALESCE(similarity(name_tr, %s), 0)) DESC
@@ -105,7 +105,7 @@ for word in ["NIKE", "STAR"]:
     cur.execute(f"""
         SELECT COUNT(*)
         FROM trademarks
-        WHERE current_status NOT IN ('Refused', 'Withdrawn')
+        WHERE final_status NOT IN ('Refused', 'Withdrawn')
           {DATE_FILTER}
           AND similarity(name, %s) > 0
         """, (word,))
@@ -117,7 +117,7 @@ for word in ["NIKE", "STAR"]:
     cur.execute(f"""
         SELECT COUNT(*)
         FROM trademarks
-        WHERE current_status NOT IN ('Refused', 'Withdrawn')
+        WHERE final_status NOT IN ('Refused', 'Withdrawn')
           {DATE_FILTER}
           AND similarity(name, %s) >= 0.3
         """, (word,))
@@ -149,7 +149,7 @@ for word in ["STAR", "ZARA", "APPLE"]:
     cur.execute(f"""
         SELECT id, name FROM trademarks
         WHERE {NORMALIZE_SQL} LIKE %s ESCAPE '\\'
-          AND current_status NOT IN ('Refused', 'Withdrawn') {DATE_FILTER}
+          AND final_status NOT IN ('Refused', 'Withdrawn') {DATE_FILTER}
         ORDER BY length(name) ASC LIMIT 30
     """, (f'%{word.lower()}%',))
     contain = cur.fetchall()
@@ -161,7 +161,7 @@ for word in ["STAR", "ZARA", "APPLE"]:
     cur.execute(f"""
         SELECT id, name, similarity(name, %s) as sim
         FROM trademarks
-        WHERE current_status NOT IN ('Refused', 'Withdrawn') {DATE_FILTER}
+        WHERE final_status NOT IN ('Refused', 'Withdrawn') {DATE_FILTER}
           AND similarity(name, %s) >= 0.3
         ORDER BY similarity(name, %s) DESC LIMIT %s
     """, (word, word, word, remaining))

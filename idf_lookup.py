@@ -46,8 +46,11 @@ class IDFLookup:
 
     _instance = None
     _cache: Dict[str, dict] = {}
+    _cache_tr: Dict[str, dict] = {}  # Translated name IDF cache (from word_idf_tr)
     _loaded: bool = False
+    _loaded_tr: bool = False
     _total_docs: int = 0
+    _total_docs_tr: int = 0
     _default_idf: float = 9.0  # Default for unknown words (treat as distinctive)
 
     def __new__(cls):
@@ -86,19 +89,20 @@ class IDFLookup:
                 cur.execute("SELECT COUNT(*) FROM trademarks WHERE name IS NOT NULL")
                 cls._total_docs = cur.fetchone()[0]
 
-                # Load all IDF scores in one query
+                # Load all IDF scores in one query (include word_class from DB)
                 cur.execute("""
-                    SELECT word, idf_score, is_generic, document_frequency
+                    SELECT word, idf_score, is_generic, document_frequency, word_class
                     FROM word_idf
                 """)
 
                 cls._cache = {}
                 rows = cur.fetchall()
-                for word, idf, is_generic, doc_freq in rows:
+                for word, idf, is_generic, doc_freq, word_class in rows:
                     cls._cache[word] = {
                         'idf': idf,
                         'is_generic': is_generic,
-                        'doc_freq': doc_freq
+                        'doc_freq': doc_freq,
+                        'word_class': word_class or 'distinctive',
                     }
 
                 # Apply FOREIGN_GENERICS_OVERRIDE: force known generic terms
@@ -109,10 +113,11 @@ class IDFLookup:
                     if word in cls._cache:
                         cls._cache[word]['idf'] = 2.0
                         cls._cache[word]['is_generic'] = True
+                        cls._cache[word]['word_class'] = 'generic'
                         overridden += 1
                     else:
                         # Word not in DB at all — insert it so lookups return 2.0
-                        cls._cache[word] = {'idf': 2.0, 'is_generic': True, 'doc_freq': 0}
+                        cls._cache[word] = {'idf': 2.0, 'is_generic': True, 'doc_freq': 0, 'word_class': 'generic'}
                         overridden += 1
 
                 cls._loaded = True
@@ -125,6 +130,85 @@ class IDFLookup:
             logger.warning(f"IDFLookup: Failed to load from database: {e}")
             logger.warning("IDFLookup: Will use default scores (all words treated as distinctive)")
             cls._loaded = True  # Mark as loaded to prevent repeated failures
+
+    @classmethod
+    def load_translated(cls, force: bool = False) -> None:
+        """
+        Load translated IDF scores from word_idf_tr table into memory.
+        This provides independent word importance scoring for Path B
+        (query vs translated name).
+        """
+        if cls._loaded_tr and not force:
+            return
+
+        try:
+            import psycopg2
+            import os
+
+            conn = psycopg2.connect(
+                host=os.getenv("DB_HOST", "127.0.0.1"),
+                port=int(os.getenv("DB_PORT", 5432)),
+                database=os.getenv("DB_NAME", "trademark_db"),
+                user=os.getenv("DB_USER", "turk_patent"),
+                password=os.getenv("DB_PASSWORD")
+            )
+
+            try:
+                cur = conn.cursor()
+
+                # Check if word_idf_tr table exists
+                cur.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables
+                        WHERE table_name = 'word_idf_tr'
+                    )
+                """)
+                if not cur.fetchone()[0]:
+                    logger.warning("word_idf_tr table not found - run compute_idf.py to create it")
+                    cls._loaded_tr = True
+                    return
+
+                cur.execute("SELECT COUNT(*) FROM trademarks WHERE name_tr IS NOT NULL")
+                cls._total_docs_tr = cur.fetchone()[0]
+
+                cur.execute("""
+                    SELECT word, idf_score, is_generic, document_frequency, word_class
+                    FROM word_idf_tr
+                """)
+
+                cls._cache_tr = {}
+                rows = cur.fetchall()
+                for word, idf, is_generic, doc_freq, word_class in rows:
+                    cls._cache_tr[word] = {
+                        'idf': idf,
+                        'is_generic': is_generic,
+                        'doc_freq': doc_freq,
+                        'word_class': word_class or 'distinctive',
+                    }
+
+                # Apply FOREIGN_GENERICS_OVERRIDE to translated cache too
+                from foreign_generics import FOREIGN_GENERICS_OVERRIDE
+                overridden = 0
+                for word in FOREIGN_GENERICS_OVERRIDE:
+                    if word in cls._cache_tr:
+                        cls._cache_tr[word]['idf'] = 2.0
+                        cls._cache_tr[word]['is_generic'] = True
+                        cls._cache_tr[word]['word_class'] = 'generic'
+                        overridden += 1
+                    else:
+                        cls._cache_tr[word] = {'idf': 2.0, 'is_generic': True, 'doc_freq': 0, 'word_class': 'generic'}
+                        overridden += 1
+
+                cls._loaded_tr = True
+                logger.info(f"IDFLookup: Loaded {len(cls._cache_tr):,} translated word scores (overrode {overridden} generic terms)")
+
+            finally:
+                conn.close()
+
+        except Exception as e:
+            logger.warning(f"IDFLookup: Failed to load translated IDF from database: {e}")
+            logger.warning("IDFLookup: Path B will use default scores (all translated words treated as distinctive)")
+            cls._loaded_tr = True
 
     @classmethod
     def _get_entry_with_fallback(cls, word_norm: str) -> dict:
@@ -221,19 +305,84 @@ class IDFLookup:
 
         Returns one of: 'generic', 'semi_generic', 'distinctive'
 
-        Classification based on IDF thresholds:
-        - GENERIC: IDF < 6.0 (>0.5% of docs)
-        - SEMI_GENERIC: 6.0 <= IDF < 8.5 (0.1%-0.5%)
-        - DISTINCTIVE: IDF >= 8.5 (<0.1%)
+        Classification is read directly from the DB word_class column,
+        which is computed by compute_idf.py using dynamic k-means thresholds.
+        Falls back to IDF-threshold derivation for words missing word_class.
         """
-        idf = cls.get_idf(word)
+        if not cls._loaded:
+            cls.load()
 
-        if idf < 6.0:
-            return 'generic'
-        elif idf < 8.5:
-            return 'semi_generic'
-        else:
+        word_norm = normalize_turkish(word)
+        entry = cls._get_entry_with_fallback(word_norm)
+
+        if entry:
+            wc = entry.get('word_class')
+            if wc in ('generic', 'semi_generic', 'distinctive'):
+                return wc
+            # Fallback: derive from IDF for old DB rows without word_class
+            idf = entry.get('idf', cls._default_idf)
+            if idf < 6.0:
+                return 'generic'
+            elif idf < 8.5:
+                return 'semi_generic'
             return 'distinctive'
+
+        # Unknown word — treat as distinctive
+        return 'distinctive'
+
+    @classmethod
+    def get_idf_tr(cls, word: str) -> float:
+        """Get IDF score for a word from the TRANSLATED name corpus."""
+        if not cls._loaded_tr:
+            cls.load_translated()
+        word_norm = normalize_turkish(word)
+        entry = cls._cache_tr.get(word_norm)
+        if not entry:
+            # Morphological fallback (same logic as original)
+            for suffix in ('leri', 'ları', 'ler', 'lar', 'si', 'sı', 'i', 'ı', 'in', 'ın', 'nin', 'nın', 'ye', 'ya', 'e', 'a'):
+                if word_norm.endswith(suffix):
+                    stem = word_norm[:-len(suffix)]
+                    if len(stem) >= 3:
+                        stem_entry = cls._cache_tr.get(stem)
+                        if stem_entry is not None:
+                            return stem_entry['idf']
+        return entry['idf'] if entry else cls._default_idf
+
+    @classmethod
+    def get_word_class_tr(cls, word: str) -> str:
+        """Get 3-tier classification from the TRANSLATED name corpus."""
+        if not cls._loaded_tr:
+            cls.load_translated()
+
+        word_norm = normalize_turkish(word)
+        entry = cls._cache_tr.get(word_norm)
+        if not entry:
+            # Morphological fallback (same logic as get_idf_tr)
+            for suffix in ('leri', 'ları', 'ler', 'lar', 'si', 'sı', 'i', 'ı', 'in', 'ın', 'nin', 'nın', 'ye', 'ya', 'e', 'a'):
+                if word_norm.endswith(suffix):
+                    stem = word_norm[:-len(suffix)]
+                    if len(stem) >= 3:
+                        entry = cls._cache_tr.get(stem)
+                        if entry:
+                            break
+
+        if entry:
+            wc = entry.get('word_class')
+            if wc in ('generic', 'semi_generic', 'distinctive'):
+                return wc
+            idf = entry.get('idf', cls._default_idf)
+            if idf < 6.0:
+                return 'generic'
+            elif idf < 8.5:
+                return 'semi_generic'
+            return 'distinctive'
+
+        return 'distinctive'
+
+    @classmethod
+    def is_generic_tr(cls, word: str) -> bool:
+        """Check if a word is generic in the TRANSLATED name corpus."""
+        return cls.get_word_class_tr(word) in ('generic', 'semi_generic')
 
     @classmethod
     def get_weight_multiplier(cls, word: str) -> float:
@@ -369,8 +518,10 @@ class IDFLookup:
     def clear_cache(cls) -> None:
         """Clear the cache and force reload on next access."""
         cls._cache = {}
+        cls._cache_tr = {}
         cls._loaded = False
-        logger.info("IDFLookup: Cache cleared")
+        cls._loaded_tr = False
+        logger.info("IDFLookup: Cache cleared (original + translated)")
 
 
 # ============================================

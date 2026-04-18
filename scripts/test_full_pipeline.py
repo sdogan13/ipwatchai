@@ -183,7 +183,7 @@ cur.execute(f"""
     REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(name,
     'ğ','g'),'Ğ','g'),'ı','i'),'İ','i'),'ö','o'),'Ö','o'),
     'ü','u'),'Ü','u'),'ş','s'),'Ş','s'),'ç','c'),'Ç','c')) LIKE %s ESCAPE '\\'
-    AND current_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
+    AND final_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
     ORDER BY length(name) ASC LIMIT 30
 """, (f'%{escaped}%',))
 contain = cur.fetchall()
@@ -195,7 +195,7 @@ q_vec = text_model.encode(query).tolist()
 cur.execute(f"""
     SELECT id FROM trademarks
     WHERE text_embedding IS NOT NULL
-    AND current_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
+    AND final_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
     ORDER BY text_embedding <=> %s::halfvec LIMIT 50
 """, (str(q_vec),))
 vec = cur.fetchall()
@@ -212,7 +212,7 @@ if sam_img:
     cur.execute(f"""
         SELECT id FROM trademarks
         WHERE image_embedding IS NOT NULL
-        AND current_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
+        AND final_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
         ORDER BY image_embedding <=> %s::halfvec LIMIT 50
     """, (sam_img[0],))
     img = cur.fetchall()
@@ -227,7 +227,7 @@ cur.execute(f"""
     SELECT id FROM trademarks
     WHERE logo_ocr_text IS NOT NULL AND logo_ocr_text != ''
     AND LOWER(logo_ocr_text) LIKE %s ESCAPE '\\'
-    AND current_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
+    AND final_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
     ORDER BY length(name) ASC LIMIT 20
 """, (f'%{escaped}%',))
 ocr = cur.fetchall()
@@ -237,7 +237,7 @@ t_ocr = (time.time() - t0) * 1000
 t0 = time.time()
 cur.execute(f"""
     SELECT id FROM trademarks
-    WHERE current_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
+    WHERE final_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
     AND GREATEST(similarity(name, %s), COALESCE(similarity(name_tr, %s), 0)) >= 0.3
     ORDER BY GREATEST(similarity(name, %s), COALESCE(similarity(name_tr, %s), 0)) DESC
     LIMIT 50

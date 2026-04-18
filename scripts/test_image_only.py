@@ -65,7 +65,7 @@ cur.execute(f"""
     SELECT id, name, (1 - (image_embedding <=> %s::halfvec)) as vis
     FROM trademarks
     WHERE image_embedding IS NOT NULL
-      AND current_status NOT IN ('Refused', 'Withdrawn')
+      AND final_status NOT IN ('Refused', 'Withdrawn')
       {DATE_FILTER}
     ORDER BY image_embedding <=> %s::halfvec
     LIMIT 20
@@ -110,7 +110,7 @@ if len(ocr_words) == 1 and len(ocr_words[0]) >= 2:
     cur.execute(f"""
         SELECT id, name FROM trademarks
         WHERE {NORM_NAME} LIKE %s ESCAPE '\\'
-        AND current_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
+        AND final_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
         ORDER BY length(name) ASC LIMIT 30
     """, (f'%{esc_w}%',))
     s2 = cur.fetchall()
@@ -126,7 +126,7 @@ if ocr_name:
     cur.execute(f"""
         SELECT id, name FROM trademarks
         WHERE text_embedding IS NOT NULL
-        AND current_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
+        AND final_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
         ORDER BY text_embedding <=> %s::halfvec LIMIT 50
     """, (str(ocr_vec),))
     s3 = cur.fetchall()
@@ -140,7 +140,7 @@ t0 = time.time()
 cur.execute(f"""
     SELECT id, name FROM trademarks
     WHERE image_embedding IS NOT NULL
-    AND current_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
+    AND final_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
     ORDER BY image_embedding <=> %s::halfvec LIMIT 50
 """, (clip_str,))
 s4 = cur.fetchall()
@@ -154,7 +154,7 @@ if ocr_name and len(norm_ocr) >= 2:
         SELECT id, name FROM trademarks
         WHERE logo_ocr_text IS NOT NULL AND logo_ocr_text != ''
         AND {NORM_OCR} LIKE %s ESCAPE '\\'
-        AND current_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
+        AND final_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
         ORDER BY length(name) ASC LIMIT 20
     """, (f'%{escaped}%',))
     s45 = cur.fetchall()
@@ -168,7 +168,7 @@ t0 = time.time()
 if ocr_name:
     cur.execute(f"""
         SELECT id, name FROM trademarks
-        WHERE current_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
+        WHERE final_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
         AND similarity(name, %s) >= 0.3
         ORDER BY similarity(name, %s) DESC LIMIT 200
     """, (ocr_name, ocr_name))
@@ -223,7 +223,7 @@ for s_name, s_clip, s_ocr in samples:
 
     # Image stage
     cur.execute(f"""SELECT id FROM trademarks WHERE image_embedding IS NOT NULL
-        AND current_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
+        AND final_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
         ORDER BY image_embedding <=> %s::halfvec LIMIT 50""", (s_clip,))
     img_count = 0
     for r in cur.fetchall(): pool.add(r[0]); img_count += 1
@@ -244,7 +244,7 @@ for s_name, s_clip, s_ocr in samples:
     if s_ocr.strip():
         ocr_vec = text_model.encode(s_ocr.strip()).tolist()
         cur.execute(f"""SELECT id FROM trademarks WHERE text_embedding IS NOT NULL
-            AND current_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
+            AND final_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
             ORDER BY text_embedding <=> %s::halfvec LIMIT 50""", (str(ocr_vec),))
         for r in cur.fetchall():
             if r[0] not in pool: txt_count += 1

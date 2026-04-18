@@ -32,7 +32,7 @@ for s_id, s_name, s_clip in samples:
                (1 - (image_embedding <=> %s::halfvec)) as clip_sim
         FROM trademarks
         WHERE image_embedding IS NOT NULL
-          AND current_status NOT IN ('Refused', 'Withdrawn')
+          AND final_status NOT IN ('Refused', 'Withdrawn')
           {DATE_FILTER}
         ORDER BY image_embedding <=> %s::halfvec
         LIMIT 50

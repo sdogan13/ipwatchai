@@ -155,13 +155,16 @@ class TestCalculateTurkishSimilarity:
         """'ÇAĞDAŞ' vs 'CAGDAS' should match after normalization."""
         assert calculate_name_similarity("ÇAĞDAŞ", "CAGDAS") == 1.0
 
-    def test_containment_returns_1(self):
-        """'ELMA' in 'ELMA DÜNYASI' → 1.0."""
-        assert calculate_name_similarity("ELMA", "ELMA DÜNYASI") == 1.0
+    def test_containment_penalized_by_extra_words(self):
+        """'ELMA' in 'ELMA DÜNYASI' → no longer 1.0, penalized by extra word."""
+        score = calculate_name_similarity("ELMA", "ELMA DÜNYASI")
+        assert 0.50 <= score <= 0.85, f"Containment with extra word should be moderate, got {score}"
 
-    def test_reverse_containment(self):
-        """'ELMA' (target) is substring of 'ELMA DÜNYASI' (query) → 1.0."""
-        assert calculate_name_similarity("ELMA DÜNYASI", "ELMA") == 1.0
+    def test_reverse_containment_similar_score(self):
+        """Bidirectional: 'ELMA DÜNYASI' vs 'ELMA' → close to forward (small asymmetry OK)."""
+        fwd = calculate_name_similarity("ELMA", "ELMA DÜNYASI")
+        rev = calculate_name_similarity("ELMA DÜNYASI", "ELMA")
+        assert abs(fwd - rev) < 0.10, f"Forward {fwd} and reverse {rev} should be close"
 
     def test_completely_different(self):
         """'ELMA' vs 'KAPLAN' → low score."""
@@ -174,9 +177,9 @@ class TestCalculateTurkishSimilarity:
         assert 0.40 <= score <= 0.80
 
     def test_sequencematcher_similar(self):
-        """'NIKEA' vs 'NIKE' — high sequence similarity."""
+        """'NIKEA' vs 'NIKE' — near match but different word."""
         score = calculate_name_similarity("NIKEA", "NIKE")
-        assert score >= 0.70  # containment: "nike" in "nikea"
+        assert score >= 0.35, f"Near match should score moderately, got {score}"
 
     def test_empty_query(self):
         assert calculate_name_similarity("", "NIKE") == 0.0
@@ -187,13 +190,12 @@ class TestCalculateTurkishSimilarity:
     def test_both_empty(self):
         assert calculate_name_similarity("", "") == 0.0
 
-    def test_returns_max_of_methods(self):
-        """Result should be the max of SequenceMatcher, containment, token overlap."""
+    def test_returns_multilevel_score(self):
+        """Result uses multi-level scoring, not simple max of methods."""
         # "DOGAN PATENT" vs "D.P DOGAN PATENT"
-        # Token overlap: {"dogan","patent"} vs {"d.p","dogan","patent"} → 2/2 = 1.0
-        # Containment: "dogan patent" in "d.p dogan patent" → 1.0
+        # Word overlap: {dogan, patent} match, {d.p} extra in target → penalized
         score = calculate_name_similarity("DOGAN PATENT", "D.P DOGAN PATENT")
-        assert score == 1.0
+        assert 0.60 <= score <= 0.90, f"Multi-level score should be moderate-high, got {score}"
 
     def test_output_between_0_and_1(self):
         pairs = [

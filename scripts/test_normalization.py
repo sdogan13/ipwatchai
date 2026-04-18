@@ -48,7 +48,7 @@ for query, desc in pairs:
         FROM trademarks
         WHERE logo_ocr_text IS NOT NULL AND logo_ocr_text != ''
           AND {NORM_OCR} LIKE %s ESCAPE '\\'
-          AND current_status NOT IN ('Refused', 'Withdrawn')
+          AND final_status NOT IN ('Refused', 'Withdrawn')
           {DATE_FILTER}
         ORDER BY length(name) ASC LIMIT 5
     """, (f'%{escaped}%',))
@@ -96,7 +96,7 @@ cur.execute(f"""
     SELECT id FROM trademarks
     WHERE logo_ocr_text IS NOT NULL AND logo_ocr_text != ''
       AND {NORM_OCR} LIKE '%dogan%' ESCAPE '\\'
-      AND current_status NOT IN ('Refused', 'Withdrawn')
+      AND final_status NOT IN ('Refused', 'Withdrawn')
       {DATE_FILTER}
     LIMIT 20
 """)
@@ -146,7 +146,7 @@ for q in bench:
         SELECT id, name FROM trademarks
         WHERE logo_ocr_text IS NOT NULL AND logo_ocr_text != ''
           AND {NORM_OCR} LIKE %s ESCAPE '\\'
-          AND current_status NOT IN ('Refused', 'Withdrawn')
+          AND final_status NOT IN ('Refused', 'Withdrawn')
           {DATE_FILTER}
         ORDER BY length(name) ASC LIMIT 20
     """, (f'%{escaped}%',))

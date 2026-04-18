@@ -57,7 +57,7 @@ cur.execute(f"""
            (1 - (image_embedding <=> %s::halfvec)) as clip_sim
     FROM trademarks
     WHERE image_embedding IS NOT NULL
-      AND current_status NOT IN ('Refused', 'Withdrawn')
+      AND final_status NOT IN ('Refused', 'Withdrawn')
       {DATE_FILTER}
       AND id != %s
     ORDER BY image_embedding <=> %s::halfvec
@@ -79,7 +79,7 @@ cur.execute(f"""
            (1 - (dinov2_embedding <=> %s::halfvec)) as dino_sim
     FROM trademarks
     WHERE dinov2_embedding IS NOT NULL
-      AND current_status NOT IN ('Refused', 'Withdrawn')
+      AND final_status NOT IN ('Refused', 'Withdrawn')
       {DATE_FILTER}
       AND id != %s
     ORDER BY dinov2_embedding <=> %s::halfvec
@@ -104,7 +104,7 @@ cur.execute(f"""
            ) as visual_sim
     FROM trademarks
     WHERE image_embedding IS NOT NULL
-      AND current_status NOT IN ('Refused', 'Withdrawn')
+      AND final_status NOT IN ('Refused', 'Withdrawn')
       {DATE_FILTER}
       AND id != %s
     ORDER BY GREATEST(
@@ -143,7 +143,7 @@ for s_id, s_name, s_clip, s_dino in samples:
                ) as vis
         FROM trademarks
         WHERE image_embedding IS NOT NULL
-          AND current_status NOT IN ('Refused', 'Withdrawn')
+          AND final_status NOT IN ('Refused', 'Withdrawn')
           {DATE_FILTER}
         ORDER BY GREATEST(
             (1 - (image_embedding <=> %s::halfvec)),

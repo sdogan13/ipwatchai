@@ -63,7 +63,7 @@ t_s1 = (time.time() - t0) * 1000
 t0 = time.time()
 cur.execute(f"""
     SELECT id FROM trademarks WHERE {NORM} LIKE %s ESCAPE '\\'
-    AND current_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
+    AND final_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
     ORDER BY length(name) ASC LIMIT 30
 """, (f'%{escaped}%',))
 for r in cur.fetchall(): text_ids.add(r[0])
@@ -73,7 +73,7 @@ t_s2 = (time.time() - t0) * 1000
 t0 = time.time()
 cur.execute(f"""
     SELECT id FROM trademarks WHERE text_embedding IS NOT NULL
-    AND current_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
+    AND final_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
     ORDER BY text_embedding <=> %s::halfvec LIMIT 50
 """, (text_str,))
 for r in cur.fetchall(): text_ids.add(r[0])
@@ -82,7 +82,7 @@ t_s3 = (time.time() - t0) * 1000
 # Stage 5: Trigram
 t0 = time.time()
 cur.execute(f"""
-    SELECT id FROM trademarks WHERE current_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
+    SELECT id FROM trademarks WHERE final_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
     AND GREATEST(similarity(name, %s), COALESCE(similarity(name_tr, %s), 0)) >= 0.3
     ORDER BY GREATEST(similarity(name, %s), COALESCE(similarity(name_tr, %s), 0)) DESC
     LIMIT 200
@@ -101,7 +101,7 @@ t_img_total = time.time()
 t0 = time.time()
 cur.execute(f"""
     SELECT id FROM trademarks WHERE image_embedding IS NOT NULL
-    AND current_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
+    AND final_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
     ORDER BY image_embedding <=> %s::halfvec LIMIT 50
 """, (clip_str,))
 img_results = cur.fetchall()
@@ -117,7 +117,7 @@ if len(ocr_q) >= 2:
         SELECT id FROM trademarks
         WHERE logo_ocr_text IS NOT NULL AND logo_ocr_text != ''
         AND LOWER(logo_ocr_text) LIKE %s ESCAPE '\\'
-        AND current_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
+        AND final_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
         ORDER BY length(name) ASC LIMIT 20
     """, (f'%{ocr_escaped}%',))
     for r in cur.fetchall(): combined_ids.add(r[0])
@@ -180,20 +180,20 @@ for q in test_queries:
     for rr in cur.fetchall(): pool.add(rr[0])
 
     cur.execute(f"""SELECT id FROM trademarks WHERE {NORM} LIKE %s ESCAPE '\\'
-        AND current_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
+        AND final_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
         ORDER BY length(name) ASC LIMIT 30""", (f'%{q_esc}%',))
     for rr in cur.fetchall(): pool.add(rr[0])
 
     text_count = len(pool)
 
     cur.execute(f"""SELECT id FROM trademarks WHERE text_embedding IS NOT NULL
-        AND current_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
+        AND final_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
         ORDER BY text_embedding <=> %s::halfvec LIMIT 50""", (q_text,))
     for rr in cur.fetchall(): pool.add(rr[0])
 
     # Image stage
     cur.execute(f"""SELECT id FROM trademarks WHERE image_embedding IS NOT NULL
-        AND current_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
+        AND final_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
         ORDER BY image_embedding <=> %s::halfvec LIMIT 50""", (q_clip,))
     for rr in cur.fetchall(): pool.add(rr[0])
 
@@ -204,13 +204,13 @@ for q in test_queries:
         cur.execute(f"""SELECT id FROM trademarks
             WHERE logo_ocr_text IS NOT NULL AND logo_ocr_text != ''
             AND LOWER(logo_ocr_text) LIKE %s ESCAPE '\\'
-            AND current_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
+            AND final_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
             ORDER BY length(name) ASC LIMIT 20""", (f'%{ocr_esc}%',))
         for rr in cur.fetchall(): pool.add(rr[0])
 
     # Trigram
     cur.execute(f"""SELECT id FROM trademarks
-        WHERE current_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
+        WHERE final_status NOT IN ('Refused','Withdrawn') {DATE_FILTER}
         AND similarity(name, %s) >= 0.3
         ORDER BY similarity(name, %s) DESC LIMIT 200""", (q_name, q_name))
     for rr in cur.fetchall(): pool.add(rr[0])

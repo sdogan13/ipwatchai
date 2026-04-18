@@ -42,7 +42,7 @@ for query, desc in queries:
                (1 - (text_embedding <=> %s::halfvec)) as sim
         FROM trademarks
         WHERE text_embedding IS NOT NULL
-          AND current_status NOT IN ('Refused', 'Withdrawn')
+          AND final_status NOT IN ('Refused', 'Withdrawn')
           {DATE_FILTER}
         ORDER BY text_embedding <=> %s::halfvec
         LIMIT 20
@@ -91,7 +91,7 @@ for q in bench:
         SELECT id, name, (1 - (text_embedding <=> %s::halfvec)) as sim
         FROM trademarks
         WHERE text_embedding IS NOT NULL
-          AND current_status NOT IN ('Refused', 'Withdrawn')
+          AND final_status NOT IN ('Refused', 'Withdrawn')
           {DATE_FILTER}
         ORDER BY text_embedding <=> %s::halfvec
         LIMIT 50

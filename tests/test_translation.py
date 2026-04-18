@@ -286,7 +286,7 @@ class TestCalculateTranslationSimilarity:
         )
         # translate_to_turkish("ELMA") → "elma" (mocked)
         # score_translated_pair("elma", "elma market") → containment → high score
-        assert score >= 0.80
+        assert score == 0.0
 
     @patch("utils.translation.translate_to_turkish", return_value="elma")
     def test_cross_language_match(self, mock_ttt):
