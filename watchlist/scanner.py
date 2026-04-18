@@ -16,8 +16,8 @@ from config.settings import settings
 from database.crud import (
     Database, WatchlistCRUD, AlertCRUD, ScanLogCRUD, get_db_connection
 )
+from services.scoring_service import calculate_comprehensive_score, extract_ocr_text
 from utils.idf_scoring import (
-    calculate_comprehensive_score,
     normalize_turkish,
     MAX_ALERTS_PER_ITEM
 )
@@ -25,7 +25,7 @@ from utils.class_utils import (
     GLOBAL_CLASS,
     get_overlapping_classes,
 )
-import ai  # Shared AI models (loaded once at app startup)
+from pipeline import ai  # Shared AI models (loaded once at app startup)
 from risk_engine import score_pair, calculate_visual_similarity  # Centralized scoring
 from utils.phonetic import calculate_phonetic_similarity  # Graduated phonetic scoring
 
@@ -54,43 +54,41 @@ def generate_logo_embeddings(logo_path: str) -> Optional[Dict]:
         # CLIP embedding (512-dim)
         try:
             clip_input = ai.clip_preprocess(img).unsqueeze(0).to(ai.device)
+            if ai.USE_FP16:
+                clip_input = clip_input.half()
             with torch.no_grad():
                 clip_emb = ai.clip_model.encode_image(clip_input)
                 clip_emb = clip_emb / clip_emb.norm(dim=-1, keepdim=True)
-            result['clip_embedding'] = clip_emb.cpu().squeeze().tolist()
+            result['clip_embedding'] = clip_emb.float().cpu().squeeze().tolist()
         except Exception as e:
             logger.warning(f"CLIP embedding failed: {e}")
 
         # DINOv2 embedding (768-dim)
         try:
-            dino_input = ai.dinov2_transform(img).unsqueeze(0).to(ai.device)
+            dino_input = ai.dinov2_preprocess(img).unsqueeze(0).to(ai.device)
+            if ai.USE_FP16:
+                dino_input = dino_input.half()
             with torch.no_grad():
                 dino_emb = ai.dinov2_model(dino_input)
                 dino_emb = dino_emb / dino_emb.norm(dim=-1, keepdim=True)
-            result['dino_embedding'] = dino_emb.cpu().squeeze().tolist()
+            result['dino_embedding'] = dino_emb.float().cpu().squeeze().tolist()
         except Exception as e:
             logger.warning(f"DINOv2 embedding failed: {e}")
 
-        # Color histogram (32-dim: 8 bins per H/S/V + 8 grayscale)
+        # Color histogram (512-dim: HSV 8x8x8 = 512 bins, matching trademarks table)
         try:
             img_cv = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
             hsv = cv2.cvtColor(img_cv, cv2.COLOR_BGR2HSV)
-            h_hist = cv2.calcHist([hsv], [0], None, [8], [0, 180]).flatten()
-            s_hist = cv2.calcHist([hsv], [1], None, [8], [0, 256]).flatten()
-            v_hist = cv2.calcHist([hsv], [2], None, [8], [0, 256]).flatten()
-            gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
-            g_hist = cv2.calcHist([gray], [0], None, [8], [0, 256]).flatten()
-            combined = np.concatenate([h_hist, s_hist, v_hist, g_hist])
-            norm = np.linalg.norm(combined)
+            hist = cv2.calcHist([hsv], [0, 1, 2], None, [8, 8, 8], [0, 180, 0, 256, 0, 256]).flatten()
+            norm = np.linalg.norm(hist)
             if norm > 0:
-                combined = combined / norm
-            result['color_histogram'] = combined.tolist()
+                hist = hist / norm
+            result['color_histogram'] = hist.tolist()
         except Exception as e:
             logger.warning(f"Color histogram failed: {e}")
 
         # OCR text
         try:
-            from utils.idf_scoring import extract_ocr_text
             result['ocr_text'] = extract_ocr_text(logo_path)
         except Exception as e:
             logger.warning(f"OCR extraction failed: {e}")
@@ -117,7 +115,6 @@ class WatchlistScanner:
     """
 
     # Configuration constants
-    MIN_THRESHOLD = 0.70  # Minimum 70% similarity required
     # MAX_ALERTS_PER_ITEM imported from utils.idf_scoring (global constant = 10)
 
     def __init__(self, db_conn=None):
@@ -133,7 +130,7 @@ class WatchlistScanner:
     ) -> int:
         """
         Scan specific trademarks against all active watchlists.
-        Called after ingest.py processes new data.
+        Called after pipeline.ingest processes new data.
 
         Args:
             trademark_ids: List of newly ingested trademark IDs
@@ -158,6 +155,18 @@ class WatchlistScanner:
                 ScanLogCRUD.complete(self.db, scan_id, len(trademark_ids), 0, 0)
                 return 0
 
+            # Purge stale alerts for every watchlist item before scanning.
+            # If a user raised their threshold since the last scan, old alerts
+            # that no longer meet the new threshold are resolved here.
+            stale_resolved = 0
+            for wl_item in watchlist_items:
+                threshold = wl_item.get('alert_threshold', 0.7)
+                stale_resolved += AlertCRUD.resolve_below_threshold(
+                    self.db, UUID(wl_item['id']), threshold
+                )
+            if stale_resolved:
+                logger.info(f"   Pre-scan cleanup: resolved {stale_resolved} stale alert(s) below threshold")
+
             # Get trademark details
             trademarks = self._get_trademarks_by_ids(trademark_ids)
 
@@ -175,8 +184,7 @@ class WatchlistScanner:
                     # Check for conflict
                     conflict = self._check_conflict(tm, wl_item)
 
-                    # Enforce minimum threshold (at least 70%)
-                    threshold = max(wl_item.get('alert_threshold', 0.75), self.MIN_THRESHOLD)
+                    threshold = wl_item.get('alert_threshold', 0.7)
 
                     if conflict and conflict['total'] >= threshold:
                         # Collect conflict for later sorting/limiting
@@ -225,7 +233,7 @@ class WatchlistScanner:
                                 'id': tm.get('id'),
                                 'name': tm.get('name'),
                                 'application_no': tm.get('application_no'),
-                                'status': tm.get('current_status'),
+                                'status': tm.get('final_status'),
                                 'classes': tm.get('nice_class_numbers', []),
                                 'holder': tm.get('holder_name'),
                                 'image_path': tm.get('image_path')
@@ -267,15 +275,13 @@ class WatchlistScanner:
     def scan_single_watchlist(
         self,
         watchlist_id: UUID,
-        limit: int = 500
     ) -> int:
         """
-        Scan all trademarks against a single watchlist item.
+        Scan all within-appeal-deadline trademarks against a single watchlist item.
         Useful when user adds new watchlist item.
 
         Args:
             watchlist_id: The watchlist item to scan for
-            limit: Max trademarks to check (default 500 candidates)
 
         Returns:
             Number of alerts generated (max MAX_ALERTS_PER_ITEM)
@@ -292,11 +298,16 @@ class WatchlistScanner:
             self._update_watchlist_embedding(wl_item)
             wl_item = WatchlistCRUD.get_by_id_internal(self.db, watchlist_id)
 
-        # Find similar trademarks
-        candidates = self._find_similar_trademarks(wl_item, limit)
+        # All trademarks within appeal deadline
+        candidates = self._get_trademarks_within_deadline()
 
-        # Enforce minimum threshold (at least 70%)
-        threshold = max(wl_item.get('alert_threshold', 0.75), self.MIN_THRESHOLD)
+        threshold = wl_item.get('alert_threshold', 0.7)
+
+        # Purge stale alerts that no longer meet the current threshold before
+        # generating new ones — handles the case where threshold was raised.
+        resolved = AlertCRUD.resolve_below_threshold(self.db, watchlist_id, threshold)
+        if resolved:
+            logger.info(f"   Resolved {resolved} stale alert(s) below threshold {threshold:.0%}")
 
         # Collect all conflicts first
         conflicts: List[Tuple[Dict, Dict]] = []
@@ -332,7 +343,7 @@ class WatchlistScanner:
                         'id': tm.get('id'),
                         'name': tm.get('name'),
                         'application_no': tm.get('application_no'),
-                        'status': tm.get('current_status'),
+                        'status': tm.get('final_status'),
                         'classes': tm.get('nice_class_numbers', []),
                         'holder': tm.get('holder_name'),
                         'image_path': tm.get('image_path')
@@ -358,25 +369,10 @@ class WatchlistScanner:
         Check if trademark conflicts with watchlist item.
         Delegates scoring to risk_engine.score_pair() for consistency.
         """
-        # 0. Skip if this is the user's own trademark
+        # 0. Skip if this is the user's own trademark (application number match only)
         own_app_no = watchlist_item.get('customer_application_no')
         tm_app_no = trademark.get('application_no')
         if own_app_no and tm_app_no and own_app_no == tm_app_no:
-            return None
-
-        # 0b. CRITICAL: Skip EXACT name matches (self-conflict prevention)
-        tm_name_raw = trademark.get('name') or ''
-        wl_name_raw = watchlist_item.get('brand_name') or ''
-        tm_name_normalized = normalize_turkish(tm_name_raw.lower().strip())
-        wl_name_normalized = normalize_turkish(wl_name_raw.lower().strip())
-
-        if tm_name_normalized == wl_name_normalized:
-            return None
-
-        # 0c. Skip very high similarity names (>98%) to catch minor variations
-        from difflib import SequenceMatcher
-        name_ratio = SequenceMatcher(None, tm_name_normalized, wl_name_normalized).ratio()
-        if name_ratio > 0.98:
             return None
 
         # 1. Check Nice class overlap
@@ -416,8 +412,8 @@ class WatchlistScanner:
 
         # 3. DELEGATE TO CENTRALIZED SCORING
         score_breakdown = score_pair(
-            query_name=wl_name_raw,
-            candidate_name=tm_name_raw,
+            query_name=watchlist_item.get('brand_name') or '',
+            candidate_name=trademark.get('name') or '',
             text_sim=text_sim,
             semantic_sim=semantic_sim,
             visual_sim=visual_sim,
@@ -469,10 +465,12 @@ class WatchlistScanner:
     def _compute_visual_sim(trademark, watchlist_item) -> float:
         """Combine visual sub-components into single similarity value.
         Delegates to risk_engine.calculate_visual_similarity().
-        OCR compares logo text vs logo text ONLY — never brand name vs OCR."""
-        if not watchlist_item.get('monitor_similar_logos'):
-            return 0.0
+        OCR compares logo text vs logo text ONLY — never brand name vs OCR.
 
+        Note: visual scoring runs whenever embeddings exist on both sides.
+        The monitor_similar_logos flag is stored for UX purposes but does NOT
+        suppress scoring — logos are always compared when data is available.
+        """
         cos = WatchlistScanner._cosine_sim
 
         clip_sim = 0.0
@@ -488,6 +486,10 @@ class WatchlistScanner:
         wl_color = watchlist_item.get('logo_color_histogram') or watchlist_item.get('color_embedding')
         if trademark.get('color_histogram') and wl_color:
             color_sim = cos(trademark['color_histogram'], wl_color)
+
+        # If no embedding overlap exists on either side, skip — nothing to compare
+        if clip_sim == 0.0 and dino_sim == 0.0 and color_sim == 0.0:
+            return 0.0
 
         # OCR text from BOTH logos — never use brand name here
         tm_ocr = trademark.get('logo_ocr_text') or ''
@@ -520,98 +522,28 @@ class WatchlistScanner:
             SELECT t.*
             FROM trademarks t
             WHERE t.id = ANY(%s::uuid[])
+              AND t.appeal_deadline IS NOT NULL
+              AND t.appeal_deadline >= CURRENT_DATE
         """, (id_strings,))
 
         return [dict(row) for row in cur.fetchall()]
 
-    def _find_similar_trademarks(self, watchlist_item: Dict, limit: int) -> List[Dict]:
-        """Find trademarks similar to watchlist item using text similarity."""
+    def _get_trademarks_within_deadline(self) -> List[Dict]:
+        """
+        Return all trademarks whose appeal deadline has not yet passed.
+        This is the full candidate pool for watchlist conflict detection —
+        no pre-screening by name similarity, class, or score.
+        """
         cur = self.db.cursor()
-
-        wl_name = watchlist_item.get('brand_name', '')
-        wl_classes = watchlist_item.get('nice_class_numbers', []) or []
-        own_app_no = watchlist_item.get('customer_application_no')
-
-        logger.debug(f"  Finding similar TMs for '{wl_name}', classes={wl_classes}")
-
-        # Enforce minimum threshold in SQL query for efficiency
-        min_similarity = max(
-            watchlist_item.get('alert_threshold', 0.75),
-            self.MIN_THRESHOLD
-        ) * 0.5  # Use half threshold in SQL to catch near-misses for IDF scoring
-
-        # Normalize watchlist name for exact-match exclusion
-        wl_name_normalized = normalize_turkish(wl_name.lower().strip())
-
-        # Build class filter - if no classes specified, search ALL classes
-        if wl_classes:
-            class_filter = "(t.nice_class_numbers && %s::integer[] OR 99 = ANY(t.nice_class_numbers))"
-            class_params = [wl_classes]
-        else:
-            class_filter = "TRUE"
-            class_params = []
-            logger.warning(f"  No Nice classes specified for '{wl_name}' - searching all classes")
-
-        # Build query params
-        app_no_filter = ""
-        app_no_params = []
-        if own_app_no:
-            app_no_filter = "AND (t.application_no IS NULL OR t.application_no != %s)"
-            app_no_params = [own_app_no]
-
-        # CRITICAL: Exclude EXACT name matches (self-conflict prevention)
-        exact_name_filter = """
-            AND LOWER(TRIM(
-                REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-                REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(t.name,
-                'ğ','g'),'Ğ','g'),'ı','i'),'İ','i'),'ö','o'),'Ö','o'),
-                'ü','u'),'Ü','u'),'ş','s'),'Ş','s'),'ç','c'),'Ç','c')
-            )) != %s
-        """
-
-        # Turkish normalization SQL fragment (reused in SELECT and WHERE)
-        turkish_norm = """LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-                REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(t.name,
-                'ğ','g'),'Ğ','g'),'ı','i'),'İ','i'),'ö','o'),'Ö','o'),
-                'ü','u'),'Ü','u'),'ş','s'),'Ş','s'),'ç','c'),'Ç','c'))"""
-
-        # Match search engine pre-screening: trigram on original name,
-        # Turkish-normalized name, AND name_tr (translation) for cross-language conflicts
-        query = f"""
-            SELECT t.*,
-                   GREATEST(
-                       similarity(t.name, %s),
-                       similarity({turkish_norm}, %s),
-                       COALESCE(similarity(t.name_tr, %s), 0)
-                   ) as text_score
+        cur.execute("""
+            SELECT t.*
             FROM trademarks t
-            WHERE {class_filter}
-              AND t.current_status NOT IN ('Refused', 'Withdrawn', 'Expired')
-              AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
-              AND GREATEST(
-                  similarity(t.name, %s),
-                  similarity({turkish_norm}, %s),
-                  COALESCE(similarity(t.name_tr, %s), 0)
-              ) >= %s
-              {app_no_filter}
-              {exact_name_filter}
-            ORDER BY text_score DESC
-            LIMIT %s
-        """
-
-        # Params: SELECT(3) + class_params + WHERE(6+threshold) + app_no + exact_name + limit
-        base_params = (
-            [wl_name, wl_name_normalized, wl_name] +
-            class_params +
-            [wl_name, wl_name_normalized, wl_name, min_similarity] +
-            app_no_params +
-            [wl_name_normalized, limit]
-        )
-
-        cur.execute(query, base_params)
+            WHERE t.appeal_deadline IS NOT NULL
+              AND t.appeal_deadline >= CURRENT_DATE
+              AND t.final_status NOT IN ('Reddedildi', 'Geri Çekildi', 'Süresi Doldu')
+        """)
         results = [dict(row) for row in cur.fetchall()]
-
-        logger.debug(f"  Found {len(results)} similar trademarks for '{wl_name}'")
+        logger.info(f"  Within-deadline pool: {len(results)} trademarks")
         return results
 
     def _update_watchlist_embedding(self, watchlist_item: Dict):
@@ -684,7 +616,162 @@ def reset_scanner():
 
 
 # ==========================================
-# Integration with ingest.py
+# Event-Based Alert Scanning
+# ==========================================
+
+# Business-context messages for event types (English keys, i18n done on frontend)
+EVENT_ALERT_MESSAGES = {
+    "transfer": "Trademark has been transferred to a new holder",
+    "merger": "Trademark holder has undergone a merger",
+    "partial_transfer": "Partial transfer of trademark rights",
+    "cancellation": "Trademark has been cancelled",
+    "withdrawal": "Trademark application has been withdrawn",
+    "renewal": "Trademark has been renewed",
+    "seizure": "Seizure order placed on trademark",
+    "precautionary_seizure": "Precautionary seizure placed on trademark",
+    "injunction": "Court injunction issued on trademark",
+    "precautionary_injunction": "Precautionary injunction issued on trademark",
+    "seizure_lift": "Seizure on trademark has been lifted",
+    "injunction_lift": "Injunction on trademark has been lifted",
+    "restriction_lift": "Restriction on trademark has been lifted",
+    "license": "License agreement registered for trademark",
+    "bankruptcy": "Trademark holder declared bankrupt",
+    "correction": "Official correction to trademark record",
+    "address_change": "Trademark holder address changed",
+    "name_change": "Trademark holder name changed",
+}
+
+EVENT_SEVERITY_MAP = {
+    "cancellation": "critical",
+    "seizure": "critical",
+    "precautionary_seizure": "critical",
+    "bankruptcy": "critical",
+    "injunction": "high",
+    "precautionary_injunction": "high",
+    "transfer": "high",
+    "merger": "high",
+    "partial_transfer": "high",
+    "withdrawal": "high",
+    "renewal": "medium",
+    "license": "medium",
+    "seizure_lift": "low",
+    "injunction_lift": "low",
+    "restriction_lift": "low",
+    "correction": "low",
+    "address_change": "low",
+    "name_change": "low",
+}
+
+
+def scan_events_for_watchlist(conn=None) -> int:
+    """
+    Check for new trademark events that affect watched trademarks.
+
+    Joins trademark_events with watchlist_mt to find events on trademarks
+    that users are actively monitoring, then creates event-type alerts.
+
+    Returns number of alerts generated.
+    """
+    from database.crud import Database, get_db_connection
+    from uuid import uuid4
+
+    if conn is None:
+        conn = get_db_connection()
+    db = Database(conn)
+    cur = db.cursor()
+
+    # Find events on watched trademarks that haven't been alerted yet.
+    # Match by application_no (watchlist stores the watched trademark's app_no).
+    cur.execute("""
+        SELECT te.id AS event_id, te.application_no, te.event_type, te.event_subtype,
+               te.source_type, te.bulletin_no, te.bulletin_date,
+               te.old_value, te.new_value, te.details,
+               w.id AS watchlist_id, w.user_id, w.organization_id, w.brand_name,
+               t.id AS trademark_id, t.name AS trademark_name,
+               t.nice_class_numbers, t.image_path, t.final_status
+        FROM trademark_events te
+        JOIN watchlist_mt w ON w.customer_application_no = te.application_no
+        JOIN trademarks t ON t.application_no = te.application_no
+        WHERE w.is_active = TRUE
+          AND NOT EXISTS (
+              SELECT 1 FROM alerts_mt a
+              WHERE a.watchlist_item_id = w.id
+                AND a.alert_type = 'event'
+                AND a.source_type = te.event_type
+                AND a.source_bulletin = te.bulletin_no
+          )
+        ORDER BY te.bulletin_date DESC NULLS LAST
+    """)
+
+    rows = cur.fetchall()
+    if not rows:
+        logger.info("Event alert scan: no new events for watched trademarks")
+        return 0
+
+    logger.info(f"Event alert scan: found {len(rows)} event(s) on watched trademarks")
+
+    alerts_generated = 0
+    for row in rows:
+        event_type = row["event_type"]
+        severity = EVENT_SEVERITY_MAP.get(event_type, "medium")
+        message = EVENT_ALERT_MESSAGES.get(event_type, f"Event: {event_type}")
+
+        # Build details string for resolution_notes (used for display context)
+        detail_parts = []
+        if row["old_value"]:
+            detail_parts.append(f"Old: {row['old_value'][:200]}")
+        if row["new_value"]:
+            detail_parts.append(f"New: {row['new_value'][:200]}")
+        detail_text = " | ".join(detail_parts) if detail_parts else None
+
+        alert_id = uuid4()
+        try:
+            cur.execute("""
+                INSERT INTO alerts_mt (
+                    id, user_id, organization_id, watchlist_item_id,
+                    conflicting_trademark_id, conflicting_name,
+                    conflicting_application_no, conflicting_classes,
+                    conflicting_holder_name, conflicting_image_path,
+                    overall_risk_score, severity, source_type,
+                    source_bulletin, alert_type, status, resolution_notes
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                )
+            """, (
+                str(alert_id),
+                str(row["user_id"]),
+                str(row["organization_id"]),
+                str(row["watchlist_id"]),
+                str(row["trademark_id"]),
+                row["trademark_name"],
+                row["application_no"],
+                row["nice_class_numbers"] or [],
+                row.get("new_value", "")[:500] if event_type in ("transfer", "merger", "partial_transfer") else None,
+                row["image_path"],
+                1.0,  # Event alerts are always 100% relevance (exact trademark match)
+                severity,
+                event_type,  # source_type stores the event type
+                row["bulletin_no"],
+                "event",
+                "new",
+                message + (f" — {detail_text}" if detail_text else ""),
+            ))
+            alerts_generated += 1
+            logger.info(
+                f"  Event alert: {row['brand_name']} — {event_type} "
+                f"(bulletin {row['bulletin_no']}, severity={severity})"
+            )
+        except Exception as e:
+            logger.warning(f"  Failed to create event alert: {e}")
+            conn.rollback()
+
+    conn.commit()
+    logger.info(f"Event alert scan complete: {alerts_generated} alerts generated")
+    return alerts_generated
+
+
+# ==========================================
+# Integration with pipeline.ingest
 # ==========================================
 
 def trigger_watchlist_scan(
@@ -693,9 +780,9 @@ def trigger_watchlist_scan(
     source_reference: str
 ):
     """
-    Called by ingest.py after processing new data.
+    Called by pipeline.ingest after processing new data.
 
-    Add this to the end of process_file_batch() in ingest.py:
+    Add this to the end of process_file_batch() in pipeline/ingest.py:
 
         from watchlist.scanner import trigger_watchlist_scan
         trigger_watchlist_scan(new_trademark_ids, source_type, source_reference)
@@ -722,6 +809,7 @@ if __name__ == "__main__":
     parser.add_argument("--full-rescan", action="store_true", help="Rescan all trademarks")
     parser.add_argument("--watchlist-id", type=str, help="Scan for specific watchlist item")
     parser.add_argument("--source", type=str, help="Source reference (e.g., BLT_500)")
+    parser.add_argument("--events", action="store_true", help="Scan for event-based alerts on watched trademarks")
 
     args = parser.parse_args()
 
@@ -733,12 +821,15 @@ if __name__ == "__main__":
     # Use singleton for CLI too
     scanner = get_scanner()
 
-    if args.watchlist_id:
+    if args.events:
+        count = scan_events_for_watchlist()
+        print(f"Event alerts generated: {count}")
+    elif args.watchlist_id:
         scanner.scan_single_watchlist(UUID(args.watchlist_id))
     elif args.full_rescan:
         # Get all trademark IDs
         cur = scanner.db.cursor()
-        cur.execute("SELECT id FROM trademarks WHERE current_status NOT IN ('Refused', 'Withdrawn', 'Expired')")
+        cur.execute("SELECT id FROM trademarks WHERE appeal_deadline IS NOT NULL AND appeal_deadline >= CURRENT_DATE AND final_status NOT IN ('Reddedildi', 'Geri Çekildi', 'Süresi Doldu')")
         ids = [UUID(row['id']) for row in cur.fetchall()]
         scanner.scan_new_trademarks(ids, "full_rescan", f"manual_{datetime.utcnow().date()}")
     else:

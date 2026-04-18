@@ -639,7 +639,7 @@ def score_translated_pair(translated_query: str, translated_candidate_tr: str) -
     phon = calculate_phonetic_similarity(q, c)
 
     # --- IDF waterfall (the same Cases A-F used for normal text scoring) ---
-    from idf_scoring import compute_idf_weighted_score
+    from services.scoring_service import compute_idf_weighted_score
     idf_total, breakdown = compute_idf_weighted_score(
         query=translated_query,
         target=translated_candidate_tr,

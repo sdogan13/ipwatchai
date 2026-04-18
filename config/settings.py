@@ -3,10 +3,68 @@ Configuration Management
 Centralized settings using Pydantic BaseSettings
 """
 import os
+import shutil
+from pathlib import Path
 from typing import List, Optional
 from pydantic_settings import BaseSettings
 from pydantic import Field, validator
 from functools import lru_cache
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_BULLETINS_ROOT = PROJECT_ROOT / "bulletins" / "Marka"
+DEFAULT_UPLOAD_DIR = PROJECT_ROOT / "uploads"
+DEFAULT_REPORT_DIR = DEFAULT_UPLOAD_DIR / "reports"
+DEFAULT_LOG_DIR = PROJECT_ROOT / "logs"
+DEFAULT_LOGO_OUTPUT_DIR = DEFAULT_UPLOAD_DIR / "generated" / "logos"
+DEFAULT_WINDOWS_7Z_PATH = Path(
+    os.environ.get("ProgramW6432") or os.environ.get("ProgramFiles", r"C:\Program Files")
+) / "7-Zip" / "7z.exe"
+
+
+def _resolve_project_directory(value: str) -> str:
+    """Resolve relative directory settings from the project root."""
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    path.mkdir(parents=True, exist_ok=True)
+    return str(path.resolve())
+
+
+def _resolve_project_path_or_command(value: str) -> str:
+    """Resolve project-relative paths, or normalize executable names via PATH lookup."""
+    text = os.fspath(value).strip()
+    if not text:
+        return text
+
+    path = Path(text).expanduser()
+    if path.is_absolute():
+        return str(path.resolve())
+
+    if any(sep in text for sep in (os.sep, "/", "\\")):
+        return str((PROJECT_ROOT / path).resolve())
+
+    resolved = shutil.which(text)
+    if resolved:
+        return str(Path(resolved).resolve())
+
+    return text
+
+
+def _default_seven_zip_path() -> str:
+    """Prefer PATH discovery first, then a conventional Windows install path."""
+    for executable in ("7zz", "7z"):
+        resolved = shutil.which(executable)
+        if resolved:
+            return str(Path(resolved).resolve())
+
+    if DEFAULT_WINDOWS_7Z_PATH.exists():
+        return str(DEFAULT_WINDOWS_7Z_PATH.resolve())
+
+    return "7z"
+
+
+DEFAULT_SEVEN_ZIP_PATH = _default_seven_zip_path()
 
 
 class DatabaseSettings(BaseSettings):
@@ -23,6 +81,7 @@ class DatabaseSettings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        env_file_encoding = "utf-8"
         extra = "ignore"
         populate_by_name = True
 
@@ -52,6 +111,7 @@ class RedisSettings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        env_file_encoding = "utf-8"
         extra = "ignore"
         populate_by_name = True
 
@@ -79,6 +139,7 @@ class AuthSettings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        env_file_encoding = "utf-8"
         extra = "ignore"
         populate_by_name = True
 
@@ -129,6 +190,7 @@ class AISettings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        env_file_encoding = "utf-8"
         extra = "ignore"
         populate_by_name = True
 
@@ -149,6 +211,8 @@ class MonitoringSettings(BaseSettings):
     digest_send_day: int = Field(default=1, alias="DIGEST_SEND_DAY")  # Monday
 
     class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
         extra = "ignore"
         populate_by_name = True
 
@@ -168,25 +232,32 @@ class EmailSettings(BaseSettings):
     template_dir: str = Field(default="templates/email", alias="EMAIL_TEMPLATE_DIR")
 
     class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
         extra = "ignore"
         populate_by_name = True
 
 
 class PathSettings(BaseSettings):
     """File Path Configuration"""
-    data_root: str = Field(default=r"C:\Users\701693\turk_patent\bulletins\Marka", alias="DATA_ROOT")
-    upload_dir: str = Field(default="uploads", alias="UPLOAD_DIR")
-    report_dir: str = Field(default="reports", alias="REPORT_DIR")
-    log_dir: str = Field(default="logs", alias="LOG_DIR")
+    data_root: str = Field(default=str(DEFAULT_BULLETINS_ROOT), alias="DATA_ROOT")
+    upload_dir: str = Field(default=str(DEFAULT_UPLOAD_DIR), alias="UPLOAD_DIR")
+    report_dir: str = Field(default=str(DEFAULT_REPORT_DIR), alias="REPORT_DIR")
+    log_dir: str = Field(default=str(DEFAULT_LOG_DIR), alias="LOG_DIR")
 
     class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
         extra = "ignore"
         populate_by_name = True
 
-    @validator("data_root", "upload_dir", "report_dir", "log_dir", pre=True)
-    def ensure_dir_exists(cls, v):
-        os.makedirs(v, exist_ok=True)
-        return v
+    @validator("upload_dir", "report_dir", "log_dir", pre=True)
+    def resolve_runtime_dir(cls, v):
+        return _resolve_project_directory(v)
+
+    @validator("data_root", pre=True)
+    def resolve_data_root(cls, v):
+        return _resolve_project_directory(v)
 
 
 class CreativeSettings(BaseSettings):
@@ -206,7 +277,7 @@ class CreativeSettings(BaseSettings):
     # Logo Studio
     logo_images_per_run: int = Field(default=4, alias="CREATIVE_LOGO_IMAGES_PER_RUN")
     logo_similarity_threshold: float = Field(default=0.65, alias="CREATIVE_LOGO_SIMILARITY_THRESHOLD")
-    logo_output_dir: str = Field(default="uploads/generated/logos", alias="CREATIVE_LOGO_OUTPUT_DIR")
+    logo_output_dir: str = Field(default=str(DEFAULT_LOGO_OUTPUT_DIR), alias="CREATIVE_LOGO_OUTPUT_DIR")
 
     # Redis
     generation_cache_db: int = Field(default=4, alias="CREATIVE_GENERATION_CACHE_DB")
@@ -214,20 +285,21 @@ class CreativeSettings(BaseSettings):
 
     class Config:
         env_prefix = "CREATIVE_"
+        env_file = ".env"
+        env_file_encoding = "utf-8"
         extra = "ignore"
         populate_by_name = True
 
     @validator("logo_output_dir", pre=True)
-    def ensure_logo_dir_exists(cls, v):
-        os.makedirs(v, exist_ok=True)
-        return v
+    def resolve_logo_dir(cls, v):
+        return _resolve_project_directory(v)
 
 
 class PipelineSettings(BaseSettings):
     """Data Pipeline Configuration (collection → extraction → metadata → ingest)"""
     # Paths
     bulletins_root: str = Field(
-        default=r"C:\Users\701693\turk_patent\bulletins\Marka",
+        default=str(DEFAULT_BULLETINS_ROOT),
         alias="PIPELINE_BULLETINS_ROOT"
     )
 
@@ -242,7 +314,7 @@ class PipelineSettings(BaseSettings):
 
     # zip.py
     seven_zip_path: str = Field(
-        default=r"C:\Program Files\7-Zip\7z.exe",
+        default=DEFAULT_SEVEN_ZIP_PATH,
         alias="PIPELINE_SEVEN_ZIP_PATH"
     )
     max_cd_archives: int = Field(default=0, alias="PIPELINE_MAX_CD_ARCHIVES")
@@ -269,8 +341,20 @@ class PipelineSettings(BaseSettings):
 
     class Config:
         env_prefix = "PIPELINE_"
+        env_file = ".env"
+        env_file_encoding = "utf-8"
         extra = "ignore"
         populate_by_name = True
+
+    @validator("bulletins_root", pre=True)
+    def resolve_bulletins_root(cls, v):
+        return _resolve_project_directory(v)
+
+    @validator("seven_zip_path", pre=True)
+    def resolve_seven_zip_path(cls, v):
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return DEFAULT_SEVEN_ZIP_PATH
+        return _resolve_project_path_or_command(v)
 
 
 class IyzicoSettings(BaseSettings):
@@ -283,6 +367,7 @@ class IyzicoSettings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        env_file_encoding = "utf-8"
         extra = "ignore"
         populate_by_name = True
 

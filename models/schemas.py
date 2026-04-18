@@ -6,7 +6,7 @@ from typing import List, Optional, Dict, Any
 from uuid import UUID
 from enum import Enum
 
-from pydantic import BaseModel, EmailStr, Field, validator
+from pydantic import BaseModel, EmailStr, Field, validator, root_validator
 
 
 # ==========================================
@@ -21,9 +21,8 @@ class PlanType(str, Enum):
 
 
 class UserRole(str, Enum):
-    OWNER = "owner"
     ADMIN = "admin"
-    MEMBER = "member"
+    USER = "user"
     VIEWER = "viewer"
 
 
@@ -166,7 +165,7 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str = Field(..., min_length=8)
-    role: UserRole = UserRole.MEMBER
+    role: UserRole = UserRole.USER
 
 
 class UserUpdate(BaseModel):
@@ -218,7 +217,7 @@ class WatchlistItemBase(BaseModel):
     application_date: Optional[date] = None
     
     # Monitoring settings
-    similarity_threshold: float = Field(default=0.70, ge=0.0, le=1.0)
+    similarity_threshold: float = Field(default=0.50, ge=0.0, le=1.0)
     monitor_text: bool = True
     monitor_visual: bool = True
     monitor_phonetic: bool = True
@@ -274,10 +273,14 @@ class WatchlistItemResponse(WatchlistItemBase):
     updated_at: datetime
 
     # Override to map DB column names to API field names
+    # DB stores threshold as 'alert_threshold'; schema exposes it as 'similarity_threshold'
+    similarity_threshold: float = Field(default=0.50, validation_alias='alert_threshold', ge=0.0, le=1.0)
     application_no: Optional[str] = Field(None, validation_alias='customer_application_no')
     bulletin_no: Optional[str] = Field(None, validation_alias='customer_bulletin_no')
     registration_no: Optional[str] = Field(None, validation_alias='customer_registration_no')
     application_date: Optional[date] = Field(None, validation_alias='customer_registration_date')
+    monitor_text: bool = Field(default=True, validation_alias='monitor_similar_names')
+    monitor_visual: bool = Field(default=True, validation_alias='monitor_similar_logos')
 
     # Logo (logo_path is internal, excluded from JSON via model serialization)
     logo_path: Optional[str] = Field(None, exclude=True)
@@ -288,6 +291,13 @@ class WatchlistItemResponse(WatchlistItemBase):
     new_alerts_count: Optional[int] = 0
     total_alerts_count: Optional[int] = 0
     conflict_summary: Optional[Dict[str, Any]] = None
+    true_application_date: Optional[date] = None
+    trademark_image_path: Optional[str] = None  # image_path from trademarks table (for /api/trademark-image/ endpoint)
+    trademark_status: Optional[str] = None       # final_status from trademarks table
+    needs_renewal: bool = False        # expiry already passed (days_until_expiry <= 0)
+    renewal_approaching: bool = False  # expiry within 12 months (0 < days <= 365)
+    expiry_date: Optional[date] = None
+    days_until_expiry: Optional[int] = None
 
     @validator('has_logo', pre=True, always=True)
     def compute_has_logo(cls, v, values):
@@ -305,6 +315,40 @@ class WatchlistItemResponse(WatchlistItemBase):
             return f"/api/v1/watchlist/{item_id}/logo"
         return None
 
+    @root_validator(pre=True)
+    def compute_renewal(cls, values):
+        from datetime import timedelta
+        today = datetime.now().date()
+
+        def _set_from_expiry(expiry):
+            values['expiry_date'] = expiry
+            days = (expiry - today).days
+            values['days_until_expiry'] = days
+            values['needs_renewal'] = days <= 0
+            values['renewal_approaching'] = 0 < days <= 365
+
+        app_date = values.get('true_application_date')
+        if app_date:
+            try:
+                ten_yr = app_date.replace(year=app_date.year + 10)
+            except ValueError:
+                ten_yr = app_date + timedelta(days=3652)
+            expiry = ten_yr + timedelta(days=183)  # 6-month renewal grace window
+            _set_from_expiry(expiry)
+        else:
+            # Fallback: derive from application number year
+            app_no = values.get('customer_application_no') or values.get('application_no')
+            if app_no and isinstance(app_no, str) and len(app_no) >= 4:
+                try:
+                    year_str = app_no[:4]
+                    if year_str.isdigit():
+                        # +10y +6m approximated as July 1st of the 10th anniversary year
+                        approx_expiry = date(int(year_str) + 10, 7, 1)
+                        _set_from_expiry(approx_expiry)
+                except Exception:
+                    pass
+        return values
+
     class Config:
         from_attributes = True
         populate_by_name = True  # Allow both field name and alias
@@ -319,10 +363,22 @@ class WatchlistBulkImportResult(BaseModel):
     total: int
     created: int
     failed: int
+    skipped: int = 0
     errors: List[Dict[str, Any]]
     limit_reached: bool = False
     max_allowed: int = 0
     current_count: int = 0
+
+
+class PortfolioPreviewRequest(BaseModel):
+    holder_id: Optional[str] = None
+    attorney_no: Optional[str] = None
+
+
+class PortfolioPreviewResponse(BaseModel):
+    total_items: int
+    duplicate_count: int
+    can_add: int
 
 
 class FileUploadWarning(BaseModel):
@@ -429,7 +485,7 @@ class ConflictingTrademark(BaseModel):
     id: Optional[UUID]
     name: str
     application_no: str
-    status: TrademarkStatus
+    status: Optional[str]  # DB stores Turkish values; keep as str for display
     classes: List[int]
     holder: Optional[str]
     holder_tpe_client_id: Optional[str] = None
@@ -813,6 +869,15 @@ class TrademarkApplicationCreate(BaseModel):
     source_search_query: Optional[str] = None
     source_risk_score: Optional[float] = None
 
+    # Opposition-specific fields (used when application_type == 'appeal')
+    opposition_target_app_no: Optional[str] = None
+    opposition_target_brand: Optional[str] = None
+    opposition_target_holder: Optional[str] = None
+    opposition_target_bulletin_no: Optional[str] = None
+    opposition_target_bulletin_date: Optional[date] = None
+    opposition_target_classes: List[int] = Field(default=[])
+    opposition_grounds: Optional[str] = None
+
     @validator('nice_class_numbers', each_item=True)
     def validate_nice_classes(cls, v):
         if v < 1 or v > 45:
@@ -837,6 +902,15 @@ class TrademarkApplicationUpdate(BaseModel):
 
     notes: Optional[str] = None
 
+    # Opposition-specific fields
+    opposition_target_app_no: Optional[str] = None
+    opposition_target_brand: Optional[str] = None
+    opposition_target_holder: Optional[str] = None
+    opposition_target_bulletin_no: Optional[str] = None
+    opposition_target_bulletin_date: Optional[date] = None
+    opposition_target_classes: Optional[List[int]] = None
+    opposition_grounds: Optional[str] = None
+
 
 class TrademarkApplicationResponse(BaseModel):
     """Response model for a trademark application"""
@@ -860,6 +934,15 @@ class TrademarkApplicationResponse(BaseModel):
     notes: Optional[str] = None
     specialist_notes: Optional[str] = None
     rejection_reason: Optional[str] = None
+
+    # Opposition-specific fields
+    opposition_target_app_no: Optional[str] = None
+    opposition_target_brand: Optional[str] = None
+    opposition_target_holder: Optional[str] = None
+    opposition_target_bulletin_no: Optional[str] = None
+    opposition_target_bulletin_date: Optional[date] = None
+    opposition_target_classes: List[int] = Field(default=[])
+    opposition_grounds: Optional[str] = None
 
     assigned_specialist_id: Optional[UUID] = None
     turkpatent_application_no: Optional[str] = None

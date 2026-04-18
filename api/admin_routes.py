@@ -21,7 +21,7 @@ admin_router = APIRouter(prefix="/admin", tags=["Admin"])
 # ==========================================
 
 @admin_router.get("/idf-stats")
-async def get_idf_stats(user: CurrentUser = Depends(require_role(["owner", "admin"]))):
+async def get_idf_stats(user: CurrentUser = Depends(require_role(["admin"]))):
     """
     Get IDF scoring system statistics.
     Shows cache status, word counts, and top generic words.
@@ -43,7 +43,7 @@ async def get_idf_stats(user: CurrentUser = Depends(require_role(["owner", "admi
 @admin_router.get("/idf-analyze")
 async def analyze_word(
     word: str = Query(..., description="Word to analyze"),
-    user: CurrentUser = Depends(require_role(["owner", "admin"]))
+    user: CurrentUser = Depends(require_role(["admin"]))
 ):
     """
     Analyze a specific word's IDF classification.
@@ -65,7 +65,7 @@ async def analyze_word(
 @admin_router.get("/idf-query-analysis")
 async def analyze_query(
     q: str = Query(..., description="Query to analyze"),
-    user: CurrentUser = Depends(require_role(["owner", "admin"]))
+    user: CurrentUser = Depends(require_role(["admin"]))
 ):
     """
     Analyze a search query and show word importance breakdown.
@@ -80,13 +80,13 @@ async def analyze_query(
 async def test_similarity(
     query: str = Query(..., description="Search query"),
     target: str = Query(..., description="Target trademark name"),
-    user: CurrentUser = Depends(require_role(["owner", "admin"]))
+    user: CurrentUser = Depends(require_role(["admin"]))
 ):
     """
     Test IDF-weighted similarity between two texts.
     Returns both raw and adjusted scores with breakdown.
     """
-    from utils.idf_scoring import (
+    from services.scoring_service import (
         calculate_text_similarity, calculate_adjusted_score
     )
 

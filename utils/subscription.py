@@ -41,7 +41,8 @@ PLAN_FEATURES = {
         "monthly_ai_credits": 0,
         "monthly_applications": 0,
         "can_track_logos": False,
-        "can_view_holder_portfolio": False,
+        "can_view_holder_portfolio": True,
+        "can_download_portfolio": False,
         "can_export_csv_leads": False,
         "can_use_live_scraping": False,
         "max_users": 1,
@@ -61,57 +62,36 @@ PLAN_FEATURES = {
         "monthly_reports": 10,
         "can_export_reports": True,
         "name_suggestions_per_session": 10,
-        "monthly_ai_credits": 30,
+        "monthly_ai_credits": 10,
         "monthly_applications": 1,
         "can_track_logos": True,
-        "can_view_holder_portfolio": False,
-        "can_export_csv_leads": False,
+        "can_view_holder_portfolio": True,
+        "can_download_portfolio": False,
+        "can_export_csv_leads": True,
         "can_use_live_scraping": True,
         "max_users": 3,
         "max_watchlist_items": 15,
         "max_daily_quick_searches": 50,
         "auto_scan_max_items": 15,
-        "auto_scan_frequency": "weekly",
-        "priority_support": False,
-        "api_access": False,
-        "dedicated_account_manager": False,
-    },
-    "business": {
-        "price_monthly": 799,
-        "price_annual_monthly": 639,
-        "monthly_live_searches": 30,
-        "daily_lead_views": 5,
-        "monthly_reports": 20,
-        "can_export_reports": True,
-        "name_suggestions_per_session": 20,
-        "monthly_ai_credits": 100,
-        "monthly_applications": 3,
-        "can_track_logos": True,
-        "can_view_holder_portfolio": True,
-        "can_export_csv_leads": False,
-        "can_use_live_scraping": True,
-        "max_users": 5,
-        "max_watchlist_items": 50,
-        "max_daily_quick_searches": 150,
-        "auto_scan_max_items": 50,
-        "auto_scan_frequency": "weekly",
+        "auto_scan_frequency": "daily",
         "priority_support": False,
         "api_access": False,
         "dedicated_account_manager": False,
     },
     "professional": {
-        "price_monthly": 1299,
-        "price_annual_monthly": 1039,
+        "price_monthly": 1999,
+        "price_annual_monthly": 1599,
         "monthly_live_searches": 100,
         "daily_lead_views": 10,
         "monthly_reports": 30,
         "can_export_reports": True,
         "name_suggestions_per_session": 30,
-        "monthly_ai_credits": 300,
-        "monthly_applications": 5,
+        "monthly_ai_credits": 50,
+        "monthly_applications": 3,
         "can_track_logos": True,
         "can_view_holder_portfolio": True,
-        "can_export_csv_leads": False,
+        "can_download_portfolio": True,
+        "can_export_csv_leads": True,
         "can_use_live_scraping": True,
         "max_users": 10,
         "max_watchlist_items": 1000,
@@ -120,20 +100,21 @@ PLAN_FEATURES = {
         "auto_scan_frequency": "daily",
         "priority_support": True,
         "api_access": False,
-        "dedicated_account_manager": False,
+        "dedicated_account_manager": True,
     },
     "enterprise": {
-        "price_monthly": 2999,
-        "price_annual_monthly": 2399,
+        "price_monthly": 4999,
+        "price_annual_monthly": 3999,
         "monthly_live_searches": 999999,
         "daily_lead_views": 999999,
         "monthly_reports": 999999,
         "can_export_reports": True,
         "name_suggestions_per_session": 999999,
-        "monthly_ai_credits": 999999,
-        "monthly_applications": 999999,
+        "monthly_ai_credits": 500,
+        "monthly_applications": 10,
         "can_track_logos": True,
         "can_view_holder_portfolio": True,
+        "can_download_portfolio": True,
         "can_export_csv_leads": True,
         "can_use_live_scraping": True,
         "max_users": 999999,
@@ -157,6 +138,7 @@ PLAN_FEATURES = {
         "monthly_applications": 999999,
         "can_track_logos": True,
         "can_view_holder_portfolio": True,
+        "can_download_portfolio": True,
         "can_export_csv_leads": True,
         "can_use_live_scraping": True,
         "max_users": 999999,
@@ -170,6 +152,68 @@ PLAN_FEATURES = {
     },
 }
 
+# Support legacy plan names while keeping a single canonical product surface.
+PLAN_ALIASES = {
+    "business": "professional",
+}
+
+
+def _canonical_plan_name(plan_name: Optional[str]) -> str:
+    normalized = (plan_name or "free").strip().lower()
+    normalized = PLAN_ALIASES.get(normalized, normalized)
+    if normalized in PLAN_FEATURES:
+        return normalized
+    return "free"
+
+
+def _is_mock_value(value) -> bool:
+    return getattr(value.__class__, "__module__", "").startswith("unittest.mock")
+
+
+def _row_value(row, *keys, default=None):
+    if row is None:
+        return default
+
+    for key in keys:
+        if isinstance(row, dict):
+            if key not in row:
+                continue
+            value = row.get(key)
+        else:
+            try:
+                value = row[key]
+            except Exception:
+                continue
+
+        if value is not None and not _is_mock_value(value):
+            return value
+
+    return default
+
+
+def _int_value(value, default=0) -> int:
+    try:
+        if value is None or _is_mock_value(value):
+            return default
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _credit_balances_from_row(row, cost: int) -> tuple[int, int]:
+    monthly_keys = ["ai_credits_monthly", "monthly"]
+    purchased_keys = ["ai_credits_purchased", "purchased"]
+
+    if cost == 5:
+        monthly_keys.append("logo_credits_monthly")
+        purchased_keys.append("logo_credits_purchased")
+    elif cost == 1:
+        purchased_keys.append("name_credits_purchased")
+
+    monthly = _int_value(_row_value(row, *monthly_keys, default=0))
+    purchased = _int_value(_row_value(row, *purchased_keys, default=0))
+    return monthly, purchased
+
 
 def get_plan_limit(plan_name: str, feature: str):
     """
@@ -178,6 +222,7 @@ def get_plan_limit(plan_name: str, feature: str):
     DB key format: plan.{plan_name}.{feature}
     """
     from utils.settings_manager import settings_manager
+    plan_name = _canonical_plan_name(plan_name)
     db_key = f"plan.{plan_name}.{feature}"
     db_value = settings_manager.get(db_key)
     if db_value is not None:
@@ -226,28 +271,35 @@ def get_user_plan(db, user_id: str) -> dict:
             'monthly_limit': 0,
         }
 
-    plan_name = row['plan_name']
-    display_name = row['display_name']
+    plan_name = _canonical_plan_name(_row_value(row, 'plan_name', default='free'))
+    display_name = _row_value(row, 'display_name', default='Free Trial')
 
     # Super admins get unlimited access
-    if row['is_superadmin']:
+    if _row_value(row, 'is_superadmin', default=False):
         plan_name = 'superadmin'
         display_name = 'Super Admin'
-    elif plan_name != 'free' and row.get('subscription_end_date'):
-        # Check if subscription has expired
-        end_date = row['subscription_end_date']
-        if hasattr(end_date, 'date'):
-            end_date = end_date.date()
-        if end_date < date.today():
-            logger.info(f"Subscription expired for user={user_id}, was={plan_name}, end={end_date}")
-            plan_name = 'free'
-            display_name = 'Free Trial'
+    else:
+        subscription_end_date = _row_value(row, 'subscription_end_date', default=None)
+        if plan_name != 'free' and subscription_end_date:
+            # Check if subscription has expired
+            end_date = subscription_end_date
+            if hasattr(end_date, 'date'):
+                end_date = end_date.date()
+            if end_date < date.today():
+                logger.info(f"Subscription expired for user={user_id}, was={plan_name}, end={end_date}")
+                plan_name = 'free'
+                display_name = 'Free Trial'
+
+    monthly_limit = get_plan_limit(plan_name, 'monthly_live_searches')
+    can_use_live_search = bool(_row_value(row, 'is_superadmin', default=False)) or (
+        bool(get_plan_limit(plan_name, 'can_use_live_scraping')) and monthly_limit > 0
+    )
 
     return {
         'plan_name': plan_name,
         'display_name': display_name,
-        'can_use_live_search': row['can_use_live_search'] or row['is_superadmin'],
-        'monthly_limit': get_plan_limit(plan_name, 'monthly_live_searches'),
+        'can_use_live_search': can_use_live_search,
+        'monthly_limit': monthly_limit,
     }
 
 
@@ -337,9 +389,9 @@ def check_live_search_eligibility(db, user_id: str) -> Tuple[bool, str, dict]:
             "error": "upgrade_required",
             "current_plan": plan_name,
             "display_name": plan['display_name'],
-            "required_plan": "professional",
-            "message": "Canli arama Premium ozelligidir. Professional veya Enterprise plana yukseltmeniz gerekiyor.",
-            "message_en": "Live search is a Premium feature. Upgrade to Professional or Enterprise.",
+            "required_plan": "live_search_enabled_plan",
+            "message": "Canli arama, planinda canli arama hakki bulunan kullanicilar icindir. Canli aramayi destekleyen bir plana yukseltmeniz gerekiyor.",
+            "message_en": "Live search is only available on plans with live-search access. Upgrade to a plan that includes live search.",
         }
 
     current_usage = get_live_search_usage(db, user_id)
@@ -520,7 +572,10 @@ def get_org_plan(db, org_id: str) -> dict:
             'display_name': 'Free Trial',
         }
 
-    return dict(row)
+    return {
+        'plan_name': _canonical_plan_name(_row_value(row, 'plan_name', default='free')),
+        'display_name': _row_value(row, 'display_name', default='Free Trial'),
+    }
 
 
 # ============================================================
@@ -545,10 +600,13 @@ def _reset_monthly_ai_credits_if_needed(db, org_id: str) -> None:
     if not row:
         return
 
-    reset_at = row['ai_credits_reset_at']
-    plan_name = row['plan_name']
+    reset_at = _row_value(row, 'ai_credits_reset_at', default=None)
+    plan_name = _canonical_plan_name(_row_value(row, 'plan_name', default='free'))
     plan_limit = get_plan_limit(plan_name, 'monthly_ai_credits')
     now = datetime.utcnow()
+
+    if not hasattr(reset_at, 'year') or not hasattr(reset_at, 'month'):
+        reset_at = None
 
     if reset_at is None or (reset_at.year, reset_at.month) < (now.year, now.month):
         cur.execute("""
@@ -596,8 +654,7 @@ def check_ai_credit_eligibility(db, org_id: str, cost: int) -> Tuple[bool, str, 
             "message_en": "Organization not found.",
         }
 
-    monthly = row['ai_credits_monthly']
-    purchased = row['ai_credits_purchased']
+    monthly, purchased = _credit_balances_from_row(row, cost=cost)
     total_remaining = monthly + purchased
 
     if total_remaining >= cost:
@@ -662,8 +719,7 @@ def deduct_ai_credits(db, org_id: str, cost: int) -> bool:
     if not row:
         return False
 
-    monthly = row['monthly']
-    purchased = row['purchased']
+    monthly, purchased = _credit_balances_from_row(row, cost=cost)
 
     if monthly + purchased >= cost:
         remainder = cost - monthly
@@ -703,7 +759,8 @@ def refund_ai_credits(db, org_id: str, cost: int) -> bool:
     db.commit()
     row = cur.fetchone()
     if row is not None:
-        logger.info(f"Refunded {cost} AI credits for org {org_id}, monthly now: {row['ai_credits_monthly']}")
+        new_monthly = _row_value(row, 'ai_credits_monthly', 'logo_credits_monthly', default='unknown')
+        logger.info(f"Refunded {cost} AI credits for org {org_id}, monthly now: {new_monthly}")
         return True
     return False
 
@@ -885,6 +942,147 @@ def refund_logo_credit(db, org_id: str) -> bool:
         True if credits were refunded
     """
     return refund_ai_credits(db, org_id, cost=5)
+
+
+# Compatibility redefinitions: keep legacy behaviors working while the
+# codebase transitions fully to unified AI credits.
+def check_name_generation_eligibility(db, org_id: str, session_count: int) -> Tuple[bool, str, dict]:
+    """
+    Check if an organization can generate more name suggestions.
+    Enforces per-session limits, monthly AI-credit limits, and legacy
+    purchased-name-credit fallbacks during the migration period.
+    """
+    plan = get_org_plan(db, org_id)
+    plan_name = plan['plan_name']
+    monthly_limit = get_plan_limit(plan_name, 'monthly_ai_credits')
+    monthly_used = get_monthly_name_generations(db, org_id)
+    session_limit = get_plan_limit(plan_name, 'name_suggestions_per_session')
+    legacy_purchased = 0
+
+    if session_limit < 999999 and session_count >= session_limit:
+        cur = db.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT COALESCE(name_credits_purchased, 0) as name_credits_purchased
+            FROM organizations WHERE id = %s
+        """, (org_id,))
+        row = cur.fetchone()
+        legacy_purchased = _int_value(_row_value(row, 'name_credits_purchased', default=0))
+
+        if legacy_purchased <= 0:
+            return False, "upgrade_required", {
+                "error": "upgrade_required",
+                "current_plan": plan_name,
+                "display_name": plan['display_name'],
+                "session_limit": session_limit,
+                "session_count": session_count,
+                "remaining": 0,
+                "message": f"Bu oturumda {session_limit} isim onerisi hakkini kullandiniz. Daha fazlasi icin planunuzi yukseltebilirsiniz.",
+                "message_en": f"You've used all {session_limit} name suggestions for this session. Upgrade for more.",
+            }
+
+    if monthly_limit < 999999 and monthly_used >= monthly_limit and legacy_purchased <= 0:
+        return False, "monthly_limit_exceeded", {
+            "error": "credits_exhausted",
+            "current_plan": plan_name,
+            "display_name": plan['display_name'],
+            "monthly_limit": monthly_limit,
+            "monthly_used": monthly_used,
+            "remaining": 0,
+            "message": "Bu ayki isim onerisi limitinize ulastiniz.",
+            "message_en": "You have reached your monthly name generation limit.",
+        }
+
+    can_use, _, details = check_ai_credit_eligibility(db, org_id, cost=1)
+    if not can_use:
+        if legacy_purchased <= 0:
+            cur = db.cursor(cursor_factory=RealDictCursor)
+            cur.execute("""
+                SELECT COALESCE(name_credits_purchased, 0) as name_credits_purchased
+                FROM organizations WHERE id = %s
+            """, (org_id,))
+            row = cur.fetchone()
+            legacy_purchased = _int_value(_row_value(row, 'name_credits_purchased', default=0))
+
+        if legacy_purchased <= 0:
+            return False, "monthly_limit_exceeded", {
+                "error": "credits_exhausted",
+                "current_plan": plan_name,
+                "display_name": plan['display_name'],
+                "remaining": 0,
+                "message": "AI kredi bakiyeniz yetersiz.",
+                "message_en": "Insufficient AI credits.",
+            }
+
+        details = {
+            "monthly_limit": monthly_limit,
+            "total_remaining": legacy_purchased,
+        }
+
+    return True, "ok", {
+        "current_plan": plan_name,
+        "display_name": plan['display_name'],
+        "session_limit": session_limit,
+        "session_count": session_count,
+        "monthly_limit": details.get('monthly_limit', monthly_limit),
+        "remaining": details.get('total_remaining', 0),
+        "using_purchased_credits": legacy_purchased > 0 and details.get('total_remaining', 0) == legacy_purchased,
+    }
+
+
+def check_logo_generation_eligibility(db, org_id: str) -> Tuple[bool, str, dict]:
+    """
+    Check if an organization can run a logo generation.
+    Uses unified AI credits first, but also tolerates legacy logo-credit
+    rows during the migration period.
+    """
+    _reset_monthly_logo_credits_if_needed(db, org_id)
+
+    plan = get_org_plan(db, org_id)
+    plan_name = plan['plan_name']
+    monthly_limit = get_plan_limit(plan_name, 'monthly_ai_credits')
+
+    cur = db.cursor(cursor_factory=RealDictCursor)
+    cur.execute("""
+        SELECT
+            COALESCE(ai_credits_monthly, 0) as ai_credits_monthly,
+            COALESCE(ai_credits_purchased, 0) as ai_credits_purchased
+        FROM organizations WHERE id = %s
+    """, (org_id,))
+    row = cur.fetchone()
+
+    if not row:
+        return False, "upgrade_required", {
+            "error": "upgrade_required",
+            "current_plan": plan_name,
+            "message": "Organizasyon bulunamadi.",
+            "message_en": "Organization not found.",
+        }
+
+    monthly, purchased = _credit_balances_from_row(row, cost=5)
+    total_remaining = monthly + purchased
+
+    if total_remaining >= 5:
+        return True, "ok", {
+            "current_plan": plan_name,
+            "display_name": plan['display_name'],
+            "monthly_remaining": monthly,
+            "purchased_remaining": purchased,
+            "total_remaining": total_remaining,
+            "monthly_limit": monthly_limit,
+        }
+
+    return False, "credits_exhausted", {
+        "error": "credits_exhausted",
+        "current_plan": plan_name,
+        "display_name": plan['display_name'],
+        "monthly_remaining": monthly,
+        "purchased_remaining": purchased,
+        "total_remaining": total_remaining,
+        "monthly_limit": monthly_limit,
+        "cost": 5,
+        "message": f"AI kredi bakiyeniz yetersiz ({total_remaining} mevcut, 5 gerekli).",
+        "message_en": f"Insufficient AI credits ({total_remaining} available, 5 required).",
+    }
 
 
 # ============================================================

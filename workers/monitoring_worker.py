@@ -3,8 +3,6 @@ Watchlist Monitoring Worker
 Background service that monitors new trademarks against all watchlists
 """
 import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import logging
 import time
@@ -479,7 +477,7 @@ class SingleScanWorker:
             # Get recent trademark IDs
             cur.execute("""
                 SELECT id FROM trademarks 
-                WHERE current_status NOT IN ('Refused', 'Withdrawn', 'Expired')
+                WHERE final_status NOT IN ('Reddedildi', 'Geri Çekildi', 'Süresi Doldu')
                 ORDER BY created_at DESC
                 LIMIT %s
             """, (limit,))

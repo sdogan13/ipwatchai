@@ -1,13 +1,14 @@
 """
 Trademark Data Pipeline Worker
 ================================
-Orchestrates the full 5-step data pipeline:
+Orchestrates the full 6-step data pipeline:
 
 1. data_collection.py - Download bulletin archives from TURKPATENT
 2. zip.py            - Extract archives to structured folders
 3. metadata.py       - Parse HSQLDB SQL files -> metadata.json
-4. ai.py             - Generate embeddings -> enrich metadata.json in-place
-5. ingest.py         - Load enriched metadata.json into PostgreSQL
+4. pipeline.ai       - Generate embeddings -> enrich metadata.json in-place
+5. pipeline.ingest   - Load enriched metadata.json into PostgreSQL
+6. universal_scanner - Scan within-deadline bulletins for opposition conflicts
 
 Usage:
     # Run full pipeline (all 5 steps)
@@ -35,10 +36,6 @@ from datetime import datetime
 from dataclasses import dataclass, field, asdict
 from typing import Optional, List
 from uuid import uuid4
-
-# Add project root to path
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -333,11 +330,12 @@ class PipelineWorker:
     # ---- Step 2: Extract ----
 
     def run_step_extract(self) -> StepResult:
-        """Step 2: Extract archives via zip.py"""
+        """Step 2: Extract archives (ZIP) + parse PDF bulletins."""
         result = StepResult(step_name="extract")
         t0 = time.time()
 
         try:
+            # --- 2a: ZIP archive extraction (legacy) ---
             logger.info("[Step 2/5] Starting archive extraction...")
             from zip import run_extraction
             summary = run_extraction(settings=self.pipeline_settings)
@@ -346,9 +344,49 @@ class PipelineWorker:
             result.skipped = summary.get("skipped", 0)
             result.failed = summary.get("failed", 0)
 
+            logger.info(
+                f"[Step 2/5] ZIP extraction: "
+                f"{result.processed} extracted, {result.skipped} skipped, "
+                f"{result.failed} failed"
+            )
+
+            # --- 2b: PDF bulletin extraction (new format) ---
+            logger.info("[Step 2/5] Starting PDF bulletin extraction...")
+            try:
+                from pdf_extract import run_pdf_extraction
+                from pathlib import Path
+
+                root_dir = None
+                if self.pipeline_settings:
+                    root_dir = Path(getattr(self.pipeline_settings, "bulletins_root", "bulletins/Marka"))
+
+                pdf_summary = run_pdf_extraction(root_dir=root_dir)
+                pdf_processed = pdf_summary.get("processed", 0)
+                pdf_failed = pdf_summary.get("failed", 0)
+                pdf_records = pdf_summary.get("total_records", 0)
+
+                result.processed += pdf_processed
+                result.failed += pdf_failed
+
+                if pdf_processed > 0:
+                    logger.info(
+                        f"[Step 2/5] PDF extraction: "
+                        f"{pdf_processed} bulletin(s), {pdf_records} records"
+                    )
+                elif pdf_failed > 0:
+                    logger.warning(f"[Step 2/5] PDF extraction: {pdf_failed} failed")
+                else:
+                    logger.info("[Step 2/5] No new PDF bulletins to extract")
+            except ImportError:
+                logger.warning("[Step 2/5] pdf_extract module not available (PyMuPDF not installed)")
+            except Exception as e:
+                logger.error(f"[Step 2/5] PDF extraction error: {e}")
+                result.failed += 1
+
+            # --- Final status ---
             if result.failed > 0 and result.processed == 0:
                 result.status = "failed"
-                result.error = f"All {result.failed} extractions failed"
+                result.error = f"All extractions failed"
             elif result.failed > 0:
                 result.status = "partial"
                 result.error = f"{result.failed} extraction(s) failed"
@@ -357,7 +395,7 @@ class PipelineWorker:
 
             logger.info(
                 f"[Step 2/5] Extraction complete: "
-                f"{result.processed} extracted, {result.skipped} skipped, "
+                f"{result.processed} total, {result.skipped} skipped, "
                 f"{result.failed} failed"
             )
 
@@ -430,7 +468,7 @@ class PipelineWorker:
 
     def run_step_embeddings(self) -> StepResult:
         """
-        Step 4: Generate embeddings and enrich metadata.json via ai.py.
+        Step 4: Generate embeddings and enrich metadata.json via pipeline.ai.
 
         Reads each metadata.json, generates:
           - CLIP embeddings (512-dim) for logo images
@@ -450,8 +488,8 @@ class PipelineWorker:
             logger.info("[Step 4/5] Starting embedding generation (GPU)...")
             logger.info("[Step 4/5] Loading AI models (CLIP, DINOv2, MiniLM)...")
 
-            # Deferred import - ai.py loads CUDA models at import time
-            from ai import run_embedding_generation
+            # Deferred import - pipeline.ai loads CUDA models at import time
+            from pipeline.ai import run_embedding_generation
             summary = run_embedding_generation(settings=self.pipeline_settings)
 
             result.processed = summary.get("processed", 0)
@@ -485,7 +523,7 @@ class PipelineWorker:
 
     def run_step_ingest(self) -> StepResult:
         """
-        Step 5: Load enriched metadata.json into PostgreSQL via ingest.py.
+        Step 5: Load enriched metadata.json into PostgreSQL via pipeline.ingest.
 
         Reads metadata.json files that now contain embeddings from step 4.
         Inserts/updates trademarks with vector embeddings into PostgreSQL.
@@ -495,7 +533,7 @@ class PipelineWorker:
 
         try:
             logger.info("[Step 5/5] Starting database ingestion...")
-            from ingest import run_ingest
+            from pipeline.ingest import run_ingest
             summary = run_ingest(settings=self.pipeline_settings)
 
             result.processed = summary.get("inserted", 0) + summary.get("updated", 0)
@@ -517,6 +555,98 @@ class PipelineWorker:
         result.duration_seconds = round(time.time() - t0, 1)
         return result
 
+    # ---- Step 6: Conflict Scan (Opposition Radar) ----
+
+    def run_step_conflict_scan(self) -> StepResult:
+        """
+        Step 6: Scan within-deadline bulletins for opposition conflicts.
+
+        Uses the UniversalScanner to find conflicts between new trademark
+        applications (within appeal deadline) and existing registered marks.
+        Results populate the Opposition Radar lead feed.
+        """
+        result = StepResult(step_name="conflict_scan")
+        t0 = time.time()
+
+        try:
+            logger.info("[Step 6/6] Starting conflict scan (Opposition Radar)...")
+
+            conn = _get_db_connection()
+            try:
+                from workers.universal_scanner import UniversalScanner
+                scanner = UniversalScanner(conn=conn)
+
+                # Get distinct bulletins with active appeal deadlines
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute("""
+                        SELECT DISTINCT bulletin_no
+                        FROM trademarks
+                        WHERE appeal_deadline IS NOT NULL
+                          AND appeal_deadline >= CURRENT_DATE
+                          AND bulletin_no IS NOT NULL
+                          AND name IS NOT NULL AND length(name) >= 2
+                        ORDER BY bulletin_no DESC
+                    """)
+                    bulletins = [r['bulletin_no'] for r in cur.fetchall()]
+
+                if not bulletins:
+                    logger.info("[Step 6/6] No bulletins with active appeal deadlines")
+                    result.status = "success"
+                    result.duration_seconds = round(time.time() - t0, 1)
+                    return result
+
+                logger.info(f"[Step 6/6] Scanning {len(bulletins)} bulletin(s): {bulletins}")
+
+                total_conflicts = 0
+                total_scanned = 0
+                errors = 0
+
+                for bno in bulletins:
+                    try:
+                        summary = scanner.scan_bulletin(bno)
+                        total_scanned += summary['trademarks_scanned']
+                        total_conflicts += summary['total_conflicts']
+                        errors += summary['errors']
+                    except Exception as e:
+                        logger.error(f"[Step 6/6] Bulletin {bno} scan failed: {e}")
+                        errors += 1
+                        try:
+                            conn.rollback()
+                        except Exception:
+                            pass
+
+                result.processed = total_conflicts
+                result.skipped = total_scanned - total_conflicts
+                result.failed = errors
+
+                if errors > 0 and total_conflicts == 0:
+                    result.status = "failed"
+                    result.error = f"All bulletin scans failed ({errors} errors)"
+                elif errors > 0:
+                    result.status = "partial"
+                    result.error = f"{errors} error(s) during scan"
+                else:
+                    result.status = "success"
+
+                logger.info(
+                    f"[Step 6/6] Conflict scan complete: "
+                    f"{total_scanned} trademarks scanned, "
+                    f"{total_conflicts} conflicts found, {errors} errors"
+                )
+
+                scanner.close()
+            except Exception:
+                conn.close()
+                raise
+
+        except Exception as e:
+            result.status = "failed"
+            result.error = str(e)
+            logger.error(f"[Step 6/6] Conflict scan failed: {e}")
+
+        result.duration_seconds = round(time.time() - t0, 1)
+        return result
+
     # ---- Full Pipeline ----
 
     async def run_full_pipeline(
@@ -527,7 +657,7 @@ class PipelineWorker:
         run_id: Optional[str] = None,
     ) -> PipelineResult:
         """
-        Run the complete 5-step pipeline end-to-end.
+        Run the complete 6-step pipeline end-to-end.
 
         Args:
             skip_download: If True, skip step 1 (download).
@@ -640,6 +770,21 @@ class PipelineWorker:
                 step = self.run_step_ingest()
                 pipeline_result.steps.append(step)
 
+        if single_step == "ingest":
+            abort = True
+
+        # --- Step 6: Conflict Scan (Opposition Radar) ---
+        if not abort:
+            if single_step and single_step != "conflict_scan":
+                pass
+            else:
+                step = self.run_step_conflict_scan()
+                pipeline_result.steps.append(step)
+                if step.status == "failed":
+                    logger.warning(
+                        "[Step 6/6] Conflict scan failed but pipeline continues"
+                    )
+
         # --- Finalize ---
         pipeline_result.completed_at = datetime.utcnow()
         pipeline_result.total_duration_seconds = round(time.time() - t0, 1)
@@ -695,11 +840,12 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Steps:
-  1. download   - Download bulletin archives from TURKPATENT
-  2. extract    - Extract archives to structured folders
-  3. metadata   - Parse HSQLDB SQL files to metadata.json
-  4. embeddings - Generate CLIP/DINOv2/MiniLM embeddings (GPU)
-  5. ingest     - Load enriched metadata.json into PostgreSQL
+  1. download      - Download bulletin archives from TURKPATENT
+  2. extract       - Extract archives to structured folders
+  3. metadata      - Parse HSQLDB SQL files to metadata.json
+  4. embeddings    - Generate CLIP/DINOv2/MiniLM embeddings (GPU)
+  5. ingest        - Load enriched metadata.json into PostgreSQL
+  6. conflict_scan - Scan within-deadline bulletins for opposition conflicts
 
 Examples:
     # Run full pipeline
@@ -711,8 +857,8 @@ Examples:
     # Run only embedding generation
     python -m workers.pipeline_worker --step embeddings
 
-    # Run only ingestion
-    python -m workers.pipeline_worker --step ingest
+    # Run only conflict scan (Opposition Radar)
+    python -m workers.pipeline_worker --step conflict_scan
         """,
     )
 
@@ -722,7 +868,7 @@ Examples:
     )
     parser.add_argument(
         "--step", type=str, default=None,
-        choices=["download", "extract", "metadata", "embeddings", "ingest"],
+        choices=["download", "extract", "metadata", "embeddings", "ingest", "conflict_scan"],
         help="Run only a single step.",
     )
     parser.add_argument(

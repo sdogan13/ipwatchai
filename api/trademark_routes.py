@@ -5,6 +5,7 @@ Extracted from api/routes.py for maintainability.
 import logging
 from typing import List, Optional
 from uuid import UUID
+from datetime import date
 
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from auth.authentication import CurrentUser, get_current_user, require_role
@@ -12,10 +13,97 @@ from models.schemas import (
     PaginatedResponse, SuccessResponse
 )
 from database.crud import Database
+from services.trademark_service import (
+    get_extracted_goods_data,
+    get_trademark_events_data,
+)
 
 logger = logging.getLogger(__name__)
 
 trademark_router = APIRouter(prefix="/trademark", tags=["Trademark"])
+
+# ---------------------------------------------------------------------------
+# Turkish labels for event types and statuses
+# ---------------------------------------------------------------------------
+EVENT_TYPE_LABELS = {
+    "transfer": "Devir",
+    "merger": "BirleÅŸme",
+    "partial_transfer": "KÄ±smi Devir",
+    "cancellation": "Ä°ptal",
+    "withdrawal": "Geri Ã‡ekme",
+    "renewal": "Yenileme",
+    "seizure": "Haciz",
+    "precautionary_seizure": "Ä°htiyati Haciz",
+    "injunction": "Ä°htiyati Tedbir",
+    "precautionary_injunction": "Ä°htiyati Tedbir",
+    "seizure_lift": "Haciz KaldÄ±rma",
+    "injunction_lift": "Tedbir KaldÄ±rma",
+    "restriction_lift": "KÄ±sÄ±tlama KaldÄ±rma",
+    "license": "Lisans",
+    "bankruptcy": "Ä°flas",
+    "correction": "DÃ¼zeltme",
+    "madrid_registration": "Madrid Tescil",
+    "madrid_renewal": "Madrid Yenileme",
+    "address_change": "Adres DeÄŸiÅŸikliÄŸi",
+    "name_change": "Unvan DeÄŸiÅŸikliÄŸi",
+    "class_change": "SÄ±nÄ±f DeÄŸiÅŸikliÄŸi",
+}
+
+# Health card severity: critical > warning > info
+EVENT_SEVERITY = {
+    "cancellation": "critical",
+    "seizure": "critical",
+    "precautionary_seizure": "critical",
+    "injunction": "warning",
+    "precautionary_injunction": "warning",
+    "bankruptcy": "critical",
+    "transfer": "warning",
+    "merger": "warning",
+    "partial_transfer": "warning",
+    "withdrawal": "warning",
+    "renewal": "info",
+    "license": "info",
+    "seizure_lift": "info",
+    "injunction_lift": "info",
+    "restriction_lift": "info",
+    "correction": "info",
+    "address_change": "info",
+    "name_change": "info",
+    "class_change": "info",
+    "madrid_registration": "info",
+    "madrid_renewal": "info",
+}
+
+
+# ==========================================
+# Event Timeline + Health Card
+# ==========================================
+
+@trademark_router.get("/{application_no:path}/events")
+async def get_trademark_events(
+    application_no: str,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
+    event_type: Optional[str] = Query(None),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Returns the event timeline and health card summary for a trademark.
+
+    Response:
+    - health_card: summary of the trademark's event-derived state
+    - events: paginated list of events ordered by bulletin_date DESC
+    - total: total event count
+    """
+    return await get_trademark_events_data(
+        application_no=application_no,
+        page=page,
+        per_page=per_page,
+        event_type=event_type,
+        current_user=current_user,
+    )
+
+
 # ==========================================
 # Trademark Detail (extracted goods lazy-load)
 # ==========================================
@@ -29,34 +117,7 @@ async def get_extracted_goods(
     Lazy-load endpoint: fetch extracted goods for a specific trademark.
     Called when user clicks the extracted goods indicator on a card.
     """
-    with Database() as db:
-        cur = db.cursor()
-        cur.execute("""
-            SELECT application_no, name, extracted_goods, nice_class_numbers
-            FROM trademarks
-            WHERE application_no = %s
-        """, (application_no,))
-        row = cur.fetchone()
-
-    if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Marka bulunamadi")
-
-    extracted = row.get("extracted_goods")
-    if not extracted or extracted == [] or extracted is None:
-        return {
-            "application_no": application_no,
-            "has_extracted_goods": False,
-            "extracted_goods": [],
-            "total_items": 0
-        }
-
-    return {
-        "application_no": application_no,
-        "name": row.get("name"),
-        "has_extracted_goods": True,
-        "extracted_goods": extracted,
-        "nice_classes": row.get("nice_class_numbers"),
-        "total_items": len(extracted) if isinstance(extracted, list) else 0
-    }
-
-
+    return await get_extracted_goods_data(
+        application_no=application_no,
+        current_user=current_user,
+    )

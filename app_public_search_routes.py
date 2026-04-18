@@ -1,0 +1,162 @@
+"""Public search route extraction from the legacy main app."""
+
+import io
+import os
+import tempfile
+from typing import Optional
+
+from fastapi import File, Form, HTTPException, Query, Request, UploadFile
+from PIL import Image
+
+
+async def do_public_search_impl(
+    query: str,
+    image_path: str = None,
+    nice_classes: list = None,
+    status_code_getter=None,
+    logger=None,
+):
+    """Shared implementation for GET and POST public search."""
+    from services.search_service import run_public_search
+
+    try:
+        return await run_public_search(
+            query=query,
+            image_path=image_path,
+            nice_classes=nice_classes,
+            status_code_getter=status_code_getter,
+            logger=logger,
+        )
+    except Exception as e:
+        if logger:
+            logger.error(f"Public search failed: {e}")
+        raise HTTPException(status_code=500, detail="Search temporarily unavailable")
+
+
+async def public_search_post_impl(
+    query: Optional[str],
+    image: Optional[UploadFile],
+    classes: Optional[str],
+    do_public_search_handler,
+    allowed_image_types,
+    max_image_size,
+    validate_image_magic_bytes,
+):
+    """POST public search logic with optional image upload."""
+    has_image = image is not None and image.filename
+    has_query = query and len(query.strip()) >= 2
+    if not has_query and not has_image:
+        raise HTTPException(status_code=422, detail="Provide a brand name (min 2 chars) or upload a logo image")
+    query = query.strip() if query else ""
+
+    class_list = None
+    if classes:
+        try:
+            class_list = [int(c.strip()) for c in classes.split(",") if c.strip()]
+            class_list = [c for c in class_list if 1 <= c <= 45] or None
+        except ValueError:
+            class_list = None
+
+    temp_path = None
+    has_image = image is not None and image.filename
+    if has_image:
+        if image.content_type not in allowed_image_types:
+            raise HTTPException(status_code=400, detail="Invalid image type")
+        content = await image.read()
+        if len(content) > max_image_size:
+            raise HTTPException(status_code=413, detail="Image too large (max 10MB)")
+        if not validate_image_magic_bytes(content):
+            raise HTTPException(status_code=400, detail="Invalid image file content")
+        try:
+            Image.open(io.BytesIO(content)).verify()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Corrupted image file")
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
+        temp_file.write(content)
+        temp_file.close()
+        temp_path = temp_file.name
+
+    try:
+        return await do_public_search_handler(
+            query=query,
+            image_path=temp_path,
+            nice_classes=class_list,
+        )
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.unlink(temp_path)
+
+
+def register_public_search_routes(
+    app,
+    limiter,
+    logger,
+    status_code_getter,
+    allowed_image_types,
+    max_image_size,
+    validate_image_magic_bytes,
+):
+    """Register the extracted public search routes on the app."""
+
+    async def _do_public_search(
+        query: str,
+        image_path: str = None,
+        nice_classes: list = None,
+    ):
+        return await do_public_search_impl(
+            query=query,
+            image_path=image_path,
+            nice_classes=nice_classes,
+            status_code_getter=status_code_getter,
+            logger=logger,
+        )
+
+    @limiter.limit("3/minute")
+    async def public_search(
+        request: Request,
+        query: str = Query(..., min_length=2, max_length=100, description="Trademark name to search"),
+    ):
+        """
+        Public (unauthenticated) trademark search for landing page.
+        Rate limited to 3 requests per minute per IP.
+        Returns max 10 results with limited fields.
+        """
+        return await _do_public_search(query=query)
+
+    @limiter.limit("3/minute")
+    async def public_search_post(
+        request: Request,
+        query: Optional[str] = Form(None, max_length=100, description="Trademark name to search"),
+        image: Optional[UploadFile] = File(None, description="Optional logo image for visual search"),
+        classes: Optional[str] = Form(None, description="Nice classes, comma-separated (e.g. 9,35,42)"),
+    ):
+        """
+        Public (unauthenticated) trademark search with optional image upload.
+        At least one of query or image must be provided.
+        Rate limited to 3 requests per minute per IP.
+        Returns max 10 results with limited fields.
+        """
+        return await public_search_post_impl(
+            query=query,
+            image=image,
+            classes=classes,
+            do_public_search_handler=_do_public_search,
+            allowed_image_types=allowed_image_types,
+            max_image_size=max_image_size,
+            validate_image_magic_bytes=validate_image_magic_bytes,
+        )
+
+    app.add_api_route(
+        "/api/v1/search/public",
+        public_search,
+        methods=["GET"],
+        tags=["Search"],
+    )
+    app.add_api_route(
+        "/api/v1/search/public",
+        public_search_post,
+        methods=["POST"],
+        tags=["Search"],
+    )
+
+    return public_search, public_search_post, _do_public_search

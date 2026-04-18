@@ -292,7 +292,7 @@ async def get_current_active_user(
 def require_role(allowed_roles: list):
     """
     Dependency factory to require specific roles.
-    Usage: Depends(require_role(["owner", "admin"]))
+    Usage: Depends(require_role(["admin"]))
     """
     async def role_checker(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
         if current_user.role not in allowed_roles:
@@ -325,7 +325,7 @@ def require_permission(permission: str):
     Usage: Depends(require_permission("watchlist.write"))
     """
     async def permission_checker(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
-        if permission not in current_user.permissions and current_user.role not in ["owner", "admin"]:
+        if permission not in current_user.permissions and current_user.role not in ["admin"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Permission '{permission}' required"

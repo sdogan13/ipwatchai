@@ -31,6 +31,25 @@ from datetime import datetime
 from dotenv import load_dotenv
 from config.settings import settings
 
+_LOCAL_PROJECT_ROOT = Path(__file__).resolve().parent
+_LOCAL_DEFAULT_BULLETINS_ROOT = _LOCAL_PROJECT_ROOT / "bulletins" / "Marka"
+
+
+def _resolve_local_agentic_path(value: str | None, default: Path) -> Path:
+    if not value:
+        return default.resolve()
+
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = _LOCAL_PROJECT_ROOT / path
+    return path.resolve()
+
+
+_PRE_DOTENV_PROJECT_ROOT = os.environ.get("PROJECT_ROOT")
+_PRE_DOTENV_PIPELINE_BULLETINS_ROOT = os.environ.get("PIPELINE_BULLETINS_ROOT")
+_PRE_DOTENV_DATA_ROOT = os.environ.get("DATA_ROOT")
+
+
 # Fix console encoding for Turkish characters
 if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
@@ -46,8 +65,18 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Project paths
-PROJECT_ROOT = Path(os.getenv("PROJECT_ROOT", r"C:\Users\701693\turk_patent"))
-DATA_ROOT = Path(os.getenv("DATA_ROOT", r"C:\Users\701693\turk_patent\bulletins\Marka"))
+PROJECT_ROOT = _resolve_local_agentic_path(
+    _PRE_DOTENV_PROJECT_ROOT or os.environ.get("PROJECT_ROOT"),
+    _LOCAL_PROJECT_ROOT,
+)
+DATA_ROOT = _resolve_local_agentic_path(
+    _PRE_DOTENV_PIPELINE_BULLETINS_ROOT
+    or _PRE_DOTENV_DATA_ROOT
+    or os.environ.get("PIPELINE_BULLETINS_ROOT")
+    or os.environ.get("DATA_ROOT")
+    or settings.pipeline.bulletins_root,
+    _LOCAL_DEFAULT_BULLETINS_ROOT,
+)
 
 # ============================================
 # REAL-TIME PROGRESS TRACKING (via Redis)
@@ -204,7 +233,6 @@ class AgenticTrademarkSearch:
         nice_classes: List[int] = None,
         force_scrape: bool = False,
         image_path: str = None,
-        status_filter: str = None,
         attorney_no: str = None,
         user_id: str = None
     ) -> Dict:
@@ -265,13 +293,25 @@ class AgenticTrademarkSearch:
         step1_start = time.time()
         _prog("db_search", 5, query)
 
+        # Push heartbeat progress events every 5s so the UI doesn't look frozen
+        _db_search_done = threading.Event()
+        def _db_heartbeat():
+            pct = 7
+            while not _db_search_done.wait(5.0):
+                if pct < 14:
+                    _prog("db_searching", pct, query)
+                    pct += 2
+        if user_id:
+            _hb = threading.Thread(target=_db_heartbeat, daemon=True)
+            _hb.start()
+
         db_result, needs_live = self.risk_engine.assess_brand_risk(
             name=query,
             image_path=image_path,
             target_classes=nice_classes if nice_classes else None,
-            status_filter=status_filter,
             attorney_no=attorney_no
         )
+        _db_search_done.set()
 
         db_max_score = db_result.get("final_risk_score", 0)
         db_candidates = db_result.get("top_candidates", [])
@@ -360,6 +400,8 @@ class AgenticTrademarkSearch:
         except Exception as e:
             logger.error(f"   [FAIL] Scraping failed: {e}")
             _prog("scraping_failed", 45, str(e))
+            time.sleep(1.2)
+            _prog("complete", 100, "0")
             response = self._build_response(
                 query=query,
                 results=db_candidates,
@@ -374,6 +416,9 @@ class AgenticTrademarkSearch:
 
         if not scraped_records:
             logger.info("   No new records scraped. Returning database results.")
+            _prog("scrape_no_results", 48, query)
+            time.sleep(1.2)  # give frontend one poll cycle to display the event
+            _prog("complete", 100, "0")
             return self._build_response(
                 query=query,
                 results=db_candidates,
@@ -456,7 +501,6 @@ class AgenticTrademarkSearch:
             name=query,
             image_path=image_path,
             target_classes=nice_classes if nice_classes else None,
-            status_filter=status_filter,
             attorney_no=attorney_no
         )
 
@@ -532,9 +576,11 @@ class AgenticTrademarkSearch:
                     _prog("scraping", 20, query)
 
                 # Scrapper returns list of row data and saves to JSON
+                # Pass _prog so the surgical Turkish char fallback can emit a progress event
                 results = self.scrapper.search_and_ingest(
                     trademark_name=query,
-                    limit=self.scrape_limit
+                    limit=self.scrape_limit,
+                    progress_callback=_prog
                 )
 
                 if not results:
@@ -608,9 +654,9 @@ class AgenticTrademarkSearch:
         return formatted
 
     def _generate_embeddings(self, records: List[Dict]) -> int:
-        """Generate AI embeddings + translations for scraped records using ai.py."""
+        """Generate AI embeddings + translations for scraped records using pipeline.ai."""
         try:
-            import ai
+            from pipeline import ai
 
             enriched_count = 0
             for record in records:
@@ -639,15 +685,15 @@ class AgenticTrademarkSearch:
             return enriched_count
 
         except ImportError:
-            logger.warning("ai.py not available, skipping embedding generation")
+            logger.warning("pipeline.ai not available, skipping embedding generation")
             return 0
 
     def _ingest_to_database(self, records: List[Dict], query: str) -> int:
-        """Ingest enriched records to database using ingest.py."""
+        """Ingest enriched records to database using pipeline.ingest."""
         if not records:
             return 0
 
-        # Create folder structure expected by ingest.py
+        # Create the folder structure expected by pipeline.ingest
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_query = "".join(c if c.isalnum() else "_" for c in query)
 
@@ -658,9 +704,9 @@ class AgenticTrademarkSearch:
         with open(metadata_file, 'w', encoding='utf-8') as f:
             json.dump(records, f, ensure_ascii=False, indent=2)
 
-        # Call ingest.py to process
+        # Call pipeline.ingest to process
         try:
-            from ingest import process_file_batch
+            from pipeline.ingest import process_file_batch
 
             process_file_batch(self.conn, metadata_file, force=True)
             self.conn.commit()
@@ -768,6 +814,25 @@ def _normalize_search_results(result: dict) -> None:
     text_similarity, visual_similarity, translation_similarity, phonetic_similarity).
     Keeps original fields for backward compatibility.
     """
+    def _local_get_status_code(status_text: Optional[str]) -> str:
+        if not status_text: return 'unknown'
+        status_text = status_text.strip()
+        mapping = {
+            'Yayında': 'published',
+            'Tescil Edildi': 'registered',
+            'Başvuruldu': 'pending',
+            'Reddedildi': 'rejected',
+            'Geri Çekildi': 'withdrawn',
+            'Devredildi': 'transferred',
+            'Kısmi Red': 'partial_refusal',
+            'Süresi Doldu': 'expired',
+            'İtiraz Edildi': 'opposed',
+            'Yenilendi': 'renewed',
+            'İptal Edildi': 'cancelled',
+            'Bilinmiyor': 'unknown',
+        }
+        return mapping.get(status_text, 'unknown')
+
     for r in result.get("results", []):
         scores = r.get("scores") or {}
         img_path = r.get("image_path")
@@ -779,6 +844,7 @@ def _normalize_search_results(result: dict) -> None:
         r["visual_similarity"] = round(scores.get("visual_similarity", 0), 3)
         r["translation_similarity"] = round(scores.get("translation_similarity", 0), 3)
         r["phonetic_similarity"] = round(scores.get("phonetic_similarity", 0), 3)
+        r["status_code"] = _local_get_status_code(r.get("status"))
 
 
 class SearchRequest(BaseModel):
@@ -808,7 +874,7 @@ async def search_status():
 
 def _run_search_sync(confidence_threshold, auto_scrape, query, nice_classes,
                       force_scrape=False, image_path=None,
-                      status_filter=None, attorney_no=None, user_id=None):
+                      attorney_no=None, user_id=None):
     """Run AgenticTrademarkSearch synchronously (for use with asyncio.to_thread)."""
     with AgenticTrademarkSearch(
         confidence_threshold=confidence_threshold,
@@ -819,7 +885,6 @@ def _run_search_sync(confidence_threshold, auto_scrape, query, nice_classes,
             nice_classes=nice_classes,
             force_scrape=force_scrape,
             image_path=image_path,
-            status_filter=status_filter,
             attorney_no=attorney_no,
             user_id=user_id
         )
@@ -879,7 +944,6 @@ async def quick_search(
     request: Request,
     query: str = Query(..., description="Trademark name to search"),
     classes: Optional[str] = Query(None, description="Nice classes (comma-separated)"),
-    status: Optional[str] = Query(None, description="Filter by trademark status"),
     attorney_no: Optional[str] = Query(None, description="Filter by attorney number"),
     current_user: CurrentUser = Depends(get_current_user)
 ):
@@ -909,7 +973,6 @@ async def quick_search(
                 query=query,
                 nice_classes=nice_classes,
                 force_scrape=False,
-                status_filter=status,
                 attorney_no=attorney_no
             )
 
@@ -945,7 +1008,6 @@ async def quick_search_with_image(
     query: Optional[str] = Form(None, description="Trademark name to search"),
     image: Optional[UploadFile] = File(None, description="Optional logo image for visual search"),
     classes: Optional[str] = Form(None, description="Nice classes (comma-separated)"),
-    status: Optional[str] = Form(None, description="Filter by trademark status"),
     attorney_no: Optional[str] = Form(None, description="Filter by attorney number"),
     current_user: CurrentUser = Depends(get_current_user)
 ):
@@ -991,7 +1053,6 @@ async def quick_search_with_image(
                 nice_classes=nice_classes,
                 force_scrape=False,
                 image_path=image_path,
-                status_filter=status,
                 attorney_no=attorney_no
             )
 
@@ -1031,7 +1092,6 @@ async def intelligent_search(
     request: Request,
     query: str = Query(..., description="Trademark name to search"),
     classes: Optional[str] = Query(None, description="Nice classes (comma-separated)"),
-    status: Optional[str] = Query(None, description="Filter by trademark status"),
     attorney_no: Optional[str] = Query(None, description="Filter by attorney number"),
     threshold: float = Query(0.75, description="Confidence threshold for live scraping"),
     force_scrape: bool = Query(False, description="Force live scrape regardless of DB results"),
@@ -1040,7 +1100,7 @@ async def intelligent_search(
     """
     Intelligent search with automatic live investigation.
 
-    Requires: Professional or Enterprise plan.
+    Requires: a plan with live-search access.
     Deducts 1 credit per live scrape triggered.
 
     If database confidence is below threshold, automatically:
@@ -1082,7 +1142,6 @@ async def intelligent_search(
             query=query,
             nice_classes=nice_classes,
             force_scrape=True,
-            status_filter=status,
             attorney_no=attorney_no,
             user_id=_uid
         )
@@ -1123,7 +1182,6 @@ async def intelligent_search_with_image(
     query: str = Form(..., description="Trademark name to search"),
     image: Optional[UploadFile] = File(None, description="Optional logo image for visual scoring"),
     classes: Optional[str] = Form(None, description="Nice classes (comma-separated)"),
-    status: Optional[str] = Form(None, description="Filter by trademark status"),
     attorney_no: Optional[str] = Form(None, description="Filter by attorney number"),
     threshold: float = Form(0.75, description="Confidence threshold for live scraping"),
     force_scrape: bool = Form(False, description="Force live scrape regardless of DB results"),
@@ -1135,7 +1193,7 @@ async def intelligent_search_with_image(
     Text query is always required. Image is optional and enhances scoring
     with CLIP + DINOv2 + color histogram + OCR similarity against DB logos.
 
-    Requires: Professional or Enterprise plan for live scraping.
+    Requires: a plan with live-search access for live scraping.
     """
     # Feature flag kill switch
     if not is_feature_enabled("live_scraping_enabled"):
@@ -1176,7 +1234,6 @@ async def intelligent_search_with_image(
             nice_classes=nice_classes,
             force_scrape=True,
             image_path=image_path,
-            status_filter=status,
             attorney_no=attorney_no,
             user_id=_uid
         )
@@ -1223,7 +1280,7 @@ async def post_search(
 ):
     """
     Full search via POST request.
-    If auto_scrape is True, requires Professional or Enterprise plan.
+    If auto_scrape is True, requires a plan with live-search access.
     """
     # If auto_scrape requested, check plan eligibility
     if request.auto_scrape or request.force_scrape:

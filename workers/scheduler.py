@@ -7,10 +7,6 @@ Usage (standalone):
 Usage (integrated via main.py lifespan):
     Automatically started when FastAPI app boots.
 """
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 import logging
 from datetime import datetime, timedelta
 from uuid import UUID
@@ -50,6 +46,15 @@ def start_scheduler():
         replace_existing=True,
     )
 
+    # Daily universal conflict scan at 04:00 (Opposition Radar)
+    scheduler.add_job(
+        daily_universal_scan,
+        trigger=CronTrigger(hour=4, minute=0),
+        id='daily_universal_scan',
+        name='Daily Universal Conflict Scan',
+        replace_existing=True,
+    )
+
     # Subscription expiry reminders at 09:00 UTC
     scheduler.add_job(
         check_subscription_expiry,
@@ -61,7 +66,8 @@ def start_scheduler():
 
     scheduler.start()
     next_run = scheduler.get_job('daily_watchlist_scan').next_run_time
-    logger.info(f"Scheduler started — next watchlist scan: {next_run}")
+    next_universal = scheduler.get_job('daily_universal_scan').next_run_time
+    logger.info(f"Scheduler started — next watchlist scan: {next_run}, next universal scan: {next_universal}")
     return scheduler
 
 
@@ -213,6 +219,78 @@ def daily_watchlist_scan():
         logger.error(f"Daily watchlist scan failed: {e}", exc_info=True)
 
 
+def daily_universal_scan():
+    """
+    Scan within-deadline bulletins for opposition conflicts (Opposition Radar).
+
+    Finds all bulletins with appeal_deadline >= today and runs the universal
+    scanner against each one. This populates the universal_conflicts table
+    that powers the Opposition Radar lead feed.
+
+    Runs daily at 04:00 (after watchlist scan at 03:00).
+    """
+    logger.info("=== Daily Universal Conflict Scan starting ===")
+
+    try:
+        from workers.universal_scanner import UniversalScanner
+        from psycopg2.extras import RealDictCursor
+
+        scanner = UniversalScanner()
+        conn = scanner.conn
+
+        # Get distinct bulletins with active appeal deadlines
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT DISTINCT bulletin_no
+                FROM trademarks
+                WHERE appeal_deadline IS NOT NULL
+                  AND appeal_deadline >= CURRENT_DATE
+                  AND bulletin_no IS NOT NULL
+                  AND name IS NOT NULL AND length(name) >= 2
+                ORDER BY bulletin_no DESC
+            """)
+            bulletins = [r['bulletin_no'] for r in cur.fetchall()]
+
+        if not bulletins:
+            logger.info("No bulletins with active appeal deadlines — nothing to scan")
+            scanner.close()
+            return
+
+        logger.info(f"Scanning {len(bulletins)} bulletin(s): {bulletins}")
+
+        total_conflicts = 0
+        total_scanned = 0
+        errors = 0
+
+        for bno in bulletins:
+            try:
+                summary = scanner.scan_bulletin(bno)
+                total_scanned += summary['trademarks_scanned']
+                total_conflicts += summary['total_conflicts']
+                errors += summary['errors']
+                logger.info(
+                    f"  Bulletin {bno}: {summary['trademarks_scanned']} scanned, "
+                    f"{summary['total_conflicts']} conflicts"
+                )
+            except Exception as e:
+                logger.error(f"  Bulletin {bno} scan failed: {e}")
+                errors += 1
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+
+        scanner.close()
+
+        logger.info(
+            f"=== Universal Scan complete: {total_scanned} scanned, "
+            f"{total_conflicts} conflicts, {errors} errors ==="
+        )
+
+    except Exception as e:
+        logger.error(f"Daily universal scan failed: {e}", exc_info=True)
+
+
 def check_subscription_expiry():
     """
     Send reminder emails for subscriptions expiring in 7, 3, or 1 days.
@@ -263,7 +341,7 @@ def check_subscription_expiry():
                     FROM users
                     WHERE organization_id = %s
                       AND is_active = TRUE
-                      AND role IN ('owner', 'admin')
+                      AND role IN ('admin')
                 """, (str(org["org_id"]),))
                 users = cur.fetchall()
 
@@ -299,16 +377,22 @@ if __name__ == "__main__":
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 
-    parser = argparse.ArgumentParser(description="Watchlist scheduler")
+    parser = argparse.ArgumentParser(description="Watchlist & Universal scanner scheduler")
     parser.add_argument("--run-now", action="store_true",
-                        help="Run daily scan immediately (don't wait for schedule)")
+                        help="Run daily scans immediately (don't wait for schedule)")
+    parser.add_argument("--run-universal", action="store_true",
+                        help="Run universal conflict scan immediately")
     parser.add_argument("--daemon", action="store_true",
                         help="Start scheduler daemon (blocks forever)")
     args = parser.parse_args()
 
     if args.run_now:
-        logger.info("Running daily scan immediately...")
+        logger.info("Running daily scans immediately...")
         daily_watchlist_scan()
+        daily_universal_scan()
+    elif args.run_universal:
+        logger.info("Running universal conflict scan immediately...")
+        daily_universal_scan()
     elif args.daemon:
         import time
         scheduler = start_scheduler()

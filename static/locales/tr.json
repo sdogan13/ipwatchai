@@ -1,7 +1,6 @@
 {
   "dir": "ltr",
   "locale": "tr",
-
   "nav": {
     "brand": "IP WATⒸH AI",
     "admin": "Admin",
@@ -12,7 +11,6 @@
     "more": "Diğer",
     "refresh": "Yenile"
   },
-
   "profile": {
     "title": "Profilim",
     "email": "E-posta",
@@ -38,7 +36,6 @@
     "upload_photo": "Foto Yükle",
     "change_photo": "Foto Değiştir"
   },
-
   "verification": {
     "title": "E-posta Doğrulama",
     "desc": "Hesabınızı doğrulamak için e-postanıza gönderilen 6 haneli kodu girin.",
@@ -51,7 +48,6 @@
     "resend_code": "Kodu Tekrar Gönder",
     "resend_cooldown": "Tekrar gönder ({seconds}s)"
   },
-
   "tabs": {
     "overview": "Genel Bakış",
     "watchlist": "Takip Listesi",
@@ -63,7 +59,6 @@
     "pro": "PRO",
     "new": "YENI"
   },
-
   "search": {
     "placeholder": "Marka adı girin... (ör: Nike, Apple, Samsung)",
     "button": "Ara",
@@ -83,11 +78,11 @@
     "recent_searches": "Son Aramalar",
     "clear_history": "Temizle",
     "search_failed": "Arama başarısız",
-    "tagline": "Metin \u2022 Görsel \u2022 Fonetik \u2022 Anlamsal \u2022 Çeviri analizi",
+    "tagline": "Metin • Görsel • Fonetik • Anlamsal • Çeviri analizi",
     "mode_quick": "Hızlı Arama",
     "mode_intelligent": "Akıllı Arama",
-    "mode_quick_desc": "Veritabanı araması \u2014 kredi kullanılmaz",
-    "mode_intelligent_desc": "Canlı TÜRKPATENT taraması \u2014 kredi kullanır",
+    "mode_quick_desc": "Veritabanı araması — kredi kullanılmaz",
+    "mode_intelligent_desc": "Canlı TÜRKPATENT taraması — kredi kullanır",
     "results_found": "{count} sonuç bulundu",
     "results_found_db": "{count} sonuç bulundu (veritabanı)",
     "results_found_image": "{count} sonuç bulundu (görsel analiz dahil). {credits}",
@@ -134,25 +129,22 @@
     "source_db": "Veritabanı",
     "source_live": "Canlı"
   },
-
   "sort": {
     "label": "Sırala:",
-    "risk_desc": "Risk \u2193",
-    "risk_asc": "Risk \u2191",
+    "risk_desc": "Risk ↓",
+    "risk_asc": "Risk ↑",
     "date_desc": "Başvuru (En Yeni)",
     "date_asc": "Başvuru (En Eski)",
     "reset": "Sıfırla",
     "results_count": "{count} sonuç",
     "source_label": "Kaynak:"
   },
-
   "pagination": {
-    "prev": "\u2190 Önceki",
-    "next": "Sonraki \u2192",
+    "prev": "← Önceki",
+    "next": "Sonraki →",
     "page": "Sayfa {current}",
     "page_of": "Sayfa {current} / {total}"
   },
-
   "dashboard": {
     "portfolio_size": "Portföy Büyüklüğü",
     "critical_risks": "Kritik Riskler",
@@ -184,14 +176,16 @@
     "deadline_label": "Son Tarih:",
     "opposition_filing": "İtiraz Başvurusu",
     "no_active_deadlines": "Aktif itiraz süresi yok.",
+    "renewal": "Yenileme",
+    "no_active_renewals": "Aktif yenileme süresi yok.",
     "watchlist": "İzleme Listesi",
     "loading": "Yükleniyor...",
     "not_run_yet": "Henüz çalıştırılmadı",
     "early_warning_banner": "{count} erken uyarı: Henüz yayınlanmamış başvurular tespit edildi. Bülten yayınlandığında itiraz süreniz başlayacak.",
     "early_warning_short": "{count} erken uyarı: Henüz yayınlanmamış başvurular tespit edildi.",
     "pre_pub_inline": "Erken Tespit: Henüz yayınlanmadı. İtiraz süresi bülten yayınlandığında başlayacak.",
-    "threats_label": "{brand} \u2014 Tehditler",
-    "remove_filter": "\u2715 Filtreyi Kaldır",
+    "threats_label": "{brand} — Tehditler",
+    "remove_filter": "✕ Filtreyi Kaldır",
     "threats_load_failed": "Tehditler yüklenemedi",
     "watchlist_empty": "İzleme listesi boş",
     "not_scanned": "Taranmadı",
@@ -202,7 +196,6 @@
     "watchlist_items": "izleme kalemi",
     "total_alerts_label": "toplam uyarı"
   },
-
   "pipeline": {
     "title": "Veri Hattı Durumu",
     "run_full": "Tam Çalıştır",
@@ -236,7 +229,6 @@
     "currently_running": "Şu anda çalışıyor...",
     "next_run_prefix": "Sonraki:"
   },
-
   "chart": {
     "critical": "Kritik (%90+)",
     "very_high": "Çok Yüksek (%80+)",
@@ -244,7 +236,6 @@
     "medium": "Orta (%50+)",
     "low": "Düşük"
   },
-
   "risk_level": {
     "critical": "Kritik",
     "very_high": "Çok Yüksek",
@@ -252,7 +243,6 @@
     "medium": "Orta",
     "low": "Düşük"
   },
-
   "scores": {
     "text": "Metin",
     "visual": "Görsel",
@@ -283,7 +273,6 @@
     "search_time": "{seconds}sn",
     "risk_assessment": "Risk Değerlendirmesi"
   },
-
   "status": {
     "registered": "Tescilli",
     "published": "Yayınlandı",
@@ -293,9 +282,11 @@
     "withdrawn": "Geri Çekildi",
     "expired": "Süresi Doldu",
     "renewed": "Yenilendi",
-    "unknown": "Bilinmiyor"
+    "unknown": "Bilinmiyor",
+    "cancelled": "İptal Edildi",
+    "transferred": "Devredildi",
+    "partial_refusal": "Kısmen Red"
   },
-
   "deadline": {
     "pre_publication": "Erken Uyarı",
     "active_critical": "Kritik",
@@ -316,17 +307,16 @@
     "deadline_approaching": "İtiraz süresi dolmak üzere",
     "last_date": "Son tarih:"
   },
-
   "timeline": {
     "elapsed": "{days}/{total} gün geçti",
     "progress": "%{pct} tamamlandı"
   },
-
   "alerts": {
     "title": "Uyarı Detayı",
     "acknowledge": "Onayla",
     "resolved": "Çözüldü",
     "dismiss": "Reddet",
+    "file_opposition": "İtiraz Et",
     "watched_brand": "İzlenen Marka",
     "conflicting_brand": "Çakışan Marka",
     "overlapping_classes": "Ortak Sınıflar:",
@@ -356,7 +346,6 @@
     "acknowledged_at": "Onaylandı",
     "resolved_at": "Çözüldü"
   },
-
   "opposition": {
     "published": "Yayınlandı",
     "deadline": "İtiraz Son Tarihi",
@@ -386,14 +375,13 @@
     "email_risk": "Risk Skoru:",
     "email_closing": "Bilgilendirmenizi rica ederim."
   },
-
   "leads": {
     "title": "Opposition Radar",
     "subtitle": "Potansiyel müşteriler - İtiraz hizmeti fırsatları",
     "daily_credits": "Günlük Hak:",
     "csv_download": "CSV İndir",
-    "stat_critical": "Kritik (\u22647 gun)",
-    "stat_urgent": "Acil (\u226414 gun)",
+    "stat_critical": "Kritik (≤7 gun)",
+    "stat_urgent": "Acil (≤14 gun)",
     "stat_total": "Toplam Lead",
     "stat_converted": "Dönüştürülen",
     "stat_upcoming": "Yaklaşan",
@@ -406,12 +394,12 @@
     "filter_class": "Sınıf:",
     "filter_status": "Durum:",
     "filter_all": "Tümü",
-    "filter_critical": "Kritik (\u22647 gun)",
-    "filter_urgent": "Acil (\u226414 gun)",
-    "filter_soon": "Yakında (\u226430 gun)",
-    "filter_risk_critical": "Kritik (\u226590%)",
-    "filter_risk_high": "Yüksek (\u226580%)",
-    "filter_risk_medium": "Orta (\u226570%)",
+    "filter_critical": "Kritik (≤7 gun)",
+    "filter_urgent": "Acil (≤14 gun)",
+    "filter_soon": "Yakında (≤30 gun)",
+    "filter_risk_critical": "Kritik (≥90%)",
+    "filter_risk_high": "Yüksek (≥80%)",
+    "filter_risk_medium": "Orta (≥70%)",
     "filter_all_classes": "Tüm Sınıflar",
     "filter_new": "Yeni",
     "filter_viewed": "Görüntülenen",
@@ -469,9 +457,30 @@
     "col_holder": "Sahip",
     "days_short": "{n}g",
     "total_results": "{count} sonuç",
-    "page_of": "Sayfa {current} / {total}"
+    "page_of": "Sayfa {current} / {total}",
+    "mode_conflicts": "Çakışmalar",
+    "mode_renewals": "Yenilemeler",
+    "renewals_title": "Yenileme Radarı",
+    "renewals_subtitle": "10 yıllık yenileme süresine yaklaşan markalar",
+    "renewal_grace": "Ek Süre",
+    "renewal_critical": "Kritik",
+    "renewal_urgent": "Acil",
+    "renewal_total": "Toplam Yenileme",
+    "renewal_upcoming": "Yaklaşan",
+    "renewals_empty": "Yenileme leadi bulunamadı.",
+    "renewal_col_mark": "Marka",
+    "renewal_col_holder": "Sahip",
+    "renewal_col_expiry": "Son Kullanma Tarihi",
+    "renewal_col_days": "Kalan Gün",
+    "renewal_grace_short": "Ek Süre",
+    "renewal_critical_short": "Kritik",
+    "renewal_urgent_short": "Acil",
+    "renewal_upcoming_short": "Yaklaşan",
+    "renewal_grace_days": "{days}g ek sürede",
+    "days_overdue": "{days}g gecikmiş",
+    "days_left": "{days}g kaldı",
+    "attorney": "Vekil"
   },
-
   "studio": {
     "name_lab": "Name Lab",
     "logo_studio": "Logo Studio",
@@ -489,10 +498,10 @@
     "name_gen_failed": "İsim oluşturma başarısız",
     "logo_gen_failed": "Logo oluşturma başarısız",
     "history_failed": "Geçmiş yüklenemedi",
-    "risky_name_cta": "Bu isim riskli \u2014 Güvenli alternatif öner",
-    "similar_logo_cta": "Benzer logo \u2014 Özgün logo oluştur",
-    "safe_name_cta": "Risk düşük \u2014 Bu ismi tescil ettir",
-    "safe_logo_cta": "Logo uygun \u2014 Logonu tescil ettir",
+    "risky_name_cta": "Bu isim riskli — Güvenli alternatif öner",
+    "similar_logo_cta": "Benzer logo — Özgün logo oluştur",
+    "safe_name_cta": "Risk düşük — Bu ismi tescil ettir",
+    "safe_logo_cta": "Logo uygun — Logonu tescil ettir",
     "safe_badge": "Güvenli",
     "risky_badge": "Riskli",
     "phonetic_match": "Fonetik Eşleşme",
@@ -545,7 +554,6 @@
     "color_label": "Renk",
     "logo_credits_info": "Bu ay {total} logo hakkınız kaldı (aylık: {monthly}, ek: {purchased})"
   },
-
   "reports": {
     "title": "Raporlar",
     "remaining": "Kalan:",
@@ -587,7 +595,6 @@
     "download_upgrade": "Rapor indirme için planınızı yükseltin",
     "creating": "Oluşturuluyor..."
   },
-
   "watchlist": {
     "add_title": "Takip Listesine Ekle",
     "brand_name": "Marka Adı",
@@ -669,6 +676,47 @@
     "scan_all_started": "Toplu tarama başlatılıyor...",
     "scan_all_queued": "Toplu tarama başlatıldı",
     "scan_all_failed": "Toplu tarama başarısız oldu",
+    "scan_all_confirm_title": "Tüm Markalar Taranacak",
+    "scan_all_items_count": "{count} marka taranacak",
+    "scan_all_start": "Taramayı Başlat",
+    "scanning": "Taranıyor...",
+    "scan_est_label": "Tahmini süre:",
+    "scan_est_min": "dakika",
+    "scan_est_hour": "saat",
+    "scan_est_under_minute": "1 dakikadan az",
+    "scan_completed_check": "Tarama tamamlandı olabilir. Güncel sonuçları görmek için sayfayı yenileyin.",
+    "filter_threshold": "Risk Eşiği",
+    "threshold_saved": "Eşik güncellendi. Taramak için 'Tümünü Tara'ya basın.",
+    "threshold_error": "Eşik güncellenemedi.",
+    "filter_status": "Durum",
+    "status_all": "Tüm Durumlar",
+    "status_new": "Yeni",
+    "status_acknowledged": "İncelendi",
+    "status_resolved": "Çözüldü",
+    "status_dismissed": "Reddedildi",
+    "renewal_status_overdue": "Süresi Dolmuş (10y+6a geçti)",
+    "renewal_status_critical": "Yenileme Penceresinde (6 ay)",
+    "renewal_status_approaching": "Yaklaşan (1 yıl içinde)",
+    "stat_renewal": "Yenileme",
+    "stat_renewal_tooltip": "10. yıl yenileme görünümüne geç",
+    "view_all": "Tümü",
+    "view_renewal": "Yenileme",
+    "view_appeals": "İtiraz",
+    "col_mark": "Marka",
+    "col_renewal_status": "Yenileme Durumu",
+    "col_appeal_deadline": "İtiraz Son Tarihi",
+    "col_app_date": "Başvuru",
+    "col_expiry": "Bitiş",
+    "col_deadline": "Son Tarih",
+    "col_active_conflicts": "aktif çakışma",
+    "nice_class_short": "Sınıf",
+    "renewal_empty": "Yenileme gerektiren marka bulunamadı.",
+    "appeals_empty": "Aktif itiraz süresi olan marka bulunamadı.",
+    "renewal_badge": "10. Yıl Yenileme",
+    "renewal_days_left": "gün kaldı",
+    "renewal_days_ago": "gün önce geçti",
+    "renewal_today": "Bugün bitiyor",
+    "renewal_expiry_title": "Bitiş tarihi:",
     "delete_all_title": "Tüm listeyi sil",
     "delete_all_confirm": "Tüm takip listesini silmek istediğinize emin misiniz? Bu işlem geri alınamaz!",
     "delete_all_confirm_2": "Emin misiniz? Tüm takip öğeleri ve uyarılar kalıcı olarak silinecek.",
@@ -702,6 +750,7 @@
     "filter_last_year": "Son 1 yıl",
     "filter_bulletin": "Bülten No",
     "filter_sort": "Sırala",
+    "filter_tm_status": "Durum",
     "sort_newest": "En Yeni",
     "sort_oldest": "En Eski",
     "sort_most_conflicts": "En Çok Çatışma",
@@ -729,12 +778,11 @@
     "conflicts": "çakışma",
     "page_info": "Sayfa {current} / {total} ({count} öğe)"
   },
-
   "holder": {
     "title": "Marka Portföyü",
     "loading": "Portfolio yükleniyor...",
-    "subtitle": "TPE No: {tpeId} \u2022 {count} marka başvurusu",
-    "loading_subtitle": "TPE No: {tpeId} \u2022 Yükleniyor...",
+    "subtitle": "TPE No: {tpeId} • {count} marka başvurusu",
+    "loading_subtitle": "TPE No: {tpeId} • Yükleniyor...",
     "total_trademarks": "Toplam Marka",
     "registered": "Tescilli",
     "pending": "Beklemede",
@@ -742,7 +790,7 @@
     "unnamed": "İsimsiz",
     "search_placeholder": "Marka sahibi ara (min 2 karakter)...",
     "search": "Ara",
-    "back": "\u2190 Geri",
+    "back": "← Geri",
     "search_min_chars": "En az 2 karakter girin",
     "searching": "Aranıyor...",
     "no_results": "Sonuç bulunamadı",
@@ -765,12 +813,11 @@
     "add_all_to_watchlist": "Tümü Takip Et",
     "bulk_watchlist_result": "{created}/{total} marka takip listesine eklendi"
   },
-
   "attorney": {
     "title": "Vekil Portföyü",
     "loading": "Portfolio yükleniyor...",
-    "subtitle": "Vekil No: {attorneyNo} \u2022 {count} marka başvurusu",
-    "loading_subtitle": "Vekil No: {attorneyNo} \u2022 Yükleniyor...",
+    "subtitle": "Vekil No: {attorneyNo} • {count} marka başvurusu",
+    "loading_subtitle": "Vekil No: {attorneyNo} • Yükleniyor...",
     "total_trademarks": "Toplam Marka",
     "registered": "Tescilli",
     "pending": "Beklemede",
@@ -778,7 +825,7 @@
     "label": "Vekil: ",
     "search_placeholder": "Vekil ara (min 2 karakter)...",
     "search": "Ara",
-    "back": "\u2190 Geri",
+    "back": "← Geri",
     "search_min_chars": "En az 2 karakter girin",
     "searching": "Aranıyor...",
     "no_results": "Sonuç bulunamadı",
@@ -790,7 +837,6 @@
     "search_pro_required": "Vekil arama Professional plan gerektirir",
     "close": "Kapat"
   },
-
   "upgrade": {
     "title": "Gerçek Zamanlı Veri",
     "description": "Standart arama bülten verilerini kullanır (15 güne kadar eski olabilir). Professional plana yükselterek TÜRKPATENT portalından anlık veri çekebilirsiniz.",
@@ -802,7 +848,6 @@
     "maybe_later": "Belki Sonra",
     "upgrade_button": "Yükselt"
   },
-
   "credits": {
     "title": "Arama Hakkı Tükendi",
     "message": "Bu ay için tüm canlı arama haklarınızı kullandınız.",
@@ -813,24 +858,25 @@
     "buy_subject": "Kredi Satın Alma Talebi - {amount} kredi",
     "buy_body": "Merhaba,\n\n{amount} adet arama kredisi satın almak istiyorum.\n\nBilgi rica ederim."
   },
-
   "usage": {
     "resets": "Yenileme:",
     "max_searches": "Maks. Arama",
     "max_watchlist": "Maks. İzleme",
     "max_users": "Maks. Kullanıcı"
   },
-
   "agentic": {
     "title": "Canlı Araştırma",
     "subtitle": "TÜRKPATENT portalı taranıyor...",
     "cancel": "İptal Et",
     "starting": "> Ajan başlatılıyor: '{detail}'...",
     "db_search": "> Veritabanında aranıyor: '{detail}'...",
+    "db_searching": "> Veritabanı taranıyor, lütfen bekleyin...",
     "db_search_done": "> Veritabanında {detail} aday bulundu",
     "queued": "> Sırada bekleniyor (sıra: {detail})...",
     "scraping": "> TÜRKPATENT portalına bağlanılıyor...",
     "scraping_done": "> TÜRKPATENT'ten {detail} kayıt çekildi",
+    "scrape_no_results": "> TÜRKPATENT bağlandı — '{detail}' için sonuç bulunamadı (0 kayıt)",
+    "character_fallback": "> Türkçe karakter dönüşümü uygulanıyor: {detail}",
     "scraping_failed": "> TÜRKPATENT bağlantısı başarısız, veritabanı sonuçları kullanılıyor",
     "embeddings": "> AI embeddings & çeviriler oluşturuluyor ({detail} kayıt)...",
     "embeddings_done": "> {detail} kayıt için AI embeddings tamamlandı",
@@ -840,7 +886,6 @@
     "complete": "> Tamamlandı! {detail} sonuç bulundu",
     "cancelled": "> Arama kullanıcı tarafından iptal edildi"
   },
-
   "auth": {
     "session_expired": "Oturum süreniz doldu. Lütfen tekrar giriş yapın.",
     "daily_limit": "Günlük arama limitinize ulaştınız.",
@@ -882,7 +927,6 @@
     "error_generic": "Bir hata oluştu. Lütfen tekrar deneyin.",
     "register_success": "Kayıt başarılı! Giriş yapabilirsiniz."
   },
-
   "landing": {
     "nav_search": "Arama",
     "nav_features": "Hizmetler",
@@ -893,7 +937,7 @@
     "hero_title": "Markanızı Koruyun, Riskleri Keşfedin",
     "hero_subtitle": "Yapay zeka destekli marka risk analizi ile Türkiye pazarında markanızı güvenle tescil ettirin.",
     "search_placeholder": "Marka adı girin... (örnek: Nike, Apple, Samsung)",
-    "search_hint": "Metin \u2022 Görsel \u2022 Fonetik \u2022 Anlamsal \u2022 Çeviri analizi",
+    "search_hint": "Metin • Görsel • Fonetik • Anlamsal • Çeviri analizi",
     "ai_analysis_started": "AI analizi başlatıldı...",
     "search_limit_reached": "Arama limitine ulaştınız. Daha fazlası için ücretsiz kaydolun.",
     "drop_logo_title": "Logo Yükle",
@@ -919,11 +963,17 @@
     "detail_reg_no": "Tescil No",
     "detail_status": "Durumu",
     "status_registered": "Tescil Edildi",
-    "status_published": "Yayinda",
-    "status_applied": "Başvuruldu",
-    "status_refused": "Reddedildi",
+    "status_published": "Yayınlandı",
+    "status_pending": "Başvuruldu",
+    "status_rejected": "Reddedildi",
+    "status_cancelled": "İptal Edildi",
+    "status_expired": "Süresi Doldu",
     "status_withdrawn": "Geri Çekildi",
+    "status_opposed": "İtiraz Edildi",
     "status_renewed": "Yenilendi",
+    "status_partial_refusal": "Kısmen Red",
+    "status_transferred": "Devredildi",
+    "status_unknown": "Bilinmiyor",
     "detail_extracted_goods": "Çıkarılan Ürün",
     "detail_extracted_goods_yes": "Var",
     "detail_extracted_goods_no": "Yok",
@@ -980,7 +1030,6 @@
     "about_text": "IP WATⒸH AI, Türkiye'nin lider yapay zeka destekli marka risk analizi platformudur. TÜRKPATENT verileri üzerinde CLIP, DINOv2, MiniLM gibi ileri AI modelleri kullanarak kapsamlı benzerlik analizi sunar.",
     "mission_title": "Misyonumuz",
     "mission_text": "Marka tescil süreçlerini yapay zeka ile demokratikleştirmek ve her ölçekteki işletmenin fikri mülkiyet haklarını etkin bir şekilde koruyabilmesini sağlamak.",
-
     "about_services_title": "Hizmetlerimiz",
     "about_svc_search_title": "AI Marka Arama",
     "about_svc_search_desc": "Metin, logo görseli ve Nice sınıf kombinasyonları ile veritabanımızda ve canlı TÜRKPATENT sisteminde kapsamlı marka araştırması. CLIP ve DINOv2 görsel modelleri ile logo benzerliği, MiniLM ile metin benzerliği ve NLLB-200 ile çeviri benzerliği analizi yapılır.",
@@ -990,7 +1039,6 @@
     "about_svc_watchlist_desc": "Markalarınızı ve rakiplerinizi izleme listesine ekleyin. Yeni bülten yayınlandığında AI modelleri otomatik tarama yapar ve benzer başvuruları risk skorlarıyla birlikte raporlar.",
     "about_svc_studio_title": "AI Studio",
     "about_svc_studio_desc": "Yapay zeka ile güvenli marka adı önerileri alın. Mevcut markalara olan benzerliği düşük, tescil şansı yüksek isimler oluşturun. Logo tasarımı için AI destekli görsel öneriler sunulur.",
-
     "about_tech_title": "Kullanılan AI Teknolojileri",
     "about_tech_clip": "Logo ve görsel benzerlik analizi için OpenAI'nin çok modlu modeli",
     "about_tech_dino": "Meta'nin kendinden denetimli öğrenme modeli ile görsel özellik çıkarma",
@@ -998,13 +1046,10 @@
     "about_tech_nllb": "200 dil destekli çeviri modeli ile farklı dillerdeki marka benzerlik tespiti",
     "about_tech_ocr": "Logo görsellerinden metin çıkarma ve karşılaştırma",
     "about_tech_pgvector": "PostgreSQL uzerinde yüksek performanslı vektör benzerlik araması",
-
     "about_data_title": "Veri Kaynağı",
     "about_data_desc": "Tüm verilerimiz resmi TÜRKPATENT bülten ve gazetelerinden elde edilmektedir. Veritabanımız düzenli olarak güncellenmekte ve yeni başvurular AI modelleri tarafından otomatik işlenmektedir.",
-
     "mission_vision_title": "Vizyonumuz",
     "mission_vision_text": "Türkiye'de ve bölgesinde fikri mülkiyet koruma süreçlerini en ileri yapay zeka teknolojileri ile dönüştürmek. Her işletmenin — küçük girişimciden büyük holdinge kadar — markasını etkin ve uygun maliyetle koruyabildiği bir ekosistem oluşturmak.",
-
     "mission_values_title": "Değerlerimiz",
     "mission_val1_title": "İnovasyon",
     "mission_val1_desc": "En son AI modellerini (CLIP, DINOv2, MiniLM, NLLB-200) kullanarak marka benzerlik analizinde endüstri standartlarını belirliyoruz. Sürekli araştırma ve geliştirme ile platformumuzu iyileştiriyoruz.",
@@ -1014,17 +1059,14 @@
     "mission_val3_desc": "Marka koruma hizmetlerini sadece büyük şirketlere değil, her ölçekteki işletmeye uygun fiyatlarla sunuyoruz. Ücretsiz arama özelliği ile herkes platformumuzu deneyebilir.",
     "mission_val4_title": "Çok Dillilik",
     "mission_val4_desc": "Türkçe, İngilizce ve Arapça arayüz desteği ile bölgesel erişebilirlik. NLLB-200 modeli sayesinde 200 dilde marka çeviri benzerliği tespiti yapabiliyoruz.",
-
     "mission_why_title": "Neden IP WATⒸH AI?",
     "mission_why_desc": "Geleneksel marka araştırması yöntemleri zaman alıcı, maliyetli ve insana bağımlıydı. IP WATⒸH AI, yapay zeka teknolojileri ile bu süreci otomatikleştirerek dakikalar içinde kapsamlı risk analizi sunar. Görsel, metinsel ve çeviri benzerliklerini aynı anda analiz eden çok katmanlı yaklaşımımız, insan gözünden kaçabilecek riskleri ortaya çıkarır.",
-
     "footer_tagline": "Yapay zeka destekli marka risk analizi platformu.",
     "footer_product": "Ürün",
     "footer_contact": "İletişim",
     "footer_rights": "Tüm hakları saklıdır.",
     "selected_classes": "Seçilen Sınıflar"
   },
-
   "common": {
     "loading": "Yükleniyor...",
     "error": "Hata",
@@ -1044,13 +1086,12 @@
     "application_date": "Başvuru:",
     "just_now": "az önce",
     "ago": "once",
-    "back": "\u2190 Geri",
+    "back": "← Geri",
     "unlimited": "Limitsiz",
     "previous": "Önceki",
     "next": "Sonraki",
     "days": "gün"
   },
-
   "empty": {
     "search_title": "Marka Ara",
     "search_desc": "Benzer markalari bulmak ve risk degerlendirmesi yapmak için yukariya bir marka adı girin.",
@@ -1065,13 +1106,11 @@
     "dashboard_welcome": "IP WATⒸH AI'ye Hoşgeldiniz",
     "dashboard_desc": "Bir marka arayarak veya izleme listenize marka ekleyerek başlayın."
   },
-
   "duration": {
     "seconds": "{n}s",
     "minutes": "{n}dk",
     "hours": "{n}sa"
   },
-
   "extracted_goods": {
     "title": "Çıkarılmış Ürün/Hizmetler",
     "records_count": "({count} kayıt)",
@@ -1081,7 +1120,61 @@
     "label": "ÇIKARILMIŞ ÜRÜN:",
     "yes": "EVET"
   },
-
+  "events": {
+    "title": "Olay Geçmişi",
+    "health_card": "Sağlık Kartı",
+    "timeline": "Zaman Çizelgesi",
+    "no_events": "Bu marka için olay kaydı bulunamadı",
+    "loading": "Olaylar yükleniyor...",
+    "load_failed": "Olay verileri yüklenemedi",
+    "view_events": "Olaylar",
+    "effective_status": "Etkin Durum",
+    "current_status": "Kayıt Durumu",
+    "final_status": "Durum",
+    "holder": "Sahip",
+    "original_holder": "İlk Sahip",
+    "current_holder": "Güncel Sahip",
+    "holder_changed_at": "Devir Tarihi",
+    "restrictions": "Kısıtlamalar",
+    "active_restrictions": "Aktif Kısıtlama",
+    "no_restrictions": "Kısıtlama yok",
+    "renewal_expiry": "Yenileme Vade",
+    "expiry_date": "Bitiş Tarihi",
+    "last_event": "Son Olay",
+    "total_events": "Toplam Olay",
+    "severity_healthy": "Sağlıklı",
+    "severity_warning": "Dikkat",
+    "severity_critical": "Kritik",
+    "source_gz": "Resmi Gazete",
+    "source_blt": "Bülten",
+    "bulletin": "Bülten No",
+    "page": "Sayfa",
+    "old_value": "Eski Değer",
+    "new_value": "Yeni Değer",
+    "filter_all": "Tümü",
+    "show_more": "Daha Fazla",
+    "type_transfer": "Devir",
+    "type_merger": "Birleşme",
+    "type_partial_transfer": "Kısmi Devir",
+    "type_cancellation": "İptal",
+    "type_withdrawal": "Geri Çekme",
+    "type_renewal": "Yenileme",
+    "type_seizure": "Haciz",
+    "type_precautionary_seizure": "İhtiyati Haciz",
+    "type_injunction": "İhtiyati Tedbir",
+    "type_precautionary_injunction": "İhtiyati Tedbir",
+    "type_seizure_lift": "Haciz Kaldırma",
+    "type_injunction_lift": "Tedbir Kaldırma",
+    "type_restriction_lift": "Kısıtlama Kaldırma",
+    "type_license": "Lisans",
+    "type_bankruptcy": "İflas",
+    "type_correction": "Düzeltme",
+    "type_madrid_registration": "Madrid Tescil",
+    "type_madrid_renewal": "Madrid Yenileme",
+    "type_address_change": "Adres Değişikliği",
+    "type_name_change": "Unvan Değişikliği",
+    "type_class_change": "Sınıf Değişikliği"
+  },
   "nice_classes": {
     "1": "Kimyasal Ürünler",
     "2": "Boyalar",
@@ -1130,7 +1223,6 @@
     "45": "Hukuk",
     "99": "Global Marka"
   },
-
   "pricing": {
     "page_title": "Planlar - IP WATⒸH AI",
     "back_to_dashboard": "Dashboard'a Dön",
@@ -1168,7 +1260,8 @@
     "f_auto_scan": "Otomatik tarama",
     "f_weekly_scan": "Haftalık otomatik tarama ({n} marka)",
     "f_daily_scan": "Günlük otomatik tarama ({n} marka)",
-    "f_holder_portfolio": "Sahip portföyü",
+    "f_holder_portfolio": "Sahip/Vekil portföyü görüntüleme",
+    "f_download_portfolio": "Portföy indirme (sahip + vekil)",
     "f_leads_daily": "Opposition Radar ({n} lead/gun)",
     "f_unlimited_leads": "Opposition Radar (sınırsız)",
     "f_unlimited_searches": "Sınırsız hizli arama",
@@ -1191,7 +1284,6 @@
     "f_unlimited_ai_credits": "Sınırsız AI kredi",
     "f_unlimited_watchlist": "Sınırsız marka izleme",
     "f_unlimited_live": "Sınırsız canlı arama",
-    "f_unlimited_reports": "Sınırsız rapor + indirme",
     "f_unlimited_users": "Sınırsız kullanıcı",
     "f_unlimited_scan": "Sınırsız otomatik tarama",
     "faq_title": "Sıkça Sorulan Sorular",
@@ -1205,7 +1297,6 @@
     "faq_a4": "Banka havalesi ve kredi karti ile odeme yapabilirsiniz. Yıllık planlarda %20 indirim uygulanır.",
     "cta_start": "Başla"
   },
-
   "checkout": {
     "back": "Geri Dön",
     "step_account": "Hesap",
@@ -1257,7 +1348,6 @@
     "error_no_form": "Ödeme formu oluşturulamadi.",
     "error_activation_failed": "Plan etkinleştirme başarısız oldu."
   },
-
   "bookmarklet": {
     "title": "Tek tıkla Türk Patent sorgusu",
     "description": "Aşağıdaki butonu sürükleyip yer imlerinize bırakın. Sonra herhangi bir sonuç kartında 'TÜRKPATENT' butonuna tıklayın — açılan sayfada yer iminize tıklayın, başvuru numarası otomatik doldurulur.",
@@ -1268,7 +1358,6 @@
     "step2": "Sonuç kartında TÜRKPATENT butonuna tıklayın",
     "step3": "Açılan sayfada yer iminize tıklayın — otomatik sorgulama yapılır"
   },
-
   "applications": {
     "title": "Başvurular",
     "subtitle": "Marka tescil başvurularınızı yönetin",
@@ -1341,6 +1430,21 @@
     "application_type": "Başvuru Tipi",
     "type_registration": "Tescil",
     "type_appeal": "İtiraz",
-    "type_renewal": "Yenileme"
+    "type_renewal": "Yenileme",
+    "form_title_appeal": "Marka İtiraz Başvurusu",
+    "form_subtitle_appeal": "İtiraz detaylarını doldurun, uzmanlarımız TÜRKPATENT'e itiraz başvurusu yapacaktır.",
+    "section_appeal": "İtiraz Edilen Marka Bilgileri",
+    "appeal_target": "Çakışan Marka",
+    "appeal_target_app_no": "Başvuru No",
+    "appeal_target_holder": "Başvuru Sahibi",
+    "appeal_target_bulletin": "Bülten No",
+    "appeal_target_bulletin_date": "Bülten Tarihi",
+    "appeal_target_classes": "Çakışan Sınıflar",
+    "appeal_target_risk": "Risk Skoru",
+    "appeal_deadline_label": "İtiraz Son Tarihi",
+    "appeal_grounds": "İtiraz Gerekçeleri",
+    "appeal_grounds_ph": "Bu markaya itiraz gerekçelerinizi yazın (örn. görsel/fonetik benzerlik, aynı sınıflarda çakışma, önceki tescil hakkı...)",
+    "your_brand_label": "Sizin Markanız (İtiraz Eden)",
+    "auto_saved_draft": "Taslak otomatik kaydedildi"
   }
 }

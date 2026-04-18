@@ -260,7 +260,7 @@ window.AppComponents.renderNiceClassBadges = function(classes, maxShow) {
 
     if (remaining > 0) {
         var extraBadges = sorted.slice(maxShow).map(function(cls) {
-            return '<span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-indigo-50 text-indigo-600">' + cls + '</span>';
+            return "<span class='inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-indigo-50 text-indigo-600'>" + cls + "</span>";
         }).join('');
         html += '<span class="cursor-pointer text-xs text-blue-600 hover:text-blue-800 px-1" '
             + 'onclick="this.outerHTML=\'' + extraBadges.replace(/'/g, "\\'") + '\'">' + t('scores.more', {count: remaining}) + '</span>';
@@ -320,7 +320,7 @@ window.AppComponents.renderTurkpatentButton = function(applicationNo) {
         + 'class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs border hover:opacity-80 transition-colors min-h-[28px] cursor-pointer" '
         + 'style="background:var(--color-bg-muted);color:var(--color-text-muted);border-color:var(--color-border)" '
         + 'title="' + t('holder.turkpatent_hint').replace(/'/g, '&#39;') + '" aria-label="TURKPATENT">'
-        + 'TURKPATENT'
+        + 'TÜRKPATENT'
         + '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>'
         + '</button>'
         + '</div>';
@@ -334,6 +334,23 @@ var renderTurkpatentButton = window.AppComponents.renderTurkpatentButton;
 window.AppComponents.TURKPATENT_BOOKMARKLET = 'javascript:void((async()=>{try{var t=(await navigator.clipboard.readText()||"").trim();if(!t){alert("\\u00d6nce IP Watch AI\\u0027dan bir ba\\u015fvuru numaras\\u0131 kopyalay\\u0131n");return}var f=document.querySelectorAll("mat-form-field"),n;for(var i=0;i<f.length;i++){var l=f[i].querySelectorAll("mat-label,label");for(var j=0;j<l.length;j++)if(/ba.vuru/i.test(l[j].textContent)){n=f[i].querySelector("input");break}if(n)break}if(!n){var a=document.querySelectorAll("mat-form-field input");if(a.length)n=a[0]}if(!n){alert("Ba\\u015fvuru Numaras\\u0131 alan\\u0131 bulunamad\\u0131");return}var s=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set;s.call(n,t);n.dispatchEvent(new Event("input",{bubbles:!0}));n.dispatchEvent(new Event("change",{bubbles:!0}));n.focus();n.style.transition="background .3s";n.style.background="#c8e6c9";setTimeout(function(){n.style.background=""},1500);var b=document.querySelectorAll("button");for(var k=0;k<b.length;k++)if(/sorgula/i.test(b[k].textContent)){(function(x){setTimeout(function(){x.click()},400)})(b[k]);break}}catch(e){alert("\\u00d6nce IP Watch AI\\u0027dan bir ba\\u015fvuru numaras\\u0131 kopyalay\\u0131n")}})())';
 
 // ============================================
+// G3) renderEventsButton — opens event timeline modal
+// ============================================
+window.AppComponents.renderEventsButton = function(applicationNo) {
+    if (!applicationNo) return '';
+    var safeNo = (applicationNo || '').replace(/'/g, "\\'");
+    return '<button onclick="event.stopPropagation(); showEventsTimeline(\'' + safeNo + '\')" '
+        + 'class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs border hover:opacity-80 transition-colors min-h-[28px] cursor-pointer" '
+        + 'style="background:var(--color-bg-muted);color:var(--color-text-muted);border-color:var(--color-border)" '
+        + 'title="' + t('events.view_events') + '">'
+        + '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">'
+        + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>'
+        + '</svg>'
+        + t('events.view_events')
+        + '</button>';
+};
+
+// ============================================
 // H) VS Comparison Layout
 //    Side-by-side layout: [New App] -- VS Ring -- [Existing]
 // ============================================
@@ -344,24 +361,24 @@ window.AppComponents.renderVsComparison = function(opts) {
 
     // Build party card
     function buildPartyCard(party, borderColor, bgColor, labelKey) {
-        var thumb = window.AppComponents.renderThumbnail(party.image, party.name, party.app_no, 'w-20 h-20');
+        var thumb = window.AppComponents.renderThumbnail(party.image, party.name, party.app_no, 'w-14 h-14');
         var tp = window.AppComponents.renderTurkpatentButton(party.app_no);
         var classesHtml = party.classes ? window.AppComponents.renderNiceClassBadges(party.classes, 3) : '';
         var egHtml = '';
         if (party.has_extracted_goods && party.app_no) {
             var safeApp = (party.app_no || '').replace(/'/g, "\\'");
             egHtml = '<button onclick="event.stopPropagation(); showExtractedGoods(\'' + safeApp + '\', this)" '
-                + 'class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-200 cursor-pointer mt-1 btn-press min-h-[28px]">'
-                + t('extracted_goods.label') + ' <span class="underline">' + t('extracted_goods.yes') + '</span></button>';
+                + 'class="inline-block text-[10px] bg-yellow-100 text-yellow-800 px-1.5 py-0.5 rounded mt-1 btn-press">'
+                + t('extracted_goods.label') + ': ' + t('extracted_goods.yes') + '</button>';
         }
-        return '<div class="flex-1 min-w-0 rounded-xl p-4 border" style="background:' + bgColor + ';border-color:' + borderColor + '">'
-            + '<div class="text-xs font-semibold mb-2" style="color:' + borderColor + '">' + t(labelKey) + '</div>'
-            + '<div class="flex items-start gap-3">'
+        return '<div class="flex-1 min-w-0 rounded-xl p-3" style="background:' + bgColor + ';border-left:3px solid ' + borderColor + '">'
+            + '<div class="text-[10px] font-semibold mb-1.5 uppercase tracking-wide" style="color:' + borderColor + '">' + t(labelKey) + '</div>'
+            + '<div class="flex items-start gap-2">'
             + thumb
-            + '<div class="flex-1 min-w-0 space-y-1 text-sm">'
-            + '<div class="font-semibold truncate" style="color:var(--color-text-primary)">' + (party.name || t('common.na')) + '</div>'
+            + '<div class="flex-1 min-w-0 space-y-0.5">'
+            + '<div class="text-sm font-semibold truncate" style="color:var(--color-text-primary)">' + (party.name || t('common.na')) + '</div>'
             + tp
-            + '<div class="text-xs truncate" style="color:var(--color-text-faint)">' + (party.holder || t('leads.unknown_holder')) + '</div>'
+            + window.AppComponents.renderHolderLink(party.holder || null, null)
             + classesHtml
             + egHtml
             + '</div></div></div>';
@@ -373,9 +390,9 @@ window.AppComponents.renderVsComparison = function(opts) {
     // Score ring in center
     var ringHtml = window.AppComponents.renderScoreRing(scorePercent, ringSize);
 
-    return '<div class="vs-comparison flex items-stretch gap-0">'
+    return '<div class="vs-comparison w-full flex items-stretch justify-between gap-0">'
         + '<div class="flex-1 min-w-0">' + leftCard + '</div>'
-        + '<div class="flex flex-col items-center justify-center px-2 flex-shrink-0">'
+        + '<div class="flex flex-col items-center justify-center mx-2 flex-shrink-0">'
         + '<div class="mb-1">' + ringHtml + '</div>'
         + '<span class="text-xs font-bold" style="color:var(--color-text-faint)">VS</span>'
         + '</div>'

@@ -1,7 +1,6 @@
 {
   "dir": "ltr",
   "locale": "en",
-
   "nav": {
     "brand": "IP WATⒸH AI",
     "admin": "Admin",
@@ -12,7 +11,6 @@
     "more": "More",
     "refresh": "Refresh"
   },
-
   "profile": {
     "title": "My Profile",
     "email": "Email",
@@ -38,7 +36,6 @@
     "upload_photo": "Upload Photo",
     "change_photo": "Change Photo"
   },
-
   "verification": {
     "title": "Email Verification",
     "desc": "Enter the 6-digit code sent to your email to verify your account.",
@@ -51,7 +48,6 @@
     "resend_code": "Resend Code",
     "resend_cooldown": "Resend ({seconds}s)"
   },
-
   "tabs": {
     "overview": "Overview",
     "watchlist": "Watchlist",
@@ -63,7 +59,6 @@
     "pro": "PRO",
     "new": "NEW"
   },
-
   "search": {
     "placeholder": "Enter a trademark name... (e.g. Nike, Apple, Samsung)",
     "button": "Search",
@@ -83,11 +78,11 @@
     "recent_searches": "Recent Searches",
     "clear_history": "Clear",
     "search_failed": "Search failed",
-    "tagline": "Text \u2022 Visual \u2022 Phonetic \u2022 Semantic \u2022 Translation analysis",
+    "tagline": "Text • Visual • Phonetic • Semantic • Translation analysis",
     "mode_quick": "Quick Search",
     "mode_intelligent": "Intelligent Search",
-    "mode_quick_desc": "Database search \u2014 no credits used",
-    "mode_intelligent_desc": "Live TURKPATENT scan \u2014 uses credits",
+    "mode_quick_desc": "Database search — no credits used",
+    "mode_intelligent_desc": "Live TURKPATENT scan — uses credits",
     "results_found": "{count} results found",
     "results_found_db": "{count} results found (database)",
     "results_found_image": "{count} results found (incl. visual analysis). {credits}",
@@ -134,25 +129,22 @@
     "source_db": "Database",
     "source_live": "Live"
   },
-
   "sort": {
     "label": "Sort:",
-    "risk_desc": "Risk \u2193",
-    "risk_asc": "Risk \u2191",
+    "risk_desc": "Risk ↓",
+    "risk_asc": "Risk ↑",
     "date_desc": "Filed (Newest)",
     "date_asc": "Filed (Oldest)",
     "reset": "Reset",
     "results_count": "{count} results",
     "source_label": "Source:"
   },
-
   "pagination": {
-    "prev": "\u2190 Previous",
-    "next": "Next \u2192",
+    "prev": "← Previous",
+    "next": "Next →",
     "page": "Page {current}",
     "page_of": "Page {current} / {total}"
   },
-
   "dashboard": {
     "portfolio_size": "Portfolio Size",
     "critical_risks": "Critical Risks",
@@ -184,14 +176,16 @@
     "deadline_label": "Deadline:",
     "opposition_filing": "File Opposition",
     "no_active_deadlines": "No active deadlines.",
+    "renewal": "Renewal",
+    "no_active_renewals": "No active renewals.",
     "watchlist": "Watchlist",
     "loading": "Loading...",
     "not_run_yet": "Not yet run",
     "early_warning_banner": "{count} early warning(s): Unpublished applications detected. Your opposition period starts when the bulletin is published.",
     "early_warning_short": "{count} early warning(s): Unpublished applications detected.",
     "pre_pub_inline": "Early Detection: Not yet published. Opposition period begins when bulletin is published.",
-    "threats_label": "{brand} \u2014 Threats",
-    "remove_filter": "\u2715 Remove Filter",
+    "threats_label": "{brand} — Threats",
+    "remove_filter": "✕ Remove Filter",
     "threats_load_failed": "Failed to load threats",
     "watchlist_empty": "Watchlist is empty",
     "not_scanned": "Not scanned",
@@ -202,7 +196,6 @@
     "watchlist_items": "watchlist items",
     "total_alerts_label": "total alerts"
   },
-
   "pipeline": {
     "title": "Data Pipeline Status",
     "run_full": "Run Full",
@@ -236,7 +229,6 @@
     "currently_running": "Currently running...",
     "next_run_prefix": "Next:"
   },
-
   "chart": {
     "critical": "Critical (90%+)",
     "very_high": "Very High (80%+)",
@@ -244,7 +236,6 @@
     "medium": "Medium (50%+)",
     "low": "Low"
   },
-
   "risk_level": {
     "critical": "Critical",
     "very_high": "Very High",
@@ -252,7 +243,6 @@
     "medium": "Medium",
     "low": "Low"
   },
-
   "scores": {
     "text": "Text",
     "visual": "Visual",
@@ -283,7 +273,6 @@
     "search_time": "{seconds}s",
     "risk_assessment": "Risk Assessment"
   },
-
   "status": {
     "registered": "Registered",
     "published": "Published",
@@ -293,9 +282,11 @@
     "withdrawn": "Withdrawn",
     "expired": "Expired",
     "renewed": "Renewed",
-    "unknown": "Unknown"
+    "unknown": "Unknown",
+    "cancelled": "Cancelled",
+    "transferred": "Transferred",
+    "partial_refusal": "Partial Refusal"
   },
-
   "deadline": {
     "pre_publication": "Early Warning",
     "active_critical": "Critical",
@@ -316,25 +307,40 @@
     "deadline_approaching": "Opposition deadline approaching",
     "last_date": "Deadline:"
   },
-
   "opposition": {
-    "published": "Published",
-    "deadline": "Opposition Deadline",
-    "days_left": "{days} days left",
-    "expired": "Deadline passed",
-    "estimated": "(estimated)"
+    "title": "File Opposition",
+    "days_label": "{count} Days",
+    "approaching": "Opposition deadline approaching",
+    "last_date": "Deadline: {date}",
+    "conflicting_brand": "Conflicting Brand",
+    "watched_brand": "Watched Brand",
+    "risk_label": "Risk: {score}%",
+    "about_process": "About the Opposition Process",
+    "legal_1": "Pursuant to Decree Law No. 556, Art. 42, opposition must be filed within 2 months of the publication date.",
+    "legal_2": "Opposition can be filed in writing to TURKPATENT or through e-Government.",
+    "legal_3": "Do not forget to pay the opposition fee.",
+    "turkpatent_portal": "TURKPATENT Portal",
+    "send_lawyer": "Send to Lawyer",
+    "email_subject": "Trademark Opposition Filing - {brand}",
+    "email_greeting": "Dear Sir/Madam,",
+    "email_body_intro": "I would like to file an opposition against the following trademark application:",
+    "email_conflicting": "Conflicting Trademark:",
+    "email_app_no": "Application No:",
+    "email_watched": "Watched Trademark:",
+    "email_deadline": "Opposition Deadline:",
+    "email_risk": "Risk Score:",
+    "email_closing": "I kindly request your assistance."
   },
-
   "timeline": {
     "elapsed": "{days}/{total} days elapsed",
     "progress": "{pct}% complete"
   },
-
   "alerts": {
     "title": "Alert Detail",
     "acknowledge": "Acknowledge",
     "resolved": "Resolved",
     "dismiss": "Dismiss",
+    "file_opposition": "File Opposition",
     "watched_brand": "Watched Brand",
     "conflicting_brand": "Conflicting Brand",
     "overlapping_classes": "Overlapping Classes:",
@@ -364,39 +370,13 @@
     "acknowledged_at": "Acknowledged",
     "resolved_at": "Resolved"
   },
-
-  "opposition": {
-    "title": "File Opposition",
-    "days_label": "{count} Days",
-    "approaching": "Opposition deadline approaching",
-    "last_date": "Deadline: {date}",
-    "conflicting_brand": "Conflicting Brand",
-    "watched_brand": "Watched Brand",
-    "risk_label": "Risk: {score}%",
-    "about_process": "About the Opposition Process",
-    "legal_1": "Pursuant to Decree Law No. 556, Art. 42, opposition must be filed within 2 months of the publication date.",
-    "legal_2": "Opposition can be filed in writing to TURKPATENT or through e-Government.",
-    "legal_3": "Do not forget to pay the opposition fee.",
-    "turkpatent_portal": "TURKPATENT Portal",
-    "send_lawyer": "Send to Lawyer",
-    "email_subject": "Trademark Opposition Filing - {brand}",
-    "email_greeting": "Dear Sir/Madam,",
-    "email_body_intro": "I would like to file an opposition against the following trademark application:",
-    "email_conflicting": "Conflicting Trademark:",
-    "email_app_no": "Application No:",
-    "email_watched": "Watched Trademark:",
-    "email_deadline": "Opposition Deadline:",
-    "email_risk": "Risk Score:",
-    "email_closing": "I kindly request your assistance."
-  },
-
   "leads": {
     "title": "Opposition Radar",
     "subtitle": "Potential clients - Opposition service opportunities",
     "daily_credits": "Daily Credits:",
     "csv_download": "Download CSV",
-    "stat_critical": "Critical (\u22647 days)",
-    "stat_urgent": "Urgent (\u226414 days)",
+    "stat_critical": "Critical (≤7 days)",
+    "stat_urgent": "Urgent (≤14 days)",
     "stat_total": "Total Leads",
     "stat_converted": "Converted",
     "stat_upcoming": "Upcoming",
@@ -409,12 +389,12 @@
     "filter_class": "Class:",
     "filter_status": "Status:",
     "filter_all": "All",
-    "filter_critical": "Critical (\u22647 days)",
-    "filter_urgent": "Urgent (\u226414 days)",
-    "filter_soon": "Soon (\u226430 days)",
-    "filter_risk_critical": "Critical (\u226590%)",
-    "filter_risk_high": "High (\u226580%)",
-    "filter_risk_medium": "Medium (\u226570%)",
+    "filter_critical": "Critical (≤7 days)",
+    "filter_urgent": "Urgent (≤14 days)",
+    "filter_soon": "Soon (≤30 days)",
+    "filter_risk_critical": "Critical (≥90%)",
+    "filter_risk_high": "High (≥80%)",
+    "filter_risk_medium": "Medium (≥70%)",
     "filter_all_classes": "All Classes",
     "filter_new": "New",
     "filter_viewed": "Viewed",
@@ -472,9 +452,30 @@
     "col_holder": "Holder",
     "days_short": "{n}d",
     "total_results": "{count} results",
-    "page_of": "Page {current} / {total}"
+    "page_of": "Page {current} / {total}",
+    "mode_conflicts": "Conflicts",
+    "mode_renewals": "Renewals",
+    "renewals_title": "Renewal Radar",
+    "renewals_subtitle": "Trademarks approaching 10-year renewal deadline",
+    "renewal_grace": "Grace Period",
+    "renewal_critical": "Critical",
+    "renewal_urgent": "Urgent",
+    "renewal_total": "Total Renewals",
+    "renewal_upcoming": "Upcoming",
+    "renewals_empty": "No renewal leads found.",
+    "renewal_col_mark": "Trademark",
+    "renewal_col_holder": "Holder",
+    "renewal_col_expiry": "Expiry Date",
+    "renewal_col_days": "Days Remaining",
+    "renewal_grace_short": "Grace",
+    "renewal_critical_short": "Critical",
+    "renewal_urgent_short": "Urgent",
+    "renewal_upcoming_short": "Upcoming",
+    "renewal_grace_days": "{days}d in grace period",
+    "days_overdue": "{days}d overdue",
+    "days_left": "{days}d left",
+    "attorney": "Attorney"
   },
-
   "studio": {
     "name_lab": "Name Lab",
     "logo_studio": "Logo Studio",
@@ -492,10 +493,10 @@
     "name_gen_failed": "Name generation failed",
     "logo_gen_failed": "Logo generation failed",
     "history_failed": "Failed to load history",
-    "risky_name_cta": "This name is risky \u2014 Suggest safe alternatives",
-    "similar_logo_cta": "Similar logo \u2014 Create unique logo",
-    "safe_name_cta": "Low risk \u2014 Register this name",
-    "safe_logo_cta": "Logo is clear \u2014 Register your logo",
+    "risky_name_cta": "This name is risky — Suggest safe alternatives",
+    "similar_logo_cta": "Similar logo — Create unique logo",
+    "safe_name_cta": "Low risk — Register this name",
+    "safe_logo_cta": "Logo is clear — Register your logo",
     "safe_badge": "Safe",
     "risky_badge": "Risky",
     "phonetic_match": "Phonetic Match",
@@ -548,7 +549,6 @@
     "color_label": "Color",
     "logo_credits_info": "You have {total} logo credits remaining this month (monthly: {monthly}, extra: {purchased})"
   },
-
   "reports": {
     "title": "Reports",
     "remaining": "Remaining:",
@@ -590,7 +590,6 @@
     "download_upgrade": "Upgrade your plan to download reports",
     "creating": "Creating..."
   },
-
   "watchlist": {
     "add_title": "Add to Watchlist",
     "brand_name": "Brand Name",
@@ -672,6 +671,47 @@
     "scan_all_started": "Starting bulk scan...",
     "scan_all_queued": "Bulk scan started",
     "scan_all_failed": "Bulk scan failed",
+    "scan_all_confirm_title": "Scan All Trademarks",
+    "scan_all_items_count": "{count} trademarks will be scanned",
+    "scan_all_start": "Start Scan",
+    "scanning": "Scanning...",
+    "scan_est_label": "Estimated time:",
+    "scan_est_min": "minutes",
+    "scan_est_hour": "hours",
+    "scan_est_under_minute": "less than 1 minute",
+    "scan_completed_check": "Scan may be complete. Refresh the page to see updated results.",
+    "filter_threshold": "Risk Threshold",
+    "threshold_saved": "Threshold updated. Press 'Scan All' to apply.",
+    "threshold_error": "Could not update threshold.",
+    "filter_status": "Status",
+    "status_all": "All Statuses",
+    "status_new": "New",
+    "status_acknowledged": "Acknowledged",
+    "status_resolved": "Resolved",
+    "status_dismissed": "Dismissed",
+    "renewal_status_overdue": "Lapsed (past 10y+6m)",
+    "renewal_status_critical": "In Renewal Window (6 months)",
+    "renewal_status_approaching": "Approaching (within 1 year)",
+    "stat_renewal": "Renewal",
+    "stat_renewal_tooltip": "Switch to renewal view",
+    "view_all": "All",
+    "view_renewal": "Renewal",
+    "view_appeals": "Appeals",
+    "col_mark": "Mark",
+    "col_renewal_status": "Renewal Status",
+    "col_appeal_deadline": "Appeal Deadline",
+    "col_app_date": "Filed",
+    "col_expiry": "Expiry",
+    "col_deadline": "Deadline",
+    "col_active_conflicts": "active conflicts",
+    "nice_class_short": "Class",
+    "renewal_empty": "No marks requiring renewal found.",
+    "appeals_empty": "No marks with active appeal deadlines found.",
+    "renewal_badge": "10-Year Renewal",
+    "renewal_days_left": "days left",
+    "renewal_days_ago": "days overdue",
+    "renewal_today": "Expires today",
+    "renewal_expiry_title": "Expiry date:",
     "delete_all_title": "Delete all items",
     "delete_all_confirm": "Are you sure you want to delete all watchlist items? This cannot be undone!",
     "delete_all_confirm_2": "Are you sure? All watchlist items and alerts will be permanently deleted.",
@@ -705,6 +745,7 @@
     "filter_last_year": "Last year",
     "filter_bulletin": "Bulletin No",
     "filter_sort": "Sort",
+    "filter_tm_status": "Status",
     "sort_newest": "Newest",
     "sort_oldest": "Oldest",
     "sort_most_conflicts": "Most Conflicts",
@@ -732,12 +773,11 @@
     "conflicts": "conflicts",
     "page_info": "Page {current} / {total} ({count} items)"
   },
-
   "holder": {
     "title": "Trademark Portfolio",
     "loading": "Loading portfolio...",
-    "subtitle": "TPE No: {tpeId} \u2022 {count} trademark applications",
-    "loading_subtitle": "TPE No: {tpeId} \u2022 Loading...",
+    "subtitle": "TPE No: {tpeId} • {count} trademark applications",
+    "loading_subtitle": "TPE No: {tpeId} • Loading...",
     "total_trademarks": "Total Trademarks",
     "registered": "Registered",
     "pending": "Pending",
@@ -745,7 +785,7 @@
     "unnamed": "Unnamed",
     "search_placeholder": "Search trademark holder (min 2 characters)...",
     "search": "Search",
-    "back": "\u2190 Back",
+    "back": "← Back",
     "search_min_chars": "Enter at least 2 characters",
     "searching": "Searching...",
     "no_results": "No results found",
@@ -768,12 +808,11 @@
     "add_all_to_watchlist": "Watch All",
     "bulk_watchlist_result": "{created}/{total} trademarks added to watchlist"
   },
-
   "attorney": {
     "title": "Attorney Portfolio",
     "loading": "Loading portfolio...",
-    "subtitle": "Attorney No: {attorneyNo} \u2022 {count} trademark applications",
-    "loading_subtitle": "Attorney No: {attorneyNo} \u2022 Loading...",
+    "subtitle": "Attorney No: {attorneyNo} • {count} trademark applications",
+    "loading_subtitle": "Attorney No: {attorneyNo} • Loading...",
     "total_trademarks": "Total Trademarks",
     "registered": "Registered",
     "pending": "Pending",
@@ -781,7 +820,7 @@
     "label": "Attorney: ",
     "search_placeholder": "Search attorney (min 2 characters)...",
     "search": "Search",
-    "back": "\u2190 Back",
+    "back": "← Back",
     "search_min_chars": "Enter at least 2 characters",
     "searching": "Searching...",
     "no_results": "No results found",
@@ -793,7 +832,6 @@
     "search_pro_required": "Attorney search requires Professional plan",
     "close": "Close"
   },
-
   "upgrade": {
     "title": "Real-Time Data",
     "description": "Standard search uses bulletin data (may be up to 15 days old). Upgrade to Professional to pull real-time data from the TURKPATENT portal.",
@@ -805,7 +843,6 @@
     "maybe_later": "Maybe Later",
     "upgrade_button": "Upgrade"
   },
-
   "credits": {
     "title": "Search Credits Exhausted",
     "message": "You have used all your live search credits for this month.",
@@ -816,24 +853,25 @@
     "buy_subject": "Credit Purchase Request - {amount} credits",
     "buy_body": "Hello,\n\nI would like to purchase {amount} search credits.\n\nThank you."
   },
-
   "usage": {
     "resets": "Resets:",
     "max_searches": "Max Searches",
     "max_watchlist": "Max Watchlist",
     "max_users": "Max Users"
   },
-
   "agentic": {
     "title": "Live Research",
     "subtitle": "Scanning TURKPATENT portal...",
     "cancel": "Cancel",
     "starting": "> Starting agent: '{detail}'...",
     "db_search": "> Searching database: '{detail}'...",
+    "db_searching": "> Scanning database, please wait...",
     "db_search_done": "> Found {detail} candidates in database",
     "queued": "> Waiting in queue (position {detail})...",
     "scraping": "> Connecting to TurkPatent portal...",
     "scraping_done": "> Scraped {detail} records from TurkPatent",
+    "scrape_no_results": "> Connected to TurkPatent — no results found for '{detail}' (0 records)",
+    "character_fallback": "> Applying Turkish character substitution: {detail}",
     "scraping_failed": "> TurkPatent connection failed, using database results",
     "embeddings": "> Generating AI embeddings & translations ({detail} records)...",
     "embeddings_done": "> AI embeddings completed for {detail} records",
@@ -843,7 +881,6 @@
     "complete": "> Done! {detail} results found",
     "cancelled": "> Search cancelled by user"
   },
-
   "auth": {
     "session_expired": "Session expired. Please log in again.",
     "daily_limit": "You have reached your daily search limit.",
@@ -885,7 +922,6 @@
     "error_generic": "An error occurred. Please try again.",
     "register_success": "Registration successful! You can now sign in."
   },
-
   "landing": {
     "nav_search": "Search",
     "nav_features": "Features",
@@ -896,7 +932,7 @@
     "hero_title": "Protect Your Brand, Discover Risks",
     "hero_subtitle": "AI-powered trademark risk assessment for confident brand registration in the Turkish market.",
     "search_placeholder": "Enter a trademark name... (e.g. Nike, Apple, Samsung)",
-    "search_hint": "Text \u2022 Visual \u2022 Phonetic \u2022 Semantic \u2022 Translation analysis",
+    "search_hint": "Text • Visual • Phonetic • Semantic • Translation analysis",
     "ai_analysis_started": "AI analysis started...",
     "search_limit_reached": "Search limit reached. Sign up for free to get more.",
     "drop_logo_title": "Upload Logo",
@@ -923,10 +959,16 @@
     "detail_status": "Status",
     "status_registered": "Registered",
     "status_published": "Published",
-    "status_applied": "Applied",
-    "status_refused": "Refused",
+    "status_pending": "Applied",
+    "status_rejected": "Refused",
+    "status_cancelled": "Cancelled",
+    "status_expired": "Expired",
     "status_withdrawn": "Withdrawn",
+    "status_opposed": "Opposed",
     "status_renewed": "Renewed",
+    "status_partial_refusal": "Partial Refusal",
+    "status_transferred": "Transferred",
+    "status_unknown": "Unknown",
     "detail_extracted_goods": "Extracted Goods",
     "detail_extracted_goods_yes": "Yes",
     "detail_extracted_goods_no": "No",
@@ -983,7 +1025,6 @@
     "about_text": "IP WATⒸH AI is Turkey's leading AI-powered trademark risk analysis platform. We provide comprehensive similarity analysis using advanced AI models such as CLIP, DINOv2, and MiniLM on TURKPATENT data.",
     "mission_title": "Our Mission",
     "mission_text": "To democratize trademark registration processes with artificial intelligence and enable businesses of all sizes to effectively protect their intellectual property rights.",
-
     "about_services_title": "Our Services",
     "about_svc_search_title": "AI Trademark Search",
     "about_svc_search_desc": "Comprehensive trademark research across our database and live TURKPATENT system using text, logo images, and Nice class combinations. Logo similarity via CLIP and DINOv2 visual models, text similarity via MiniLM, and translation similarity analysis via NLLB-200.",
@@ -993,7 +1034,6 @@
     "about_svc_watchlist_desc": "Add your brands and competitors to the watchlist. When new bulletins are published, AI models automatically scan and report similar applications with risk scores.",
     "about_svc_studio_title": "AI Studio",
     "about_svc_studio_desc": "Get AI-powered safe brand name suggestions with low similarity to existing trademarks and high registration potential. AI-assisted visual suggestions for logo design.",
-
     "about_tech_title": "AI Technologies Used",
     "about_tech_clip": "OpenAI's multimodal model for logo and visual similarity analysis",
     "about_tech_dino": "Meta's self-supervised learning model for visual feature extraction",
@@ -1001,13 +1041,10 @@
     "about_tech_nllb": "Translation model supporting 200 languages for cross-lingual trademark similarity detection",
     "about_tech_ocr": "Text extraction and comparison from logo images",
     "about_tech_pgvector": "High-performance vector similarity search on PostgreSQL",
-
     "about_data_title": "Data Source",
     "about_data_desc": "All our data is sourced from official TURKPATENT bulletins and gazettes. Our database is regularly updated and new applications are automatically processed by AI models.",
-
     "mission_vision_title": "Our Vision",
     "mission_vision_text": "To transform intellectual property protection processes in Turkey and the region with cutting-edge AI technologies. To create an ecosystem where every business — from small entrepreneurs to large corporations — can effectively and affordably protect their brand.",
-
     "mission_values_title": "Our Values",
     "mission_val1_title": "Innovation",
     "mission_val1_desc": "We set industry standards in trademark similarity analysis using the latest AI models (CLIP, DINOv2, MiniLM, NLLB-200). We continuously improve our platform through research and development.",
@@ -1017,17 +1054,14 @@
     "mission_val3_desc": "We offer brand protection services at affordable prices not just for large companies, but for businesses of all sizes. Everyone can try our platform with the free search feature.",
     "mission_val4_title": "Multilingual",
     "mission_val4_desc": "Regional accessibility with Turkish, English, and Arabic interface support. Thanks to the NLLB-200 model, we can detect trademark translation similarities across 200 languages.",
-
     "mission_why_title": "Why IP WATⒸH AI?",
     "mission_why_desc": "Traditional trademark research methods were time-consuming, expensive, and human-dependent. IP WATⒸH AI automates this process with AI technologies, delivering comprehensive risk analysis in minutes. Our multi-layered approach analyzing visual, textual, and translation similarities simultaneously uncovers risks that could escape the human eye.",
-
     "footer_tagline": "AI-powered trademark risk analysis platform.",
     "footer_product": "Product",
     "footer_contact": "Contact",
     "footer_rights": "All rights reserved.",
     "selected_classes": "Selected Classes"
   },
-
   "common": {
     "loading": "Loading...",
     "error": "Error",
@@ -1047,13 +1081,12 @@
     "application_date": "Filed:",
     "just_now": "just now",
     "ago": "ago",
-    "back": "\u2190 Back",
+    "back": "← Back",
     "unlimited": "Unlimited",
     "previous": "Previous",
     "next": "Next",
     "days": "days"
   },
-
   "empty": {
     "search_title": "Search for Trademarks",
     "search_desc": "Enter a brand name above to find similar trademarks and assess risk.",
@@ -1068,13 +1101,11 @@
     "dashboard_welcome": "Welcome to IP WATⒸH AI",
     "dashboard_desc": "Start by searching for a trademark or adding brands to your watchlist."
   },
-
   "duration": {
     "seconds": "{n}s",
     "minutes": "{n}m",
     "hours": "{n}h"
   },
-
   "extracted_goods": {
     "title": "Extracted Goods/Services",
     "records_count": "({count} records)",
@@ -1084,7 +1115,61 @@
     "label": "EXTRACTED GOODS:",
     "yes": "YES"
   },
-
+  "events": {
+    "title": "Event History",
+    "health_card": "Health Card",
+    "timeline": "Timeline",
+    "no_events": "No events found for this trademark",
+    "loading": "Loading events...",
+    "load_failed": "Failed to load event data",
+    "view_events": "Events",
+    "effective_status": "Effective Status",
+    "current_status": "Registration Status",
+    "final_status": "Status",
+    "holder": "Holder",
+    "original_holder": "Original Holder",
+    "current_holder": "Current Holder",
+    "holder_changed_at": "Transfer Date",
+    "restrictions": "Restrictions",
+    "active_restrictions": "Active Restriction",
+    "no_restrictions": "No restrictions",
+    "renewal_expiry": "Renewal Expiry",
+    "expiry_date": "Expiry Date",
+    "last_event": "Last Event",
+    "total_events": "Total Events",
+    "severity_healthy": "Healthy",
+    "severity_warning": "Warning",
+    "severity_critical": "Critical",
+    "source_gz": "Official Gazette",
+    "source_blt": "Bulletin",
+    "bulletin": "Bulletin No",
+    "page": "Page",
+    "old_value": "Old Value",
+    "new_value": "New Value",
+    "filter_all": "All",
+    "show_more": "Load More",
+    "type_transfer": "Transfer",
+    "type_merger": "Merger",
+    "type_partial_transfer": "Partial Transfer",
+    "type_cancellation": "Cancellation",
+    "type_withdrawal": "Withdrawal",
+    "type_renewal": "Renewal",
+    "type_seizure": "Seizure",
+    "type_precautionary_seizure": "Precautionary Seizure",
+    "type_injunction": "Injunction",
+    "type_precautionary_injunction": "Precautionary Injunction",
+    "type_seizure_lift": "Seizure Lift",
+    "type_injunction_lift": "Injunction Lift",
+    "type_restriction_lift": "Restriction Lift",
+    "type_license": "License",
+    "type_bankruptcy": "Bankruptcy",
+    "type_correction": "Correction",
+    "type_madrid_registration": "Madrid Registration",
+    "type_madrid_renewal": "Madrid Renewal",
+    "type_address_change": "Address Change",
+    "type_name_change": "Name Change",
+    "type_class_change": "Class Change"
+  },
   "nice_classes": {
     "1": "Chemical Products",
     "2": "Paints",
@@ -1133,7 +1218,6 @@
     "45": "Legal Services",
     "99": "Global Brand"
   },
-
   "pricing": {
     "page_title": "Plans - IP WATⒸH AI",
     "back_to_dashboard": "Back to Dashboard",
@@ -1171,7 +1255,8 @@
     "f_auto_scan": "Auto scan",
     "f_weekly_scan": "Weekly auto scan ({n} trademarks)",
     "f_daily_scan": "Daily auto scan ({n} trademarks)",
-    "f_holder_portfolio": "Holder portfolio",
+    "f_holder_portfolio": "Holder/Attorney portfolio view",
+    "f_download_portfolio": "Portfolio download (holder + attorney)",
     "f_leads_daily": "Opposition Radar ({n} leads/day)",
     "f_unlimited_leads": "Opposition Radar (unlimited)",
     "f_unlimited_searches": "Unlimited quick searches",
@@ -1194,7 +1279,6 @@
     "f_unlimited_ai_credits": "Unlimited AI credits",
     "f_unlimited_watchlist": "Unlimited watchlist items",
     "f_unlimited_live": "Unlimited live searches",
-    "f_unlimited_reports": "Unlimited reports + download",
     "f_unlimited_users": "Unlimited users",
     "f_unlimited_scan": "Unlimited auto scan",
     "faq_title": "Frequently Asked Questions",
@@ -1208,7 +1292,6 @@
     "faq_a4": "You can pay via bank transfer or credit card. Annual plans receive a 20% discount.",
     "cta_start": "Get Started"
   },
-
   "checkout": {
     "back": "Go Back",
     "step_account": "Account",
@@ -1260,7 +1343,6 @@
     "error_no_form": "Could not create payment form.",
     "error_activation_failed": "Plan activation failed."
   },
-
   "bookmarklet": {
     "title": "One-click TurkPatent lookup",
     "description": "Drag the button below to your bookmarks bar. Then click 'TURKPATENT' on any result card — on the opened page, click your bookmark and the application number is auto-filled.",
@@ -1271,7 +1353,6 @@
     "step2": "Click TURKPATENT on a result card",
     "step3": "Click the bookmark on the opened page — auto-search runs"
   },
-
   "applications": {
     "title": "Applications",
     "subtitle": "Manage your trademark registration applications",
@@ -1344,6 +1425,21 @@
     "application_type": "Application Type",
     "type_registration": "Registration",
     "type_appeal": "Appeal",
-    "type_renewal": "Renewal"
+    "type_renewal": "Renewal",
+    "form_title_appeal": "Trademark Opposition Filing",
+    "form_subtitle_appeal": "Fill in the opposition details and our specialists will file it with TURKPATENT.",
+    "section_appeal": "Opposed Trademark Details",
+    "appeal_target": "Conflicting Mark",
+    "appeal_target_app_no": "Application No",
+    "appeal_target_holder": "Applicant / Holder",
+    "appeal_target_bulletin": "Bulletin No",
+    "appeal_target_bulletin_date": "Bulletin Date",
+    "appeal_target_classes": "Conflicting Classes",
+    "appeal_target_risk": "Risk Score",
+    "appeal_deadline_label": "Opposition Deadline",
+    "appeal_grounds": "Grounds for Opposition",
+    "appeal_grounds_ph": "State your grounds for opposition (e.g. visual/phonetic similarity, conflict in same classes, prior registration rights...)",
+    "your_brand_label": "Your Brand (Opposing Party)",
+    "auto_saved_draft": "Draft auto-saved"
   }
 }

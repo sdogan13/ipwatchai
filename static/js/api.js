@@ -6,19 +6,16 @@ window.AppAPI = window.AppAPI || {};
 // ============================================
 // QUICK (DB-ONLY) SEARCH
 // ============================================
-window.AppAPI.handleQuickSearch = async function() {
+window.AppAPI.handleQuickSearch = async function () {
     var input = document.getElementById('search-input');
     var query = (input && input.value || '').trim();
     if (!query) { showToast(t('search.enter_brand_name'), 'error'); return; }
 
     var classes = getSelectedNiceClasses();
-    var statusEl = document.getElementById('status-filter');
-    var statusVal = statusEl ? statusEl.value : '';
     var attorneyEl = document.getElementById('attorney-filter-value');
     var attorneyVal = attorneyEl ? attorneyEl.value : '';
     var url = '/api/v1/search/quick?query=' + encodeURIComponent(query);
     if (classes.length) url += '&classes=' + classes.join(',');
-    if (statusVal) url += '&status=' + encodeURIComponent(statusVal);
     if (attorneyVal) url += '&attorney_no=' + encodeURIComponent(attorneyVal);
 
     try {
@@ -27,7 +24,7 @@ window.AppAPI.handleQuickSearch = async function() {
         });
         if (res.status === 401) { showToast(t('auth.session_expired'), 'error'); return; }
         if (res.status === 429) {
-            var errData = await res.json().catch(function() { return {}; });
+            var errData = await res.json().catch(function () { return {}; });
             var msg = (errData.detail && errData.detail.message) || t('auth.daily_limit');
             showToast(msg, 'warning');
             return;
@@ -36,7 +33,7 @@ window.AppAPI.handleQuickSearch = async function() {
         var data = await res.json();
         currentSearchType = 'quick';
         displayAgenticResults(data);
-        showToast(t('search.results_found_db', { count: data.total || 0 }), 'success');
+        showToast(t('search.results_found_db', { count: Math.min(data.total || 0, 30) }), 'success');
     } catch (e) {
         console.error('Quick search error:', e);
         showToast(t('common.error') + ': ' + e.message, 'error');
@@ -46,14 +43,12 @@ window.AppAPI.handleQuickSearch = async function() {
 // ============================================
 // AGENTIC (LIVE) SEARCH
 // ============================================
-window.AppAPI.handleAgenticSearch = async function() {
+window.AppAPI.handleAgenticSearch = async function () {
     var input = document.getElementById('search-input');
     var query = (input && input.value || '').trim();
     if (!query) { showToast(t('search.enter_brand_name'), 'error'); return; }
 
     var classes = getSelectedNiceClasses();
-    var statusEl = document.getElementById('status-filter');
-    var statusVal = statusEl ? statusEl.value : '';
     var attorneyEl = document.getElementById('attorney-filter-value');
     var attorneyVal = attorneyEl ? attorneyEl.value : '';
     var imageInput = document.getElementById('search-image');
@@ -73,7 +68,6 @@ window.AppAPI.handleAgenticSearch = async function() {
             formData.append('query', query);
             formData.append('image', imageFile);
             if (classes.length) formData.append('classes', classes.join(','));
-            if (statusVal) formData.append('status', statusVal);
             if (attorneyVal) formData.append('attorney_no', attorneyVal);
 
             res = await fetch('/api/v1/search/intelligent', {
@@ -86,7 +80,6 @@ window.AppAPI.handleAgenticSearch = async function() {
             // GET without image (backward compatible)
             var url = '/api/v1/search/intelligent?query=' + encodeURIComponent(query);
             if (classes.length) url += '&classes=' + classes.join(',');
-            if (statusVal) url += '&status=' + encodeURIComponent(statusVal);
             if (attorneyVal) url += '&attorney_no=' + encodeURIComponent(attorneyVal);
 
             res = await fetch(url, {
@@ -111,8 +104,8 @@ window.AppAPI.handleAgenticSearch = async function() {
             ? t('search.credits_remaining', { count: data.credits_remaining })
             : t('search.from_database');
         var resultMsg = data.image_used
-            ? t('search.results_found_image', { count: data.total || 0, credits: creditsMsg })
-            : t('search.results_found', { count: data.total || 0 }) + '. ' + creditsMsg;
+            ? t('search.results_found_image', { count: Math.min(data.total || 0, 30), credits: creditsMsg })
+            : t('search.results_found', { count: Math.min(data.total || 0, 30) }) + '. ' + creditsMsg;
         showToast(resultMsg, 'success');
 
     } catch (e) {
@@ -127,7 +120,7 @@ window.AppAPI.handleAgenticSearch = async function() {
 // ============================================
 // OPPOSITION RADAR - LEADS
 // ============================================
-window.AppAPI.loadLeadStats = async function() {
+window.AppAPI.loadLeadStats = async function () {
     try {
         var response = await fetch('/api/v1/leads/stats', {
             headers: { 'Authorization': 'Bearer ' + getAuthToken() }
@@ -185,7 +178,7 @@ window.AppAPI.loadLeadStats = async function() {
     }
 };
 
-window.AppAPI.loadLeadCredits = async function() {
+window.AppAPI.loadLeadCredits = async function () {
     try {
         var response = await fetch('/api/v1/leads/credits', {
             headers: { 'Authorization': 'Bearer ' + getAuthToken() }
@@ -219,7 +212,7 @@ window.AppAPI.loadLeadCredits = async function() {
     }
 };
 
-window.AppAPI.loadLeadFeed = async function(page) {
+window.AppAPI.loadLeadFeed = async function (page) {
     if (page === undefined) page = 1;
     currentLeadPage = page;
 
@@ -243,7 +236,7 @@ window.AppAPI.loadLeadFeed = async function(page) {
 
     var url = '/api/v1/leads/feed?page=' + page + '&limit=' + LEADS_PER_PAGE;
     if (urgency) url += '&urgency=' + urgency;
-    if (risk) url += '&risk_level=' + risk;
+    if (risk) url += '&min_score=' + risk;
     if (niceClass) url += '&nice_class=' + niceClass;
     if (status) url += '&status=' + status;
     if (search) url += '&search=' + encodeURIComponent(search);
@@ -293,7 +286,232 @@ window.AppAPI.loadLeadFeed = async function(page) {
     }
 };
 
-window.AppAPI.showLeadDetail = async function(leadId) {
+// ============================================
+// RENEWAL LEADS
+// ============================================
+
+var currentRenewalPage = 1;
+var currentRadarMode = 'conflicts';
+
+window.AppAPI.switchRadarMode = function (mode) {
+    currentRadarMode = mode;
+    var conflictsBtn = document.getElementById('radar-mode-conflicts');
+    var renewalsBtn = document.getElementById('radar-mode-renewals');
+    var conflictsSection = document.getElementById('radar-conflicts-section');
+    var renewalsSection = document.getElementById('radar-renewals-section');
+
+    if (mode === 'renewals') {
+        conflictsBtn.style.background = 'transparent';
+        conflictsBtn.style.color = 'var(--color-text-secondary)';
+        renewalsBtn.style.background = 'var(--color-primary)';
+        renewalsBtn.style.color = 'white';
+        conflictsSection.classList.add('hidden');
+        renewalsSection.classList.remove('hidden');
+        loadRenewalStats();
+        loadRenewalFeed(1);
+    } else {
+        renewalsBtn.style.background = 'transparent';
+        renewalsBtn.style.color = 'var(--color-text-secondary)';
+        conflictsBtn.style.background = 'var(--color-primary)';
+        conflictsBtn.style.color = 'white';
+        renewalsSection.classList.add('hidden');
+        conflictsSection.classList.remove('hidden');
+    }
+};
+
+window.AppAPI.loadRenewalStats = async function () {
+    try {
+        var response = await fetch('/api/v1/leads/renewals/stats', {
+            headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+        });
+        if (!response.ok) return;
+
+        var stats = await response.json();
+        var graceEl = document.getElementById('renewal-stat-grace');
+        var criticalEl = document.getElementById('renewal-stat-critical');
+        var urgentEl = document.getElementById('renewal-stat-urgent');
+        var totalEl = document.getElementById('renewal-stat-total');
+
+        if (graceEl) graceEl.textContent = stats.grace_period || 0;
+        if (criticalEl) criticalEl.textContent = stats.critical || 0;
+        if (urgentEl) urgentEl.textContent = stats.urgent || 0;
+        if (totalEl) totalEl.textContent = stats.total || 0;
+    } catch (error) {
+        console.error('Failed to load renewal stats:', error);
+    }
+};
+
+window.AppAPI.loadRenewalFeed = async function (page) {
+    if (page === undefined) page = 1;
+    currentRenewalPage = page;
+
+    var container = document.getElementById('renewal-feed-cards');
+    var loading = document.getElementById('renewal-feed-loading');
+    var empty = document.getElementById('renewal-feed-empty');
+    var pagination = document.getElementById('renewal-pagination');
+
+    loading.classList.remove('hidden');
+    container.innerHTML = '';
+    container.classList.add('hidden');
+    empty.classList.add('hidden');
+
+    var urgency = document.getElementById('filter-renewal-urgency').value;
+    var niceClass = document.getElementById('filter-renewal-nice-class').value;
+    var searchEl = document.getElementById('filter-renewal-search');
+    var search = searchEl ? searchEl.value.trim() : '';
+
+    var url = '/api/v1/leads/renewals/feed?page=' + page + '&limit=' + LEADS_PER_PAGE;
+    if (urgency) url += '&urgency=' + urgency;
+    if (niceClass) url += '&nice_class=' + niceClass;
+    if (search) url += '&search=' + encodeURIComponent(search);
+
+    try {
+        var response = await fetch(url, {
+            headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+        });
+
+        loading.classList.add('hidden');
+
+        if (response.status === 403) { showLeadUpgradePrompt(); return; }
+        if (!response.ok) throw new Error('Failed to load renewals');
+
+        var data = await response.json();
+        var items = data.items || [];
+        var totalCount = data.total_count != null ? data.total_count : items.length;
+
+        if (items.length === 0) {
+            empty.classList.remove('hidden');
+            pagination.classList.add('hidden');
+            return;
+        }
+
+        container.innerHTML = items.map(renderRenewalCard).join('');
+        container.classList.remove('hidden');
+
+        var totalPages = Math.ceil(totalCount / LEADS_PER_PAGE);
+        pagination.classList.remove('hidden');
+
+        var totalInfoEl = document.getElementById('renewal-total-info');
+        if (totalInfoEl) totalInfoEl.textContent = t('leads.total_results', { count: totalCount });
+        document.getElementById('renewal-page-info').textContent = t('leads.page_of', { current: page, total: totalPages });
+        document.getElementById('renewal-prev-btn').disabled = page === 1;
+        document.getElementById('renewal-next-btn').disabled = page >= totalPages;
+
+    } catch (error) {
+        loading.classList.add('hidden');
+        console.error('Failed to load renewals:', error);
+        showToast(t('leads.load_error'), 'error');
+    }
+};
+
+function renderRenewalCard(item) {
+    var urgencyMap = {
+        'grace_period': { riskLevel: 'critical', label: t('leads.renewal_grace_short') || 'EK SÜRE' },
+        'critical':     { riskLevel: 'high',     label: t('leads.renewal_critical_short') || 'KRİTİK' },
+        'urgent':       { riskLevel: 'medium',   label: t('leads.renewal_urgent_short') || 'ACİL' },
+        'upcoming':     { riskLevel: 'low',      label: t('leads.renewal_upcoming_short') || 'YAKLAŞAN' }
+    };
+    var um = urgencyMap[item.urgency_level] || { riskLevel: 'low', label: '-' };
+
+    // Urgency badge (top-right, replaces score ring)
+    var urgencyColor = window.AppComponents.getScoreColor(
+        um.riskLevel === 'critical' ? 95 : um.riskLevel === 'high' ? 85 : um.riskLevel === 'medium' ? 60 : 30
+    );
+    var days = item.days_until_expiry;
+    var daysDisplay = '';
+    if (days < 0) {
+        var graceDays = item.grace_days_remaining;
+        daysDisplay = graceDays != null
+            ? t('leads.renewal_grace_days', { days: graceDays })
+            : t('leads.days_overdue', { days: Math.abs(days) });
+    } else {
+        daysDisplay = t('leads.days_left', { days: days });
+    }
+    var urgencyBadge = '<div class="flex flex-col items-center gap-1 flex-shrink-0">'
+        + '<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold" style="' + urgencyColor + '">' + um.label + '</span>'
+        + '<span class="text-xs font-medium" style="color:' + (days < 0 ? 'var(--color-risk-critical-text)' : 'var(--color-text-secondary)') + '">' + daysDisplay + '</span>'
+        + '</div>';
+
+    // Reuse shared components
+    var thumbnail = window.AppComponents.renderThumbnail(item.image_path, item.name, item.application_no);
+    var classBadges = window.AppComponents.renderNiceClassBadges(item.nice_classes);
+    var turkpatentBtn = window.AppComponents.renderTurkpatentButton(item.application_no);
+    var regNo = window.AppComponents.renderRegistrationNo(item.registration_no);
+    var holderLink = window.AppComponents.renderHolderLink(item.holder_name, item.holder_tpe_client_id || null);
+    var attorneyLink = window.AppComponents.renderAttorneyLink(item.attorney_name, item.attorney_no);
+    var eventsBtn = window.AppComponents.renderEventsButton(item.application_no);
+
+    // Status badge
+    var statusHtml = '<span class="text-xs px-2 py-0.5 rounded-full font-medium" style="color:' + getStatusColor(item.status) + ';background:' + getStatusBg(item.status) + '">' + getStatusText(item.status) + '</span>';
+
+    // Expiry date line
+    var expiryHtml = item.expiry_date
+        ? '<div class="text-xs mt-0.5" style="color:var(--color-text-faint)">'
+            + '<svg class="w-3 h-3 inline-block mr-0.5 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>'
+            + t('leads.renewal_col_expiry') + ': ' + formatDateTRShort(item.expiry_date)
+            + '</div>'
+        : '';
+
+    // Application date line
+    var appDateHtml = item.application_date
+        ? '<div class="text-xs" style="color:var(--color-text-faint)">' + t('common.application_date') + ' ' + formatDateTRShort(item.application_date) + '</div>'
+        : '';
+
+    var inner = '<div class="flex justify-between items-start gap-4">'
+        + '<div class="flex items-start gap-3 flex-1 min-w-0">'
+        + thumbnail
+        + '<div class="flex-1 min-w-0">'
+        + '<div class="font-semibold truncate" style="color:var(--color-text-primary)">' + escapeHtml(item.name || '-') + '</div>'
+        + '<div class="mt-0.5">' + statusHtml + '</div>'
+        + appDateHtml
+        + expiryHtml
+        + classBadges
+        + turkpatentBtn
+        + regNo
+        + holderLink
+        + attorneyLink
+        + '<div class="mt-1">' + eventsBtn + '</div>'
+        + '</div>'
+        + '</div>'
+        + urgencyBadge
+        + '</div>';
+
+    return window.AppComponents.renderCardShell(inner, { riskLevel: um.riskLevel });
+}
+
+window.AppAPI.exportRenewalsCSV = async function () {
+    try {
+        var urgency = document.getElementById('filter-renewal-urgency').value;
+        var niceClass = document.getElementById('filter-renewal-nice-class').value;
+        var url = '/api/v1/leads/renewals/export/csv?';
+        if (urgency) url += 'urgency=' + urgency + '&';
+        if (niceClass) url += 'nice_class=' + niceClass + '&';
+
+        var response = await fetch(url, {
+            headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+        });
+        if (response.status === 403) {
+            showToast(t('leads.csv_enterprise_only') || 'CSV export sadece Enterprise plan icin', 'warning');
+            return;
+        }
+        if (!response.ok) throw new Error('Export failed');
+
+        var blob = await response.blob();
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'renewals_' + new Date().toISOString().slice(0, 10) + '.csv';
+        a.click();
+    } catch (error) {
+        showToast(t('common.error') + ': ' + error.message, 'error');
+    }
+};
+
+var switchRadarMode = window.AppAPI.switchRadarMode;
+var loadRenewalStats = window.AppAPI.loadRenewalStats;
+var loadRenewalFeed = window.AppAPI.loadRenewalFeed;
+var exportRenewalsCSV = window.AppAPI.exportRenewalsCSV;
+
+window.AppAPI.showLeadDetail = async function (leadId) {
     currentLeadId = leadId;
     var modal = document.getElementById('lead-detail-modal');
     var content = document.getElementById('lead-detail-content');
@@ -313,16 +531,20 @@ window.AppAPI.showLeadDetail = async function(leadId) {
 
         var riskColorClass = window.AppComponents.getRiskColorClass(lead.risk_level);
 
-        var reasonsHtml = '';
+        // Conflict reason pills (shown in footer)
+        var reasonPills = '';
         if (lead.conflict_reasons && lead.conflict_reasons.length) {
-            reasonsHtml = '<div class="bg-gray-50 rounded-xl p-4 border border-gray-200">'
-                + '<div class="text-gray-600 font-semibold mb-2 text-sm">' + t('leads.conflict_reasons') + '</div>'
-                + '<ul class="space-y-1">'
-                + lead.conflict_reasons.map(function(r) { return '<li class="text-sm text-gray-700 flex items-center gap-2"><span class="text-amber-500">&bull;</span> ' + r + '</li>'; }).join('')
-                + '</ul></div>';
+            reasonPills = lead.conflict_reasons.map(function (r) {
+                return '<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full" style="background:var(--color-bg-muted);color:var(--color-text-secondary)">'
+                    + '<span style="color:var(--color-risk-medium-text)">&#8226;</span> ' + r + '</span>';
+            }).join('');
         }
 
-        // Build VS comparison layout
+        // Risk badge style
+        var riskLabel = (lead.risk_level || '').replace('_', ' ');
+        var riskBadgeStyle = window.AppComponents.getRiskBadgeSmall(lead.risk_level);
+
+        // VS comparison (borderless cards via updated renderVsComparison)
         var vsHtml = window.AppComponents.renderVsComparison({
             scorePercent: scorePercent,
             ringSize: 56,
@@ -344,20 +566,40 @@ window.AppAPI.showLeadDetail = async function(leadId) {
             }
         });
 
-        content.innerHTML = '<div class="space-y-5">'
-            + '<div class="text-center">'
-            + '<span class="inline-block text-xs font-medium px-2.5 py-0.5 rounded-full" style="'
-            + window.AppComponents.getRiskBadgeSmall(lead.risk_level)
-            + '">' + lead.risk_level + ' ' + t('scores.risk_suffix') + '</span>'
-            + '<div class="flex justify-center mt-2">' + window.AppComponents.renderSimilarityBadges(lead) + '</div>'
+        // Timeline bar only (no duplicate bordered box)
+        var timelineHtml = window.AppComponents.renderTimelineBar(lead.bulletin_date, lead.opposition_deadline);
+
+        content.innerHTML = '<div class="space-y-4">'
+
+            // ── TOP: Risk badge + score bars (left) │ Timeline (right) ──
+            + '<div class="flex gap-4 items-start">'
+            +   '<div class="flex-1 min-w-0 space-y-2">'
+            +     '<span class="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-bold border" style="' + riskBadgeStyle + '">'
+            +       riskLabel + ' ' + t('scores.risk_suffix')
+            +     '</span>'
+            +     window.AppComponents.renderSimilarityBadges(lead)
+            +   '</div>'
+            +   (timelineHtml
+                  ? '<div class="flex-shrink-0" style="min-width:155px;max-width:185px">' + timelineHtml + '</div>'
+                  : '')
             + '</div>'
-            + window.AppComponents.renderTimelineBar(lead.bulletin_date, lead.opposition_deadline)
-            + window.AppComponents.renderOppositionTimeline(lead.bulletin_date, lead.opposition_deadline)
+
+            // ── MIDDLE: VS Comparison ──
             + vsHtml
-            + reasonsHtml
-            + '<div class="text-sm text-gray-400 text-center">'
-            + t('leads.bulletin_label') + ' ' + (lead.bulletin_no || t('common.na')) + ' &bull; ' + t('leads.date_label') + ' ' + (lead.bulletin_date || t('common.na')) + ' &bull; ' + t('leads.type_label') + ' ' + lead.conflict_type
-            + '</div></div>';
+
+            // ── BOTTOM: Reasons + Metadata in one clean footer ──
+            + '<div class="pt-3 space-y-2" style="border-top:1px solid var(--color-border)">'
+            + (reasonPills ? '<div class="flex flex-wrap gap-1.5">' + reasonPills + '</div>' : '')
+            + '<div class="flex items-center gap-1.5 flex-wrap text-xs" style="color:var(--color-text-faint)">'
+            +   '<span>' + t('leads.bulletin_label') + ' <strong style="color:var(--color-text-secondary)">' + (lead.bulletin_no || t('common.na')) + '</strong></span>'
+            +   '<span>&bull;</span>'
+            +   '<span>' + (lead.bulletin_date ? window.AppComponents.formatTimelineDate(lead.bulletin_date) : t('common.na')) + '</span>'
+            +   '<span>&bull;</span>'
+            +   '<span>' + (lead.conflict_type || '') + '</span>'
+            + '</div>'
+            + '</div>'
+
+            + '</div>';
 
         loadLeadFeed(currentLeadPage);
 
@@ -367,7 +609,7 @@ window.AppAPI.showLeadDetail = async function(leadId) {
     }
 };
 
-window.AppAPI.updateLeadStatus = async function(leadId, action) {
+window.AppAPI.updateLeadStatus = async function (leadId, action) {
     try {
         var response = await fetch('/api/v1/leads/' + leadId + '/' + action, {
             method: 'POST',
@@ -386,7 +628,7 @@ window.AppAPI.updateLeadStatus = async function(leadId, action) {
     }
 };
 
-window.AppAPI.exportLeadsCSV = async function() {
+window.AppAPI.exportLeadsCSV = async function () {
     try {
         var urgency = document.getElementById('filter-urgency').value;
         var niceClass = document.getElementById('filter-nice-class').value;
@@ -420,7 +662,7 @@ window.AppAPI.exportLeadsCSV = async function() {
 // ============================================
 // GENERIC ENTITY PORTFOLIO (holder + attorney)
 // ============================================
-window.AppAPI._loadEntityTrademarks = async function(entityType, entityId, page) {
+window.AppAPI._loadEntityTrademarks = async function (entityType, entityId, page) {
     var apiPath = entityType === 'attorney'
         ? '/api/v1/attorneys/' + encodeURIComponent(entityId) + '/trademarks'
         : '/api/v1/holders/' + encodeURIComponent(entityId) + '/trademarks';
@@ -451,9 +693,9 @@ window.AppAPI._loadEntityTrademarks = async function(entityType, entityId, page)
         document.getElementById('entityTotalCount').textContent = data.total_count;
         window._entityPortfolioTotalCount = data.total_count || 0;
         var registered = 0, pending = 0;
-        data.trademarks.forEach(function(tm) {
-            if (tm.status === 'Registered' || tm.status === 'Renewed') registered++;
-            if (tm.status === 'Applied' || tm.status === 'Published' || tm.status === 'Opposed') pending++;
+        data.trademarks.forEach(function (tm) {
+            if (tm.status === 'Tescil Edildi' || tm.status === 'Yenilendi') registered++;
+            if (tm.status === 'Başvuruldu' || tm.status === 'Yayında' || tm.status === 'İtiraz Edildi') pending++;
         });
         document.getElementById('entityRegisteredCount').textContent = registered;
         document.getElementById('entityPendingCount').textContent = pending;
@@ -472,7 +714,7 @@ window.AppAPI._loadEntityTrademarks = async function(entityType, entityId, page)
             if (footerTotal) footerTotal.textContent = t('holder.total_trademarks_label', { count: data.total_count });
         }
 
-    } catch(e) {
+    } catch (e) {
         document.getElementById('entityPortfolioLoading').classList.add('hidden');
         document.getElementById('entityPortfolioError').classList.remove('hidden');
         document.getElementById('entityErrorMessage').textContent = t(i18nPrefix + '.load_error');
@@ -480,17 +722,17 @@ window.AppAPI._loadEntityTrademarks = async function(entityType, entityId, page)
 };
 
 // Thin wrappers for backward compat and pagination onclick
-window.AppAPI.loadHolderTrademarks = function(tpeClientId, page) {
+window.AppAPI.loadHolderTrademarks = function (tpeClientId, page) {
     return window.AppAPI._loadEntityTrademarks('holder', tpeClientId, page);
 };
-window.AppAPI.loadAttorneyTrademarks = function(attorneyNo, page) {
+window.AppAPI.loadAttorneyTrademarks = function (attorneyNo, page) {
     return window.AppAPI._loadEntityTrademarks('attorney', attorneyNo, page);
 };
 
 // ============================================
 // CREATIVE SUITE - NAME GENERATOR
 // ============================================
-window.AppAPI.generateNames = async function(params) {
+window.AppAPI.generateNames = async function (params) {
     var res = await fetch('/api/v1/tools/suggest-names', {
         method: 'POST',
         headers: {
@@ -525,7 +767,7 @@ window.AppAPI.generateNames = async function(params) {
 // ============================================
 // CREATIVE SUITE - LOGO GENERATOR
 // ============================================
-window.AppAPI.generateLogos = async function(params) {
+window.AppAPI.generateLogos = async function (params) {
     var res = await fetch('/api/v1/tools/generate-logo', {
         method: 'POST',
         headers: {
@@ -560,7 +802,7 @@ window.AppAPI.generateLogos = async function(params) {
 // ============================================
 // CREATIVE SUITE - GENERATION HISTORY
 // ============================================
-window.AppAPI.getGenerationHistory = async function(page, featureType) {
+window.AppAPI.getGenerationHistory = async function (page, featureType) {
     if (page === undefined) page = 1;
     var url = '/api/v1/tools/generation-history?page=' + page + '&per_page=20';
     if (featureType) url += '&feature_type=' + featureType;
@@ -575,7 +817,7 @@ window.AppAPI.getGenerationHistory = async function(page, featureType) {
 // ============================================
 // PIPELINE MANAGEMENT (admin only)
 // ============================================
-window.AppAPI.getPipelineStatus = async function() {
+window.AppAPI.getPipelineStatus = async function () {
     var res = await fetch('/api/v1/pipeline/status', {
         headers: { 'Authorization': 'Bearer ' + getAuthToken() }
     });
@@ -584,7 +826,7 @@ window.AppAPI.getPipelineStatus = async function() {
     return await res.json();
 };
 
-window.AppAPI.triggerPipeline = async function(skipDownload) {
+window.AppAPI.triggerPipeline = async function (skipDownload) {
     var res = await fetch('/api/v1/pipeline/trigger?skip_download=' + (skipDownload ? 'true' : 'false'), {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + getAuthToken() }
@@ -596,7 +838,7 @@ window.AppAPI.triggerPipeline = async function(skipDownload) {
     return data;
 };
 
-window.AppAPI.triggerPipelineStep = async function(step) {
+window.AppAPI.triggerPipelineStep = async function (step) {
     var res = await fetch('/api/v1/pipeline/trigger-step?step=' + encodeURIComponent(step), {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + getAuthToken() }
@@ -611,7 +853,7 @@ window.AppAPI.triggerPipelineStep = async function(step) {
 // ============================================
 // WATCHLIST LOGO MANAGEMENT
 // ============================================
-window.AppAPI.uploadWatchlistLogo = async function(itemId, file) {
+window.AppAPI.uploadWatchlistLogo = async function (itemId, file) {
     var formData = new FormData();
     formData.append('logo', file);
 
@@ -627,7 +869,7 @@ window.AppAPI.uploadWatchlistLogo = async function(itemId, file) {
     return await res.json();
 };
 
-window.AppAPI.deleteWatchlistLogo = async function(itemId) {
+window.AppAPI.deleteWatchlistLogo = async function (itemId) {
     var res = await fetch('/api/v1/watchlist/' + itemId + '/logo', {
         method: 'DELETE',
         headers: { 'Authorization': 'Bearer ' + getAuthToken() }
@@ -639,12 +881,17 @@ window.AppAPI.deleteWatchlistLogo = async function(itemId) {
     return await res.json();
 };
 
-window.AppAPI.getWatchlistItems = async function(page, pageSize, search, sort) {
+window.AppAPI.getWatchlistItems = async function (page, pageSize, search, sort, renewalOnly, appealsOnly, statusFilter, threshold, tmStatus) {
     if (page === undefined) page = 1;
     if (pageSize === undefined) pageSize = 20;
     var url = '/api/v1/watchlist?page=' + page + '&page_size=' + pageSize;
     if (search) url += '&search=' + encodeURIComponent(search);
     if (sort) url += '&sort=' + encodeURIComponent(sort);
+    if (renewalOnly) url += '&renewal_only=true';
+    if (appealsOnly) url += '&appeals_only=true';
+    if (statusFilter) url += '&status_filter=' + encodeURIComponent(statusFilter);
+    if (threshold != null) url += '&threshold=' + threshold;
+    if (tmStatus) url += '&tm_status=' + encodeURIComponent(tmStatus);
     var res = await fetch(url, {
         headers: { 'Authorization': 'Bearer ' + getAuthToken() }
     });
@@ -652,15 +899,17 @@ window.AppAPI.getWatchlistItems = async function(page, pageSize, search, sort) {
     return await res.json();
 };
 
-window.AppAPI.getWatchlistStats = async function() {
-    var res = await fetch('/api/v1/watchlist/stats', {
+window.AppAPI.getWatchlistStats = async function (minScore) {
+    var url = '/api/v1/watchlist/stats';
+    if (minScore != null && minScore > 0) url += '?min_score=' + minScore;
+    var res = await fetch(url, {
         headers: { 'Authorization': 'Bearer ' + getAuthToken() }
     });
     if (!res.ok) throw new Error('Failed to load stats');
     return await res.json();
 };
 
-window.AppAPI.getAggregateAlerts = async function(page, pageSize, severity) {
+window.AppAPI.getAggregateAlerts = async function (page, pageSize, severity) {
     if (page === undefined) page = 1;
     if (pageSize === undefined) pageSize = 20;
     var url = '/api/v1/alerts/aggregate?page=' + page + '&page_size=' + pageSize;
@@ -672,7 +921,7 @@ window.AppAPI.getAggregateAlerts = async function(page, pageSize, severity) {
     return await res.json();
 };
 
-window.AppAPI.addWatchlistItem = async function(data) {
+window.AppAPI.addWatchlistItem = async function (data) {
     var res = await fetch('/api/v1/watchlist', {
         method: 'POST',
         headers: {
@@ -681,7 +930,7 @@ window.AppAPI.addWatchlistItem = async function(data) {
         },
         body: JSON.stringify(data)
     });
-    var body = await res.json().catch(function() { return {}; });
+    var body = await res.json().catch(function () { return {}; });
     if (!res.ok) {
         var err = new Error(body.detail || t('watchlist.add_failed'));
         err.status = res.status;
@@ -691,19 +940,19 @@ window.AppAPI.addWatchlistItem = async function(data) {
     return body;
 };
 
-window.AppAPI.deleteWatchlistItem = async function(itemId) {
+window.AppAPI.deleteWatchlistItem = async function (itemId) {
     var res = await fetch('/api/v1/watchlist/' + itemId, {
         method: 'DELETE',
         headers: { 'Authorization': 'Bearer ' + getAuthToken() }
     });
     if (!res.ok) {
-        var data = await res.json().catch(function() { return {}; });
+        var data = await res.json().catch(function () { return {}; });
         throw new Error(data.detail || t('watchlist.delete_failed'));
     }
     return await res.json();
 };
 
-window.AppAPI.updateWatchlistItem = async function(itemId, data) {
+window.AppAPI.updateWatchlistItem = async function (itemId, data) {
     var res = await fetch('/api/v1/watchlist/' + itemId, {
         method: 'PUT',
         headers: {
@@ -713,54 +962,67 @@ window.AppAPI.updateWatchlistItem = async function(itemId, data) {
         body: JSON.stringify(data)
     });
     if (!res.ok) {
-        var body = await res.json().catch(function() { return {}; });
+        var body = await res.json().catch(function () { return {}; });
         throw new Error(body.detail || t('watchlist.update_failed'));
     }
     return await res.json();
 };
 
-window.AppAPI.scanWatchlistItem = async function(itemId) {
+window.AppAPI.scanWatchlistItem = async function (itemId) {
     var res = await fetch('/api/v1/watchlist/' + itemId + '/scan', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + getAuthToken() }
     });
     if (!res.ok) {
-        var data = await res.json().catch(function() { return {}; });
+        var data = await res.json().catch(function () { return {}; });
         throw new Error(data.detail || t('watchlist.scan_failed'));
     }
     return await res.json();
 };
 
-window.AppAPI.scanAllWatchlist = async function() {
+window.AppAPI.scanAllWatchlist = async function () {
     var res = await fetch('/api/v1/watchlist/scan-all', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + getAuthToken() }
     });
     if (!res.ok) {
-        var data = await res.json().catch(function() { return {}; });
+        var data = await res.json().catch(function () { return {}; });
         throw new Error(data.detail || t('watchlist.scan_all_failed'));
     }
     return await res.json();
 };
 
-window.AppAPI.deleteAllWatchlist = async function() {
+window.AppAPI.updateAllThreshold = async function (threshold) {
+    var res = await fetch('/api/v1/watchlist/bulk-threshold', {
+        method: 'PUT',
+        headers: {
+            'Authorization': 'Bearer ' + getAuthToken(),
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ threshold: threshold })
+    });
+    if (!res.ok) throw new Error('Failed to update threshold');
+    return await res.json();
+};
+
+window.AppAPI.deleteAllWatchlist = async function () {
     var res = await fetch('/api/v1/watchlist/all', {
         method: 'DELETE',
         headers: { 'Authorization': 'Bearer ' + getAuthToken() }
     });
     if (!res.ok) {
-        var data = await res.json().catch(function() { return {}; });
+        var data = await res.json().catch(function () { return {}; });
         throw new Error(data.detail || t('watchlist.delete_all_failed'));
     }
     return await res.json();
 };
 
-window.AppAPI.downloadWatchlistTemplate = function() {
+window.AppAPI.downloadWatchlistTemplate = function () {
     var token = getAuthToken();
     window.open('/api/v1/watchlist/upload/template?token=' + encodeURIComponent(token), '_blank');
 };
 
-window.AppAPI.detectWatchlistColumns = async function(file) {
+window.AppAPI.detectWatchlistColumns = async function (file) {
     var formData = new FormData();
     formData.append('file', file);
     var res = await fetch('/api/v1/watchlist/upload/detect-columns', {
@@ -769,13 +1031,13 @@ window.AppAPI.detectWatchlistColumns = async function(file) {
         body: formData
     });
     if (!res.ok) {
-        var data = await res.json().catch(function() { return {}; });
+        var data = await res.json().catch(function () { return {}; });
         throw new Error(data.detail || t('watchlist.upload_detect_failed'));
     }
     return await res.json();
 };
 
-window.AppAPI.uploadWatchlistFile = async function(file, columnMapping) {
+window.AppAPI.uploadWatchlistFile = async function (file, columnMapping) {
     var formData = new FormData();
     formData.append('file', file);
     if (columnMapping) {
@@ -788,7 +1050,7 @@ window.AppAPI.uploadWatchlistFile = async function(file, columnMapping) {
         body: formData
     });
     if (!res.ok) {
-        var data = await res.json().catch(function() { return {}; });
+        var data = await res.json().catch(function () { return {}; });
         throw new Error(data.detail || t('watchlist.upload_failed'));
     }
     return await res.json();
@@ -797,13 +1059,13 @@ window.AppAPI.uploadWatchlistFile = async function(file, columnMapping) {
 // ============================================
 // ENTITY SEARCH (holder + attorney)
 // ============================================
-window.AppAPI.searchHolders = async function(query, limit) {
+window.AppAPI.searchHolders = async function (query, limit) {
     if (limit === undefined) limit = 10;
     var res = await fetch('/api/v1/holders/search?query=' + encodeURIComponent(query) + '&limit=' + limit, {
         headers: { 'Authorization': 'Bearer ' + getAuthToken() }
     });
     if (!res.ok) {
-        var data = await res.json().catch(function() { return {}; });
+        var data = await res.json().catch(function () { return {}; });
         var err = new Error(data.detail || t('search.search_failed'));
         err.status = res.status;
         err.data = data;
@@ -812,13 +1074,13 @@ window.AppAPI.searchHolders = async function(query, limit) {
     return await res.json();
 };
 
-window.AppAPI.searchAttorneys = async function(query, limit) {
+window.AppAPI.searchAttorneys = async function (query, limit) {
     if (limit === undefined) limit = 10;
     var res = await fetch('/api/v1/attorneys/search?query=' + encodeURIComponent(query) + '&limit=' + limit, {
         headers: { 'Authorization': 'Bearer ' + getAuthToken() }
     });
     if (!res.ok) {
-        var data = await res.json().catch(function() { return {}; });
+        var data = await res.json().catch(function () { return {}; });
         var err = new Error(data.detail || t('search.search_failed'));
         err.status = res.status;
         err.data = data;
@@ -830,7 +1092,7 @@ window.AppAPI.searchAttorneys = async function(query, limit) {
 // ============================================
 // REPORTS
 // ============================================
-window.AppAPI.generateReport = async function(reportData) {
+window.AppAPI.generateReport = async function (reportData) {
     var res = await fetch('/api/v1/reports/generate', {
         method: 'POST',
         headers: {
@@ -849,7 +1111,7 @@ window.AppAPI.generateReport = async function(reportData) {
     return data;
 };
 
-window.AppAPI.loadReports = async function(page, pageSize) {
+window.AppAPI.loadReports = async function (page, pageSize) {
     if (page === undefined) page = 1;
     if (pageSize === undefined) pageSize = 10;
     var res = await fetch('/api/v1/reports?page=' + page + '&page_size=' + pageSize, {
@@ -863,12 +1125,12 @@ window.AppAPI.loadReports = async function(page, pageSize) {
     return await res.json();
 };
 
-window.AppAPI.downloadReport = async function(reportId) {
+window.AppAPI.downloadReport = async function (reportId) {
     var res = await fetch('/api/v1/reports/' + reportId + '/download', {
         headers: { 'Authorization': 'Bearer ' + getAuthToken() }
     });
     if (!res.ok) {
-        var data = await res.json().catch(function() { return {}; });
+        var data = await res.json().catch(function () { return {}; });
         var err = new Error((data.detail && data.detail.message) || data.detail || t('reports.download_failed'));
         err.status = res.status;
         err.data = data;
@@ -888,7 +1150,7 @@ window.AppAPI.downloadReport = async function(reportId) {
 // ============================================
 // EXTRACTED GOODS LAZY LOAD
 // ============================================
-window.AppAPI.loadExtractedGoods = async function(applicationNo) {
+window.AppAPI.loadExtractedGoods = async function (applicationNo) {
     var resp = await fetch('/api/v1/trademark/' + encodeURIComponent(applicationNo) + '/extracted-goods', {
         headers: { 'Authorization': 'Bearer ' + getAuthToken() }
     });

@@ -74,7 +74,7 @@ window.AppComponents.renderLeadCard = function(lead) {
         + '<div class="flex-1 min-w-0">'
         + '<div class="font-semibold truncate" style="color:var(--color-text-primary)">' + (lead.new_mark_name || 'N/A') + '</div>'
         + window.AppComponents.renderTurkpatentButton(lead.new_mark_app_no)
-        + '<div class="text-xs truncate mt-0.5" style="color:var(--color-text-faint)">' + (lead.new_mark_holder_name || t('leads.unknown_holder')) + '</div>'
+        + window.AppComponents.renderHolderLink(lead.new_mark_holder_name, null)
         + (lead.new_mark_application_date ? '<div class="text-xs mt-0.5" style="color:var(--color-text-faint)">' + t('common.application_date') + ' ' + formatDateTRShort(lead.new_mark_application_date) + '</div>' : '')
         + newMarkEgHtml
         + '</div></div>'
@@ -86,7 +86,7 @@ window.AppComponents.renderLeadCard = function(lead) {
         + '<div class="flex-1 min-w-0">'
         + '<div class="font-semibold truncate" style="color:var(--color-text-primary)">' + (lead.existing_mark_name || 'N/A') + '</div>'
         + window.AppComponents.renderTurkpatentButton(lead.existing_mark_app_no)
-        + '<div class="text-xs truncate mt-0.5" style="color:var(--color-text-faint)">' + (lead.existing_mark_holder_name || t('leads.unknown_holder')) + '</div>'
+        + window.AppComponents.renderHolderLink(lead.existing_mark_holder_name, null)
         + (lead.existing_mark_application_date ? '<div class="text-xs mt-0.5" style="color:var(--color-text-faint)">' + t('common.application_date') + ' ' + formatDateTRShort(lead.existing_mark_application_date) + '</div>' : '')
         + existMarkEgHtml
         + '</div></div>'

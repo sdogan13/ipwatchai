@@ -23,21 +23,15 @@ import sys
 import time
 import logging
 import argparse
-from pathlib import Path
 from datetime import datetime, timedelta
 from utils.deadline import calculate_appeal_deadline
 from typing import List, Dict, Optional
 from uuid import UUID
 
-# Add project root to path
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
-
-import numpy as np
 import psycopg2
 from psycopg2.extras import RealDictCursor, execute_values
 from dotenv import load_dotenv
-from risk_engine import score_pair, get_risk_level, calculate_visual_similarity  # Centralized scoring
+from risk_engine import get_risk_level, RISK_THRESHOLDS
 
 load_dotenv()
 
@@ -45,14 +39,15 @@ load_dotenv()
 # CONFIGURATION
 # ============================================
 
-# Similarity thresholds — uses centralized RISK_THRESHOLDS from risk_engine
-from risk_engine import RISK_THRESHOLDS
 MIN_SIMILARITY_SCORE = RISK_THRESHOLDS["medium"]  # 0.50 — minimum to be a conflict
 
 # Processing limits
 BATCH_SIZE = 50                  # Trademarks to process per batch
 MAX_CONFLICTS_PER_MARK = 20      # Max conflicts to store per new trademark
 QUEUE_POLL_INTERVAL = 30         # Seconds between queue checks (daemon mode)
+
+# Statuses considered "active" in the registered database
+ACTIVE_STATUSES = {'Tescil Edildi', 'Yayında', 'Yenilendi'}
 
 # Opposition deadline computed via utils.deadline.calculate_appeal_deadline()
 # (Turkey: 2 calendar months from bulletin publication per KHK m.42)
@@ -81,257 +76,135 @@ def get_db_connection():
     )
 
 
-def _parse_vec(v):
-    """Parse a vector that may be a string (halfvec from PostgreSQL) or list."""
-    if v is None:
-        return None
-    if isinstance(v, str):
-        import json
-        v = v.strip()
-        if v.startswith('['):
-            return np.array(json.loads(v), dtype=np.float32)
-        return None
-    return np.array(v, dtype=np.float32)
-
-
-def _cosine_sim(a, b):
-    """Cosine similarity between two vectors."""
-    v1, v2 = _parse_vec(a), _parse_vec(b)
-    if v1 is None or v2 is None:
-        return 0.0
-    n1, n2 = np.linalg.norm(v1), np.linalg.norm(v2)
-    return float(np.dot(v1, v2) / (n1 * n2)) if n1 > 0 and n2 > 0 else 0.0
-
-
 # ============================================
 # UNIVERSAL SCANNER CLASS
 # ============================================
 
 class UniversalScanner:
     """
-    Scans new trademarks against the entire database to detect conflicts.
+    Scans within-appeal-deadline trademarks against the registered database.
+    Treats each within-deadline trademark as a search query using the same
+    pre_screen_candidates + calculate_hybrid_risk pipeline as the search engine.
     """
 
     def __init__(self, conn=None, dry_run: bool = False):
         self.conn = conn or get_db_connection()
         self.dry_run = dry_run
+        self._risk_engine = None
+
+    @property
+    def risk_engine(self):
+        if self._risk_engine is None:
+            from risk_engine import RiskEngine
+            self._risk_engine = RiskEngine(existing_conn=self.conn)
+        return self._risk_engine
+
+    def get_within_deadline_trademarks(self) -> List[Dict]:
+        """Return all trademarks whose appeal deadline has not yet passed."""
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT t.id, t.name, t.application_no, t.nice_class_numbers,
+                       t.bulletin_no, t.bulletin_date, t.image_path, t.appeal_deadline,
+                       h.name as holder_name
+                FROM trademarks t
+                LEFT JOIN holders h ON t.holder_id = h.id
+                WHERE t.appeal_deadline IS NOT NULL
+                  AND t.appeal_deadline >= CURRENT_DATE
+                  AND t.name IS NOT NULL AND length(t.name) >= 2
+                ORDER BY t.bulletin_date DESC, t.application_no
+            """)
+            results = [dict(r) for r in cur.fetchall()]
+            logger.info(f"Within-deadline pool: {len(results)} trademarks")
+            return results
 
     def scan_trademark(self, trademark_id: str, limit: int = MAX_CONFLICTS_PER_MARK) -> List[Dict]:
         """
-        Scan a single new trademark against the entire database.
-
-        Args:
-            trademark_id: UUID of the new trademark to scan
-            limit: Max conflicts to return
-
-        Returns:
-            List of detected conflicts
+        Scan a single within-deadline trademark against the registered database
+        using the same pipeline as the search engine.
         """
         logger.info(f"Scanning trademark: {trademark_id}")
 
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            # Get the new trademark details
             cur.execute("""
-                SELECT
-                    id, name, application_no, holder_id,
-                    (SELECT name FROM holders WHERE id = t.holder_id) as holder_name,
-                    nice_class_numbers, bulletin_no, bulletin_date,
-                    text_embedding, image_embedding, logo_ocr_text,
-                    dinov2_embedding, color_histogram
-                FROM trademarks t
-                WHERE id = %s::uuid
-            """, (trademark_id,))
-
-            new_mark = cur.fetchone()
-
-            if not new_mark:
-                logger.warning(f"Trademark not found: {trademark_id}")
-                return []
-
-            logger.info(f"  New mark: {new_mark['name']} ({new_mark['application_no']})")
-            logger.info(f"  Classes: {new_mark['nice_class_numbers']}")
-
-            # Calculate opposition deadline (2 calendar months from bulletin date)
-            bulletin_date = new_mark['bulletin_date']
-            opposition_deadline = calculate_appeal_deadline(bulletin_date)
-
-            # Find similar existing trademarks
-            conflicts = self._find_conflicts(cur, new_mark, limit)
-
-            logger.info(f"  Found {len(conflicts)} potential conflicts")
-
-            # Store conflicts if not dry run
-            # Requires valid opposition_deadline (universal_conflicts.opposition_deadline is NOT NULL)
-            if conflicts and not self.dry_run:
-                if opposition_deadline is None:
-                    logger.warning(f"  No bulletin_date for {trademark_id}, cannot store conflicts (deadline required)")
-                else:
-                    self._store_conflicts(cur, new_mark, conflicts, opposition_deadline)
-                    self.conn.commit()
-                    logger.info(f"  Stored {len(conflicts)} conflicts")
-
-            return conflicts
-
-    def _find_conflicts(self, cur, new_mark: Dict, limit: int) -> List[Dict]:
-        """
-        Find existing trademarks that conflict with the new mark.
-        Uses hybrid search: text similarity + vector similarity + class overlap.
-        """
-        conflicts = []
-        new_name = new_mark['name'] or ''
-        new_classes = set(new_mark['nice_class_numbers'] or [])
-
-        # Skip if no name
-        if not new_name or len(new_name) < 2:
-            return []
-
-        # ============================================
-        # STRATEGY 1: Text similarity search (trigram)
-        # ============================================
-        cur.execute("""
-            SELECT
-                t.id, t.name, t.application_no, t.registration_no,
-                t.holder_id, h.name as holder_name,
-                t.nice_class_numbers, t.current_status,
-                t.application_date, t.registration_date,
-                t.image_embedding, t.logo_ocr_text,
-                similarity(t.name, %s) as text_sim,
-                t.name_tr,
-                t.dinov2_embedding, t.color_histogram
-            FROM trademarks t
-            LEFT JOIN holders h ON t.holder_id = h.id
-            WHERE t.id != %s::uuid
-              AND t.name IS NOT NULL
-              AND t.name %% %s
-              AND t.current_status IN ('Registered', 'Published', 'Renewed')
-            ORDER BY text_sim DESC
-            LIMIT 100
-        """, (new_name, str(new_mark['id']), new_name))
-
-        text_candidates = cur.fetchall()
-        logger.info(f"  Text search: {len(text_candidates)} candidates")
-
-        # ============================================
-        # STRATEGY 2: Vector similarity search (if embeddings exist)
-        # ============================================
-        vector_candidates = []
-
-        if new_mark.get('text_embedding'):
-            cur.execute("""
-                SELECT
-                    t.id, t.name, t.application_no, t.registration_no,
-                    t.holder_id, h.name as holder_name,
-                    t.nice_class_numbers, t.current_status,
-                    t.application_date, t.registration_date,
-                    t.image_embedding, t.logo_ocr_text,
-                    1 - (t.text_embedding <=> %s::halfvec) as semantic_sim,
-                    t.name_tr,
-                    t.dinov2_embedding, t.color_histogram
+                SELECT t.id, t.name, t.application_no, t.nice_class_numbers,
+                       t.bulletin_no, t.bulletin_date, t.image_path, t.appeal_deadline,
+                       t.holder_id, t.holder_tpe_client_id, h.name as holder_name
                 FROM trademarks t
                 LEFT JOIN holders h ON t.holder_id = h.id
-                WHERE t.id != %s::uuid
-                  AND t.text_embedding IS NOT NULL
-                  AND t.current_status IN ('Registered', 'Published', 'Renewed')
-                ORDER BY t.text_embedding <=> %s::halfvec
-                LIMIT 100
-            """, (new_mark['text_embedding'], str(new_mark['id']), new_mark['text_embedding']))
+                WHERE t.id = %s::uuid
+            """, (trademark_id,))
+            mark = cur.fetchone()
 
-            vector_candidates = cur.fetchall()
-            logger.info(f"  Vector search: {len(vector_candidates)} candidates")
+        if not mark:
+            logger.warning(f"Trademark not found: {trademark_id}")
+            return []
 
-        # ============================================
-        # MERGE & SCORE CANDIDATES
-        # ============================================
-        seen_ids = set()
-        all_candidates = []
+        name = mark['name'] or ''
+        target_classes = list(mark['nice_class_numbers'] or [])
+        image_path = mark.get('image_path')
+        mark_holder_tpe_id = mark.get('holder_tpe_client_id')
+        logger.info(f"  Mark: {name} ({mark['application_no']}) classes={target_classes}")
 
-        # Add text candidates
-        for c in text_candidates:
-            if c['id'] not in seen_ids:
-                seen_ids.add(c['id'])
-                c['source'] = 'text'
-                all_candidates.append(c)
+        # Encode query vectors (same as search engine)
+        q_text_vec, q_img_vec, q_dino_vec, q_color_vec, q_ocr_text =             self.risk_engine.get_query_vectors(name, image_path)
 
-        # Add vector candidates
-        for c in vector_candidates:
-            if c['id'] not in seen_ids:
-                seen_ids.add(c['id'])
-                c['source'] = 'vector'
-                all_candidates.append(c)
+        # Pre-screen candidates using same 6-stage pipeline as search engine
+        raw_candidates = self.risk_engine.pre_screen_candidates(
+            name, target_classes, limit=500,
+            q_img_vec=q_img_vec, q_dino_vec=q_dino_vec, q_ocr_text=q_ocr_text
+        )
+        logger.info(f"  Pre-screened: {len(raw_candidates)} candidates")
 
-        logger.info(f"  Total unique candidates: {len(all_candidates)}")
+        # Score all candidates
+        scored = self.risk_engine.calculate_hybrid_risk(
+            raw_candidates, name, q_text_vec, q_img_vec, q_dino_vec, q_color_vec,
+            query_ocr_text=q_ocr_text or ''
+        )
 
-        # ============================================
-        # CALCULATE COMPREHENSIVE SCORES
-        # ============================================
-        for candidate in all_candidates:
-            candidate_name = (candidate.get('name') or '').strip()
-            if not candidate_name:
+        # Filter: active statuses only, exclude same holder, apply threshold
+        new_classes = set(target_classes)
+        conflicts = []
+        today = datetime.now().date()
+        grace_cutoff = today - timedelta(days=183)  # ~6 months grace period for renewal
+        for r in scored:
+            # Skip candidates without a trademark ID (can't store)
+            if not r.get('trademark_id'):
+                continue
+            # Exclude trademarks belonging to the same holder
+            if mark_holder_tpe_id and r.get('holder_tpe_client_id') == mark_holder_tpe_id:
+                continue
+            if r['status'] not in ACTIVE_STATUSES:
+                continue
+            # Skip expired marks (Turkey: 10-year registration + 6-month renewal grace)
+            expiry = r.get('expiry_date')
+            if expiry:
+                from datetime import date as date_type
+                if isinstance(expiry, str):
+                    try:
+                        expiry = date_type.fromisoformat(expiry)
+                    except ValueError:
+                        expiry = None
+                if expiry and expiry < grace_cutoff:
+                    continue
+            scores = r['scores']
+            score = scores['total']
+            if score < MIN_SIMILARITY_SCORE:
                 continue
 
-            candidate_classes = set(candidate['nice_class_numbers'] or [])
-
-            text_sim = float(candidate.get('text_sim', 0) or 0)
-            semantic_sim = float(candidate.get('semantic_sim', 0) or 0)
-
-            # Visual similarity (full composite: CLIP + DINOv2 + color + OCR)
-            clip_sim = 0.0
-            if new_mark.get('image_embedding') and candidate.get('image_embedding'):
-                clip_sim = _cosine_sim(new_mark['image_embedding'], candidate['image_embedding'])
-
-            dino_sim = 0.0
-            if new_mark.get('dinov2_embedding') and candidate.get('dinov2_embedding'):
-                dino_sim = _cosine_sim(new_mark['dinov2_embedding'], candidate['dinov2_embedding'])
-
-            color_sim = 0.0
-            if new_mark.get('color_histogram') and candidate.get('color_histogram'):
-                color_sim = _cosine_sim(new_mark['color_histogram'], candidate['color_histogram'])
-
-            visual_sim = calculate_visual_similarity(
-                clip_sim=clip_sim,
-                dinov2_sim=dino_sim,
-                color_sim=color_sim,
-                ocr_text_a=new_mark.get('logo_ocr_text') or '',
-                ocr_text_b=candidate.get('logo_ocr_text') or '',
-            )
-
-            # Delegate to centralized scoring
-            breakdown = score_pair(
-                query_name=new_name,
-                candidate_name=candidate_name,
-                text_sim=text_sim,
-                semantic_sim=semantic_sim,
-                visual_sim=visual_sim,
-                candidate_translations={
-                    'name_tr': candidate.get('name_tr') or '',
-                },
-            )
-
-            final_score = breakdown['total']
-
-            # Class overlap (no additive boost — scoring handled by score_pair)
+            candidate_classes = set(r.get('classes') or [])
             overlapping = new_classes & candidate_classes
-
-            # Check for Class 99 (global protection)
             if 99 in new_classes or 99 in candidate_classes:
                 overlapping = new_classes | candidate_classes
 
-            # Skip if below threshold
-            if final_score < MIN_SIMILARITY_SCORE:
-                continue
-
-            # Determine conflict type
+            text_sim = scores.get('text_similarity', 0)
+            semantic_sim = scores.get('semantic_similarity', 0)
             if text_sim > 0.7 and semantic_sim > 0.7:
                 conflict_type = 'HYBRID'
-            elif text_sim > semantic_sim:
+            elif text_sim >= semantic_sim:
                 conflict_type = 'TEXT'
             else:
                 conflict_type = 'SEMANTIC'
 
-            # Determine risk level using centralized function
-            risk_level = get_risk_level(final_score).upper()
-
-            # Build conflict reasons
             reasons = []
             if text_sim >= 0.8:
                 reasons.append('Yuksek metin benzerligi')
@@ -339,30 +212,42 @@ class UniversalScanner:
                 reasons.append('Yuksek anlamsal benzerlik')
             if overlapping:
                 reasons.append(f'Ortak siniflar: {sorted(overlapping)}')
-            if candidate['current_status'] == 'Registered':
+            if r['status'] == 'Tescil Edildi':
                 reasons.append('Tescilli marka')
 
             conflicts.append({
-                'existing_mark_id': str(candidate['id']),
-                'existing_mark_name': candidate_name,
-                'existing_mark_app_no': candidate['application_no'],
-                'existing_mark_holder_id': str(candidate['holder_id']) if candidate['holder_id'] else None,
-                'existing_mark_holder_name': candidate['holder_name'],
-                'existing_mark_nice_classes': candidate['nice_class_numbers'],
-                'similarity_score': final_score,
-                'text_similarity': breakdown.get('text_similarity', text_sim),
-                'semantic_similarity': breakdown.get('semantic_similarity', semantic_sim),
-                'visual_similarity': breakdown.get('visual_similarity', 0),
-                'translation_similarity': breakdown.get('translation_similarity', 0),
+                'existing_mark_id': r.get('trademark_id'),
+                'existing_mark_name': r['name'],
+                'existing_mark_app_no': r['application_no'],
+                'existing_mark_holder_id': r.get('holder_id'),
+                'existing_mark_holder_name': r.get('holder_name'),
+                'existing_mark_nice_classes': r.get('classes'),
+                'similarity_score': score,
+                'text_similarity': text_sim,
+                'semantic_similarity': semantic_sim,
+                'visual_similarity': scores.get('visual_similarity', 0),
+                'translation_similarity': scores.get('translation_similarity', 0),
                 'conflict_type': conflict_type,
-                'risk_level': risk_level,
+                'risk_level': get_risk_level(score).upper(),
                 'overlapping_classes': sorted(overlapping) if overlapping else [],
                 'conflict_reasons': reasons
             })
 
-        # Sort by score and limit
         conflicts.sort(key=lambda x: x['similarity_score'], reverse=True)
-        return conflicts[:limit]
+        conflicts = conflicts[:limit]
+        logger.info(f"  Found {len(conflicts)} conflicts")
+
+        opposition_deadline = calculate_appeal_deadline(mark.get('bulletin_date'))
+        if conflicts and not self.dry_run:
+            if opposition_deadline is None:
+                logger.warning(f"  No bulletin_date for {trademark_id}, cannot store conflicts")
+            else:
+                with self.conn.cursor() as cur:
+                    self._store_conflicts(cur, mark, conflicts, opposition_deadline)
+                self.conn.commit()
+                logger.info(f"  Stored {len(conflicts)} conflicts")
+
+        return conflicts
 
     def _store_conflicts(self, cur, new_mark: Dict, conflicts: List[Dict], opposition_deadline):
         """Store detected conflicts in the database."""

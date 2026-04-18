@@ -120,9 +120,9 @@ async def initialize_idf_scoring(db_pool) -> bool:
                 _cache_loaded = True  # Mark as loaded to prevent retries
                 return False
 
-            # Load all word IDF data
+            # Load all word IDF data — read word_class from DB (set by compute_idf.py)
             rows = await conn.fetch("""
-                SELECT word, idf_score, document_frequency, is_generic
+                SELECT word, idf_score, document_frequency, is_generic, word_class
                 FROM word_idf
             """)
 
@@ -131,20 +131,28 @@ async def initialize_idf_scoring(db_pool) -> bool:
                 word = row['word']
                 idf = float(row['idf_score'])
                 doc_freq = int(row['document_frequency'])
+                db_class = row['word_class'] or ''
 
                 if word in FOREIGN_GENERICS_OVERRIDE:
                     idf = 2.0
                     word_class = 'generic'
                     weight = WEIGHT_GENERIC
-                elif idf < IDF_THRESHOLD_GENERIC:
-                    word_class = 'generic'
-                    weight = WEIGHT_GENERIC
-                elif idf < IDF_THRESHOLD_SEMI_GENERIC:
-                    word_class = 'semi_generic'
-                    weight = WEIGHT_SEMI_GENERIC
+                elif db_class in ('generic', 'semi_generic', 'distinctive'):
+                    word_class = db_class
+                    weight = (WEIGHT_GENERIC if db_class == 'generic'
+                              else WEIGHT_SEMI_GENERIC if db_class == 'semi_generic'
+                              else WEIGHT_DISTINCTIVE)
                 else:
-                    word_class = 'distinctive'
-                    weight = WEIGHT_DISTINCTIVE
+                    # Fallback for rows missing word_class (old DB data)
+                    if idf < IDF_THRESHOLD_GENERIC:
+                        word_class = 'generic'
+                        weight = WEIGHT_GENERIC
+                    elif idf < IDF_THRESHOLD_SEMI_GENERIC:
+                        word_class = 'semi_generic'
+                        weight = WEIGHT_SEMI_GENERIC
+                    else:
+                        word_class = 'distinctive'
+                        weight = WEIGHT_DISTINCTIVE
 
                 _word_data[word] = {
                     'idf': idf,
@@ -191,26 +199,34 @@ def initialize_idf_scoring_sync():
         cur.execute("SELECT COUNT(*) FROM trademarks WHERE name IS NOT NULL")
         _total_docs = cur.fetchone()[0]
 
-        # Load word IDF data
-        cur.execute("SELECT word, idf_score, document_frequency FROM word_idf")
+        # Load word IDF data — read word_class from DB (set by compute_idf.py)
+        cur.execute("SELECT word, idf_score, document_frequency, word_class FROM word_idf")
 
         _word_data = {}
-        for word, idf, doc_freq in cur.fetchall():
+        for word, idf, doc_freq, db_class in cur.fetchall():
             idf = float(idf)
+            db_class = db_class or ''
 
             if word in FOREIGN_GENERICS_OVERRIDE:
                 idf = 2.0
                 word_class = 'generic'
                 weight = WEIGHT_GENERIC
-            elif idf < IDF_THRESHOLD_GENERIC:
-                word_class = 'generic'
-                weight = WEIGHT_GENERIC
-            elif idf < IDF_THRESHOLD_SEMI_GENERIC:
-                word_class = 'semi_generic'
-                weight = WEIGHT_SEMI_GENERIC
+            elif db_class in ('generic', 'semi_generic', 'distinctive'):
+                word_class = db_class
+                weight = (WEIGHT_GENERIC if db_class == 'generic'
+                          else WEIGHT_SEMI_GENERIC if db_class == 'semi_generic'
+                          else WEIGHT_DISTINCTIVE)
             else:
-                word_class = 'distinctive'
-                weight = WEIGHT_DISTINCTIVE
+                # Fallback for rows missing word_class (old DB data)
+                if idf < IDF_THRESHOLD_GENERIC:
+                    word_class = 'generic'
+                    weight = WEIGHT_GENERIC
+                elif idf < IDF_THRESHOLD_SEMI_GENERIC:
+                    word_class = 'semi_generic'
+                    weight = WEIGHT_SEMI_GENERIC
+                else:
+                    word_class = 'distinctive'
+                    weight = WEIGHT_DISTINCTIVE
 
             _word_data[word] = {
                 'idf': idf,
@@ -396,18 +412,18 @@ def calculate_adjusted_score(
     include_details: bool = False
 ) -> dict:
     """DEPRECATED. Wraps new Hierarchical scorer."""
-    from idf_scoring import compute_idf_weighted_score
-    score, breakdown = compute_idf_weighted_score(query_text, candidate_text, raw_similarity)
-    result = {'raw_score': round(raw_similarity, 4), 'adjusted_score': round(score, 4), 'idf_weight': 1.0, 'blended_weight': score, 'blend_factor': 0.0, 'query_weight': 1.0, 'candidate_weight': 1.0}
-    if include_details:
-        result['details'] = {'query_words': breakdown.get("matched_words", []), 'candidate_words': breakdown.get("scoring_path", ""), 'breakdown': breakdown}
-    return result
+    from services.scoring_service import calculate_adjusted_score as _calculate_adjusted_score
+    return _calculate_adjusted_score(
+        raw_similarity=raw_similarity,
+        query_text=query_text,
+        candidate_text=candidate_text,
+        include_details=include_details,
+    )
 
 def calculate_text_similarity(query: str, target: str) -> float:
     """DEPRECATED. Wraps new Hierarchical scorer."""
-    from idf_scoring import compute_idf_weighted_score
-    score, _ = compute_idf_weighted_score(query, target)
-    return score
+    from services.scoring_service import calculate_text_similarity as _calculate_text_similarity
+    return _calculate_text_similarity(query=query, target=target)
 
 def calculate_risk_score(
     text_similarity: float,
@@ -434,55 +450,14 @@ def calculate_risk_score(
             'components': {...}
         }
     """
-    _ensure_loaded()
-
-    # Apply IDF adjustment to text similarity
-    idf_result = calculate_adjusted_score(text_similarity, query_text, candidate_text)
-    adjusted_text_sim = idf_result['adjusted_score']
-
-    # Weights for combining scores
-    TEXT_WEIGHT = 0.5
-    IMAGE_WEIGHT = 0.3
-    CLASS_WEIGHT = 0.2
-
-    # Calculate components
-    if image_similarity is not None and image_similarity > 0:
-        text_component = adjusted_text_sim * TEXT_WEIGHT
-        image_component = image_similarity * IMAGE_WEIGHT
-    else:
-        # Redistribute image weight to text if no image
-        text_component = adjusted_text_sim * (TEXT_WEIGHT + IMAGE_WEIGHT)
-        image_component = 0
-
-    class_component = class_overlap_ratio * CLASS_WEIGHT
-
-    # Final score
-    final_score = text_component + image_component + class_component
-
-    # Determine risk level using centralized thresholds
-    from risk_engine import get_risk_level as _central_get_risk_level
-    risk_level = _central_get_risk_level(final_score)
-
-    return {
-        'overall_score': round(final_score, 4),
-        'risk_level': risk_level,
-        'components': {
-            'text': {
-                'raw': round(text_similarity, 4),
-                'adjusted': round(adjusted_text_sim, 4),
-                'idf_weight': idf_result['applied_weight'],
-                'contribution': round(text_component, 4)
-            },
-            'image': {
-                'score': round(image_similarity, 4) if image_similarity else None,
-                'contribution': round(image_component, 4)
-            },
-            'class_overlap': {
-                'ratio': round(class_overlap_ratio, 4),
-                'contribution': round(class_component, 4)
-            }
-        }
-    }
+    from services.scoring_service import calculate_risk_score as _calculate_risk_score
+    return _calculate_risk_score(
+        text_similarity=text_similarity,
+        image_similarity=image_similarity,
+        class_overlap_ratio=class_overlap_ratio,
+        query_text=query_text,
+        candidate_text=candidate_text,
+    )
 
 
 def calculate_combined_score(
@@ -507,69 +482,13 @@ def calculate_combined_score(
     Returns:
         dict with overall_score, text_score, image_score, search_type, risk_level
     """
-    # Normalize inputs
-    text_sim = float(text_similarity) if text_similarity is not None else 0.0
-    image_sim = float(image_similarity) if image_similarity is not None else 0.0
+    from services.scoring_service import calculate_combined_score as _calculate_combined_score
+    return _calculate_combined_score(
+        text_similarity=text_similarity,
+        image_similarity=image_similarity,
+        search_type=search_type,
+    )
 
-    # ═══════════════════════════════════════════════════════════════
-    # RULE 1: Image-only search - image is everything
-    # ═══════════════════════════════════════════════════════════════
-    if search_type == 'image' or text_similarity is None or text_sim < 0.1:
-        overall = image_sim
-        return {
-            'overall_score': round(overall, 3),
-            'text_score': round(text_sim, 3),
-            'image_score': round(image_sim, 3),
-            'search_type': 'image',
-            'risk_level': get_risk_level_simple(overall)
-        }
-
-    # ═══════════════════════════════════════════════════════════════
-    # RULE 2: Text-only search - text is everything
-    # ═══════════════════════════════════════════════════════════════
-    if search_type == 'text' or image_similarity is None or image_sim < 0.1:
-        overall = text_sim
-        return {
-            'overall_score': round(overall, 3),
-            'text_score': round(text_sim, 3),
-            'image_score': round(image_sim, 3),
-            'search_type': 'text',
-            'risk_level': get_risk_level_simple(overall)
-        }
-
-    # ═══════════════════════════════════════════════════════════════
-    # RULE 3: Combined search - smart weighting
-    # ═══════════════════════════════════════════════════════════════
-
-    if image_sim >= 0.80:
-        overall = (image_sim * 0.80) + (text_sim * 0.20)
-
-    elif text_sim >= 0.80:
-        overall = (text_sim * 0.80) + (image_sim * 0.20)
-
-    # Both moderate - use balanced weighting
-    else:
-        # 60% text, 40% image (text usually more reliable)
-        overall = (text_sim * 0.60) + (image_sim * 0.40)
-
-    # ═══════════════════════════════════════════════════════════════
-    # ═══════════════════════════════════════════════════════════════
-    if image_sim >= 0.95 or text_sim >= 0.95:
-        overall = max(overall, 0.85)
-
-    if image_sim >= 0.99:
-        overall = max(overall, 0.92)  # ~100% image = at least 92% overall
-
-    if text_sim >= 0.99:
-        overall = max(overall, 0.92)  # ~100% text = at least 92% overall
-
-    return {
-        'overall_score': round(overall, 3),
-        'text_score': round(text_sim, 3),
-        'image_score': round(image_sim, 3),
-        'search_type': 'combined',
-        'risk_level': get_risk_level_simple(overall)
-    }
 
 
 def adjust_image_similarity(raw_score: float) -> float:
@@ -589,36 +508,8 @@ def adjust_image_similarity(raw_score: float) -> float:
     Returns:
         Adjusted score (0-1) that better reflects true similarity
     """
-    if raw_score >= 0.98:
-        # Near-perfect match - keep as is
-        return raw_score
-
-    if raw_score >= 0.95:
-        # Very high match - slight reduction
-        # 95% -> 90%, 98% -> 96%
-        return 0.90 + (raw_score - 0.95) * 2
-
-    if raw_score >= 0.80:
-        # High match - moderate reduction
-        # Map 80-95% to 60-90%
-        normalized = (raw_score - 0.80) / 0.15  # 0 to 1
-        return 0.60 + (normalized * 0.30)  # 60% to 90%
-
-    if raw_score >= 0.60:
-        # Medium match - significant reduction
-        # Map 60-80% to 35-60%
-        normalized = (raw_score - 0.60) / 0.20  # 0 to 1
-        return 0.35 + (normalized * 0.25)  # 35% to 60%
-
-    if raw_score >= 0.40:
-        # Low-medium match - heavy reduction
-        # Map 40-60% to 20-35%
-        normalized = (raw_score - 0.40) / 0.20  # 0 to 1
-        return 0.20 + (normalized * 0.15)  # 20% to 35%
-
-    # Low match - keep proportionally low
-    # 40% -> 20%, 20% -> 10%
-    return raw_score * 0.5
+    from services.scoring_service import adjust_image_similarity as _adjust_image_similarity
+    return _adjust_image_similarity(raw_score)
 
 
 def get_risk_level_simple(score: float) -> str:
@@ -1073,26 +964,14 @@ def calculate_comprehensive_score(
     include_details: bool = False,
 ) -> Dict:
     """DEPRECATED. Wraps new Hierarchical scorer."""
-    from idf_scoring import compute_idf_weighted_score
-    raw = raw_similarity if raw_similarity is not None else 0.0
-    score, breakdown = compute_idf_weighted_score(query_text, result_text, raw)
-    
-    risk_level = "low"
-    if score >= 0.70: risk_level = "critical"
-    elif score >= 0.50: risk_level = "high"
-    elif score >= 0.30: risk_level = "medium"
-    
-    result = {
-        'raw_score': round(raw, 3),
-        'final_score': round(score, 3),
-        'factors': {'word_match': 0.0, 'length_ratio': 0.0, 'coverage': 0.0, 'idf': 0.0},
-        'weighted_factor': round(score, 3),
-        'risk_level': risk_level
-    }
-    
-    if include_details:
-        result['details'] = breakdown
-    return result
+    from services.scoring_service import calculate_comprehensive_score as _calculate_comprehensive_score
+    return _calculate_comprehensive_score(
+        query_text=query_text,
+        result_text=result_text,
+        raw_similarity=raw_similarity,
+        include_details=include_details,
+    )
+
 
 def calculate_alert_risk_score(
     query_text: str,
@@ -1126,98 +1005,21 @@ def calculate_alert_risk_score(
             'components': {...}
         }
     """
-    # Get comprehensive text score
-    text_result = calculate_comprehensive_score(
+    from services.scoring_service import calculate_alert_risk_score as _calculate_alert_risk_score
+    return _calculate_alert_risk_score(
         query_text=query_text,
         result_text=result_text,
-        raw_similarity=raw_text_similarity,
-        include_details=include_details
+        raw_text_similarity=raw_text_similarity,
+        image_similarity=image_similarity,
+        class_overlap_ratio=class_overlap_ratio,
+        include_details=include_details,
     )
 
-    adjusted_text_score = text_result['final_score']
-
-    # Weight distribution
-    TEXT_WEIGHT = 0.50
-    IMAGE_WEIGHT = 0.25
-    CLASS_WEIGHT = 0.25
-
-    text_component = adjusted_text_score * TEXT_WEIGHT
-
-    if image_similarity is not None and image_similarity > 0:
-        image_component = image_similarity * IMAGE_WEIGHT
-    else:
-        # Redistribute weight to text if no image
-        text_component = adjusted_text_score * (TEXT_WEIGHT + IMAGE_WEIGHT)
-        image_component = 0
-
-    class_component = class_overlap_ratio * CLASS_WEIGHT
-
-    overall_score = text_component + image_component + class_component
-
-    # Determine risk level
-    if overall_score >= 0.65:
-        risk_level = 'critical'
-    elif overall_score >= 0.45:
-        risk_level = 'high'
-    elif overall_score >= 0.30:
-        risk_level = 'medium'
-    else:
-        risk_level = 'low'
-
-    return {
-        'overall_score': round(overall_score, 3),
-        'risk_level': risk_level,
-        'components': {
-            'text': {
-                'raw': round(raw_text_similarity, 3),
-                'adjusted': round(adjusted_text_score, 3),
-                'factors': text_result['factors'],
-                'contribution': round(text_component, 3)
-            },
-            'image': {
-                'score': round(image_similarity, 3) if image_similarity else None,
-                'contribution': round(image_component, 3)
-            },
-            'class_overlap': {
-                'ratio': round(class_overlap_ratio, 3),
-                'contribution': round(class_component, 3)
-            }
-        },
-        'text_details': text_result.get('details') if include_details else None
-    }
 
 
 # ===============================================================
 # OCR-ENHANCED IMAGE SCORING
 # ===============================================================
-
-# Global OCR reader (loaded lazily)
-_ocr_reader = None
-_ocr_available = False
-
-def _load_ocr_reader():
-    """Lazily load EasyOCR reader."""
-    global _ocr_reader, _ocr_available
-    if _ocr_reader is not None:
-        return _ocr_reader
-
-    try:
-        import easyocr
-        import torch
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        _ocr_reader = easyocr.Reader(['en', 'tr'], gpu=(device == 'cuda'), verbose=False)
-        _ocr_available = True
-        logger.info(f"EasyOCR loaded on {device}")
-        return _ocr_reader
-    except ImportError:
-        logger.warning("EasyOCR not available - OCR features disabled")
-        _ocr_available = False
-        return None
-    except Exception as e:
-        logger.error(f"Failed to load EasyOCR: {e}")
-        _ocr_available = False
-        return None
-
 
 def extract_ocr_text(image_path: str) -> str:
     """
@@ -1229,28 +1031,15 @@ def extract_ocr_text(image_path: str) -> str:
     Returns:
         Extracted text (lowercase, stripped) or empty string
     """
-    reader = _load_ocr_reader()
-    if reader is None:
-        return ""
-
-    try:
-        results = reader.readtext(image_path, detail=0, paragraph=True)
-        text = turkish_lower(" ".join(results).strip())
-        return text
-    except Exception as e:
-        logger.warning(f"OCR extraction failed: {e}")
-        return ""
+    from services.scoring_service import extract_ocr_text as _extract_ocr_text
+    return _extract_ocr_text(image_path)
 
 
 def calculate_ocr_similarity(ocr_text: str, trademark_name: str) -> float:
     """DEPRECATED: Use risk_engine.calculate_visual_similarity() instead.
     Kept for backward compatibility only."""
-    import warnings
-    warnings.warn("calculate_ocr_similarity is deprecated, use risk_engine.calculate_visual_similarity", DeprecationWarning, stacklevel=2)
-    if not ocr_text or not trademark_name:
-        return 0.0
-    from difflib import SequenceMatcher
-    return SequenceMatcher(None, turkish_lower(ocr_text.strip()), turkish_lower(trademark_name.strip())).ratio()
+    from services.scoring_service import calculate_ocr_similarity as _calculate_ocr_similarity
+    return _calculate_ocr_similarity(ocr_text, trademark_name)
 
 
 def combine_visual_scores(
@@ -1262,14 +1051,14 @@ def combine_visual_scores(
 ) -> dict:
     """DEPRECATED: Use risk_engine.calculate_visual_similarity() instead.
     Kept for backward compatibility only."""
-    import warnings
-    warnings.warn("combine_visual_scores is deprecated, use risk_engine.calculate_visual_similarity", DeprecationWarning, stacklevel=2)
-    from risk_engine import calculate_visual_similarity
-    score = calculate_visual_similarity(
-        clip_sim=clip_sim, dinov2_sim=dino_sim, color_sim=color_sim,
-        ocr_text_a=ocr_text_query, ocr_text_b=ocr_text_target,
+    from services.scoring_service import combine_visual_scores as _combine_visual_scores
+    return _combine_visual_scores(
+        clip_sim=clip_sim,
+        dino_sim=dino_sim,
+        color_sim=color_sim,
+        ocr_text_query=ocr_text_query,
+        ocr_text_target=ocr_text_target,
     )
-    return {"combined_score": score, "clip_score": clip_sim, "dino_score": dino_sim, "color_score": color_sim, "ocr_score": 0.0, "components_used": []}
 
 
 def calculate_image_score_with_ocr(
@@ -1279,20 +1068,12 @@ def calculate_image_score_with_ocr(
 ) -> dict:
     """DEPRECATED: Use risk_engine.calculate_visual_similarity() instead.
     Kept for backward compatibility only."""
-    import warnings
-    warnings.warn("calculate_image_score_with_ocr is deprecated, use risk_engine.calculate_visual_similarity", DeprecationWarning, stacklevel=2)
-    from risk_engine import calculate_visual_similarity, get_risk_level
-    score = calculate_visual_similarity(
-        clip_sim=raw_image_similarity,
-        ocr_text_a=query_ocr_text or "",
-        ocr_text_b=trademark_ocr_text or "",
+    from services.scoring_service import calculate_image_score_with_ocr as _calculate_image_score_with_ocr
+    return _calculate_image_score_with_ocr(
+        raw_image_similarity=raw_image_similarity,
+        query_ocr_text=query_ocr_text,
+        trademark_ocr_text=trademark_ocr_text,
     )
-    return {
-        'final_score': score, 'visual_score': raw_image_similarity,
-        'ocr_boost': 0.0, 'ocr_similarity': 0.0,
-        'ocr_query_text': query_ocr_text or "", 'ocr_target_text': trademark_ocr_text or "",
-        'risk_level': get_risk_level(score),
-    }
 
 
 # ===============================================================

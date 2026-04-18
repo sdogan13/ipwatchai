@@ -207,7 +207,7 @@ window.AppComponents.renderResultCard = function(r) {
         + '<div class="flex-1 min-w-0">'
         + '<div class="font-semibold truncate" style="color:var(--color-text-primary)">' + highlightMatches(r.name || 'N/A', r.scores && r.scores.matched_words) + '</div>'
         + (r.name_tr && r.name_tr.toLowerCase() !== (r.name || '').toLowerCase() ? '<div class="text-xs mt-0.5" style="color:var(--color-text-faint)">TR: ' + escapeHtml(r.name_tr) + '</div>' : '')
-        + '<div class="text-sm" style="color:var(--color-text-muted)">' + (r.status || 'N/A') + '</div>'
+        + '<div class="mt-0.5"><span class="text-xs px-2 py-0.5 rounded-full font-medium" style="color:' + getStatusColor(r.status) + ';background:' + getStatusBg(r.status) + '">' + getStatusText(r.status) + '</span></div>'
         + (r.application_date ? '<div class="text-xs" style="color:var(--color-text-faint)">' + t('common.application_date') + ' ' + formatDateTRShort(r.application_date) + '</div>' : '')
         + window.AppComponents.renderNiceClassBadges(r.classes)
         + window.AppComponents.renderTurkpatentButton(r.application_no)
@@ -218,6 +218,7 @@ window.AppComponents.renderResultCard = function(r) {
         + breakdownHtml
         + watchlistBtnHtml
         + extractedGoodsHtml
+        + '<div class="mt-1">' + window.AppComponents.renderEventsButton(r.application_no) + '</div>'
         + studioCta
         + '</div>'
         + '</div>'

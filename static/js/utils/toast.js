@@ -41,5 +41,19 @@ window.AppToast.showToast = function(message, type) {
     }, 4000);
 };
 
+window.AppToast.show = window.AppToast.showToast;
+window.AppToast.success = function(message) {
+    return window.AppToast.showToast(message, 'success');
+};
+window.AppToast.error = function(message) {
+    return window.AppToast.showToast(message, 'error');
+};
+window.AppToast.info = function(message) {
+    return window.AppToast.showToast(message, 'info');
+};
+window.AppToast.warning = function(message) {
+    return window.AppToast.showToast(message, 'warning');
+};
+
 // Expose as global
 var showToast = window.AppToast.showToast;
