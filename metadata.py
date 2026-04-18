@@ -2,10 +2,25 @@ import re
 import json
 import codecs
 import logging
+import os
 import sys
 import time
 from pathlib import Path
 from datetime import datetime
+
+_LOCAL_PROJECT_ROOT = Path(__file__).resolve().parent
+_LOCAL_DEFAULT_BULLETINS_ROOT = _LOCAL_PROJECT_ROOT / "bulletins" / "Marka"
+
+
+def _resolve_local_metadata_root(value: str | None, default: Path) -> Path:
+    if not value:
+        return default.resolve()
+
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = _LOCAL_PROJECT_ROOT / path
+    return path.resolve()
+
 
 # ----------------------------
 # Config (from settings with fallback defaults)
@@ -17,7 +32,10 @@ try:
     SKIP_IF_METADATA_EXISTS = _pipe.skip_if_metadata_exists
     CANARY_FAILURE_THRESHOLD = _pipe.canary_failure_threshold
 except Exception:
-    ROOT = Path(r"C:\Users\701693\turk_patent\bulletins\Marka")
+    ROOT = _resolve_local_metadata_root(
+        os.environ.get("PIPELINE_BULLETINS_ROOT") or os.environ.get("DATA_ROOT"),
+        _LOCAL_DEFAULT_BULLETINS_ROOT,
+    )
     SKIP_IF_METADATA_EXISTS = True
     CANARY_FAILURE_THRESHOLD = 0.05
 
@@ -422,16 +440,17 @@ def process_single_folder(folder_path: Path, skip_existing: bool = True) -> dict
         result["error"] = f"Not a directory: {folder_path}"
         return result
 
+    out_path = folder_path / OUTPUT_NAME
+
+    # Check skip BEFORE expensive find_db_files (rglob is slow on large folders)
+    if skip_existing and out_path.exists():
+        result["status"] = "skipped"
+        return result
+
     db_files = find_db_files(folder_path)
 
     if not db_files:
         result["status"] = "no_db_files"
-        return result
-
-    out_path = folder_path / OUTPUT_NAME
-
-    if skip_existing and out_path.exists():
-        result["status"] = "skipped"
         return result
 
     # Detect Status based on folder name
@@ -571,8 +590,23 @@ if __name__ == "__main__":
         logger.error("Root path not found: %s", ROOT)
         sys.exit(1)
 
-    logger.info("Starting Metadata Extraction on: %s", ROOT)
-    result = run_metadata()
-    logger.info("Result: %s", result)
-    if result["failed"] > 0:
-        sys.exit(1)
+    # --- NEW: Target Mode Logic ---
+    if len(sys.argv) > 1:
+        target_folder = sys.argv[1]
+        target_path = ROOT / target_folder
+        
+        if target_path.exists() and target_path.is_dir():
+            logger.info("🎯 TARGET MODE: Extracting ONLY for %s", target_folder)
+            result = process_single_folder(target_path, skip_existing=False)
+            logger.info("Finished targeted run. Result: %s", result)
+        else:
+            logger.error("❌ Could not find folder: %s", target_path)
+            sys.exit(1)
+            
+    # --- Normal Mode (Runs on everything) ---
+    else:
+        logger.info("Starting Batch Metadata Extraction on: %s", ROOT)
+        result = run_metadata()
+        logger.info("Batch Result: %s", result)
+        if result["failed"] > 0:
+            sys.exit(1)

@@ -3,8 +3,25 @@ import re
 import os
 from pathlib import Path
 
-# --- CORRECT PATH FOR YOUR USER ---
-ROOT_DIR = Path(r"C:\Users\701693\turk_patent\bulletins\Marka")
+_LOCAL_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_LOCAL_DEFAULT_BULLETINS_ROOT = _LOCAL_PROJECT_ROOT / "bulletins" / "Marka"
+
+
+def _resolve_local_clean_root(value: str | None, default: Path) -> Path:
+    if not value:
+        return default
+
+    candidate = Path(value)
+    if candidate.is_absolute():
+        return candidate
+
+    return (_LOCAL_PROJECT_ROOT / candidate).resolve()
+
+
+ROOT_DIR = _resolve_local_clean_root(
+    os.environ.get("PIPELINE_BULLETINS_ROOT") or os.environ.get("DATA_ROOT"),
+    _LOCAL_DEFAULT_BULLETINS_ROOT,
+)
 
 def clean_name_field(text):
     if not text or not isinstance(text, str):

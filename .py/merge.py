@@ -4,6 +4,21 @@ import shutil
 import re
 import sys
 from collections import defaultdict
+from pathlib import Path
+
+_LOCAL_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_LOCAL_DEFAULT_BULLETINS_ROOT = _LOCAL_PROJECT_ROOT / "bulletins" / "Marka"
+
+
+def _resolve_local_merge_root(value: str | None, default: Path) -> str:
+    if not value:
+        return str(default)
+
+    candidate = Path(value)
+    if candidate.is_absolute():
+        return str(candidate)
+
+    return str((_LOCAL_PROJECT_ROOT / candidate).resolve())
 
 def normalize_id(text):
     """
@@ -185,7 +200,10 @@ def fix_misplaced_images(root_dir):
     print("="*40)
 
 if __name__ == "__main__":
-    target_directory = r"C:\Users\701693\turk_patent\bulletins\Marka"
+    target_directory = _resolve_local_merge_root(
+        os.environ.get("PIPELINE_BULLETINS_ROOT") or os.environ.get("DATA_ROOT"),
+        _LOCAL_DEFAULT_BULLETINS_ROOT,
+    )
     
     if os.path.exists(target_directory):
         fix_misplaced_images(target_directory)

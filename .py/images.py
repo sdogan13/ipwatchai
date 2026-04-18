@@ -2,10 +2,29 @@ import os
 import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 # --- CONFIGURATION ---
 # We use os.path for raw speed over pathlib
-ROOT_DIR = os.getenv("DATA_ROOT", r"C:\Users\701693\turk_patent\bulletins\Marka")
+_LOCAL_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_LOCAL_DEFAULT_BULLETINS_ROOT = _LOCAL_PROJECT_ROOT / "bulletins" / "Marka"
+
+
+def _resolve_local_images_root(value: str | None, default: Path) -> str:
+    if not value:
+        return str(default)
+
+    candidate = Path(value)
+    if candidate.is_absolute():
+        return str(candidate)
+
+    return str((_LOCAL_PROJECT_ROOT / candidate).resolve())
+
+
+ROOT_DIR = _resolve_local_images_root(
+    os.environ.get("PIPELINE_BULLETINS_ROOT") or os.environ.get("DATA_ROOT"),
+    _LOCAL_DEFAULT_BULLETINS_ROOT,
+)
 TARGET_LOGOS_DIR = os.path.join(ROOT_DIR, "LOGOS")
 
 # Extensions (set for fast lookup)

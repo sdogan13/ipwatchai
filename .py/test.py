@@ -1,82 +1,200 @@
 import os
 import json
-import re
+from pathlib import Path
 
-def normalize_id(text):
-    match = re.search(r"(\d{4})/(\d+)", str(text))
-    if match:
-        return f"{match.group(1)}_{match.group(2)}"
-    return str(text).strip()
+_LOCAL_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_LOCAL_DEFAULT_BULLETINS_ROOT = _LOCAL_PROJECT_ROOT / "bulletins" / "Marka"
 
-def load_json(json_path):
-    try:
-        with open(json_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            return [data] if isinstance(data, dict) else data
-    except Exception as e:
-        return []
 
-def save_json(json_path, data):
-    with open(json_path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
+def _resolve_local_test_root(value: str | None, default: Path) -> Path:
+    if not value:
+        return default.resolve()
 
-def get_app_id(record):
-    if "APPLICATIONNO" in record and record["APPLICATIONNO"]:
-        return normalize_id(record["APPLICATIONNO"])
-    return None
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = _LOCAL_PROJECT_ROOT / path
+    return path.resolve()
 
-def find_target_folder(root_dir, target_num):
-    pattern = re.compile(rf"^GZ_{target_num}(?!\d)")
-    candidates = [f for f in os.listdir(root_dir) if pattern.match(f) and os.path.isdir(os.path.join(root_dir, f))]
-    return os.path.join(root_dir, max(candidates, key=len)) if candidates else None
 
-def undo_mistakes(root_dir):
-    print("--- Step 1: Memorizing the accidentally copied Application Numbers ---")
-    polluting_ids = set()
+# Set this to the folder containing your B_ and BLT_ directories
+ROOT_DIR = _resolve_local_test_root(
+    os.environ.get("PIPELINE_BULLETINS_ROOT") or os.environ.get("DATA_ROOT"),
+    _LOCAL_DEFAULT_BULLETINS_ROOT,
+)
+
+def is_not_empty(value):
+    """
+    Determines if a value from the B_ dataset should overwrite the BLT_ dataset.
+    Returns False if the value is None, an empty string, "null", or an empty list/dict.
+    """
+    if value is None:
+        return False
+    if isinstance(value, str) and value.strip() in ("", "null", "None"):
+        return False
+    if isinstance(value, (list, dict)) and not value:
+        return False
+    return True
+
+def deep_merge(target, source):
+    """
+    Recursively updates the target dictionary with the source dictionary,
+    but ONLY if the source values are considered 'not empty'.
+    Includes special protection for NICE Classes to prevent truncation.
+    """
+    for key, value in source.items():
+        if not is_not_empty(value):
+            continue 
+
+        # Smart protection for NICE Classes
+        if key in ["NICECLASSES_LIST", "NICECLASSES_RAW"]:
+            target_list = target.get("NICECLASSES_LIST", [])
+            source_list = source.get("NICECLASSES_LIST", [])
+            if isinstance(target_list, list) and len(target_list) >= len(source_list) and len(target_list) > 0:
+                continue
+
+        if isinstance(value, dict) and key in target and isinstance(target[key], dict):
+            deep_merge(target[key], value)
+        else:
+            target[key] = value
+            
+    return target
+
+def main():
+    print(f"Starting bulk merge in: {ROOT_DIR}\n")
     
-    # The mistake happened from GZ_38 to GZ_63
-    for i in range(38, 64):
-        src_folder = os.path.join(root_dir, f"GZ_{i}")
-        json_path = os.path.join(src_folder, "metadata.json")
-        
-        if os.path.exists(json_path):
-            records = load_json(json_path)
-            for r in records:
-                app_id = get_app_id(r)
-                if app_id:
-                    polluting_ids.add(app_id)
-                    
-    print(f"  -> Memorized {len(polluting_ids)} Application Numbers that need to be removed.\n")
+    # Find all B_ folders
+    b_folders = [d for d in ROOT_DIR.iterdir() if d.is_dir() and d.name.startswith("B_")]
+    
+    if not b_folders:
+        print("[INFO] No B_ folders found to process.")
+        return
 
-    print("--- Step 2: Surgically cleaning the higher target folders ---")
-    # The mistake polluted GZ_472 to GZ_499
-    total_cleaned = 0
-    for i in range(472, 500):
-        target_folder = find_target_folder(root_dir, i)
-        if not target_folder:
+    # Sort them so they process in a nice, predictable order
+    b_folders.sort(key=lambda x: x.name)
+    
+    # --- Tracking Lists for Final Report ---
+    skipped_mismatch_folders = []
+    skipped_missing_blt_folders = []
+
+    for b_dir in b_folders:
+        # Extract the folder ID (e.g., "489" from "B_489")
+        parts = b_dir.name.split('_')
+        if len(parts) < 2:
+            continue
+        folder_id = parts[1]
+        
+        # Look for any folder that starts with "BLT_{folder_id}"
+        blt_candidates = [d for d in ROOT_DIR.iterdir() if d.is_dir() and d.name.startswith(f"BLT_{folder_id}")]
+        
+        # --- NEW: Skip if no BLT folder exists at all ---
+        if not blt_candidates:
+            print(f"[WARNING] No matching BLT folder found for {b_dir.name}!")
+            print("  -> [ACTION] Skipping and adding to missing list.")
+            skipped_missing_blt_folders.append(b_dir.name)
+            print("-" * 50)
             continue
             
-        json_path = os.path.join(target_folder, "metadata.json")
-        if os.path.exists(json_path):
-            records = load_json(json_path)
-            original_len = len(records)
+        # Sort alphabetically to pick the newest date if multiple exist
+        blt_candidates.sort()
+        blt_dir = blt_candidates[-1]
             
-            # Keep only the records that are NOT in our polluted list
-            cleaned_records = [r for r in records if get_app_id(r) not in polluting_ids]
+        b_json_path = b_dir / "metadata.json"
+        blt_json_path = blt_dir / "metadata.json"
+        
+        # Check if B_ data exists
+        if not b_json_path.exists():
+            print(f"[SKIP] {b_dir.name} metadata.json is missing.")
+            print("-" * 50)
+            continue
             
-            removed_count = original_len - len(cleaned_records)
-            if removed_count > 0:
-                save_json(json_path, cleaned_records)
-                print(f"  [Cleaned] Removed {removed_count} mistaken records from {os.path.basename(target_folder)}")
-                total_cleaned += removed_count
+        # --- NEW: Skip if BLT folder exists but has no JSON file ---
+        if not blt_json_path.exists():
+            print(f"[WARNING] {blt_dir.name} exists but has no metadata.json!")
+            print("  -> [ACTION] Skipping and adding to missing list.")
+            skipped_missing_blt_folders.append(f"{b_dir.name} (Missing JSON in BLT)")
+            print("-" * 50)
+            continue
 
-    print("-" * 60)
-    print(f"UNDO COMPLETE: Successfully erased {total_cleaned} mistaken records.")
-    print("Your target folders are now clean and ready for the real Global Map merge.")
+        print(f"[INFO] Merging: {b_dir.name} -> {blt_dir.name}")
+        
+        # Load JSON Data
+        try:
+            with open(b_json_path, 'r', encoding='utf-8') as f:
+                b_data = json.load(f)
+            with open(blt_json_path, 'r', encoding='utf-8') as f:
+                blt_data = json.load(f)
+        except Exception as e:
+            print(f"  -> [ERROR] Failed to read JSON: {e}")
+            print("-" * 50)
+            continue
+            
+        blt_dict = {item.get("APPLICATIONNO"): item for item in blt_data if item.get("APPLICATIONNO")}
+        
+        # The 50% Match Safety Check
+        b_app_nos = {item.get("APPLICATIONNO") for item in b_data if item.get("APPLICATIONNO")}
+        blt_app_nos = set(blt_dict.keys())
+
+        if not b_app_nos:
+            print(f"  -> [SKIP] {b_dir.name} has no valid applications inside.")
+            print("-" * 50)
+            continue
+
+        overlap_count = len(b_app_nos.intersection(blt_app_nos))
+        match_percentage = (overlap_count / len(b_app_nos)) * 100
+
+        if match_percentage < 50.0:
+            print(f"  -> [WARNING] Only {match_percentage:.1f}% match ({overlap_count}/{len(b_app_nos)}). Mismatch detected!")
+            print("  -> [ACTION] Skipping this folder to prevent data corruption.")
+            skipped_mismatch_folders.append(f"{b_dir.name} (Matched only {match_percentage:.1f}%)")
+            print("-" * 50)
+            continue
+        else:
+            print(f"  -> [VALIDATION] Pass: {match_percentage:.1f}% match ({overlap_count}/{len(b_app_nos)}).")
+        
+        updated_count = 0
+        added_count = 0
+        
+        for b_item in b_data:
+            app_no = b_item.get("APPLICATIONNO")
+            if not app_no:
+                continue
+                
+            if app_no in blt_dict:
+                blt_dict[app_no] = deep_merge(blt_dict[app_no], b_item)
+                updated_count += 1
+            else:
+                blt_dict[app_no] = b_item
+                added_count += 1
+                
+        merged_blt_list = list(blt_dict.values())
+        
+        try:
+            with open(blt_json_path, 'w', encoding='utf-8') as f:
+                json.dump(merged_blt_list, f, ensure_ascii=False, indent=2)
+            print(f"  -> [SUCCESS] Updated {updated_count} records | Appended {added_count} new records.")
+        except Exception as e:
+            print(f"  -> [ERROR] Failed to save merged data: {e}")
+            
+        print("-" * 50)
+
+    # --- Final Report ---
+    if skipped_mismatch_folders or skipped_missing_blt_folders:
+        print("\n" + "=" * 50)
+        print("🚨 BULK MERGE COMPLETE - WITH SKIPPED FOLDERS 🚨")
+        
+        if skipped_missing_blt_folders:
+            print("\n❌ MISSING TARGET FOLDERS (No BLT folder found):")
+            for folder in skipped_missing_blt_folders:
+                print(f"  - {folder}")
+                
+        if skipped_mismatch_folders:
+            print("\n⚠️ DATA MISMATCH (Failed 50% overlap rule):")
+            for folder in skipped_mismatch_folders:
+                print(f"  - {folder}")
+                
+        print("=" * 50)
+    else:
+        print("\n✅ BULK MERGE COMPLETE - All folders passed safety checks and merged successfully!")
 
 if __name__ == "__main__":
-    target_directory = r"C:\Users\701693\turk_patent\bulletins\Marka"
-    if os.path.exists(target_directory):
-        undo_mistakes(target_directory)
-    else:
-        print(f"Directory not found: {target_directory}")
+    main()

@@ -22,9 +22,26 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from playwright.sync_api import sync_playwright
 
+_LOCAL_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_LOCAL_DEFAULT_BULLETINS_ROOT = _LOCAL_PROJECT_ROOT / "bulletins" / "Marka"
+
+
+def _resolve_local_tescil_root(value: str | None, default: Path) -> Path:
+    if not value:
+        return default.resolve()
+
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = _LOCAL_PROJECT_ROOT / path
+    return path.resolve()
+
+
 # --- DIRECTORY CONFIGURATION ---
 # Define the root directory. Subdirectories will be created dynamically based on Bulletin No.
-ROOT_DIR = Path(os.getenv("DATA_ROOT", r"C:\Users\701693\turk_patent\bulletins\Marka"))
+ROOT_DIR = _resolve_local_tescil_root(
+    os.environ.get("PIPELINE_BULLETINS_ROOT") or os.environ.get("DATA_ROOT"),
+    _LOCAL_DEFAULT_BULLETINS_ROOT,
+)
 
 URL = "https://www.turkpatent.gov.tr/arastirma-yap?form=trademark"
 
@@ -54,17 +71,52 @@ def try_click(locator, timeout_ms: int = 1500) -> bool:
         return False
 
 
-def close_cookie_banner(page) -> None:
-    """Identifies and closes common cookie or GDPR banners."""
+def close_popups(page) -> None:
+    """Identifies and closes common cookie banners and announcement (Duyuru) modals."""
+    # 1. Hit Escape, which commonly closes active dialogs
+    try:
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(500)
+    except Exception:
+        pass
+
+    # 2. Try common consent and close buttons
     candidates = [
-        page.get_by_role("button", name=re.compile(r"kabul|accept|tamam|ok", re.I)),
-        page.get_by_role("button", name=re.compile(r"anlad[ıi]m", re.I)),
+        page.get_by_role("button", name=re.compile(r"kabul|accept|tamam|ok|anlad[ıi]m", re.I)),
         page.locator("button:has-text('Kabul')"),
         page.locator("button:has-text('Accept')"),
+        page.locator("button[aria-label*='Close']"),
+        page.locator("button[aria-label*='Kapat']"),
+        page.locator("div[role='dialog'] button").first,
     ]
+    
     for c in candidates:
-        if try_click(c, 1200):
-            return
+        try:
+            if c.count() > 0:
+                c.first.click(timeout=800, force=True)
+                page.wait_for_timeout(300)
+        except Exception:
+            pass
+            
+    # 3. Click completely outside to dismiss backdrop-dismissible modals
+    try:
+        page.mouse.click(2, 2)
+        page.wait_for_timeout(300)
+    except Exception:
+        pass
+
+    # 4. Nuclear option: hide any remaining full-screen overlays via JS
+    try:
+        page.evaluate("""() => {
+            document.querySelectorAll('section[class*="jss"], div[role="dialog"], .MuiDialog-root, .MuiBackdrop-root').forEach(el => {
+                const style = window.getComputedStyle(el);
+                if (style.position === 'fixed' && parseInt(style.zIndex || 0) > 50) {
+                    el.style.display = 'none';
+                }
+            });
+        }""")
+    except Exception:
+        pass
 
 
 def ensure_marka_arastirma_tab(page) -> None:
@@ -548,15 +600,21 @@ def process_brand(context, page, bulten_no: str, out_dir: Path, max_scroll_secon
     # Updated variable name for clarity, though logic treats it as generic search term
     log(f"\n[INFO] Starting search for Bulletin No: {bulten_no}")
     page.goto(URL, wait_until="domcontentloaded")
-    close_cookie_banner(page)
+    close_popups(page)
     ensure_marka_arastirma_tab(page)
 
     # Use the new locator function for Bulletin Number
     inp = locate_bulten_no_input(page)
     if not inp: raise RuntimeError("Input field for Bulletin No not found (even after Detailed Search check).")
     
-    inp.click()
-    inp.fill(bulten_no)
+    try:
+        inp.click(timeout=4000)
+        inp.fill(bulten_no)
+    except Exception:
+        log("[WARN] Input action intercepted by overlay. Forcing click and fill...")
+        inp.click(force=True, timeout=2000)
+        inp.fill(bulten_no, force=True)
+        
     inp.press("Enter")
     page.wait_for_timeout(1000)
     click_sorgula(page)

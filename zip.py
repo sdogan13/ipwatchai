@@ -11,6 +11,22 @@ import locale
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+_LOCAL_PROJECT_ROOT = Path(__file__).resolve().parent
+_LOCAL_DEFAULT_BULLETINS_ROOT = _LOCAL_PROJECT_ROOT / "bulletins" / "Marka"
+_DEFAULT_WINDOWS_7Z_PATH = Path(
+    os.environ.get("ProgramW6432") or os.environ.get("ProgramFiles", r"C:\Program Files")
+) / "7-Zip" / "7z.exe"
+
+
+def _resolve_local_project_path(value: Optional[str], default: Path) -> Path:
+    if not value:
+        return default.resolve()
+
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = _LOCAL_PROJECT_ROOT / path
+    return path.resolve()
+
 # ----------------------------
 # Config (from settings with fallback defaults)
 # ----------------------------
@@ -23,8 +39,11 @@ try:
     _DEFAULT_CLEAN = _pipe.clean_after_extract
     _DEFAULT_MAX_CD = _pipe.max_cd_archives or None  # 0 means no limit
 except Exception:
-    _DEFAULT_ROOT = Path(r"C:\Users\701693\turk_patent\bulletins\Marka")
-    _DEFAULT_7Z = r"C:\Program Files\7-Zip\7z.exe"
+    _DEFAULT_ROOT = _resolve_local_project_path(
+        os.environ.get("PIPELINE_BULLETINS_ROOT") or os.environ.get("DATA_ROOT"),
+        _LOCAL_DEFAULT_BULLETINS_ROOT,
+    )
+    _DEFAULT_7Z = "7z"
     _DEFAULT_SKIP = True
     _DEFAULT_CLEAN = True
     _DEFAULT_MAX_CD = None
@@ -101,30 +120,40 @@ def normalize_prefix(prefix: str) -> str:
 # ---------------------- 7z ----------------------
 def find_7z(explicit: Optional[str] = None) -> Path:
     if explicit:
-        p = Path(explicit)
-        if p.exists():
-            return p
-        raise FileNotFoundError(f"7z not found at: {explicit}")
+        p = Path(explicit).expanduser()
+        if p.is_absolute() or p.parent != Path("."):
+            if p.exists():
+                return p.resolve()
+            raise FileNotFoundError(f"7z not found at: {explicit}")
+
+        resolved = shutil.which(explicit)
+        if resolved:
+            return Path(resolved).resolve()
+        raise FileNotFoundError(f"7z executable not found on PATH: {explicit}")
 
     # Try config setting first
-    cfg_path = Path(_DEFAULT_7Z)
+    cfg_path = Path(_DEFAULT_7Z).expanduser()
     if cfg_path.exists():
-        return cfg_path
+        return cfg_path.resolve()
+
+    resolved_default = shutil.which(_DEFAULT_7Z)
+    if resolved_default:
+        return Path(resolved_default).resolve()
 
     # Prefer modern 7zz (7-Zip >=21.x) which has better RAR5 support
     p = shutil.which("7zz")
     if p:
-        return Path(p)
+        return Path(p).resolve()
 
     p = shutil.which("7z")
     if p:
-        return Path(p)
+        return Path(p).resolve()
 
-    fallback = Path(r"C:\Program Files\7-Zip\7z.exe")
+    fallback = _DEFAULT_WINDOWS_7Z_PATH
     if fallback.exists():
-        return fallback
+        return fallback.resolve()
 
-    raise FileNotFoundError("7z.exe not found. Install 7-Zip or add it to PATH.")
+    raise FileNotFoundError("7z not found. Install 7-Zip or add it to PATH.")
 
 
 # ---------------------- helpers ----------------------
@@ -923,7 +952,7 @@ def run_extraction(root_dir: Path = None, settings=None) -> dict:
     max_cd = (settings.max_cd_archives or None) if settings else _DEFAULT_MAX_CD
 
     seven_z_hint = settings.seven_zip_path if settings else None
-    seven_z = find_7z(seven_z_hint if seven_z_hint and Path(seven_z_hint).exists() else None)
+    seven_z = find_7z(seven_z_hint if settings else None)
 
     t0 = time.time()
     direct_cd, single_issue, group_ranges = find_archives(root, max_cd)

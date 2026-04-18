@@ -5,6 +5,21 @@ import glob
 import sys
 import io
 from collections import defaultdict, Counter
+from pathlib import Path
+
+_LOCAL_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_LOCAL_DEFAULT_BULLETINS_ROOT = _LOCAL_PROJECT_ROOT / "bulletins" / "Marka"
+
+
+def _resolve_local_find_duplicates2_root(value: str | None, default: Path) -> str:
+    if not value:
+        return str(default)
+
+    candidate = Path(value)
+    if candidate.is_absolute():
+        return str(candidate)
+
+    return str((_LOCAL_PROJECT_ROOT / candidate).resolve())
 
 # Force UTF-8 output
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
@@ -16,7 +31,10 @@ def safe(s):
     return str(s)
 
 def main():
-    base = r'C:\Users\701693\turk_patent\bulletins\Marka'
+    base = _resolve_local_find_duplicates2_root(
+        os.environ.get("PIPELINE_BULLETINS_ROOT") or os.environ.get("DATA_ROOT"),
+        _LOCAL_DEFAULT_BULLETINS_ROOT,
+    )
     pattern = os.path.join(base, '*', 'metadata.json')
     files = sorted(glob.glob(pattern))
     print(f'Found {len(files)} metadata.json files', flush=True)

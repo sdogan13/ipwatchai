@@ -21,9 +21,26 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from playwright.sync_api import sync_playwright
 
+_LOCAL_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_LOCAL_DEFAULT_BULLETINS_ROOT = _LOCAL_PROJECT_ROOT / "bulletins" / "Marka"
+
+
+def _resolve_local_blt_root(value: str | None, default: Path) -> Path:
+    if not value:
+        return default.resolve()
+
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = _LOCAL_PROJECT_ROOT / path
+    return path.resolve()
+
+
 # --- DIRECTORY CONFIGURATION ---
 # Define the root directory. Subdirectories will be created dynamically based on Bulletin No.
-ROOT_DIR = Path(os.getenv("DATA_ROOT", r"C:\Users\701693\turk_patent\bulletins\Marka"))
+ROOT_DIR = _resolve_local_blt_root(
+    os.environ.get("PIPELINE_BULLETINS_ROOT") or os.environ.get("DATA_ROOT"),
+    _LOCAL_DEFAULT_BULLETINS_ROOT,
+)
 
 URL = "https://www.turkpatent.gov.tr/arastirma-yap?form=trademark"
 

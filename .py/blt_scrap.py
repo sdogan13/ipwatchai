@@ -4,6 +4,7 @@
 # Includes persistence logic to continue scrolling until Expected Total is reached.
 # TIMEOUT DISABLED BY DEFAULT (runs until completion).
 # PERFORMANCE TUNED: Uses JS-side execution for scraping and position checks (10x faster loop).
+# POPUP HANDLING UPGRADED: Uses robust multi-step escape/click/JS-hide logic.
 
 from __future__ import annotations
 
@@ -20,9 +21,26 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from playwright.sync_api import sync_playwright
 
+_LOCAL_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_LOCAL_DEFAULT_BULLETINS_ROOT = _LOCAL_PROJECT_ROOT / "bulletins" / "Marka"
+
+
+def _resolve_local_blt_scrap_root(value: str | None, default: Path) -> Path:
+    if not value:
+        return default.resolve()
+
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = _LOCAL_PROJECT_ROOT / path
+    return path.resolve()
+
+
 # --- DIRECTORY CONFIGURATION ---
 # Define the root directory. Subdirectories will be created dynamically based on Bulletin No.
-ROOT_DIR = Path(os.getenv("DATA_ROOT", r"C:\Users\sdogan\turk_patent\bulletins\Marka"))
+ROOT_DIR = _resolve_local_blt_scrap_root(
+    os.environ.get("PIPELINE_BULLETINS_ROOT") or os.environ.get("DATA_ROOT"),
+    _LOCAL_DEFAULT_BULLETINS_ROOT,
+)
 
 URL = "https://www.turkpatent.gov.tr/arastirma-yap?form=trademark"
 
@@ -52,17 +70,53 @@ def try_click(locator, timeout_ms: int = 1500) -> bool:
         return False
 
 
-def close_cookie_banner(page) -> None:
-    """Identifies and closes common cookie or GDPR banners."""
+def close_popups(page) -> None:
+    """Identifies and closes common cookie banners and announcement (Duyuru) modals."""
+    log("[INFO] Attempting to clear popups/overlays...")
+    # 1. Hit Escape, which commonly closes active dialogs
+    try:
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(500)
+    except Exception:
+        pass
+
+    # 2. Try common consent and close buttons
     candidates = [
-        page.get_by_role("button", name=re.compile(r"kabul|accept|tamam|ok", re.I)),
-        page.get_by_role("button", name=re.compile(r"anlad[ıi]m", re.I)),
+        page.get_by_role("button", name=re.compile(r"kabul|accept|tamam|ok|anlad[ıi]m", re.I)),
         page.locator("button:has-text('Kabul')"),
         page.locator("button:has-text('Accept')"),
+        page.locator("button[aria-label*='Close']"),
+        page.locator("button[aria-label*='Kapat']"),
+        page.locator("div[role='dialog'] button").first,
     ]
+    
     for c in candidates:
-        if try_click(c, 1200):
-            return
+        try:
+            if c.count() > 0:
+                c.first.click(timeout=800, force=True)
+                page.wait_for_timeout(300)
+        except Exception:
+            pass
+            
+    # 3. Click completely outside to dismiss backdrop-dismissible modals
+    try:
+        page.mouse.click(2, 2)
+        page.wait_for_timeout(300)
+    except Exception:
+        pass
+
+    # 4. Nuclear option: hide any remaining full-screen overlays via JS
+    try:
+        page.evaluate("""() => {
+            document.querySelectorAll('section[class*="jss"], div[role="dialog"], .MuiDialog-root, .MuiBackdrop-root').forEach(el => {
+                const style = window.getComputedStyle(el);
+                if (style.position === 'fixed' && parseInt(style.zIndex || 0) > 50) {
+                    el.style.display = 'none';
+                }
+            });
+        }""")
+    except Exception:
+        pass
 
 
 def ensure_marka_arastirma_tab(page) -> None:
@@ -215,7 +269,7 @@ def get_last_row_position(page, row_sel: str) -> int:
         if (rows.length === 0) return 0;
         const last = rows[rows.length - 1];
         
-        # Try all common index attributes
+        // Try all common index attributes
         const idx = last.getAttribute('aria-rowindex') || 
                     last.getAttribute('data-rowindex') || 
                     last.getAttribute('data-idx');
@@ -419,7 +473,7 @@ def scroll_and_capture(page, row_sel: str, scroll_target_sel: str, max_seconds: 
                 new_pos3 = wait_until_position_changes(page, row_sel, prev, timeout_s=4.0) # Reduced from 6.0
                 new_pos = max(new_pos, new_pos3)
             
-            threshold = 200 if (total and current_len < total) else 25
+            threshold = 50 if (total and current_len < total) else 25
             
             if stagnation > threshold:
                 log(f"[WARN] Stagnation limit ({threshold}) reached. Aborting scroll.")
@@ -510,7 +564,10 @@ def process_brand(context, page, bulten_no: str, out_dir: Path, max_scroll_secon
     # Updated variable name for clarity, though logic treats it as generic search term
     log(f"\n[INFO] Starting search for Bulletin No: {bulten_no}")
     page.goto(URL, wait_until="domcontentloaded")
-    close_cookie_banner(page)
+    
+    # CALLING THE NEW UPGRADED POPUP HANDLER
+    close_popups(page)
+    
     ensure_marka_arastirma_tab(page)
 
     # Use the new locator function for Bulletin Number
@@ -540,27 +597,36 @@ def process_brand(context, page, bulten_no: str, out_dir: Path, max_scroll_secon
 
 def main():
     ap = argparse.ArgumentParser()
-    # Updated help text, but keeping argument name to match previous interface compatibility
-    ap.add_argument("--names", type=str, nargs="+", default=["sedo"], help="Bulletin Numbers to search")
+    ap.add_argument("--names", type=str, nargs="+", default=[], help="Bulletin Numbers to search")
+    # NEW ARGUMENT: Added ability to specify a numeric range
+    ap.add_argument("--range", type=int, nargs=2, metavar=('START', 'END'), help="Search a range of Bulletin Numbers (e.g., --range 1 489)")
     ap.add_argument("--limit", type=int, default=0, help="Max rows")
     ap.add_argument("--headless", action="store_true", help="Run headless")
-    # CHANGED: Default timeout changed from 1200 to 0 (infinite)
     ap.add_argument("--max-scroll-seconds", type=int, default=0, help="Max time (0 for infinite)")
     args = ap.parse_args()
 
-    # NOTE: SCRAPED_DATA_DIR constant removed to allow dynamic directory creation per bulletin number
+    # Combine individual names and range of names into one list
+    search_targets = args.names.copy()
+    if args.range:
+        start, end = args.range
+        # Generate numbers from start to end (inclusive) and convert them to strings
+        search_targets.extend([str(i) for i in range(start, end + 1)])
+
+    # If neither --names nor --range were provided, default to a test search
+    if not search_targets:
+        search_targets = ["sedo"]
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=args.headless)
-        for val in args.names:
+        
+        for val in search_targets:
             # Create a safe directory name from the bulletin number
             safe_val = re.sub(r'[^\w\s-]', '', val).strip().replace(' ', '_')
-            dynamic_out_dir = ROOT_DIR / f"BLT_{safe_val}"
+            dynamic_out_dir = ROOT_DIR / f"B_{safe_val}"
 
             context = browser.new_context(viewport={"width": 1920, "height": 1080})
             page = context.new_page()
             try: 
-                # Pass the dynamic_out_dir to the processor
                 process_brand(context, page, val, dynamic_out_dir, args.max_scroll_seconds, args.limit)
             except Exception as e: 
                 log(f"[ERROR] Failed {val}: {e}")

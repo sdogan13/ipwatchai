@@ -3,7 +3,22 @@ import json
 import shutil
 import re
 from collections import Counter
+from pathlib import Path
 from send2trash import send2trash  # <-- NEW: Imports the Recycle Bin tool
+
+_LOCAL_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_LOCAL_DEFAULT_BULLETINS_ROOT = _LOCAL_PROJECT_ROOT / "bulletins" / "Marka"
+
+
+def _resolve_local_gz_root(value: str | None, default: Path) -> str:
+    if not value:
+        return str(default)
+
+    candidate = Path(value)
+    if candidate.is_absolute():
+        return str(candidate)
+
+    return str((_LOCAL_PROJECT_ROOT / candidate).resolve())
 
 def normalize_id(text):
     match = re.search(r"(\d{4})/(\d+)", str(text))
@@ -207,7 +222,10 @@ def process_global_mapping_move(root_dir):
     print("="*50)
 
 if __name__ == "__main__":
-    target_directory = r"C:\Users\701693\turk_patent\bulletins\Marka"
+    target_directory = _resolve_local_gz_root(
+        os.environ.get("PIPELINE_BULLETINS_ROOT") or os.environ.get("DATA_ROOT"),
+        _LOCAL_DEFAULT_BULLETINS_ROOT,
+    )
     if os.path.exists(target_directory):
         process_global_mapping_move(target_directory)
     else:

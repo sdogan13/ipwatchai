@@ -9,12 +9,44 @@ from typing import Optional, Tuple, List, Dict
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from datetime import datetime
 from dotenv import load_dotenv
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+_LOCAL_PROJECT_ROOT = Path(__file__).resolve().parent
+_LOCAL_DEFAULT_BULLETINS_ROOT = _LOCAL_PROJECT_ROOT / "bulletins" / "Marka"
+
+
+def _resolve_local_scraper_root(value: str | None, default: Path) -> Path:
+    if not value:
+        return default.resolve()
+
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = _LOCAL_PROJECT_ROOT / path
+    return path.resolve()
+
+
+# Handle API changes in playwright-stealth v2.0+
+# v2.0+ uses Stealth().use_sync(page); older versions had stealth_sync(page)
+try:
+    from playwright_stealth import Stealth as _StealthClass
+    stealth_sync = _StealthClass().use_sync
+except ImportError:
+    try:
+        from playwright_stealth import stealth_sync
+        if not callable(stealth_sync):
+            stealth_sync = None
+    except ImportError:
+        # playwright_stealth not installed — scraping features disabled
+        stealth_sync = None
 
 load_dotenv()
 
 # ===================== CONFIG =====================
 # Directory Structure Configuration (Windows-compatible)
-ROOT_DIR = Path(os.getenv("DATA_ROOT", r"C:\Users\701693\turk_patent\bulletins\Marka"))
+ROOT_DIR = _resolve_local_scraper_root(
+    os.environ.get("PIPELINE_BULLETINS_ROOT") or os.environ.get("DATA_ROOT"),
+    _LOCAL_DEFAULT_BULLETINS_ROOT,
+)
 
 # Ensure root data directory exists
 ROOT_DIR.mkdir(parents=True, exist_ok=True)
@@ -22,6 +54,37 @@ ROOT_DIR.mkdir(parents=True, exist_ok=True)
 # ===================== SCRAPING LIMITS =====================
 # Maximum records to scrape per search (hard cap to prevent runaway scraping)
 MAX_SCRAPE_LIMIT = 1000
+
+# ===================== TURKISH CHARACTER FALLBACK =====================
+# Maps Latin characters to their Turkish equivalents for fallback search
+TURKISH_CHAR_MAP = {
+    'c': 'ç', 'C': 'Ç',
+    'g': 'ğ', 'G': 'Ğ',
+    'i': 'ı', 'I': 'İ',
+    's': 'ş', 'S': 'Ş',
+    # o→ö and u→ü intentionally excluded: too aggressive, creates invalid words
+    # e.g. 'dogan' → 'doğan' (correct) vs 'döğan' (wrong)
+}
+
+# Rotation pool for fallback UA to avoid IP fingerprinting
+FALLBACK_USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/120.0",
+]
+
+
+def _apply_turkish_chars(text: str) -> str:
+    """Replace Latin equivalents with Turkish characters per TURKISH_CHAR_MAP."""
+    return ''.join(TURKISH_CHAR_MAP.get(ch, ch) for ch in text)
+
+
+def _has_latin_equivalents(text: str) -> bool:
+    """Return True if text contains any Latin char that has a Turkish equivalent."""
+    return any(ch in TURKISH_CHAR_MAP for ch in text)
+
 
 # ===================== SKIP TERMS =====================
 # Placeholder/generic terms that are not real trademark names
@@ -126,32 +189,92 @@ class TurkPatentScraper:
             viewport={"width": 1920, "height": 1080}
         )
         self.page = self.context.new_page()
+        if stealth_sync is not None:
+            stealth_sync(self.page)
         self.page.set_default_timeout(60000)
 
     def close(self):
-        if self.context: 
+        if self.context:
             self.context.close()
-        if self.browser: 
+        if self.browser:
             self.browser.close()
-        if self.pw: 
+        if self.pw:
             self.pw.stop()
+
+    def _rotate_user_agent(self):
+        """Recreate browser context with a rotated user agent for fallback search."""
+        import random
+        new_ua = random.choice(FALLBACK_USER_AGENTS)
+        logging.info(f"   [UA] Rotating user agent for Turkish character fallback")
+        try:
+            if self.context:
+                self.context.close()
+        except Exception:
+            pass
+        self.context = self.browser.new_context(
+            accept_downloads=True,
+            viewport={"width": 1920, "height": 1080},
+            user_agent=new_ua,
+        )
+        self.page = self.context.new_page()
+        if stealth_sync is not None:
+            stealth_sync(self.page)
+        self.page.set_default_timeout(60000)
 
     # --- COMPONENT LOGIC ---
 
-    def _close_cookie_banner(self):
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+    def _safe_goto(self, url: str):
+        """Navigates to a URL with exponential backoff retries."""
+        logging.info(f"   [NETWORK] Attempting to load {url}...")
+        self.page.goto(url, wait_until="domcontentloaded")
+
+    def _close_popups(self):
+        """Identifies and closes common cookie banners and announcement (Duyuru) modals."""
+        # 1. Hit Escape, which commonly closes active dialogs
+        try:
+            self.page.keyboard.press("Escape")
+            self.page.wait_for_timeout(500)
+        except Exception:
+            pass
+
+        # 2. Try common consent and close buttons
         candidates = [
-            self.page.get_by_role("button", name=re.compile(r"kabul|accept|tamam|ok", re.I)),
-            self.page.get_by_role("button", name=re.compile(r"anlad[ıi]m", re.I)),
+            self.page.get_by_role("button", name=re.compile(r"kabul|accept|tamam|ok|anlad[ıi]m", re.I)),
             self.page.locator("button:has-text('Kabul')"),
             self.page.locator("button:has-text('Accept')"),
+            self.page.locator("button[aria-label*='Close']"),
+            self.page.locator("button[aria-label*='Kapat']"),
+            self.page.locator("div[role='dialog'] button").first,
         ]
+        
         for c in candidates:
             try:
-                if c.first.count() > 0:
-                    c.first.click(timeout=1500)
-                    return
+                if c.count() > 0:
+                    c.first.click(timeout=800, force=True)
+                    self.page.wait_for_timeout(300)
             except Exception:
-                continue
+                pass
+                
+        # 3. Click completely outside to dismiss backdrop-dismissible modals
+        try:
+            self.page.mouse.click(2, 2)
+            self.page.wait_for_timeout(300)
+        except Exception:
+            pass
+
+        # 4. Nuclear option: hide any remaining full-screen overlays via JS
+        try:
+            self.page.evaluate("""() => {
+                document.querySelectorAll('section[class*="jss"], div[role="dialog"], .MuiDialog-root, .MuiBackdrop-root').forEach(el => {
+                    const style = window.getComputedStyle(el);
+                    if (style.position === 'fixed' && parseInt(style.zIndex || 0) > 50) {
+                        el.style.display = 'none';
+                    }
+                });
+            }""")
+        except Exception:
+            pass
 
     def _ensure_marka_arastirma_tab(self):
         try:
@@ -519,62 +642,37 @@ class TurkPatentScraper:
         # Fallback: press Enter
         self.page.keyboard.press("Enter")
 
-    def search_and_ingest(self, trademark_name: str, limit: int = 0, max_scroll_seconds: int = 1200):
-        # ===================== SKIP CHECK =====================
-        # Check if the trademark name is a placeholder/generic term (not worth scraping)
-        term_lower = trademark_name.lower().strip()
-        term_normalized = term_lower.replace(' ', '')  # Also check without spaces
-
-        for skip_term in SKIP_TERMS:
-            skip_lower = skip_term.lower()
-            skip_normalized = skip_lower.replace(' ', '')
-
-            # Match exact term or normalized (without spaces)
-            if term_lower == skip_lower or term_normalized == skip_normalized:
-                logging.info(f"   ⏭️ Skipping scrape for placeholder term: '{trademark_name}'")
-                return []  # Return empty list - no scraping needed
-
-        # Skip very short terms (1-2 chars) or terms that are just numbers
-        if len(term_lower) <= 2:
-            logging.info(f"   ⏭️ Skipping scrape: '{trademark_name}' is too short (≤2 chars)")
-            return []
-
-        if term_lower.isdigit():
-            logging.info(f"   ⏭️ Skipping scrape: '{trademark_name}' is just numbers")
-            return []
-
-        # Apply hard limit of MAX_SCRAPE_LIMIT (1000) if no limit specified or limit is higher
-        effective_limit = MAX_SCRAPE_LIMIT
-        if limit > 0:
-            effective_limit = min(limit, MAX_SCRAPE_LIMIT)
-
-        # ===================== NORMAL SCRAPING =====================
-        if not self.page:
-            self.start_browser()
-
+    def _do_search(self, trademark_name: str, effective_limit: int, max_scroll_seconds: int) -> List[List]:
+        """
+        Core search execution: navigate → fill → submit → scroll → return raw rows.
+        Returns empty list if no records found. Raises on hard failures.
+        """
         logging.info(f"🔎 Searching TurkPatent for: '{trademark_name}' (max {effective_limit} records)")
-        self.page.goto(self.url, wait_until="domcontentloaded")
-        self._close_cookie_banner()
+        self._safe_goto(self.url)
+        self._close_popups()
         self._ensure_marka_arastirma_tab()
 
         inp = self._locate_marka_adi_input()
         if not inp:
             raise Exception("Marka Adı input field not found.")
 
-        inp.click()
-        inp.fill(trademark_name)
+        try:
+            inp.click(timeout=4000)
+            inp.fill(trademark_name)
+        except Exception:
+            logging.warning("   [WARN] Input action intercepted by overlay. Forcing click and fill...")
+            inp.click(force=True, timeout=2000)
+            inp.fill(trademark_name, force=True)
+
         inp.press("Enter")
         self.page.wait_for_timeout(1000)
 
-        # Click Sorgula button
         self._click_sorgula()
 
-        # Detect grid type and wait for results
         row_sel, scroll_target_sel = self._detect_grid()
         try:
             self.page.wait_for_selector(row_sel, timeout=20000)
         except Exception:
-            # Check if no results
             if "bulunamadı" in self.page.content().lower() or "bulunamadi" in self.page.content().lower():
                 logging.info("   ℹ️ No records found.")
                 return []
@@ -582,33 +680,25 @@ class TurkPatentScraper:
 
         self._ensure_sonsuz_liste_on()
 
-        # === EXACT SCROLL LOGIC FROM tescil_test.py ===
         captured_data: Dict[str, List[str]] = {}
-        # Reduced initial sleep from 0.8 to 0.5
         time.sleep(0.5)
 
         total = self._get_total_records_count()
-
-        # Calculate actual limit (minimum of effective_limit and total)
-        actual_limit = effective_limit
         if total:
-            actual_limit = min(effective_limit, total)
-            logging.info(f"   📊 Expected total: {total} (will scrape up to {actual_limit})")
+            logging.info(f"   📊 Expected total: {total} (will scrape up to {min(effective_limit, total)})")
         else:
-            logging.info(f"   📊 Expected total: UNKNOWN (max limit: {actual_limit})")
+            logging.info(f"   📊 Expected total: UNKNOWN (max limit: {effective_limit})")
 
         start_t = time.time()
         last_pos = self._get_last_row_position(row_sel)
         stagnation = 0
 
-        # Initial wheel to activate scroll context
         try:
             self._wheel_inside_scroll_target(scroll_target_sel, delta_y=1)
         except Exception:
             pass
 
         while True:
-            # Retry reading total if not found yet
             if not total:
                 total = self._get_total_records_count()
                 if total:
@@ -623,18 +713,14 @@ class TurkPatentScraper:
             if current_len >= effective_limit:
                 logging.info(f"   ✅ Reached effective limit: {current_len}/{effective_limit}")
                 break
-            # Hard cap at MAX_SCRAPE_LIMIT (1000) - safety check
             if current_len >= MAX_SCRAPE_LIMIT:
                 logging.info(f"   ✅ Reached max scrape limit: {MAX_SCRAPE_LIMIT}")
                 break
-            # Timeout check
             if max_scroll_seconds > 0 and (time.time() - start_t > max_scroll_seconds):
                 logging.warning(f"   ⚠️ Max execution time ({max_scroll_seconds}s) reached.")
                 break
 
             prev = last_pos
-
-            # EXACT MICRO-BOUNCE TECHNIQUE FROM tescil_test.py (Performance Tuned)
             self._js_scroll_to_bottom(scroll_target_sel, offset=80)
             time.sleep(0.02)
             self._js_scroll_by(scroll_target_sel, dy=-260)
@@ -643,19 +729,15 @@ class TurkPatentScraper:
             time.sleep(0.02)
             self._wheel_inside_scroll_target(scroll_target_sel, delta_y=2800)
 
-            # Wait for position change with reduced timeout (2.5s)
             new_pos = self._wait_for_position_change(row_sel, prev, timeout_s=2.5)
 
             if new_pos <= prev:
                 stagnation += 1
-                
-                # If we think we are done (total reached), break immediately
                 if total and current_len >= total:
                     break
 
                 logging.info(f"   [WARN] No growth (stagnation={stagnation}). last_pos={last_pos} count={current_len}/{total if total else '?'}")
-                
-                # Aggressive recovery mechanics
+
                 self._js_scroll_by(scroll_target_sel, dy=-650 - (stagnation * 90))
                 time.sleep(0.15)
                 self._js_scroll_to_bottom(scroll_target_sel, offset=0)
@@ -669,9 +751,7 @@ class TurkPatentScraper:
                     new_pos3 = self._wait_for_position_change(row_sel, prev, timeout_s=4.0)
                     new_pos = max(new_pos, new_pos3)
 
-                # CRITICAL CHANGE: Stagnation threshold
                 threshold = 200 if (total and current_len < total) else 25
-
                 if stagnation > threshold:
                     logging.warning(f"   [WARN] Stagnation limit ({threshold}) reached. Aborting scroll.")
                     break
@@ -680,8 +760,77 @@ class TurkPatentScraper:
                 last_pos = new_pos
                 logging.info(f"   📉 Captured {current_len} rows...")
 
-        # Save and return
-        all_rows = list(captured_data.values())
+        return list(captured_data.values())
+
+    def search_and_ingest(self, trademark_name: str, limit: int = 0,
+                          max_scroll_seconds: int = 1200,
+                          progress_callback=None) -> List[List]:
+        """
+        Orchestrates the full search pipeline with Turkish character surgical fallback.
+
+        1. Primary search with the original query.
+        2. If 0 results AND query contains Latin chars with Turkish equivalents:
+           - Wait 2.0s (IP-safe human re-type simulation)
+           - Rotate user agent
+           - Retry with Turkish character substitutions applied
+        """
+        # ===================== SKIP CHECK =====================
+        term_lower = trademark_name.lower().strip()
+        term_normalized = term_lower.replace(' ', '')
+
+        for skip_term in SKIP_TERMS:
+            skip_lower = skip_term.lower()
+            if term_lower == skip_lower or term_normalized == skip_lower.replace(' ', ''):
+                logging.info(f"   ⏭️ Skipping scrape for placeholder term: '{trademark_name}'")
+                return []
+
+        if len(term_lower) <= 2:
+            logging.info(f"   ⏭️ Skipping scrape: '{trademark_name}' is too short (≤2 chars)")
+            return []
+
+        if term_lower.isdigit():
+            logging.info(f"   ⏭️ Skipping scrape: '{trademark_name}' is just numbers")
+            return []
+
+        effective_limit = MAX_SCRAPE_LIMIT
+        if limit > 0:
+            effective_limit = min(limit, MAX_SCRAPE_LIMIT)
+
+        if not self.page:
+            self.start_browser()
+
+        # ===================== PRIMARY SEARCH =====================
+        primary_rows = self._do_search(trademark_name, effective_limit, max_scroll_seconds)
+
+        if primary_rows:
+            logging.info(f"   ✅ Primary search returned {len(primary_rows)} records.")
+            self.save_to_json(primary_rows)
+            return primary_rows
+
+        # ===================== SURGICAL FALLBACK =====================
+        if not _has_latin_equivalents(trademark_name):
+            logging.info("   ℹ️ Primary returned 0 results and no Latin equivalents found. Done.")
+            return []
+
+        fallback_query = _apply_turkish_chars(trademark_name)
+        logging.info(f"   🔄 Primary returned 0. Surgical fallback: '{trademark_name}' → '{fallback_query}'")
+
+        # 2-second IP-safe pause to simulate human re-type
+        time.sleep(2.0)
+
+        if progress_callback:
+            progress_callback(
+                'character_fallback', 44,
+                f"'{trademark_name}' → '{fallback_query}'"
+            )
+
+        # Rotate user agent before the second request
+        self._rotate_user_agent()
+
+        fallback_rows = self._do_search(fallback_query, effective_limit, max_scroll_seconds)
+        logging.info(f"   {'✅' if fallback_rows else 'ℹ️'} Fallback returned {len(fallback_rows)} records.")
+
+        all_rows = fallback_rows  # fallback result is canonical when primary was 0
         self.save_to_json(all_rows)
         return all_rows
 
