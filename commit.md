@@ -317,6 +317,50 @@ Exit criteria:
 Commit message target:
 - depends on the decision; do not pre-commit this batch
 
+### Batch 7: Event Extraction And Status Foundation
+Status: Completed
+
+Scope:
+- PDF bulletin extraction for BLT bulletins
+- supplementary event extraction for BLT and GZ bulletins
+- event ingestion/materialization and final-status reconciliation foundation
+- event/status migrations
+- event extraction helper scripts and design doc
+
+Likely paths:
+- `pdf_extract.py`
+- `pdf_extract_events.py`
+- `ingest_events.py`
+- `utils/status_reconciler.py`
+- `tests/test_status_reconciler.py`
+- `migrations/trademark_events.sql`
+- `migrations/002_event_derived_columns.sql`
+- `migrations/003_final_status.sql`
+- `scripts/batch_extract_events.py`
+- `scripts/cycle_extract_ingest.sh`
+- `docs/EVENTS_SYSTEM_PLAN.md`
+- `requirements.txt`
+
+Verification:
+- `python -m py_compile ingest_events.py pdf_extract.py pdf_extract_events.py scripts/batch_extract_events.py tests/test_status_reconciler.py utils/status_reconciler.py`
+- `python -m pytest tests/test_status_reconciler.py -q`
+- `python -m pytest tests/test_phase0_smoke.py -q -k ingest_events_root_uses_local_project_boundary_and_env_overrides`
+
+Commit message target:
+- `pipeline: add bulletin event extraction and status foundation`
+
+Current note:
+- the Batch 7 path set was committed as `pipeline: add bulletin event extraction and status foundation`
+- the staged batch adds the missing event-extraction and event-status foundation that already had downstream route, pipeline, and smoke-test references: the PDF bulletin parser, the supplementary event parser, the event ingestion/materialization entrypoint, the final-status reconciliation helper, the initial event/status migrations, and the operator helper scripts/docs
+- verification passed for the staged batch before commit:
+  - `python -m py_compile ingest_events.py pdf_extract.py pdf_extract_events.py scripts/batch_extract_events.py tests/test_status_reconciler.py utils/status_reconciler.py`
+  - `python -m pytest tests/test_status_reconciler.py -q`
+  - `python -m pytest tests/test_phase0_smoke.py -q -k ingest_events_root_uses_local_project_boundary_and_env_overrides`
+- intentionally left out for later follow-up batches:
+  - `data_collection.py`, `metadata.py`, `scrapper.py`, and `zip.py`
+  - the large mixed API/unit-test churn
+  - the broader `docker-compose.yml` and `deploy/schema.sql` operational/bootstrap changes
+
 ## Execution Order
 
 Recommended order:
@@ -327,6 +371,7 @@ Recommended order:
 5. Batch 4
 6. Batch 5
 7. Batch 6 only after explicit review
+8. Batch 7 for the post-plan event/status foundation slice
 
 ## Staging Method
 
@@ -367,3 +412,6 @@ This commit plan is complete when:
 - Verified the staged Batch 1 set with `py_compile`, the subscription/plan suites, `tests/test_api_endpoints.py -s`, and the page/dashboard smoke suites.
 - Hit the repo pre-commit large-deletion guard on intentional wrapper/facade shrinkage in files such as `main.py`, `database/crud.py`, and `api/routes.py`.
 - Committed Batch 1 as `reorg: package app structure and canonical modules` on `codex/reorg-test-stabilization` after confirming the deletions were intentional structural extractions and using the one-time `--no-verify` override for that commit.
+- Staged the Batch 7 event/status foundation slice around the missing extraction and reconciliation modules, keeping the broader collector, ops, and mixed test churn for later follow-up batches.
+- Verified the staged Batch 7 set with `python -m py_compile` on the new event/status Python files, `python -m pytest tests/test_status_reconciler.py -q`, and `python -m pytest tests/test_phase0_smoke.py -q -k ingest_events_root_uses_local_project_boundary_and_env_overrides`.
+- Committed Batch 7 as `pipeline: add bulletin event extraction and status foundation`.

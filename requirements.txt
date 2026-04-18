@@ -56,6 +56,11 @@ requests>=2.31.0
 
 # Browser Automation
 playwright>=1.41.1
+tenacity
+playwright-stealth
+
+# PDF Processing
+PyMuPDF>=1.23.0
 
 # Background Tasks
 apscheduler>=3.10.0
