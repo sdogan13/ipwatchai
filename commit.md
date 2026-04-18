@@ -305,10 +305,10 @@ Current note:
   - `config-backup-20260210-151337/`: `Delete intentionally` because it is a timestamped backup artifact rather than an active source path
   - `Dockerfile.cloud`: `Ignore for now` because it is still part of the older cloud CPU deployment path referenced by `scripts/setup_cloud_server.sh`
   - `docker-compose.cloud.yml`: `Ignore for now` because it is still referenced by `scripts/setup_cloud_server.sh` and deleting it would strand that legacy flow without a reviewed replacement
-  - `deploy/Dockerfile.cpu`: `Ignore for now` because it belongs to the newer prod/deploy path and its deletion was not justified by the current repo cleanup
-  - `deploy/setup-server.sh`: `Ignore for now` because it points at the newer `docker-compose.yml + deploy/docker-compose.prod.yml` deployment path and should not be removed casually
+  - `deploy/Dockerfile.cpu`: `Delete intentionally` after later review because it has no live repo references outside this tracker, is not used by the current compose paths, and duplicates older CPU-only deployment scaffolding
+  - `deploy/setup-server.sh`: `Ignore for now` because the newer prod/deploy path still needs a separate cleanup and there is no reviewed replacement bootstrap flow yet
   - `CLAUDE.md`: `Ignore for now` because it is a local repo note, not part of the reviewed source-history cleanup
-- the committed Batch 6 scope is limited to the reviewed deletions that were clearly safe: `.env.cloud` and `config-backup-20260210-151337/`
+- the committed Batch 6 scope is limited to the reviewed deletions that were clearly safe at that point: `.env.cloud` and `config-backup-20260210-151337/`
 
 Exit criteria:
 - every path is classified as `keep`, `delete intentionally`, `move`, or `ignore for now`
@@ -588,6 +588,35 @@ Current note:
   - local-only helper scripts such as `scripts/run_e2e_tests.py` and `scripts/ssh_tunnel.ps1`
   - the ad hoc devtools/query probes under `scripts/devtools/`
 
+### Batch 14: Drop Unused CPU Deploy Dockerfile
+Status: Completed
+
+Scope:
+- remove the unreferenced CPU-only deploy Dockerfile that is no longer part of the active compose paths
+- leave the legacy cloud deployment pair and the newer server-setup script out for separate infra review
+
+Likely paths:
+- `deploy/Dockerfile.cpu`
+
+Verification:
+- repo reference review confirmed no live references to `deploy/Dockerfile.cpu` outside `commit.md`
+- `docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml config`
+
+Commit message target:
+- `infra: drop unused cpu deploy dockerfile`
+
+Current note:
+- the Batch 14 path set was committed as `infra: drop unused cpu deploy dockerfile`
+- later infra review confirmed `deploy/Dockerfile.cpu` was dead deployment scaffolding: the current stack builds from `Dockerfile.backend`, the legacy cloud path uses `Dockerfile.cloud`, and no tracked scripts or compose files still point at `deploy/Dockerfile.cpu`
+- verification passed for the staged batch before commit:
+  - repo reference review for `deploy/Dockerfile.cpu`
+  - `docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml config`
+- intentionally left out for later follow-up batches:
+  - `Dockerfile.cloud`
+  - `docker-compose.cloud.yml`
+  - `deploy/setup-server.sh`
+  - local-only helper scripts and ad hoc devtools files
+
 ## Execution Order
 
 Recommended order:
@@ -605,6 +634,7 @@ Recommended order:
 12. Batch 11 for the bulletin download/recovery helper slice
 13. Batch 12 for the schema/bootstrap alignment slice
 14. Batch 13 for the API endpoint coverage expansion slice
+15. Batch 14 for the isolated unused CPU deploy Dockerfile deletion
 
 ## Staging Method
 
@@ -668,3 +698,6 @@ This commit plan is complete when:
 - Verified the staged Batch 13 set with `python -m py_compile tests/test_api_endpoints.py` and `python -m pytest tests/test_api_endpoints.py -s`.
 - Verification exposed one incorrect success-path setup in the new watchlist-logo upload coverage: the test needed a paid-plan entitlement after the restored logo gate and also had to assert the live `can_track_logos` feature key; corrected the batch before commit.
 - Committed Batch 13 as `tests: expand api endpoint coverage`.
+- Re-reviewed the remaining tracked infra deletions and narrowed the safe deletion set further: `Dockerfile.cloud`, `docker-compose.cloud.yml`, and `deploy/setup-server.sh` still need a dedicated infra cleanup, but `deploy/Dockerfile.cpu` was confirmed unreferenced and redundant.
+- Verified the staged Batch 14 deletion with repo reference review and `docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml config`.
+- Committed Batch 14 as `infra: drop unused cpu deploy dockerfile`.
