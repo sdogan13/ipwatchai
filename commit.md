@@ -557,6 +557,37 @@ Current note:
   - `tests/test_api_endpoints.py`
   - local-only helper scripts and the remaining devtools additions
 
+### Batch 13: API Endpoint Coverage Expansion
+Status: Completed
+
+Scope:
+- expand endpoint-level coverage across the extracted service modules and route delegates
+- add service-focused regression coverage for the current application, watchlist, billing, lead, report, and admin flows
+- keep the remaining local-only helper scripts and review-first infra deletions out of source history
+
+Likely paths:
+- `tests/test_api_endpoints.py`
+
+Verification:
+- `python -m py_compile tests/test_api_endpoints.py`
+- `python -m pytest tests/test_api_endpoints.py -s`
+
+Commit message target:
+- `tests: expand api endpoint coverage`
+
+Current note:
+- the Batch 13 path set was committed as `tests: expand api endpoint coverage`
+- the staged batch turns `tests/test_api_endpoints.py` into the broad regression suite for the extracted route/service surface, adding focused response-model and service-behavior coverage across public search, watchlist, applications, alerts, billing, admin, leads, renewals, reports, and related helpers
+- verification initially exposed one failing watchlist-logo success-path test because the test did not inject a paid plan after the restored logo-tracking gate; the batch was corrected before commit to use the current entitled-plan setup and feature key
+- verification passed for the staged batch before commit:
+  - `python -m py_compile tests/test_api_endpoints.py`
+  - `python -m pytest tests/test_api_endpoints.py -s`
+- the suite still emits pre-existing Pydantic/Pytest deprecation warnings, but the staged batch finished green with `410 passed`
+- intentionally left out for later follow-up batches:
+  - the review-first cloud/deploy deletions
+  - local-only helper scripts such as `scripts/run_e2e_tests.py` and `scripts/ssh_tunnel.ps1`
+  - the ad hoc devtools/query probes under `scripts/devtools/`
+
 ## Execution Order
 
 Recommended order:
@@ -573,6 +604,7 @@ Recommended order:
 11. Batch 10 for the post-plan auth/subscription test realignment slice
 12. Batch 11 for the bulletin download/recovery helper slice
 13. Batch 12 for the schema/bootstrap alignment slice
+14. Batch 13 for the API endpoint coverage expansion slice
 
 ## Staging Method
 
@@ -632,3 +664,7 @@ This commit plan is complete when:
 - Verified the staged Batch 12 set with `docker compose config`, `git diff --cached --check`, and temporary `psql` DDL checks against the running `ipwatch_postgres` container.
 - Verification exposed a real PostgreSQL constraint: the new `idx_uc_opposition_deadline` partial-index predicate using `CURRENT_DATE` was invalid because index predicates must be immutable; corrected the batch before commit to use a plain `opposition_deadline` index.
 - Committed Batch 12 as `infra: align bootstrap schema and compose`.
+- Staged the Batch 13 API endpoint coverage slice around the large `tests/test_api_endpoints.py` expansion, while leaving the local-only helper scripts and review-first cloud deletions unstaged.
+- Verified the staged Batch 13 set with `python -m py_compile tests/test_api_endpoints.py` and `python -m pytest tests/test_api_endpoints.py -s`.
+- Verification exposed one incorrect success-path setup in the new watchlist-logo upload coverage: the test needed a paid-plan entitlement after the restored logo gate and also had to assert the live `can_track_logos` feature key; corrected the batch before commit.
+- Committed Batch 13 as `tests: expand api endpoint coverage`.
