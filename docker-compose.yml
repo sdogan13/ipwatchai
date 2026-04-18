@@ -256,7 +256,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./deploy/schema.sql:/docker-entrypoint-initdb.d/02-schema.sql:ro
     ports:
-      - "127.0.0.1:5433:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U turk_patent -d trademark_db" ]
       interval: 10s

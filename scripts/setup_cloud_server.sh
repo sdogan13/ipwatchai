@@ -29,9 +29,9 @@ ufw default deny incoming
 ufw default allow outgoing
 ufw allow ssh
 # Allow Postgres from specific IP (UPDATE THIS with your local PC's public IP)
-# ufw allow from YOUR_IP to any port 5433
-echo "WARNING: Postgres port 5433 is NOT opened by default."
-echo "Run: ufw allow from YOUR_PUBLIC_IP to any port 5433"
+# ufw allow from YOUR_IP to any port 5432
+echo "WARNING: Postgres port 5432 is NOT opened by default."
+echo "Run: ufw allow from YOUR_PUBLIC_IP to any port 5432"
 ufw --force enable
 
 # 4. Create project directories

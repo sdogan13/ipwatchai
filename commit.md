@@ -674,6 +674,33 @@ Current note:
   - repo reference review for `Dockerfile.cloud`, `docker-compose.cloud.yml`, and `deploy/setup-server.sh`
   - `docker compose --env-file deploy/.env.prod -f docker-compose.yml -f deploy/docker-compose.prod.yml config`
 
+### Batch 17: Normalize Prod PostgreSQL Port
+Status: Completed
+
+Scope:
+- remove the duplicate PostgreSQL host-port publish created by the base/prod compose merge
+- keep the development default host port on the base stack while letting the prod env pin the canonical production host port
+- align the server bootstrap helper comments with the reviewed prod port
+
+Likely paths:
+- `docker-compose.yml`
+- `deploy/docker-compose.prod.yml`
+- `scripts/setup_cloud_server.sh`
+
+Verification:
+- `docker compose --env-file deploy/.env.prod -f docker-compose.yml -f deploy/docker-compose.prod.yml config`
+- merged-config review to confirm the prod overlay publishes PostgreSQL only on `127.0.0.1:5432`
+
+Commit message target:
+- `infra: normalize prod postgres port exposure`
+
+Current note:
+- the Batch 17 path set was committed as `infra: normalize prod postgres port exposure`
+- the staged batch makes the base PostgreSQL host-port publish configurable, removes the redundant prod-specific `ports` stanza that caused both `5433` and `5432` to be published together, and aligns `scripts/setup_cloud_server.sh` with the reviewed production port guidance
+- verification passed for the staged batch before commit:
+  - `docker compose --env-file deploy/.env.prod -f docker-compose.yml -f deploy/docker-compose.prod.yml config`
+  - merged-config review confirmed the prod overlay now publishes PostgreSQL only on `127.0.0.1:5432`
+
 ## Execution Order
 
 Recommended order:
@@ -694,6 +721,7 @@ Recommended order:
 15. Batch 14 for the isolated unused CPU deploy Dockerfile deletion
 16. Batch 15 for the canonical prod deploy path fix
 17. Batch 16 for the legacy cloud deploy path removal
+18. Batch 17 for the prod PostgreSQL host-port normalization
 
 ## Staging Method
 
@@ -766,3 +794,6 @@ This commit plan is complete when:
 - Re-reviewed the last legacy cloud deployment files after Batch 15 and confirmed they no longer had live repo references outside `commit.md`.
 - Verified the staged Batch 16 deletion set with repo reference review and `docker compose --env-file deploy/.env.prod -f docker-compose.yml -f deploy/docker-compose.prod.yml config`.
 - Committed Batch 16 as `infra: remove legacy cloud deploy path`.
+- Staged the Batch 17 prod-port normalization slice around the duplicate PostgreSQL host-port publish left by the base/prod compose merge.
+- Verified the staged Batch 17 set with `docker compose --env-file deploy/.env.prod -f docker-compose.yml -f deploy/docker-compose.prod.yml config`, then confirmed the merged config now publishes PostgreSQL only on `127.0.0.1:5432`.
+- Committed Batch 17 as `infra: normalize prod postgres port exposure`.
