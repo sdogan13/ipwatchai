@@ -484,6 +484,40 @@ Current note:
   - the devtools/download helper additions
   - the infra/bootstrap review batch
 
+### Batch 11: Bulletin Download And Recovery Helpers
+Status: Completed
+
+Scope:
+- add operational scripts for scraping bulletin download URLs
+- add targeted GZ and general bulletin PDF download helpers
+- add recovery helpers for multi-volume gazettes and broken image paths
+
+Likely paths:
+- `scripts/download_gz_individual.py`
+- `scripts/download_gz_parts.py`
+- `scripts/download_gz_targeted.py`
+- `scripts/download_pdfs.py`
+- `scripts/fix_image_paths.py`
+- `scripts/fix_multivolume_gz.py`
+- `scripts/scrape_gz_urls.py`
+
+Verification:
+- `python -m py_compile scripts/download_gz_individual.py scripts/download_gz_parts.py scripts/download_gz_targeted.py scripts/download_pdfs.py scripts/fix_image_paths.py scripts/fix_multivolume_gz.py scripts/scrape_gz_urls.py`
+
+Commit message target:
+- `scripts: add bulletin download and recovery helpers`
+
+Current note:
+- the Batch 11 path set was committed as `scripts: add bulletin download and recovery helpers`
+- the staged batch adds the standalone bulletin-ops tooling for collecting GZ download URLs, downloading missing BLT/GZ PDFs, recovering multi-volume gazette event volumes, and repairing trademark image paths after extraction/distribution issues
+- verification passed for the staged batch before commit:
+  - `python -m py_compile scripts/download_gz_individual.py scripts/download_gz_parts.py scripts/download_gz_targeted.py scripts/download_pdfs.py scripts/fix_image_paths.py scripts/fix_multivolume_gz.py scripts/scrape_gz_urls.py`
+- there is no dedicated repo test coverage for these operational scripts yet; the batch verification was limited to syntax/import-safety at the file level
+- intentionally left out for later follow-up batches:
+  - the local-only helper scripts such as `scripts/run_e2e_tests.py` and `scripts/ssh_tunnel.ps1`
+  - the devtools move-set
+  - the infra/bootstrap review batch
+
 ## Execution Order
 
 Recommended order:
@@ -498,6 +532,7 @@ Recommended order:
 9. Batch 8 for the post-plan path-normalization helper slice
 10. Batch 9 for the post-plan scoring/translation alignment slice
 11. Batch 10 for the post-plan auth/subscription test realignment slice
+12. Batch 11 for the bulletin download/recovery helper slice
 
 ## Staging Method
 
@@ -550,3 +585,6 @@ This commit plan is complete when:
 - Staged the Batch 10 product/auth test slice around the focused auth, plan-feature, and subscription expectation updates that now match the current code and plan matrix.
 - Verified the staged Batch 10 set with `python -m py_compile` on the four focused test files and `python -m pytest tests/test_auth.py tests/test_plan_features.py tests/test_subscription.py tests/test_subscription_limits.py -q`.
 - Committed Batch 10 as `tests: align auth and subscription expectations`.
+- Staged the Batch 11 bulletin-ops helper slice around the new URL scraping, PDF download, multi-volume GZ recovery, and image-path repair scripts.
+- Verified the staged Batch 11 set with `python -m py_compile` on the operational helper files; there is no dedicated repo test coverage for these standalone scripts yet.
+- Committed Batch 11 as `scripts: add bulletin download and recovery helpers`.
