@@ -47,6 +47,8 @@ On every non-trivial task, do this before editing code:
 - Match the amount of process to the risk of the change.
 - Define expected behavior before changing code.
 - Prefer the canonical implementation point over quick fixes in multiple places.
+- Optimize for correct behavior, not just a green test run.
+- Fix root causes instead of masking failures with shortcuts.
 - Keep one concern per commit.
 - Test the affected behavior before merge.
 - Clean up created data, temp files, and runtime artifacts in the same task.
@@ -81,6 +83,8 @@ For AI agents, this means:
 - do not jump straight to editing without reading the relevant code and docs first
 - do not assume tests or docs can be deferred to a later cleanup task
 - do not treat archived docs as the current source of truth
+- do not weaken tests, widen mocks, or silently reduce scope just to get green
+- if the honest fix is blocked, surface the blocker instead of papering over it
 
 ## Documentation Sync Rule
 
@@ -192,6 +196,32 @@ Do not:
 - rewrite unrelated tests just to force green
 - treat repeated flaky-test patching as a substitute for proper stabilization
 
+## Robustness Rule
+
+AI agents must not trade correctness for a passing test run.
+
+Apply this rule:
+- fix the root cause in production code, the harness, test data, fixtures, or cleanup
+- keep the changed behavior covered by the strongest practical test layer
+- prefer proving the real path over proving only a mocked path
+
+Do not:
+- weaken assertions, delete coverage, add skips, or add `xfail` just to get green
+- replace integration coverage with lighter mocked coverage unless equal or better proof exists elsewhere
+- add test-only branches, hardcoded values, or bypass logic that hides real failures
+- silently change acceptance criteria because the original path is harder to fix
+- mark a flaky test as acceptable without addressing the source of nondeterminism
+
+When stabilizing tests, look for:
+- shared-state leakage
+- cleanup gaps
+- timing or retry races
+- environment drift
+- hidden ordering dependencies
+- stale fixtures or unrealistic mocks
+
+If the honest fix is not complete, report the blocker and leave the task incomplete.
+
 ## Testing Expectations
 
 Run the smallest useful test set first, then widen only if the change affects broader behavior.
@@ -203,6 +233,16 @@ Run the smallest useful test set first, then widen only if the change affects br
 - test-harness change: prove both correctness and cleanup behavior
 
 If a change touches user-facing behavior, permissions, plans, uploads, DB-backed flows, or cleanup logic, do not stop at `py_compile`.
+If a changed test now passes for a different reason, explain whether the product behavior changed or the test was previously wrong.
+
+## Verification Reporting Rule
+
+Report verification honestly.
+
+- Only report commands that were actually run.
+- Distinguish verified behavior from inferred behavior.
+- If a needed test could not be run, say so and explain why.
+- Do not imply broader coverage than was actually executed.
 
 ## Git And Commit Rules
 
@@ -230,6 +270,7 @@ For AI agents, do not mark a task complete if any of the following is still true
 - the relevant docs were not checked
 - setup, API, schema, or workflow changes were made without checking the matching reference docs
 - created state or temp artifacts were left behind unintentionally
+- the pass was achieved by weaker assertions, broader mocks, skips, bypass logic, or other temporary tricks
 
 ## Quick Decision Rule
 
