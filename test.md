@@ -15,6 +15,7 @@ It tracks:
 - the order in which new suites should be implemented
 
 `project.md` tracked the codebase reorganization. `test.md` tracks the verification program that follows it.
+Repo-wide engineering workflow lives in `rules.md`.
 
 ## Scope
 

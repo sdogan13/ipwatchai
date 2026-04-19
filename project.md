@@ -6,6 +6,8 @@ Last updated: 2026-04-13
 
 Reorganize the codebase in small, test-gated phases without breaking the app.
 
+Repo-wide engineering workflow lives in `rules.md`.
+
 ## Working Rules
 
 1. Keep the public contract stable while reorganizing.

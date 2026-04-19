@@ -2,6 +2,8 @@
 
 An AI-powered trademark monitoring platform that detects potential conflicts across 2.3M+ official Turkish trademarks using multi-modal similarity search and IDF-weighted scoring.
 
+Engineering workflow and change rules live in `rules.md`.
+
 ## Features
 
 | Feature | Description |
