@@ -31,16 +31,45 @@ This file is the repo-wide workflow reference.
 - `docs/DOCUMENTATION.md` is the documentation map
 - `docs/archive/` holds historical project-specific trackers
 
-## Agent Startup Checklist
+## Canonical Execution Flow
 
-On every non-trivial task, do this before editing code:
+Use this sequence for every non-trivial task. Do not skip stages.
 
-1. Identify what is changing.
-2. Identify who or what can be affected.
-3. Read the relevant current docs.
-4. Inspect the current code before deciding how to change it.
-5. Decide which tests and docs must move with the change.
-6. Use a task branch unless the change is tiny and low risk.
+1. DEFINE `/define`
+   Clarify the current behavior, the intended behavior, the affected users or systems, and the current source of truth in docs and code.
+   Do not move on until the scope is clear.
+
+2. PLAN `/plan`
+   Choose `main` or a task branch, find the canonical implementation point, list the code, docs, and tests that must move together, and decide how the change will be verified and rolled back.
+   Do not move on until the change strategy is clear.
+
+3. BUILD `/build`
+   Implement the change in the canonical place, keep the scope coherent, and avoid shortcuts that only make the diff or tests look clean.
+   Do not move on until the code matches the intended behavior.
+
+4. VERIFY `/verify`
+   Run the smallest meaningful verification first, then widen when the changed surface requires more proof.
+   Do not move on until the right level of behavior is actually proved or a real blocker is reported.
+
+5. REVIEW `/review`
+   Review the staged diff, related docs, cleanup behavior, and rollback path. Check that no temporary tricks were used to get green.
+   Do not move on until the staged change is coherent, documented, and reversible.
+
+6. SHIP `/ship`
+   Commit and merge only intended files from a clean worktree, then report exactly what changed and what was verified.
+
+If a stage fails, go back to the previous stage instead of forcing progress.
+
+## Startup Gate
+
+Before entering `BUILD` on a non-trivial task, be able to answer:
+
+1. What exactly is changing?
+2. Who or what can be affected?
+3. Which docs and code define the current behavior?
+4. Where is the canonical place to implement the fix or feature?
+5. Which tests and docs must move with the change?
+6. Does this belong on `main` or a task branch?
 
 ## Core Rules
 
@@ -70,14 +99,12 @@ Default:
 
 ## Default Workflow
 
-1. Understand the current behavior.
-2. Define what is changing and who is affected.
-3. Decide whether the work belongs on `main` or a task branch.
-4. Implement the change in small, coherent commits.
-5. Run the narrowest tests that prove the change.
-6. Run broader smoke when the affected surface justifies it.
-7. Clean up created state and update docs if behavior or process changed.
-8. Merge only when the worktree is clean, the change is verified, and rollback is clear.
+Follow `DEFINE -> PLAN -> BUILD -> VERIFY -> REVIEW -> SHIP` in order.
+
+Practical rule:
+- do not start `BUILD` before the problem and implementation point are clear
+- do not start `SHIP` before verification, cleanup, docs, and staged-diff review are complete
+- if a stage exposes unclear requirements, conflicting docs, or incomplete proof, stop and resolve that before moving forward
 
 For AI agents, this means:
 - do not jump straight to editing without reading the relevant code and docs first
@@ -85,6 +112,16 @@ For AI agents, this means:
 - do not treat archived docs as the current source of truth
 - do not weaken tests, widen mocks, or silently reduce scope just to get green
 - if the honest fix is blocked, surface the blocker instead of papering over it
+
+## Blocker Rule
+
+If the correct fix is unclear or blocked:
+
+- identify the exact blocker, affected files, and impact
+- separate known facts from guesses
+- prefer asking for clarification over making high-risk assumptions
+- do not edit unrelated code just to get past the blocker
+- do not claim success when only part of the real path is fixed
 
 ## Documentation Sync Rule
 
