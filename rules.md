@@ -81,6 +81,29 @@ Then check the changed paths against this map:
 - active tracked project or multi-batch cleanup:
   update `project.md` and/or `commit.md` when relevant
 
+## Sync Matrix
+
+Use this as the on-the-go checklist for files that commonly need to move together.
+
+- user-visible behavior or runtime flow change:
+  check `README.md`, `docs/API_REFERENCE.md`, and the relevant tests
+- route, auth, permission, billing, search, report, or watchlist change:
+  check `docs/API_REFERENCE.md`, `test.md`, `tests/test_api_endpoints.py`, and the relevant live or browser suites
+- env var or settings change:
+  check `config/settings.py`, `.env.production.example`, `README.md`, and `docs/DEPLOYMENT.md`
+- Docker, ports, service topology, or deployment path change:
+  check `docker-compose.yml`, `deploy/docker-compose.prod.yml`, `README.md`, and `docs/DEPLOYMENT.md`
+- schema, migration, cleanup, or data lifecycle change:
+  check `deploy/schema.sql`, `migrations/`, `docs/DATABASE_SCHEMA.md`, and the relevant tests
+- repo structure, entrypoint, or module-boundary change:
+  check `README.md` and `docs/FILE_INDEX.md`
+- workflow or engineering process change:
+  check `rules.md` and `docs/DOCUMENTATION.md`
+- test strategy, test personas, cleanup behavior, or verification lane change:
+  check `test.md` and the affected test files
+- active tracked refactor or multi-batch cleanup change:
+  check `project.md` and/or `commit.md`
+
 Default reading order before non-trivial work:
 1. `rules.md`
 2. `README.md`
