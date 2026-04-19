@@ -15,7 +15,7 @@ Engineering workflow and change rules live in `rules.md`.
 
 - `rules.md`: repo-wide engineering workflow
 - `test.md`: test strategy, coverage map, and verification lanes
-- `project.md`: project-specific plans when a larger refactor is active
+- `docs/DOCUMENTATION.md`: current documentation map
 - `docs/DEPLOYMENT.md`: deployment guidance
 - `docs/DATABASE_SCHEMA.md`: schema notes
 

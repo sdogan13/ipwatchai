@@ -20,14 +20,14 @@ Start here before non-trivial work:
 - read `README.md`
 - read the most relevant current technical docs in `docs/`
 - read `test.md` if behavior, flows, personas, or cleanup are affected
-- read `project.md` or `commit.md` only when the task belongs to a tracked larger effort
+- read a task-specific plan doc only when the current task actually has one
 
 This file is the repo-wide workflow reference.
 - `README.md` is the setup and runtime guide
 - `docs/API_REFERENCE.md`, `docs/DEPLOYMENT.md`, `docs/DATABASE_SCHEMA.md`, and `docs/FILE_INDEX.md` are the current technical references
 - `test.md` is the test strategy and verification guide
-- `project.md` is for a specific refactor or project plan
-- `commit.md` is for one-off commit-splitting plans when needed
+- `docs/DOCUMENTATION.md` is the documentation map
+- `docs/archive/` holds historical project-specific trackers
 
 ## Core Rules
 
@@ -88,7 +88,7 @@ Then check the changed paths against this map:
 - workflow or process changes:
   update `rules.md` and, if needed, `docs/DOCUMENTATION.md`
 - active tracked project or multi-batch cleanup:
-  update `project.md` and/or `commit.md` when relevant
+  update the task-specific tracker if one exists
 
 ## Sync Matrix
 
@@ -111,14 +111,14 @@ Use this as the on-the-go checklist for files that commonly need to move togethe
 - test strategy, test personas, cleanup behavior, or verification lane change:
   check `test.md` and the affected test files
 - active tracked refactor or multi-batch cleanup change:
-  check `project.md` and/or `commit.md`
+  check the task-specific tracker if one exists
 
 Default reading order before non-trivial work:
 1. `rules.md`
 2. `README.md`
 3. the most relevant technical doc in `docs/`
 4. `test.md` if behavior, flows, personas, or cleanup are affected
-5. `project.md` or `commit.md` only when the task belongs to a tracked larger effort
+5. a task-specific plan doc only when the current task actually has one
 
 ## Change Checklists
 

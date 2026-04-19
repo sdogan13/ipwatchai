@@ -14,7 +14,7 @@ It tracks:
 - what still needs to be built
 - the order in which new suites should be implemented
 
-`project.md` tracked the codebase reorganization. `test.md` tracks the verification program that follows it.
+The completed reorganization tracker is archived at `docs/archive/reorg-project-plan.md`. `test.md` tracks the verification program that follows it.
 Repo-wide engineering workflow lives in `rules.md`.
 
 ## Scope

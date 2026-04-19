@@ -92,5 +92,5 @@ The app still uses several root-level route and assembly modules:
 - `rules.md`: repo-wide engineering workflow
 - `README.md`: current setup, run, and test guide
 - `test.md`: current test strategy and lane definitions
-- `project.md`: project-specific plan when active
-- `commit.md`: one-off commit-splitting plan when needed
+- `docs/DOCUMENTATION.md`: documentation map and reading order
+- `docs/archive/`: archived historical project and cleanup trackers

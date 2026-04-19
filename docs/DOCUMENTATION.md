@@ -22,15 +22,13 @@ Current technical references:
 
 ## Project-Specific Docs
 
-These are useful when a specific tracked effort is active:
-- `project.md`
-- `commit.md`
-
-They are not general-purpose repo references.
+If a future task needs a project-specific plan or a one-off commit tracker, keep it task-specific and do not treat it as a repo-wide default doc.
 
 ## Historical Or Audit Docs
 
 These files should be read as point-in-time analysis, plans, or audit notes:
+- `docs/archive/reorg-project-plan.md`
+- `docs/archive/reorg-commit-plan.md`
 - `docs/CODE_AUDIT_REPORT.md`
 - `docs/EVENTS_SYSTEM_PLAN.md`
 - `docs/PHASE12_CLEANUP_INVENTORY.md`
@@ -45,7 +43,7 @@ Before making a change:
 2. `README.md`
 3. the most relevant technical reference in `docs/`
 4. `test.md` if the change affects behavior, flows, personas, or cleanup
-5. `project.md` or `commit.md` only if the task is part of a tracked larger effort
+5. a task-specific plan doc only if the current task actually has one
 
 ## Maintenance Rule
 
