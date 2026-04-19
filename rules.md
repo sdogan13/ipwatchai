@@ -55,6 +55,39 @@ Default:
 7. Clean up created state and update docs if behavior or process changed.
 8. Merge only when the worktree is clean, the change is verified, and rollback is clear.
 
+## Documentation Sync Rule
+
+Do not update every `.md` file after every tiny internal edit.
+Do update the relevant docs whenever the codebase behavior, setup, structure, or workflow changes.
+
+Before commit, run:
+
+```powershell
+git diff --name-only --cached
+```
+
+Then check the changed paths against this map:
+
+- app behavior, routes, auth, search, UI flow:
+  update `README.md`, `docs/API_REFERENCE.md`, and `test.md` if tests or flows changed
+- env vars, compose files, ports, runtime setup, deployment path:
+  update `README.md` and `docs/DEPLOYMENT.md`
+- schema, migrations, data lifecycle, cleanup rules:
+  update `docs/DATABASE_SCHEMA.md`
+- entrypoints, directory layout, repo structure:
+  update `README.md` and `docs/FILE_INDEX.md`
+- workflow or process changes:
+  update `rules.md` and, if needed, `docs/DOCUMENTATION.md`
+- active tracked project or multi-batch cleanup:
+  update `project.md` and/or `commit.md` when relevant
+
+Default reading order before non-trivial work:
+1. `rules.md`
+2. `README.md`
+3. the most relevant technical doc in `docs/`
+4. `test.md` if behavior, flows, personas, or cleanup are affected
+5. `project.md` or `commit.md` only when the task belongs to a tracked larger effort
+
 ## Change Checklists
 
 ### New Feature
@@ -121,6 +154,7 @@ A change is done when:
 - the affected tests passed at the right depth
 - created data and temp artifacts were cleaned up
 - relevant docs were updated
+- the relevant docs were checked even if no update was needed
 - the branch or worktree is clean
 - the rollback path is understood
 
