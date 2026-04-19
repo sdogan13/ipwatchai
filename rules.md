@@ -5,7 +5,7 @@ Status: Active
 
 ## Purpose
 
-This file is the default workflow for making changes in this repo.
+This file is the default operating spec for AI coding agents working in this repo.
 
 Use it for:
 - new features
@@ -14,6 +14,8 @@ Use it for:
 - schema or data changes
 - test-harness changes
 - infra or deployment changes
+
+Follow these rules as instructions, not as optional advice.
 
 Start here before non-trivial work:
 - read `rules.md`
@@ -28,6 +30,17 @@ This file is the repo-wide workflow reference.
 - `test.md` is the test strategy and verification guide
 - `docs/DOCUMENTATION.md` is the documentation map
 - `docs/archive/` holds historical project-specific trackers
+
+## Agent Startup Checklist
+
+On every non-trivial task, do this before editing code:
+
+1. Identify what is changing.
+2. Identify who or what can be affected.
+3. Read the relevant current docs.
+4. Inspect the current code before deciding how to change it.
+5. Decide which tests and docs must move with the change.
+6. Use a task branch unless the change is tiny and low risk.
 
 ## Core Rules
 
@@ -63,6 +76,11 @@ Default:
 6. Run broader smoke when the affected surface justifies it.
 7. Clean up created state and update docs if behavior or process changed.
 8. Merge only when the worktree is clean, the change is verified, and rollback is clear.
+
+For AI agents, this means:
+- do not jump straight to editing without reading the relevant code and docs first
+- do not assume tests or docs can be deferred to a later cleanup task
+- do not treat archived docs as the current source of truth
 
 ## Documentation Sync Rule
 
@@ -120,6 +138,8 @@ Default reading order before non-trivial work:
 4. `test.md` if behavior, flows, personas, or cleanup are affected
 5. a task-specific plan doc only when the current task actually has one
 
+If no doc update is needed, explicitly verify that the relevant docs still match the new behavior.
+
 ## Change Checklists
 
 ### New Feature
@@ -157,6 +177,21 @@ Default reading order before non-trivial work:
 - Delete test data created during the run unless persistence is intentional.
 - Verify that the new test flow does not leave junk state behind.
 
+## Test Sync Rule
+
+Behavior changes must update the relevant tests in the same task.
+
+Apply this rule:
+- new feature: add or extend the relevant tests in the same task
+- bug fix: add or extend a regression test in the same task
+- refactor with no behavior change: existing tests should still pass without unnecessary rewrites
+- harness or persona change: update the affected live, browser, nightly, or cleanup tests in the same task
+
+Do not:
+- change code and leave test updates for later
+- rewrite unrelated tests just to force green
+- treat repeated flaky-test patching as a substitute for proper stabilization
+
 ## Testing Expectations
 
 Run the smallest useful test set first, then widen only if the change affects broader behavior.
@@ -189,6 +224,12 @@ A change is done when:
 - the relevant docs were checked even if no update was needed
 - the branch or worktree is clean
 - the rollback path is understood
+
+For AI agents, do not mark a task complete if any of the following is still true:
+- the changed behavior is not covered by the right level of tests
+- the relevant docs were not checked
+- setup, API, schema, or workflow changes were made without checking the matching reference docs
+- created state or temp artifacts were left behind unintentionally
 
 ## Quick Decision Rule
 
