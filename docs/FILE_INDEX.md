@@ -1,160 +1,96 @@
-# IP WATCH AI - File Index
+# IP Watch AI File Index
 
-Quick reference of all files in the project.
+Last updated: 2026-04-19
+Status: Current high-level map
 
-## Core Application Files
+## Purpose
 
-| File | Path | Purpose | Lines |
-|------|------|---------|-------|
-| main.py | /turk_patent/main.py | FastAPI entry point | ~2060 |
-| pipeline/ai.py | /turk_patent/pipeline/ai.py | AI embedding pipeline | ~635 |
-| risk_engine.py | /turk_patent/risk_engine.py | Risk assessment engine | ~843 |
-| scrapper.py | /turk_patent/scrapper.py | TurkPatent web scraper | ~693 |
-| pipeline/ingest.py | /turk_patent/pipeline/ingest.py | Data ingestion pipeline | ~800 |
-| metadata.py | /turk_patent/metadata.py | SQL dump parser | ~562 |
-| agentic_search.py | /turk_patent/agentic_search.py | Intelligent search orchestrator | ~760 |
+This file is a practical map of the current codebase layout.
 
-## API Module
+It is intentionally high-level.
+- it does not try to list every file
+- it does not include stale line counts
+- it focuses on the main entrypoints and directories people actually need
 
-| File | Path | Purpose | Lines |
-|------|------|---------|-------|
-| __init__.py | /turk_patent/api/__init__.py | Module init | 5 |
-| routes.py | /turk_patent/api/routes.py | REST API endpoints | ~1100 |
-| upload.py | /turk_patent/api/upload.py | File upload handling | ~300 |
+## Root Entry Points
 
-## Authentication Module
+- `main.py`: supported FastAPI entrypoint and compatibility wrapper
+- `legacy_main.py`: current app assembly surface
+- `risk_engine.py`: shared scoring and risk evaluation entrypoint
+- `agentic_search.py`: intelligent search orchestration and related runtime helpers
+- `data_collection.py`: bulletin collection entrypoint
+- `ingest_events.py`: event ingest entrypoint
+- `compute_idf.py`: IDF recomputation utility
 
-| File | Path | Purpose | Lines |
-|------|------|---------|-------|
-| __init__.py | /turk_patent/auth/__init__.py | Module init | 5 |
-| authentication.py | /turk_patent/auth/authentication.py | JWT authentication | ~333 |
+## Core Application Layers
 
-## Configuration Module
+- `api/`: router modules for auth, billing, reports, applications, admin, leads, holders, pipeline, and related API surfaces
+- `auth/`: authentication and current-user helpers
+- `config/`: settings and environment loading
+- `database/`: database access and CRUD helpers
+- `models/`: schema and response models
+- `services/`: business logic layer
+- `utils/`: shared helpers such as class utilities, scoring helpers, settings helpers, and validation
 
-| File | Path | Purpose | Lines |
-|------|------|---------|-------|
-| __init__.py | /turk_patent/config/__init__.py | Module init | 5 |
-| settings.py | /turk_patent/config/settings.py | Pydantic settings | ~181 |
+## App Composition Modules
 
-## Database Module
+The app still uses several root-level route and assembly modules:
+- `app_factory.py`
+- `app_router_registry.py`
+- `app_system_routes.py`
+- `app_public_search_routes.py`
+- `app_public_portfolio_routes.py`
+- `app_nice_class_routes.py`
+- `app_enhanced_search_routes.py`
+- `app_image_search_routes.py`
+- `app_legacy_search_routes.py`
+- `app_legacy_rollback_routes.py`
 
-| File | Path | Purpose | Lines |
-|------|------|---------|-------|
-| __init__.py | /turk_patent/database/__init__.py | Module init | 5 |
-| crud.py | /turk_patent/database/crud.py | CRUD operations | ~840 |
+## Product And Runtime Areas
 
-## Models Module
+- `templates/`: server-rendered pages and dashboard partials
+- `static/`: frontend JS, CSS, images, and mounted assets
+- `watchlist/`: watchlist-specific scanning and monitoring helpers
+- `reports/`: report generation helpers
+- `notifications/`: notification support
+- `workers/`: background processing support
 
-| File | Path | Purpose | Lines |
-|------|------|---------|-------|
-| __init__.py | /turk_patent/models/__init__.py | Module init | 5 |
-| schemas.py | /turk_patent/models/schemas.py | Pydantic models | ~597 |
+## Data And Pipeline Areas
 
-## Utils Module
+- `pipeline/`: embedding and ingest modules
+- `bulletins/`: bulletin data root
+- `custom_bulletins/`: local bulletin inputs and experiments
+- `archive_bulletins/`: archived bulletin data
 
-| File | Path | Purpose | Lines |
-|------|------|---------|-------|
-| __init__.py | /turk_patent/utils/__init__.py | Module init | ~171 |
-| scoring.py | /turk_patent/utils/scoring.py | Scoring algorithms | ~305 |
+## Tests
 
-## Watchlist Module
+- `tests/test_api_endpoints.py`: broad API contract coverage
+- `tests/test_live_app_e2e.py`: aggregate live app smoke
+- `tests/test_browser_e2e.py`: aggregate browser smoke
+- `tests/test_nightly_e2e.py`: aggregate nightly verification
+- `tests/live/`: live HTTP suites and persona coverage
+- `tests/browser/`: browser E2E suites
+- `tests/nightly/`: stateful/nightly flows
 
-| File | Path | Purpose | Lines |
-|------|------|---------|-------|
-| __init__.py | /turk_patent/watchlist/__init__.py | Module init | 5 |
-| scanner.py | /turk_patent/watchlist/scanner.py | Conflict detection | ~654 |
+## Deployment And Operations
 
-## Frontend
+- `docker-compose.yml`: local stack and shared service definitions
+- `deploy/docker-compose.prod.yml`: prod-style overlay
+- `Dockerfile.backend`: backend image
+- `deploy/schema.sql`: bootstrap schema
+- `migrations/`: follow-on schema changes
+- `nginx/`: local nginx config
+- `deploy/nginx.prod.conf`: prod nginx config
 
-| File | Path | Purpose | Lines |
-|------|------|---------|-------|
-| index.html | /turk_patent/frontend/dist/index.html | SPA frontend | ~7800 |
+## Scripts And Tooling
 
-## Configuration Files
+- `scripts/`: operational, maintenance, migration, smoke, and setup helpers
+- `scripts/devtools/`: development-only tools such as the disposable test-account purge utility
 
-| File | Path | Purpose |
-|------|------|---------|
-| .env | /turk_patent/.env | Environment variables |
-| .env.production | /turk_patent/.env.production | Production env |
-| requirements.txt | /turk_patent/requirements.txt | Python dependencies |
-| docker-compose.yml | /turk_patent/docker-compose.yml | Docker configuration |
-| Dockerfile.backend | /turk_patent/Dockerfile.backend | Backend Docker image |
+## Repo Workflow Docs
 
-## SQL Files
-
-| File | Path | Purpose |
-|------|------|---------|
-| schema.sql | /turk_patent/schema.sql | Database schema |
-| schema_v3_multitenant.sql | /turk_patent/schema_v3_multitenant.sql | Multi-tenant schema |
-| migration_v3_multitenant.sql | /turk_patent/migration_v3_multitenant.sql | Migration script |
-
-## Documentation Files
-
-| File | Path | Purpose |
-|------|------|---------|
-| README.md | /turk_patent/README.md | Project readme |
-| CLAUDE.md | /turk_patent/Claude.md | Claude Code instructions |
-| IP_WATCH_AI_DOCUMENTATION.md | /turk_patent/IP_WATCH_AI_DOCUMENTATION.md | System documentation |
-| COMPLETE_FILE_LIST.md | /turk_patent/COMPLETE_FILE_LIST.md | File listing |
-
-## Test Files
-
-| File | Path | Purpose |
-|------|------|---------|
-| test_routes.py | /turk_patent/test_routes.py | Route tests |
-| test_ui.py | /turk_patent/test_ui.py | UI tests |
-| test_ui_final.py | /turk_patent/test_ui_final.py | Final UI tests |
-| test_idf_scoring.py | /turk_patent/test_idf_scoring.py | Scoring tests |
-| test_3tier_scoring.py | /turk_patent/test_3tier_scoring.py | 3-tier scoring tests |
-
-## Utility Scripts
-
-| File | Path | Purpose |
-|------|------|---------|
-| compute_idf.py | /turk_patent/compute_idf.py | IDF computation |
-| idf_lookup.py | /turk_patent/idf_lookup.py | IDF lookup |
-| services/scoring_service.py | /turk_patent/services/scoring_service.py | IDF scoring |
-| pipeline.py | /turk_patent/pipeline.py | Pipeline orchestrator |
-| worker.py | /turk_patent/worker.py | Background worker |
-| logging_config.py | /turk_patent/logging_config.py | Logging configuration |
-
-## Migration Scripts
-
-| File | Path | Purpose |
-|------|------|---------|
-| migrate_simple.py | /turk_patent/migrate_simple.py | Simple migration |
-| migrate_tables.py | /turk_patent/migrate_tables.py | Table migration |
-| migrate_v3.py | /turk_patent/migrate_v3.py | V3 migration |
-| migrate_bulletin.py | /turk_patent/migrate_bulletin.py | Bulletin migration |
-| run_migration.py | /turk_patent/run_migration.py | Migration runner |
-
-## Data Processing Scripts
-
-| File | Path | Purpose |
-|------|------|---------|
-| customer_data_integration.py | /turk_patent/customer_data_integration.py | Customer data integration |
-| customer_pipeline.py | /turk_patent/customer_pipeline.py | Customer pipeline |
-| extract_client_data.py | /turk_patent/extract_client_data.py | Client data extraction |
-| transform_client_data.py | /turk_patent/transform_client_data.py | Client data transformation |
-
-## Total File Count
-
-| Category | Count |
-|----------|-------|
-| Core Application | 7 |
-| API Module | 3 |
-| Auth Module | 2 |
-| Config Module | 2 |
-| Database Module | 2 |
-| Models Module | 2 |
-| Utils Module | 2 |
-| Watchlist Module | 2 |
-| Frontend | 1 |
-| Config Files | 5 |
-| SQL Files | 3 |
-| Documentation | 4+ |
-| Test Files | 5+ |
-| Utility Scripts | 6+ |
-| Migration Scripts | 5+ |
-| Data Processing | 4+ |
-| **Total** | **~55+ files** |
+- `rules.md`: repo-wide engineering workflow
+- `README.md`: current setup, run, and test guide
+- `test.md`: current test strategy and lane definitions
+- `project.md`: project-specific plan when active
+- `commit.md`: one-off commit-splitting plan when needed
