@@ -15,10 +15,19 @@ Use it for:
 - test-harness changes
 - infra or deployment changes
 
-This file is repo-wide.
-- `project.md` is for a specific refactor or project plan.
-- `test.md` is for test coverage strategy.
-- `commit.md` is for one-off commit-splitting plans when needed.
+Start here before non-trivial work:
+- read `rules.md`
+- read `README.md`
+- read the most relevant current technical docs in `docs/`
+- read `test.md` if behavior, flows, personas, or cleanup are affected
+- read `project.md` or `commit.md` only when the task belongs to a tracked larger effort
+
+This file is the repo-wide workflow reference.
+- `README.md` is the setup and runtime guide
+- `docs/API_REFERENCE.md`, `docs/DEPLOYMENT.md`, `docs/DATABASE_SCHEMA.md`, and `docs/FILE_INDEX.md` are the current technical references
+- `test.md` is the test strategy and verification guide
+- `project.md` is for a specific refactor or project plan
+- `commit.md` is for one-off commit-splitting plans when needed
 
 ## Core Rules
 
