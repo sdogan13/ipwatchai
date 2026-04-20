@@ -25,10 +25,6 @@ from fastapi import BackgroundTasks
 from fastapi.responses import JSONResponse, StreamingResponse
 from openpyxl import load_workbook
 
-
-pytestmark = pytest.mark.usefixtures()
-
-
 def _make_watchlist_item_payload(item_id=None):
     """Build a representative raw watchlist row for response-model tests."""
     now = datetime(2026, 4, 10, 12, 0, tzinfo=timezone.utc)

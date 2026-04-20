@@ -179,6 +179,7 @@ Current deep live coverage in `tests/test_watchlist_e2e.py`:
 
 Current environment note:
 - higher-tier persona coverage is now exercised in this workspace through `TEST_SUPERADMIN_EMAIL` / `TEST_SUPERADMIN_PASSWORD` backed provisioning; without those env vars, the paid/business/superadmin suites still fall back to documented skips.
+- the Docker-backed live/browser/nightly lanes are currently validated with `WORKERS=1`; the previous four-worker default caused intermittent empty-response failures on `/api/v1/search/quick` and `/api/v1/search/intelligent`
 
 ## Persona Coverage Matrix
 

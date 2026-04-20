@@ -28,6 +28,8 @@ class ManagedPersonaDefinition:
 
 @dataclass(frozen=True)
 class TestAccountRecord:
+    __test__ = False
+
     email: str
     user_id: str
     organization_id: str | None

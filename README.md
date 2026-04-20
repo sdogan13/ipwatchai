@@ -53,6 +53,11 @@ Edit `.env.production` and set at least:
 - `REDIS_PASSWORD` if you want Redis auth enabled
 - local host paths such as `DATA_PATH`, `CLIENTS_PATH`, `HF_HOME`, and `TORCH_HOME` if the defaults do not match your machine
 
+Worker note:
+- the Docker-backed backend is currently validated with `WORKERS=1`
+- the previous four-worker default caused intermittent empty-response failures on quick and intelligent search routes
+- only raise `WORKERS` after revalidating the live, browser, and nightly search lanes
+
 Start the core local stack:
 
 ```powershell
@@ -161,6 +166,7 @@ Live, browser, and nightly suites expect a running app and read:
 - `TEST_PASSWORD`
 
 The smoke harness now reuses managed free, starter, and professional test personas instead of creating large numbers of disposable accounts on every run.
+The Docker-backed test path is currently validated against a single backend worker because the multi-worker default caused intermittent dropped search responses in the real app lanes.
 
 Browser notes:
 - default browser channel is `msedge`

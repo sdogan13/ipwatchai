@@ -56,6 +56,7 @@ Set at least:
 - `CLIENTS_PATH`
 - `HF_HOME`
 - `TORCH_HOME`
+- `WORKERS=1` unless you have explicitly revalidated multi-worker search stability
 
 Start the stack:
 
@@ -72,6 +73,7 @@ Useful endpoints:
 Notes:
 - Docker bootstraps the database from `deploy/schema.sql`
 - the base local stack exposes PostgreSQL on host port `5433`
+- the current validated backend default is `WORKERS=1`; the previous four-worker default caused intermittent dropped responses on `/api/v1/search/quick` and `/api/v1/search/intelligent`
 
 ## Prod-Style Deploy Path
 
@@ -98,6 +100,7 @@ Current prod-style behavior:
 - nginx uses `deploy/nginx.prod.conf`
 - postgres is exposed on `127.0.0.1:5432`
 - GPU reservation is disabled by default in the prod overlay unless explicitly reintroduced
+- the backend worker default is intentionally `1` until the GPU-backed search stack is revalidated under multi-worker uvicorn
 
 ## Database Bootstrap
 
