@@ -1,10 +1,18 @@
 # Codebase Reorganization Project
 
+Archived on: 2026-04-19
+Status: Historical reference
+
+This file is a completed project-specific tracker kept for historical context.
+It is no longer a root-level current-state doc.
+
 Last updated: 2026-04-13
 
 ## Goal
 
 Reorganize the codebase in small, test-gated phases without breaking the app.
+
+Repo-wide engineering workflow lives in `rules.md`.
 
 ## Working Rules
 

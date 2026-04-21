@@ -5,12 +5,111 @@ import datetime
 import io
 import os
 import time
+from datetime import date
+from uuid import uuid4
 
 import psycopg2
 import psycopg2.extras
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 from psycopg2 import sql as psql
+
+PUBLIC_SEARCH_CLIENT_COOKIE = "public_search_client_id"
+PUBLIC_SEARCH_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365
+
+
+def resolve_public_search_client_id(request, id_factory=None):
+    """Return the stable anonymous client id used for landing-page quotas."""
+    cookie_value = request.cookies.get(PUBLIC_SEARCH_CLIENT_COOKIE) if request else None
+    if cookie_value and str(cookie_value).strip():
+        return str(cookie_value).strip(), False
+
+    if id_factory is None:
+        id_factory = lambda: uuid4().hex
+
+    return str(id_factory()), True
+
+
+def get_daily_public_searches(db, client_id: str, today_factory=None) -> int:
+    """Get the number of public landing-page searches used today by this anonymous client."""
+    if today_factory is None:
+        today_factory = date.today
+
+    cur = db.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        """
+        SELECT searches
+        FROM public_search_usage
+        WHERE client_id = %s AND usage_date = %s
+        """,
+        (client_id, today_factory()),
+    )
+    row = cur.fetchone()
+    return int(row["searches"]) if row else 0
+
+
+def increment_public_search_usage(db, client_id: str, today_factory=None) -> int:
+    """Increment the anonymous public-search usage counter for today."""
+    if today_factory is None:
+        today_factory = date.today
+
+    cur = db.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        """
+        INSERT INTO public_search_usage (client_id, usage_date, searches)
+        VALUES (%s, %s, 1)
+        ON CONFLICT (client_id, usage_date)
+        DO UPDATE SET
+            searches = public_search_usage.searches + 1,
+            updated_at = CURRENT_TIMESTAMP
+        RETURNING searches
+        """,
+        (client_id, today_factory()),
+    )
+    db.commit()
+    row = cur.fetchone()
+    return int(row["searches"]) if row else 1
+
+
+def get_public_search_daily_limit(plan_features=None) -> int:
+    """Return the public landing-page daily quota from the public plan surface."""
+    if plan_features is None:
+        from utils.subscription import PLAN_FEATURES
+
+        plan_features = PLAN_FEATURES
+
+    free_plan = plan_features.get("free", {})
+    try:
+        return int(free_plan.get("max_daily_quick_searches", 5))
+    except (TypeError, ValueError):
+        return 5
+
+
+def check_public_search_eligibility(db, client_id: str, daily_limit_getter=None, today_factory=None):
+    """Check whether an anonymous visitor can still use the landing-page free-search quota today."""
+    if daily_limit_getter is None:
+        daily_limit_getter = get_public_search_daily_limit
+
+    daily_limit = int(daily_limit_getter())
+    used_today = get_daily_public_searches(db, client_id, today_factory=today_factory)
+
+    if used_today >= daily_limit:
+        return False, "daily_limit_exceeded", {
+            "error": "daily_limit_exceeded",
+            "current_plan": "free",
+            "upgrade_context": "public_search",
+            "daily_limit": daily_limit,
+            "used_today": used_today,
+            "remaining": 0,
+        }
+
+    return True, "ok", {
+        "current_plan": "free",
+        "upgrade_context": "public_search",
+        "daily_limit": daily_limit,
+        "used_today": used_today,
+        "remaining": max(0, daily_limit - used_today),
+    }
 
 
 def _map_public_search_results(results, status_code_getter=None):

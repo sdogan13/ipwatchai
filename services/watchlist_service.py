@@ -345,16 +345,19 @@ def _ensure_logo_tracking_allowed(
         )
 
 
-def _raise_watchlist_limit_exceeded(max_items, current_count):
+def _raise_watchlist_limit_exceeded(max_items, current_count, current_plan=None):
     """Raise the standard watchlist capacity error."""
+    detail = {
+        "error": "limit_exceeded",
+        "message": f"Izleme listesi limitinize ulastiniz ({max_items}). Daha fazla eklemek icin planinizi yukseltin.",
+        "current_count": current_count,
+        "max_items": max_items,
+    }
+    if current_plan:
+        detail["current_plan"] = current_plan
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail={
-            "error": "limit_exceeded",
-            "message": f"Izleme listesi limitinize ulastiniz ({max_items}). Daha fazla eklemek icin planinizi yukseltin.",
-            "current_count": current_count,
-            "max_items": max_items,
-        },
+        detail=detail,
     )
 
 
@@ -577,6 +580,7 @@ async def create_watchlist_item_record(
                 _raise_watchlist_limit_exceeded(
                     capacity["max_items"],
                     capacity["current_count"],
+                    current_plan=capacity["plan_name"],
                 )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

@@ -58,7 +58,7 @@ services:
       DEBUG: ${DEBUG:-false}
       HOST: "0.0.0.0"
       PORT: "8000"
-      WORKERS: ${WORKERS:-4}
+      WORKERS: ${WORKERS:-1}
 
       # Database - Always use Docker network hostname (not host .env values)
       DB_HOST: "postgres"
@@ -161,7 +161,7 @@ services:
       - ./workers:/app/workers:ro
     init: true
     command: >
-      python -m uvicorn main:app  --host 0.0.0.0  --port 8000  --workers ${WORKERS:-4}  --loop uvloop  --http httptools  --log-level info
+      python -m uvicorn main:app  --host 0.0.0.0  --port 8000  --workers ${WORKERS:-1}  --loop uvloop  --http httptools  --log-level info
     ports:
       - "127.0.0.1:8000:8000"
     healthcheck:

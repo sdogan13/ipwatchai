@@ -20,6 +20,7 @@ if str(ROOT) not in sys.path:
 from tests.live.helpers.assertions import LiveReporter
 from tests.live.helpers.auth import login_user
 from tests.live.helpers.client import LiveClient
+from tests.live.helpers.cleanup import reset_daily_quick_search_usage
 from tests.live.helpers.config import PNG_1X1, load_live_config
 from tests.live.helpers.personas import (
     PAID_PLANS,
@@ -29,6 +30,7 @@ from tests.live.helpers.personas import (
     resolve_free_persona_session,
     resolve_plan_persona_session,
 )
+from utils.subscription import PLAN_FEATURES
 
 
 CONFIG = load_live_config()
@@ -290,6 +292,12 @@ def test_free_quick_search_usage_shape():
     if session is None:
         return
 
+    reset_daily_quick_search_usage(
+        REPORTER,
+        session.user_id,
+        name="RESET free quick-search usage before live limit check",
+    )
+
     name = "GET /api/v1/usage/summary (free quick search limit)"
     payload = fetch_authenticated_json(session.client, REPORTER, "/api/v1/usage/summary", name=name)
     if payload is None:
@@ -299,13 +307,14 @@ def test_free_quick_search_usage_shape():
     quick_usage = payload.get("usage", {}).get("daily_quick_searches", {})
     used = quick_usage.get("used")
     limit = quick_usage.get("limit")
-    if plan_name == "free" and isinstance(limit, int) and limit > 0 and isinstance(used, int):
+    expected_limit = PLAN_FEATURES["free"]["max_daily_quick_searches"]
+    if plan_name == "free" and limit == expected_limit and used == 0:
         FREE_QUICK_SEARCH_LIMIT = limit
         REPORTER.ok(f"{name} -> plan=free, used={used}, limit={limit}")
         REPORTER.record(name, True)
         return
 
-    REPORTER.fail(f"{name} -> expected positive free quick-search limit, got {payload}")
+    REPORTER.fail(f"{name} -> expected free used=0, limit={expected_limit}, got {payload}")
     REPORTER.record(name, False, str(payload))
 
 
@@ -348,11 +357,13 @@ def test_paid_quick_search_usage_shape():
     quick_usage = payload.get("usage", {}).get("daily_quick_searches", {})
     used = quick_usage.get("used")
     limit = quick_usage.get("limit")
+    expected_limit = PLAN_FEATURES[plan_name]["max_daily_quick_searches"] if plan_name in PLAN_FEATURES else None
     if (
         plan_name in PAID_PLANS
         and isinstance(used, int)
         and isinstance(limit, int)
-        and limit > 0
+        and expected_limit is not None
+        and limit == expected_limit
         and (FREE_QUICK_SEARCH_LIMIT is None or limit > FREE_QUICK_SEARCH_LIMIT)
     ):
         REPORTER.ok(f"{name} -> plan={plan_name}, used={used}, limit={limit}")
@@ -360,10 +371,63 @@ def test_paid_quick_search_usage_shape():
         return
 
     REPORTER.fail(
-        f"{name} -> expected paid quick-search limit greater than the free plan limit "
-        f"({FREE_QUICK_SEARCH_LIMIT}), got {payload}"
+        f"{name} -> expected paid quick-search limit {expected_limit} on plan {plan_name} "
+        f"and greater than free limit {FREE_QUICK_SEARCH_LIMIT}, got {payload}"
     )
     REPORTER.record(name, False, str(payload))
+
+
+def test_free_quick_search_daily_limit_gate():
+    session = ensure_free_session()
+    if session is None:
+        return
+
+    reset_daily_quick_search_usage(
+        REPORTER,
+        session.user_id,
+        name="RESET free quick-search usage before live limit gate",
+    )
+
+    name = "GET /api/v1/search/quick (free daily limit gate)"
+    final_response = None
+    try:
+        expected_limit = PLAN_FEATURES["free"]["max_daily_quick_searches"]
+        for attempt in range(expected_limit + 1):
+            response = session.client.get("/api/v1/search/quick", params={"query": "wosen"})
+            final_response = response
+            if attempt < expected_limit:
+                if response.status_code != 200:
+                    REPORTER.fail(f"{name} -> expected 200 before free limit, got {response.status_code}: {response.text[:200]}")
+                    REPORTER.record(name, False, response.text[:200])
+                    return
+                continue
+
+            if response.status_code != 429:
+                REPORTER.fail(f"{name} -> expected 429 on search {attempt + 1}, got {response.status_code}: {response.text[:200]}")
+                REPORTER.record(name, False, response.text[:200])
+                return
+
+            detail = response.json().get("detail", {})
+            if (
+                isinstance(detail, dict)
+                and detail.get("error") == "daily_limit_exceeded"
+                and canonical_plan_name(detail.get("current_plan")) == "free"
+                and detail.get("daily_limit") == expected_limit
+                and detail.get("remaining") == 0
+            ):
+                REPORTER.ok(f"{name} -> blocked on attempt {attempt + 1} with daily_limit={expected_limit}")
+                REPORTER.record(name, True)
+                return
+
+            REPORTER.fail(f"{name} -> unexpected limit detail {detail}")
+            REPORTER.record(name, False, str(detail))
+            return
+    finally:
+        reset_daily_quick_search_usage(
+            REPORTER,
+            session.user_id,
+            name="RESET free quick-search usage after live limit gate",
+        )
 
 
 def test_paid_quick_search_text_happy_path():
@@ -435,6 +499,7 @@ def main() -> None:
     test_free_plan_live_search_gate()
     test_free_quick_search_usage_shape()
     test_free_quick_search_text_happy_path()
+    test_free_quick_search_daily_limit_gate()
     test_paid_quick_search_usage_shape()
     test_paid_quick_search_text_happy_path()
     test_paid_quick_search_image_happy_path()

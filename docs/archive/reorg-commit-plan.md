@@ -1,7 +1,13 @@
 # Commit Plan
 
+Archived on: 2026-04-19
+Status: Historical reference
+
+This file is a completed one-off commit-splitting tracker kept for historical context.
+It is no longer a root-level current-state doc.
+
 Last updated: 2026-04-18
-Status: In progress
+Original tracker status at archive time: In progress
 
 ## Purpose
 

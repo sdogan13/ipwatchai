@@ -1,10 +1,44 @@
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 from database.crud import Database
 from tests.live.helpers.assertions import LiveReporter
 from tests.live.helpers.client import LiveClient
+
+
+def reset_daily_quick_search_usage(
+    reporter: LiveReporter,
+    user_id: str | None,
+    *,
+    name: str = "RESET daily quick-search usage",
+) -> bool:
+    if not user_id:
+        reporter.warn(f"{name} -> missing user id")
+        return False
+
+    try:
+        with Database() as db:
+            cur = db.cursor()
+            cur.execute(
+                """
+                UPDATE api_usage
+                SET quick_searches = 0,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = %s AND usage_date = %s
+                """,
+                (str(user_id), date.today()),
+            )
+            updated = cur.rowcount or 0
+            db.commit()
+    except Exception as exc:
+        reporter.warn(f"{name} -> cleanup failed ({exc})")
+        return False
+
+    if updated:
+        reporter.info(f"{name} -> reset {updated} quick-search usage row(s)")
+    return True
 
 
 def cleanup_watchlist_items_by_prefix(

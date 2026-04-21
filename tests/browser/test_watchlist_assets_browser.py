@@ -55,6 +55,23 @@ class _QuietAttemptReporter(LiveReporter):
         return
 
 
+def _close_upgrade_modal_if_open(page) -> None:
+    modal = page.locator("#upgrade-modal")
+    if not modal.count():
+        return
+    if not modal.is_visible():
+        return
+
+    page.evaluate(
+        """() => {
+            if (typeof hideUpgradeModal === 'function') {
+                hideUpgradeModal();
+            }
+        }"""
+    )
+    modal.wait_for(state="hidden")
+
+
 def ensure_free_session() -> PersonaSession | None:
     global FREE_SESSION
     global FREE_RESOLVED
@@ -303,6 +320,11 @@ def main() -> None:
                 upload_response = upload_response_info.value
                 if upload_response.status != 403:
                     raise AssertionError(f"expected free logo upload gate 403, got {upload_response.status}")
+                page.locator("#upgrade-modal").wait_for(state="visible", timeout=free_browser_config.timeout_ms)
+                recommended_plan = (page.locator("#upgrade-plan-code").text_content() or "").strip().lower()
+                if recommended_plan != "starter":
+                    raise AssertionError(f"expected starter recommendation for free watchlist logo gate, got {recommended_plan!r}")
+                _close_upgrade_modal_if_open(page)
                 _wait_for_logo_absent(page, free_browser_config, free_brand, free_item_id)
                 _assert_logo_fetch(free_session, free_item_id, 404)
 

@@ -2,12 +2,21 @@
 Seed app_settings with default values from PLAN_FEATURES, rate limits, and feature flags.
 Idempotent — uses ON CONFLICT DO NOTHING so it won't overwrite admin changes.
 """
+from __future__ import annotations
+
 import json
 import logging
 
 from database.crud import get_db_connection
 
 logger = logging.getLogger(__name__)
+
+LEGACY_QUICK_SEARCH_LIMITS = {
+    "free": 50,
+    "starter": 200,
+    "professional": 500,
+    "business": 150,
+}
 
 
 def seed_default_settings():
@@ -100,6 +109,61 @@ def seed_default_settings():
         logger.warning(f"Settings seed failed (non-fatal): {e}")
         if conn:
             conn.rollback()
+    finally:
+        if conn:
+            conn.close()
+
+
+def align_legacy_quick_search_limits():
+    """
+    Rewrite only the known stale quick-search limit overrides.
+
+    This keeps intentional admin overrides intact while bringing older
+    runtime settings back to the current product defaults.
+    """
+    from utils.settings_manager import settings_manager
+    from utils.subscription import PLAN_FEATURES
+
+    target_limits = {
+        "free": PLAN_FEATURES["free"]["max_daily_quick_searches"],
+        "starter": PLAN_FEATURES["starter"]["max_daily_quick_searches"],
+        "professional": PLAN_FEATURES["professional"]["max_daily_quick_searches"],
+        "business": PLAN_FEATURES["professional"]["max_daily_quick_searches"],
+    }
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        updated = 0
+
+        for plan_name, legacy_value in LEGACY_QUICK_SEARCH_LIMITS.items():
+            cur.execute(
+                """
+                UPDATE app_settings
+                SET value = %s::jsonb,
+                    updated_at = NOW()
+                WHERE key = %s
+                  AND value = %s::jsonb
+                """,
+                (
+                    json.dumps(target_limits[plan_name]),
+                    f"plan.{plan_name}.max_daily_quick_searches",
+                    json.dumps(legacy_value),
+                ),
+            )
+            updated += cur.rowcount or 0
+
+        conn.commit()
+        if updated:
+            settings_manager.invalidate_cache()
+            logger.info(f"Aligned {updated} legacy quick-search plan override(s)")
+        return True
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        logger.warning(f"Quick-search limit alignment failed (non-fatal): {e}")
+        return False
     finally:
         if conn:
             conn.close()

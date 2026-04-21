@@ -1,259 +1,209 @@
-# AI Powered Trademark Monitoring System
+# IP Watch AI
 
-An AI-powered trademark monitoring platform that detects potential conflicts across 2.3M+ official Turkish trademarks using multi-modal similarity search and IDF-weighted scoring.
+IP Watch AI is a FastAPI-based trademark monitoring and search platform for Turkish trademark data.
 
-## Features
+This repo includes:
+- the application backend and server-rendered frontend
+- authenticated and public trademark search flows
+- watchlists, alerts, reports, applications, billing, and admin tools
+- bulletin collection and ingest pipeline code
+- unit, API, live, browser, and nightly verification suites
 
-| Feature | Description |
-|---------|-------------|
-| **Multi-Modal Search** | Text + Image + Color similarity analysis |
-| **IDF-Weighted Scoring** | Smart weighting of distinctive vs generic words |
-| **3-Tier Classification** | Generic (0.1), Semi-generic (0.5), Distinctive (1.0) |
-| **Nice Class Filtering** | Filter by trademark classification (1-45) |
-| **Agentic Search** | Auto-fetches fresh data when confidence < 75% |
-| **Automated Collection** | Daily scraping from TurkPatent gazette |
-| **REST API** | FastAPI endpoints for integration |
-| **Email Alerts** | Automated notifications for conflicts |
+Engineering workflow and change rules live in `rules.md`.
 
-## System Metrics
+## Key Docs
 
-```
-Total Trademarks in Database     | 2,298,000+
-IDF Vocabulary Size              | 861,254 words
-Image Embedding (CLIP)           | 512 dimensions
-Image Embedding (DINOv2)         | 768 dimensions
-Text Embedding (MiniLM)          | 384 dimensions
-Average Search Time              | < 100ms
-Agentic Threshold                | 75% confidence
-```
+- `rules.md`: repo-wide engineering workflow
+- `test.md`: test strategy, coverage map, and verification lanes
+- `docs/DOCUMENTATION.md`: current documentation map
+- `docs/DEPLOYMENT.md`: deployment guidance
+- `docs/DATABASE_SCHEMA.md`: schema notes
 
-## Tech Stack
+## Repo Layout
 
-- **Language:** Python 3.10+
-- **Database:** PostgreSQL 15+ with pgvector
-- **Cache:** Redis 7+
-- **API:** FastAPI
-- **ML Models:** CLIP ViT-B-32, DINOv2 ViT-B/14, MiniLM-L12-v2
-- **Browser Automation:** Playwright
+- `main.py`: compatibility entrypoint for the FastAPI app
+- `legacy_main.py`: current app assembly and route registration surface
+- `api/`, `auth/`, `config/`, `database/`: core app layers
+- `services/`: business logic for auth, search, watchlist, billing, reports, usage, and admin flows
+- `pipeline/`: embedding and ingest pipeline modules
+- `templates/`, `static/`: mounted UI assets and server-rendered pages
+- `tests/`: unit, API, live, browser, and nightly suites
+- `deploy/`: bootstrap schema and deployment overlays
+- `scripts/`: operational and maintenance helpers
 
-## Project Structure
+## Quick Start
 
-```
-turk_patent/
-├── bulletins/Marka/             # Downloaded & processed trademark data
-├── clients/                     # Customer portfolios
-├── models/                      # AI model cache
-├── logs/                        # Application logs
-├── db/                          # Database utilities
-│   └── pool.py                  # Connection pooling
-├── api/                         # API routes
-│   └── routes.py                # Dashboard & search endpoints
-│
-├── data_collection.py           # Bulk download from TurkPatent
-├── zip.py                       # Extract ZIP/RAR/7z archives
-├── metadata.py                  # Parse SQL to JSON
-├── ai.py                        # Generate AI embeddings
-├── ingest.py                    # Load to PostgreSQL
-├── scrapper.py                  # Live on-demand scraping
-├── risk_engine.py               # Risk analysis + agentic search
-├── services/scoring_service.py  # IDF-weighted scoring
-├── idf_lookup.py                # Fast IDF word lookup
-├── agentic_search.py            # API router for search
-├── customer_pipeline.py         # End-to-end customer processing
-├── customer_data_integration.py # Data extraction utilities
-├── main.py                      # FastAPI application
-│
-├── .env                         # Environment variables
-└── requirements.txt             # Python dependencies
+### Option A: Docker Stack
+
+Recommended when you want the full local stack with PostgreSQL, Redis, backend, and nginx.
+
+Prerequisites:
+- Docker Desktop
+- Python 3.10+ if you also want to run local scripts or tests
+
+Setup:
+
+```powershell
+Copy-Item .env.production.example .env.production
 ```
 
-## Installation
+Edit `.env.production` and set at least:
+- `DB_PASSWORD`
+- `AUTH_SECRET_KEY`
+- `REDIS_PASSWORD` if you want Redis auth enabled
+- local host paths such as `DATA_PATH`, `CLIENTS_PATH`, `HF_HOME`, and `TORCH_HOME` if the defaults do not match your machine
 
-### Prerequisites
+Worker note:
+- the Docker-backed backend is currently validated with `WORKERS=1`
+- the previous four-worker default caused intermittent empty-response failures on quick and intelligent search routes
+- only raise `WORKERS` after revalidating the live, browser, and nightly search lanes
 
+Start the core local stack:
+
+```powershell
+docker compose up -d postgres redis backend nginx
+```
+
+Useful endpoints:
+- backend health: `http://127.0.0.1:8000/health`
+- nginx entrypoint: `http://127.0.0.1:8080`
+- PostgreSQL host port: `127.0.0.1:5433`
+- Redis host port: `127.0.0.1:6379`
+
+Notes:
+- `cloudflared` is optional and not needed for local development
+- Docker bootstraps the database from `deploy/schema.sql`
+
+### Option B: Local Python App Against Local Or Docker Services
+
+Recommended when you want to edit Python code directly and run the app outside Docker.
+
+Prerequisites:
 - Python 3.10+
-- PostgreSQL 15+ with pgvector extension
-- Redis 7+
-- 7-Zip (for archive extraction)
-- NVIDIA GPU with CUDA (optional)
+- PostgreSQL with pgvector
+- Redis
+- Playwright browsers if you plan to run browser tests
+- 7-Zip if you plan to run archive extraction locally
 
-### Setup
+Setup:
 
-```bash
-# Clone/navigate to project
-cd C:\Users\701693\turk_patent
-
-# Create virtual environment
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Install Playwright browsers
-playwright install chromium
-
-# Configure environment
-cp .env.example .env
-# Edit .env with your database credentials
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements-dev.txt
+python -m playwright install chromium
+Copy-Item .env.production.example .env
 ```
 
-### Database Setup
+Edit `.env` for your local setup.
 
-```sql
-CREATE DATABASE trademark_db;
-\c trademark_db
-CREATE EXTENSION vector;
+Common local values when PostgreSQL and Redis are running through Docker Compose:
+- `DB_HOST=127.0.0.1`
+- `DB_PORT=5433`
+- `REDIS_HOST=127.0.0.1`
+- `REDIS_PORT=6379`
+- `AI_DEVICE=cpu` if you are not running with CUDA
+
+Start the backing services if needed:
+
+```powershell
+docker compose up -d postgres redis
 ```
 
-## Usage
+Run the app:
 
-### Start API Server
-
-```bash
+```powershell
 python main.py
 ```
 
-The API will be available at `http://localhost:8000`
+For live reload during development:
 
-### Run Daily Data Pipeline
-
-```bash
-# Step 1: Download new bulletins
-python data_collection.py
-
-# Step 2: Extract archives
-python zip.py --root "bulletins/Marka"
-
-# Step 3: Parse SQL to JSON
-python metadata.py
-
-# Step 4: Generate embeddings
-python -m pipeline.ai
-
-# Step 5: Ingest to database
-python -m pipeline.ingest
+```powershell
+python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-### Customer Portfolio Analysis
+Notes:
+- `/docs` is only available when debug mode is enabled
+- `main.py` remains the supported entrypoint even though it is now a compatibility wrapper
 
-```bash
-python customer_pipeline.py "customer_data.xlsx" --customer "CLIENT_NAME"
+## Testing
+
+The repo has several verification layers. Start narrow and widen only when the change affects a broader surface.
+
+Core API regression:
+
+```powershell
+python -m pytest tests/test_api_endpoints.py -s
 ```
 
-Output: `clients/CLIENT_NAME/RISK_ANALYSIS_REPORT.xlsx`
+Full mocked regression suite:
 
-### Programmatic Search
-
-```python
-from risk_engine import RiskEngine
-
-engine = RiskEngine()
-
-# Quick search (database only)
-result, needs_live = engine.assess_brand_risk("Nike", target_classes=[25])
-print(f"Score: {result['final_risk_score']:.2%}")
-
-# Full search (with live investigation if needed)
-result = engine.assess_brand_risk_full("Nike", target_classes=[25])
+```powershell
+python -m pytest tests -s
 ```
 
-## Workflows
+Live app aggregate:
 
-### 1. Scheduled Data Pipeline (Daily)
-
-```
-data_collection.py -> zip.py -> metadata.py -> pipeline.ai -> pipeline.ingest
-     |                 |           |          |          |
-     v                 v           v          v          v
-  Download         Extract      Parse      Generate   Insert to
-  ZIP/RAR          archives     SQL->JSON  embeddings PostgreSQL
+```powershell
+python tests/test_live_app_e2e.py
 ```
 
-### 2. Agentic Search (On-Demand)
+Browser aggregate:
 
-```
-User Query -> risk_engine.py -> Database Search -> Score >= 75%?
-                                                    |
-                              +---------------------+---------------------+
-                              v                                           v
-                         YES: Return                              NO: Live Investigation
-                         Result                                   (scrapper.py -> pipeline.ai -> pipeline.ingest)
+```powershell
+python tests/test_browser_e2e.py
 ```
 
-### 3. Customer Portfolio Analysis
+Nightly aggregate:
 
-```
-Excel Input -> Extract -> Embed -> Search DB -> Generate Risk Report
-                                    |
-                           (NO database ingestion)
+```powershell
+python tests/test_nightly_e2e.py
 ```
 
-## Risk Categories
+Live, browser, and nightly suites expect a running app and read:
+- `TEST_BASE_URL`
+- `TEST_EMAIL`
+- `TEST_PASSWORD`
 
-| Score | Level | Action |
-|-------|-------|--------|
-| >= 85% | CRITICAL | Immediate review required |
-| 70-85% | HIGH | Investigate |
-| 50-70% | MEDIUM | Monitor |
-| < 50% | LOW | Minimal concern |
+The smoke harness now reuses managed free, starter, and professional test personas instead of creating large numbers of disposable accounts on every run.
+The Docker-backed test path is currently validated against a single backend worker because the multi-worker default caused intermittent dropped search responses in the real app lanes.
 
-## API Endpoints
+Browser notes:
+- default browser channel is `msedge`
+- if Edge is not available locally, set `TEST_BROWSER_CHANNEL=chromium`
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/v1/search/status` | GET | Health check |
-| `/api/v1/search/quick` | GET | Fast database search |
-| `/api/v1/search/intelligent` | GET | Full agentic search |
-| `/api/v1/dashboard/*` | GET | Dashboard data endpoints |
+See `test.md` for the current test lanes and coverage expectations.
 
-### Example: Quick Search
+## Stable Endpoints
 
-```bash
-curl "http://localhost:8000/api/v1/search/quick?q=nike&limit=10&classes=25,35"
-```
+- `/health`: app, database, and Redis health
+- `/api/info`: basic service metadata
+- `/api/v1/status`: service status and headline database stats
+- `/api/v1/search/public`: public landing-page search
+- `/api/v1/search/quick`: authenticated quick search
+- `/api/v1/search/intelligent`: authenticated deeper search flow
 
-## Configuration
+## Pipeline Notes
 
-Key environment variables in `.env`:
+Pipeline and data-collection code lives in:
+- `data_collection.py`
+- `zip.py`
+- `pdf_extract.py`
+- `ingest_events.py`
+- `pipeline/`
 
-```bash
-# Database
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=trademark_db
-DB_USER=postgres
-DB_PASSWORD=your_password
+Operational helpers and maintenance scripts live in `scripts/`.
 
-# Redis
-REDIS_HOST=localhost
-REDIS_PORT=6379
+If you run archive extraction locally on Windows, make sure `PIPELINE_SEVEN_ZIP_PATH` points to a working 7-Zip executable.
 
-# API
-API_HOST=0.0.0.0
-API_PORT=8000
+## Development Rules
 
-# AI Models
-USE_GPU=true
-BATCH_SIZE=32
-```
-
-## Security
-
-- JWT authentication for API endpoints
-- bcrypt password hashing
-- Rate limiting (100 req/min)
-- Parameterized SQL queries
-- KVKK (Turkish GDPR) compliance
-
-## Documentation
-
-Full technical documentation available in `docs/SYSTEM_DOCUMENTATION.md`
+Before making non-trivial changes:
+- read `rules.md`
+- use a task branch unless the change is tiny and low risk
+- run the smallest test set that proves the change
+- keep created test data and runtime artifacts out of git
 
 ## License
 
 Copyright 2026 Dogan Patent. All rights reserved.
-
-## Contact
-
-- **Technical Support:** tech@doganpatent.com

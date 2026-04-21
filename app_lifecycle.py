@@ -72,12 +72,20 @@ def run_startup_tasks(logger, settings):
     except Exception as exc:
         logger.warning(f"   Settings manager init failed (non-fatal): {exc}")
 
-    from utils.seed_settings import seed_default_settings
+    from utils.seed_settings import align_legacy_quick_search_limits, seed_default_settings
 
     try:
         seed_default_settings()
     except Exception as exc:
         logger.warning(f"   Default settings seed failed (non-fatal): {exc}")
+
+    try:
+        if align_legacy_quick_search_limits():
+            logger.info("   Quick-search plan limits aligned")
+        else:
+            logger.warning("   Quick-search plan-limit alignment skipped or failed (non-fatal)")
+    except Exception as exc:
+        logger.warning(f"   Quick-search plan-limit alignment failed (non-fatal): {exc}")
 
     from utils.superadmin import seed_superadmin
 

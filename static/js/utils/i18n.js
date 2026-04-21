@@ -10,6 +10,7 @@ window.AppI18n._locale = localStorage.getItem('app_locale') || 'tr';
 window.AppI18n._strings = {};
 window.AppI18n._ready = false;
 window.AppI18n._callbacks = [];
+window.AppI18n._localeAssetVersion = '32';
 
 /**
  * Deep-get a nested key from an object.
@@ -66,8 +67,13 @@ window.AppI18n.getDir = function() {
  */
 window.AppI18n.setLocale = async function(locale) {
     try {
-        var opts = typeof AbortSignal.timeout === 'function' ? { signal: AbortSignal.timeout(10000) } : {};
-        var res = await fetch('/static/locales/' + locale + '.json?v=31', opts);
+        var opts = { cache: 'no-store' };
+        if (typeof AbortSignal.timeout === 'function') {
+            // Locale bundles can be fetched on a cold app shell, so give them a
+            // slightly wider timeout before we log a hard failure to the console.
+            opts.signal = AbortSignal.timeout(20000);
+        }
+        var res = await fetch('/static/locales/' + locale + '.json?v=' + window.AppI18n._localeAssetVersion, opts);
         if (!res.ok) throw new Error('Locale file not found: ' + locale);
         var data = await res.json();
         window.AppI18n._strings = data;

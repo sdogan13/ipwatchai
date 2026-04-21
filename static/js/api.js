@@ -3,6 +3,26 @@
  */
 window.AppAPI = window.AppAPI || {};
 
+async function _readApiErrorData(response) {
+    return await response.json().catch(function () { return {}; });
+}
+
+function _apiErrorMessage(data, fallbackMessage) {
+    if (data && data.detail) {
+        if (typeof data.detail === 'object' && data.detail.message) return data.detail.message;
+        return data.detail;
+    }
+    if (data && data.message) return data.message;
+    return fallbackMessage;
+}
+
+function _buildApiError(response, data, fallbackMessage) {
+    var err = new Error(_apiErrorMessage(data, fallbackMessage));
+    err.status = response.status;
+    err.data = data || {};
+    return err;
+}
+
 // ============================================
 // QUICK (DB-ONLY) SEARCH
 // ============================================
@@ -24,9 +44,13 @@ window.AppAPI.handleQuickSearch = async function () {
         });
         if (res.status === 401) { showToast(t('auth.session_expired'), 'error'); return; }
         if (res.status === 429) {
-            var errData = await res.json().catch(function () { return {}; });
-            var msg = (errData.detail && errData.detail.message) || t('auth.daily_limit');
-            showToast(msg, 'warning');
+            var errData = await _readApiErrorData(res);
+            var detail = errData.detail || errData;
+            if (window.AppUpgradeModal && typeof window.AppUpgradeModal.maybeHandle === 'function'
+                && window.AppUpgradeModal.maybeHandle(detail, 'quick_search')) {
+                return;
+            }
+            showToast(t('search.rate_limited'), 'warning');
             return;
         }
         if (!res.ok) throw new Error(t('search.search_failed'));
@@ -91,7 +115,7 @@ window.AppAPI.handleAgenticSearch = async function () {
         if (agenticSearchAborted) return;
         var data = await res.json();
 
-        if (res.status === 403) { hideAgenticLoadingModal(); showUpgradeModal(data.detail); return; }
+        if (res.status === 403) { hideAgenticLoadingModal(); showUpgradeModal(data.detail || data, 'live_search'); return; }
         if (res.status === 402) { hideAgenticLoadingModal(); showCreditsModal(data.detail); return; }
         if (res.status === 401) { hideAgenticLoadingModal(); showToast(t('auth.session_expired'), 'error'); return; }
         if (!res.ok) throw new Error(data.detail?.message || data.detail || t('search.search_failed'));
@@ -127,7 +151,8 @@ window.AppAPI.loadLeadStats = async function () {
         });
 
         if (response.status === 403) {
-            showLeadUpgradePrompt();
+            var denied = await _readApiErrorData(response);
+            showLeadUpgradePrompt(denied.detail || denied);
             return;
         }
         if (!response.ok) return;
@@ -248,8 +273,16 @@ window.AppAPI.loadLeadFeed = async function (page) {
 
         loading.classList.add('hidden');
 
-        if (response.status === 403) { showLeadUpgradePrompt(); return; }
-        if (response.status === 429) { showToast(t('leads.daily_limit'), 'warning'); return; }
+        if (response.status === 403) {
+            var denied = await _readApiErrorData(response);
+            showLeadUpgradePrompt(denied.detail || denied);
+            return;
+        }
+        if (response.status === 429) {
+            var throttled = await _readApiErrorData(response);
+            showUpgradeModal(throttled.detail || throttled, 'leads');
+            return;
+        }
         if (!response.ok) throw new Error('Failed to load leads');
 
         var data = await response.json();
@@ -372,7 +405,11 @@ window.AppAPI.loadRenewalFeed = async function (page) {
 
         loading.classList.add('hidden');
 
-        if (response.status === 403) { showLeadUpgradePrompt(); return; }
+        if (response.status === 403) {
+            var denied = await _readApiErrorData(response);
+            showLeadUpgradePrompt(denied.detail || denied);
+            return;
+        }
         if (!response.ok) throw new Error('Failed to load renewals');
 
         var data = await response.json();
@@ -491,7 +528,8 @@ window.AppAPI.exportRenewalsCSV = async function () {
             headers: { 'Authorization': 'Bearer ' + getAuthToken() }
         });
         if (response.status === 403) {
-            showToast(t('leads.csv_enterprise_only') || 'CSV export sadece Enterprise plan icin', 'warning');
+            var denied = await _readApiErrorData(response);
+            showUpgradeModal(denied.detail || denied, 'csv_export');
             return;
         }
         if (!response.ok) throw new Error('Export failed');
@@ -640,7 +678,11 @@ window.AppAPI.exportLeadsCSV = async function () {
         var response = await fetch(url, {
             headers: { 'Authorization': 'Bearer ' + getAuthToken() }
         });
-        if (response.status === 403) { showToast(t('leads.csv_export_enterprise'), 'warning'); return; }
+        if (response.status === 403) {
+            var denied = await _readApiErrorData(response);
+            showUpgradeModal(denied.detail || denied, 'csv_export');
+            return;
+        }
         if (!response.ok) throw new Error('Export failed');
 
         var blob = await response.blob();
@@ -678,7 +720,8 @@ window.AppAPI._loadEntityTrademarks = async function (entityType, entityId, page
 
         if (res.status === 403) {
             closeEntityPortfolio();
-            showUpgradeModal();
+            var denied = await _readApiErrorData(res);
+            showUpgradeModal(denied.detail || denied, 'portfolio_download');
             return;
         }
         if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -745,7 +788,7 @@ window.AppAPI.generateNames = async function (params) {
     var data = await res.json();
 
     if (res.status === 403) {
-        showUpgradeModal(data.detail);
+        showUpgradeModal(data.detail || data);
         throw new Error('upgrade_required');
     }
     if (res.status === 402) {
@@ -780,7 +823,7 @@ window.AppAPI.generateLogos = async function (params) {
     var data = await res.json();
 
     if (res.status === 403) {
-        showUpgradeModal(data.detail);
+        showUpgradeModal(data.detail || data);
         throw new Error('upgrade_required');
     }
     if (res.status === 402) {
@@ -863,8 +906,8 @@ window.AppAPI.uploadWatchlistLogo = async function (itemId, file) {
         body: formData
     });
     if (!res.ok) {
-        var data = await res.json();
-        throw new Error(data.detail || t('watchlist.logo_upload_failed'));
+        var data = await _readApiErrorData(res);
+        throw _buildApiError(res, data, t('watchlist.logo_upload_failed'));
     }
     return await res.json();
 };
@@ -932,10 +975,7 @@ window.AppAPI.addWatchlistItem = async function (data) {
     });
     var body = await res.json().catch(function () { return {}; });
     if (!res.ok) {
-        var err = new Error(body.detail || t('watchlist.add_failed'));
-        err.status = res.status;
-        err.data = body;
-        throw err;
+        throw _buildApiError(res, body, t('watchlist.add_failed'));
     }
     return body;
 };
@@ -962,8 +1002,8 @@ window.AppAPI.updateWatchlistItem = async function (itemId, data) {
         body: JSON.stringify(data)
     });
     if (!res.ok) {
-        var body = await res.json().catch(function () { return {}; });
-        throw new Error(body.detail || t('watchlist.update_failed'));
+        var body = await _readApiErrorData(res);
+        throw _buildApiError(res, body, t('watchlist.update_failed'));
     }
     return await res.json();
 };
@@ -1031,8 +1071,8 @@ window.AppAPI.detectWatchlistColumns = async function (file) {
         body: formData
     });
     if (!res.ok) {
-        var data = await res.json().catch(function () { return {}; });
-        throw new Error(data.detail || t('watchlist.upload_detect_failed'));
+        var data = await _readApiErrorData(res);
+        throw _buildApiError(res, data, t('watchlist.upload_detect_failed'));
     }
     return await res.json();
 };
@@ -1050,8 +1090,8 @@ window.AppAPI.uploadWatchlistFile = async function (file, columnMapping) {
         body: formData
     });
     if (!res.ok) {
-        var data = await res.json().catch(function () { return {}; });
-        throw new Error(data.detail || t('watchlist.upload_failed'));
+        var data = await _readApiErrorData(res);
+        throw _buildApiError(res, data, t('watchlist.upload_failed'));
     }
     return await res.json();
 };

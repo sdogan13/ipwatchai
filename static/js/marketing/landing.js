@@ -444,8 +444,15 @@ function landing() {
                 })
                     .then(function (res) {
                         if (res.status === 429) {
-                            self.searchError = self.t('landing.search_limit_reached');
-                            return null;
+                            return res.json().catch(function () { return {}; }).then(function (errData) {
+                                var detail = errData.detail || errData;
+                                if (window.AppUpgradeModal && typeof window.AppUpgradeModal.maybeHandle === 'function'
+                                    && window.AppUpgradeModal.maybeHandle(detail, 'public_search')) {
+                                    return null;
+                                }
+                                self.searchError = self.t('search.rate_limited');
+                                return null;
+                            });
                         }
                         if (!res.ok) throw new Error('Search failed');
                         return res.json();
@@ -473,8 +480,15 @@ function landing() {
                 fetch('/api/v1/search/public?query=' + encodeURIComponent(query))
                     .then(function (res) {
                         if (res.status === 429) {
-                            self.searchError = self.t('landing.search_limit_reached');
-                            return null;
+                            return res.json().catch(function () { return {}; }).then(function (errData) {
+                                var detail = errData.detail || errData;
+                                if (window.AppUpgradeModal && typeof window.AppUpgradeModal.maybeHandle === 'function'
+                                    && window.AppUpgradeModal.maybeHandle(detail, 'public_search')) {
+                                    return null;
+                                }
+                                self.searchError = self.t('search.rate_limited');
+                                return null;
+                            });
                         }
                         if (!res.ok) throw new Error('Search failed');
                         return res.json();
@@ -518,7 +532,7 @@ function landing() {
             fetch('/api/v1/portfolio/public?' + param + '=' + encodeURIComponent(id))
                 .then(function (res) {
                     if (res.status === 429) {
-                        self.searchError = self.t('landing.search_limit_reached');
+                        self.searchError = self.t('search.rate_limited');
                         self.showPortfolio = false;
                         return null;
                     }

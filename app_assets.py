@@ -67,7 +67,11 @@ def register_asset_routes(app, templates, static_dir):
     @app.get("/dashboard", response_class=HTMLResponse, tags=["Root"])
     async def serve_dashboard(request: Request):
         """Serve the dashboard via Jinja2 templates."""
-        response = templates.TemplateResponse(request=request, name="dashboard/page.html")
+        response = templates.TemplateResponse(
+            request=request,
+            name="dashboard/page.html",
+            context={"plans": _get_public_plans()},
+        )
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         return response
 

@@ -455,8 +455,13 @@ function dashboard() {
                 if (res.status === 401) { showToast(this.t('auth.session_expired'), 'error'); return; }
                 if (res.status === 429) {
                     var errData = await res.json().catch(function () { return {}; });
-                    var msg = (errData.detail && errData.detail.message) || this.t('auth.daily_limit');
-                    showToast(msg, 'warning');
+                    var detail = errData.detail || errData;
+                    if (window.AppUpgradeModal && typeof window.AppUpgradeModal.maybeHandle === 'function'
+                        && window.AppUpgradeModal.maybeHandle(detail, 'quick_search')) {
+                        return;
+                    }
+                    this.searchError = this.t('search.rate_limited');
+                    showToast(this.searchError, 'warning');
                     return;
                 }
                 if (!res.ok) throw new Error(this.t('search.search_failed'));
@@ -534,7 +539,7 @@ function dashboard() {
                 if (agenticSearchAborted) return;
                 var data = await res.json();
 
-                if (res.status === 403) { hideAgenticLoadingModal(); showUpgradeModal(data.detail); return; }
+                if (res.status === 403) { hideAgenticLoadingModal(); showUpgradeModal(data.detail || data, 'live_search'); return; }
                 if (res.status === 402) { hideAgenticLoadingModal(); showCreditsModal(data.detail); return; }
                 if (res.status === 401) { hideAgenticLoadingModal(); showToast(this.t('auth.session_expired'), 'error'); return; }
                 if (!res.ok) throw new Error((data.detail && data.detail.message) || data.detail || this.t('search.search_failed'));
@@ -677,7 +682,7 @@ function dashboard() {
             fetch('/api/v1/portfolio/public?' + param + '=' + encodeURIComponent(id))
                 .then(function (res) {
                     if (res.status === 429) {
-                        self.searchError = self.t('landing.search_limit_reached');
+                        self.searchError = self.t('search.rate_limited');
                         self.showPortfolio = false;
                         return null;
                     }
@@ -771,45 +776,36 @@ function dashboard() {
             if (!classes.length) classes = [1];
 
             try {
-                var token = getAuthToken();
-                if (!token) {
+                if (!(window.AppAPI && typeof window.AppAPI.addWatchlistItem === 'function')) {
+                    throw new Error(this.t('watchlist.add_failed'));
+                }
+                if (!getAuthToken()) {
                     showToast(this.t('auth.session_expired'), 'error');
                     return;
                 }
-                var res = await fetch('/api/v1/watchlist', {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': 'Bearer ' + token,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        application_no: appNo,
-                        brand_name: brandName,
-                        nice_class_numbers: classes
-                    })
+
+                await window.AppAPI.addWatchlistItem({
+                    application_no: appNo,
+                    brand_name: brandName,
+                    nice_class_numbers: classes
                 });
 
-                if (res.status === 409) {
+                showToast(this.t('watchlist.added_toast'), 'success');
+                if (typeof refreshWatchlistAndStats === 'function') refreshWatchlistAndStats();
+            } catch (e) {
+                if (e.status === 409) {
                     showToast(this.t('watchlist.already_watching'), 'info');
                     return;
                 }
-                if (res.status === 403) {
-                    var errData = await res.json().catch(function () { return {}; });
-                    showUpgradeModal(errData.detail);
+                if (e.status === 403) {
+                    var errData = (e.data && (e.data.detail || e.data)) || e;
+                    showUpgradeModal(errData, 'watchlist_items');
                     return;
                 }
-                if (res.status === 401) {
+                if (e.status === 401) {
                     showToast(this.t('auth.session_expired'), 'error');
                     return;
                 }
-                if (!res.ok) {
-                    var errBody = await res.json().catch(function () { return {}; });
-                    throw new Error(errBody.detail || this.t('watchlist.add_failed'));
-                }
-
-                showToast(this.t('watchlist.added_success'), 'success');
-                if (typeof refreshWatchlistAndStats === 'function') refreshWatchlistAndStats();
-            } catch (e) {
                 showToast(this.t('common.error') + ': ' + e.message, 'error');
             }
         },
@@ -2032,15 +2028,22 @@ function addLogLine(text) {
 // ============================================
 // UPGRADE MODAL
 // ============================================
-function showUpgradeModal(detail) {
-    document.getElementById('upgrade-modal').classList.remove('hidden');
-    lockBodyScroll();
+function showUpgradeModal(detail, fallbackContext) {
+    if (window.AppUpgradeModal && typeof window.AppUpgradeModal.show === 'function') {
+        return window.AppUpgradeModal.show(detail, fallbackContext);
+    }
+    return null;
 }
 function hideUpgradeModal() {
-    document.getElementById('upgrade-modal').classList.add('hidden');
-    unlockBodyScroll();
+    if (window.AppUpgradeModal && typeof window.AppUpgradeModal.hide === 'function') {
+        window.AppUpgradeModal.hide();
+    }
 }
 function redirectToUpgrade() {
+    if (window.AppUpgradeModal && typeof window.AppUpgradeModal.redirect === 'function') {
+        window.AppUpgradeModal.redirect();
+        return;
+    }
     hideUpgradeModal();
     window.location.href = '/pricing';
 }
@@ -2504,11 +2507,12 @@ function hideOppositionModal() {
     unlockBodyScroll();
 }
 
-function showLeadUpgradePrompt() {
+function showLeadUpgradePrompt(detail) {
     document.getElementById('lead-feed-loading').classList.add('hidden');
     document.getElementById('lead-feed-container').classList.add('hidden');
     document.getElementById('lead-stats-cards').classList.add('hidden');
-    document.getElementById('lead-upgrade-prompt').classList.remove('hidden');
+    document.getElementById('lead-upgrade-prompt').classList.add('hidden');
+    showUpgradeModal(detail || { current_plan: (window.AppAuth && window.AppAuth.currentUserPlan) || 'free' }, 'leads');
 }
 
 // ============================================
@@ -2723,18 +2727,10 @@ function _showBulkResultBanner(created, total, type, skipped) {
 
 // Very visible upgrade banner for limit reached — persistent until user clicks X
 function _showUpgradeBanner(message) {
-    // Remove any existing banner
-    var existing = document.getElementById('upgrade-banner');
-    if (existing) existing.remove();
-
-    var banner = document.createElement('div');
-    banner.id = 'upgrade-banner';
-    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;padding:16px 20px;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;font-size:15px;font-weight:600;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;gap:12px;animation:slideDown 0.3s ease-out';
-    banner.innerHTML = '<svg class="w-6 h-6 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>'
-        + '<span>' + message + '</span>'
-        + '<a href="/dashboard?tab=settings" style="background:white;color:#d97706;padding:6px 16px;border-radius:8px;font-size:13px;font-weight:700;text-decoration:none;white-space:nowrap">' + (t('watchlist.upgrade_now') || 'Plani Yukselt') + '</a>'
-        + '<button onclick="this.parentElement.remove()" style="background:none;border:none;color:white;font-size:20px;cursor:pointer;padding:0 4px;line-height:1">&times;</button>';
-    document.body.prepend(banner);
+    showUpgradeModal({
+        current_plan: (window.AppAuth && window.AppAuth.currentUserPlan) || 'free',
+        message: message || ''
+    }, 'watchlist_items');
 }
 
 // Entity portfolio: CSV Download button
@@ -2798,7 +2794,7 @@ function performEntitySearch() {
         if (err.status === 403) {
             searchResults.classList.add('hidden');
             document.getElementById('entityPortfolioBody').classList.remove('hidden');
-            showUpgradeModal(t(cfg.i18nPrefix + '.search_pro_required'));
+            showUpgradeModal(err, 'portfolio_download');
         } else {
             showToast(t(cfg.i18nPrefix + '.search_error'), 'error');
             searchResults.innerHTML = '<div class="text-center py-8 text-red-500">' + t(cfg.i18nPrefix + '.search_failed') + '</div>';
@@ -4873,6 +4869,10 @@ function handleWatchlistLogoUpload(itemId, input) {
         showToast(data.message || t('watchlist.logo_uploaded'), 'success');
         refreshWatchlistAndStats();
     }).catch(function (e) {
+        if (e && e.status === 403) {
+            showUpgradeModal(e, 'watchlist_logo');
+            return;
+        }
         showToast(t('common.error') + ': ' + e.message, 'error');
     });
 }
@@ -5123,6 +5123,10 @@ function submitEditWatchlist() {
         closeEditWatchlistModal();
         refreshWatchlistAndStats();
     }).catch(function (e) {
+        if (e && e.status === 403) {
+            showUpgradeModal(e, 'watchlist_logo');
+            return;
+        }
         showToast(t('common.error') + ': ' + e.message, 'error');
     }).finally(function () {
         btn.disabled = false;
@@ -5211,6 +5215,10 @@ function detectUploadColumns() {
         document.getElementById('upload-wl-step-1').classList.add('hidden');
         document.getElementById('upload-wl-step-2').classList.remove('hidden');
     }).catch(function (e) {
+        if (e && e.status === 403) {
+            showUpgradeModal(e, 'watchlist_items');
+            return;
+        }
         showToast(t('common.error') + ': ' + e.message, 'error');
     }).finally(function () {
         btn.disabled = false;
@@ -5330,6 +5338,10 @@ function submitBulkUpload() {
         resultEl.classList.remove('hidden');
         refreshWatchlistAndStats();
     }).catch(function (e) {
+        if (e && e.status === 403) {
+            showUpgradeModal(e, 'watchlist_items');
+            return;
+        }
         showToast(t('common.error') + ': ' + e.message, 'error');
     }).finally(function () {
         btn.disabled = false;
@@ -5561,7 +5573,7 @@ function submitReportGeneration() {
         if (err.status === 402) {
             showCreditsModal();
         } else if (err.status === 403) {
-            showUpgradeModal(t('reports.limit_reached'));
+            showUpgradeModal(err, 'reports');
         } else {
             showToast(t('reports.generate_failed') + ': ' + err.message, 'error');
         }
@@ -5587,7 +5599,7 @@ function handleReportDownload(reportId) {
         window.URL.revokeObjectURL(url);
     }).catch(function (err) {
         if (err.status === 403) {
-            showUpgradeModal(t('reports.download_upgrade'));
+            showUpgradeModal(err, 'report_export');
         } else {
             showToast(t('reports.download_failed') + ': ' + err.message, 'error');
         }
@@ -5919,6 +5931,24 @@ function _appFetch(url, opts) {
     opts.headers = opts.headers || {};
     if (token) opts.headers['Authorization'] = 'Bearer ' + token;
     return fetch(url, opts);
+}
+
+function _appErrorFromResponse(response, fallbackMessageKey) {
+    return response.json().catch(function () { return {}; }).then(function (payload) {
+        payload = payload || {};
+        payload.status = response.status;
+        if (!payload.detail && fallbackMessageKey) payload.detail = t(fallbackMessageKey);
+        throw payload;
+    });
+}
+
+function _applicationErrorMessage(err, fallbackMessageKey) {
+    var msg = (err && err.detail) || t(fallbackMessageKey);
+    if (typeof msg === 'object' && msg.message) {
+        var fields = (msg.fields || []).join(', ');
+        msg = msg.message + (fields ? ': ' + fields : '');
+    }
+    return typeof msg === 'string' ? msg : JSON.stringify(msg);
 }
 
 var _applicationsState = {
@@ -6268,7 +6298,7 @@ function saveApplication(mode) {
 
     _appFetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
         .then(function (r) {
-            if (!r.ok) return r.json().then(function (e) { throw e; });
+            if (!r.ok) return _appErrorFromResponse(r, 'applications.save_error');
             return r.json();
         })
         .then(function (saved) {
@@ -6277,7 +6307,10 @@ function saveApplication(mode) {
                 var fd = new FormData();
                 fd.append('file', _applicationsState.logoFile);
                 return _appFetch('/api/v1/applications/' + saved.id + '/logo', { method: 'POST', body: fd })
-                    .then(function () { return saved; });
+                    .then(function (logoResponse) {
+                        if (!logoResponse.ok) return _appErrorFromResponse(logoResponse, 'applications.save_error');
+                        return saved;
+                    });
             }
             return saved;
         })
@@ -6289,8 +6322,11 @@ function saveApplication(mode) {
             showApplicationsList(true);
         })
         .catch(function (err) {
-            var msg = (err && err.detail) || t('applications.save_error');
-            if (typeof AppToast !== 'undefined') AppToast.error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+            if (err && err.status === 403) {
+                showUpgradeModal(err, 'applications');
+                return;
+            }
+            if (typeof AppToast !== 'undefined') AppToast.error(_applicationErrorMessage(err, 'applications.save_error'));
         });
 }
 
@@ -6310,7 +6346,7 @@ function submitApplication() {
 
         _appFetch('/api/v1/applications/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
             .then(function (r) {
-                if (!r.ok) return r.json().then(function (e) { throw e; });
+                if (!r.ok) return _appErrorFromResponse(r, 'applications.submit_error');
                 return r.json();
             })
             .then(function (saved) {
@@ -6320,7 +6356,10 @@ function submitApplication() {
                     var fd = new FormData();
                     fd.append('file', _applicationsState.logoFile);
                     logoPromise = _appFetch('/api/v1/applications/' + saved.id + '/logo', { method: 'POST', body: fd })
-                        .then(function () { return saved; });
+                        .then(function (logoResponse) {
+                            if (!logoResponse.ok) return _appErrorFromResponse(logoResponse, 'applications.submit_error');
+                            return saved;
+                        });
                 }
                 return logoPromise;
             })
@@ -6329,7 +6368,7 @@ function submitApplication() {
                 return _appFetch('/api/v1/applications/' + saved.id + '/submit', { method: 'POST' });
             })
             .then(function (r) {
-                if (!r.ok) return r.json().then(function (e) { throw e; });
+                if (!r.ok) return _appErrorFromResponse(r, 'applications.submit_error');
                 return r.json();
             })
             .then(function () {
@@ -6337,12 +6376,11 @@ function submitApplication() {
                 showApplicationsList(true);
             })
             .catch(function (err) {
-                var msg = (err && err.detail) || t('applications.submit_error');
-                if (typeof msg === 'object' && msg.message) {
-                    var fields = (msg.fields || []).join(', ');
-                    msg = msg.message + (fields ? ': ' + fields : '');
+                if (err && err.status === 403) {
+                    showUpgradeModal(err, 'applications');
+                    return;
                 }
-                if (typeof AppToast !== 'undefined') AppToast.error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+                if (typeof AppToast !== 'undefined') AppToast.error(_applicationErrorMessage(err, 'applications.submit_error'));
             });
         return;
     }
@@ -6350,7 +6388,7 @@ function submitApplication() {
     // Already saved draft — just submit
     _appFetch('/api/v1/applications/' + appId + '/submit', { method: 'POST' })
         .then(function (r) {
-            if (!r.ok) return r.json().then(function (e) { throw e; });
+            if (!r.ok) return _appErrorFromResponse(r, 'applications.submit_error');
             return r.json();
         })
         .then(function () {
@@ -6358,12 +6396,11 @@ function submitApplication() {
             showApplicationsList(true);
         })
         .catch(function (err) {
-            var msg = (err && err.detail) || t('applications.submit_error');
-            if (typeof msg === 'object' && msg.message) {
-                var fields = (msg.fields || []).join(', ');
-                msg = msg.message + (fields ? ': ' + fields : '');
+            if (err && err.status === 403) {
+                showUpgradeModal(err, 'applications');
+                return;
             }
-            if (typeof AppToast !== 'undefined') AppToast.error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+            if (typeof AppToast !== 'undefined') AppToast.error(_applicationErrorMessage(err, 'applications.submit_error'));
         });
 }
 
