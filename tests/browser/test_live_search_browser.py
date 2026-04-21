@@ -236,6 +236,21 @@ def main() -> None:
                 raise AssertionError(f"expected no live-search results for free gate, got {state['resultsCount']}")
             if not state["upgradeModalVisible"]:
                 raise AssertionError("expected upgrade modal to be visible after free live-search gate")
+            recommended_plan = (page.locator("#upgrade-plan-code").text_content() or "").strip().lower()
+            if recommended_plan != "starter":
+                raise AssertionError(f"expected starter upgrade recommendation for free live-search gate, got {recommended_plan!r}")
+            modal_offer = page.evaluate(
+                """() => ({
+                    price: (document.getElementById('upgrade-plan-price')?.textContent || '').trim(),
+                    features: Array.from(document.querySelectorAll('#upgrade-feature-list li span:last-child')).map((el) => (el.textContent || '').trim())
+                })"""
+            )
+            if "499" not in modal_offer["price"]:
+                raise AssertionError(f"expected starter monthly price in live-search upgrade modal, got {modal_offer}")
+            if not any("50" in feature for feature in modal_offer["features"]):
+                raise AssertionError(f"expected starter quick-search highlight in live-search upgrade modal, got {modal_offer}")
+            if not any("10" in feature for feature in modal_offer["features"]):
+                raise AssertionError(f"expected starter live-search highlight in live-search upgrade modal, got {modal_offer}")
             if state["loadingModalVisible"]:
                 raise AssertionError("expected agentic loading modal to close after free live-search gate")
 

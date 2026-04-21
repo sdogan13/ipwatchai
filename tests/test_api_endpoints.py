@@ -21,7 +21,7 @@ from urllib.parse import urlencode
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import BackgroundTasks
+from fastapi import BackgroundTasks, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 from openpyxl import load_workbook
 
@@ -791,10 +791,16 @@ class TestPublicEndpoints:
         assert "resets_on" in data
 
     def test_public_search_get_route_delegates_to_extracted_impl(self, client):
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value.fetchone.side_effect = [None, {"searches": 1}]
+
         with patch(
             "app_public_search_routes.do_public_search_impl",
             new_callable=AsyncMock,
-        ) as mock_search:
+        ) as mock_search, patch(
+            "database.crud.get_db_connection",
+            return_value=mock_conn,
+        ):
             mock_search.return_value = {"query": "NIKE", "results": [], "total": 0}
             resp = client.get("/api/v1/search/public?query=NIKE")
 
@@ -804,10 +810,16 @@ class TestPublicEndpoints:
         assert mock_search.await_args.kwargs["query"] == "NIKE"
 
     def test_public_search_post_route_delegates_to_extracted_impl(self, client):
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value.fetchone.side_effect = [None, {"searches": 1}]
+
         with patch(
             "app_public_search_routes.do_public_search_impl",
             new_callable=AsyncMock,
-        ) as mock_search:
+        ) as mock_search, patch(
+            "database.crud.get_db_connection",
+            return_value=mock_conn,
+        ):
             mock_search.return_value = {"query": "NIKE", "results": [], "total": 0}
             resp = client.post("/api/v1/search/public", data={"query": "NIKE", "classes": "9, 35"})
 
@@ -2828,6 +2840,65 @@ async def test_search_service_run_public_search_logs_and_raises_on_failure():
     assert "Public search failed: boom" in logger.error.call_args.args[0]
 
 
+def test_search_service_resolve_public_search_client_id_reuses_cookie():
+    from services.search_service import resolve_public_search_client_id
+
+    request = SimpleNamespace(cookies={"public_search_client_id": "browser-123"})
+
+    client_id, should_set_cookie = resolve_public_search_client_id(request)
+
+    assert client_id == "browser-123"
+    assert should_set_cookie is False
+
+
+def test_search_service_check_public_search_eligibility_hits_free_limit():
+    from services.search_service import check_public_search_eligibility
+
+    mock_db = MagicMock()
+    mock_cursor = MagicMock()
+    mock_cursor.fetchone.return_value = {"searches": 5}
+    mock_db.cursor.return_value = mock_cursor
+
+    allowed, reason, detail = check_public_search_eligibility(
+        mock_db,
+        "browser-123",
+        daily_limit_getter=lambda: 5,
+        today_factory=lambda: date(2026, 4, 21),
+    )
+
+    assert allowed is False
+    assert reason == "daily_limit_exceeded"
+    assert detail == {
+        "error": "daily_limit_exceeded",
+        "current_plan": "free",
+        "upgrade_context": "public_search",
+        "daily_limit": 5,
+        "used_today": 5,
+        "remaining": 0,
+    }
+
+
+def test_search_service_increment_public_search_usage_upserts_counter():
+    from services.search_service import increment_public_search_usage
+
+    mock_db = MagicMock()
+    mock_cursor = MagicMock()
+    mock_cursor.fetchone.return_value = {"searches": 4}
+    mock_db.cursor.return_value = mock_cursor
+
+    count = increment_public_search_usage(
+        mock_db,
+        "browser-123",
+        today_factory=lambda: date(2026, 4, 21),
+    )
+
+    assert count == 4
+    mock_db.commit.assert_called_once()
+    execute_sql = mock_cursor.execute.call_args.args[0]
+    assert "INSERT INTO public_search_usage" in execute_sql
+    assert mock_cursor.execute.call_args.args[1] == ("browser-123", date(2026, 4, 21))
+
+
 @pytest.mark.asyncio
 async def test_extracted_public_search_post_impl_parses_classes_and_delegates():
     from app_public_search_routes import public_search_post_impl
@@ -3663,6 +3734,57 @@ async def test_watchlist_service_create_watchlist_item_record_uses_trademark_ai_
         logo_ocr_text="NIKE",
         text_embedding=[0.6],
     )
+
+
+@pytest.mark.asyncio
+async def test_watchlist_service_create_watchlist_item_record_maps_watchlist_limit_to_structured_403():
+    from models.schemas import WatchlistItemCreate
+    from services.watchlist_service import create_watchlist_item_record
+
+    current_user = MagicMock()
+    current_user.organization_id = uuid.uuid4()
+    current_user.id = uuid.uuid4()
+
+    create_db_cm = MagicMock()
+    create_db = MagicMock()
+    create_cursor = MagicMock()
+    create_db.cursor.return_value = create_cursor
+    create_db_cm.__enter__.return_value = create_db
+    create_db_cm.__exit__.return_value = False
+    create_cursor.fetchone.return_value = {"count": 3}
+
+    watchlist_crud = MagicMock()
+    watchlist_crud.create.side_effect = ValueError("Organization has reached maximum watchlist items limit")
+
+    data = WatchlistItemCreate(
+        brand_name="NIKE",
+        nice_class_numbers=[9, 35],
+        monitor_visual=False,
+    )
+
+    def plan_limit_getter(plan_name, feature):
+        if feature == "max_watchlist_items":
+            return 3
+        raise AssertionError(f"Unexpected feature lookup: {feature}")
+
+    with pytest.raises(HTTPException) as excinfo:
+        await create_watchlist_item_record(
+            data=data,
+            current_user=current_user,
+            database_factory=MagicMock(return_value=create_db_cm),
+            watchlist_crud=watchlist_crud,
+            user_plan_getter=MagicMock(return_value={"plan_name": "free"}),
+            plan_limit_getter=plan_limit_getter,
+        )
+
+    assert excinfo.value.status_code == 403
+    assert excinfo.value.detail == {
+        "error": "limit_exceeded",
+        "message": "Izleme listesi limitinize ulastiniz (3). Daha fazla eklemek icin planinizi yukseltin.",
+        "current_count": 3,
+        "max_items": 3,
+        "current_plan": "free",
+    }
 
 
 @pytest.mark.asyncio

@@ -105,6 +105,32 @@ Commit and merge only:
 - Keep one concern per commit.
 - Keep `main` stable.
 
+#### Localization / Internationalization Rule
+
+All new or changed user-facing text in the app must be fully localizable.
+
+Apply this rule:
+- do not hardcode user-facing strings directly in components, templates, pages, or client logic
+- every new or updated visible text string must be added through the app’s translation/i18n system
+- every new or updated text string must include translations for all supported app languages in the same task:
+  - English
+  - Turkish
+  - Arabic
+- Arabic translations must be verified for correct right-to-left display and layout impact where relevant
+- placeholder text, validation messages, error messages, empty states, tooltips, labels, button text, banners, dialogs, and notifications are all included
+- if text is added but translations are missing, the task is not complete
+
+Do not:
+- merge UI text changes with only one language added
+- leave temporary English-only copy in the codebase
+- bypass the translation system for speed or convenience
+
+Verification:
+- confirm the new text appears correctly in English, Turkish, and Arabic
+- confirm there are no missing translation keys or fallback-only strings for the new text
+- verify layout and readability for Arabic where the changed UI is affected
+
+
 ### Branch Rule
 
 Use `main` only when all of these are true:
@@ -251,6 +277,7 @@ A task is done only when:
 - the relevant docs were checked even if no update was needed
 - the branch or worktree is clean
 - the rollback path is understood
+- all new or changed user-facing text is available in English, Turkish, and Arabic
 
 Do not mark a task complete if:
 - the changed behavior is not covered by the right level of tests
@@ -258,3 +285,6 @@ Do not mark a task complete if:
 - setup, API, schema, or workflow changes were made without checking the matching reference docs
 - created state or temp artifacts were left behind unintentionally
 - the pass was achieved by weaker assertions, broader mocks, skips, bypass logic, or other temporary tricks
+
+
+## YOUR CODE WILL BE REVIEWED BY CLAUDE CODE!

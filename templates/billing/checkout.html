@@ -6,24 +6,64 @@
     <link rel="icon" type="image/jpeg" href="/static/icons/logo.jpeg">
     <title>Checkout - IP WATⒸH AI</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <style>
-        body { font-family: 'Inter', sans-serif; }
+        :root { color-scheme: light; }
+        body { font-family: 'Inter', sans-serif; background: #e0e7ff; }
+        .font-display { font-family: 'Space Grotesk', 'Inter', sans-serif; letter-spacing: -0.03em; }
         [x-cloak] { display: none !important; }
-        #iyzico-checkout-form iframe { width: 100% !important; min-height: 400px; border: none; }
+        .checkout-shell {
+            background:
+                radial-gradient(circle at top left, rgba(99, 102, 241, 0.22), transparent 34%),
+                radial-gradient(circle at top right, rgba(14, 165, 233, 0.18), transparent 32%),
+                linear-gradient(180deg, #eef2ff 0%, #f8fafc 52%, #eef2ff 100%);
+        }
+        .checkout-card {
+            background: rgba(255, 255, 255, 0.84);
+            border: 1px solid rgba(148, 163, 184, 0.22);
+            box-shadow: 0 24px 60px rgba(15, 23, 42, 0.08);
+            backdrop-filter: blur(18px);
+            overflow: hidden;
+        }
+        .header-brand > span:last-child { display: none; }
+        .field-input {
+            min-height: 48px;
+            border: 1px solid #cbd5e1;
+            background: rgba(255, 255, 255, 0.92);
+            transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+        }
+        .field-input:focus {
+            outline: none;
+            border-color: #4f46e5;
+            box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.14);
+            background: #ffffff;
+        }
+        html.rtl .rtl-flip { transform: rotate(180deg); }
+        #iyzico-checkout-form iframe { width: 100% !important; min-height: 400px; border: none; border-radius: 1rem; background: #ffffff; }
     </style>
 </head>
-<body class="bg-gray-50 min-h-screen" x-data="checkoutPage()" x-cloak>
+<body class="min-h-screen text-slate-900" x-data="checkoutPage()" x-cloak>
+    <div class="checkout-shell relative min-h-screen overflow-hidden">
+        <div class="pointer-events-none absolute inset-x-0 top-0 h-72 bg-gradient-to-b from-white/50 to-transparent"></div>
+        <div class="pointer-events-none absolute -left-20 top-28 h-64 w-64 rounded-full bg-indigo-300/25 blur-3xl"></div>
+        <div class="pointer-events-none absolute -right-20 top-20 h-72 w-72 rounded-full bg-sky-300/20 blur-3xl"></div>
 
     <!-- Header -->
-    <nav class="bg-white border-b border-gray-200">
-        <div class="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
-            <a href="/" class="flex items-center gap-2 text-gray-600 hover:text-gray-900 text-sm font-medium">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+    <nav class="relative z-10 border-b border-white/70 bg-white/70 backdrop-blur-xl">
+        <div class="mx-auto flex max-w-6xl flex-col items-start gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
+            <a href="/" class="inline-flex w-full items-center gap-3 text-sm font-medium text-slate-600 transition hover:text-slate-900 sm:w-auto">
+                <span class="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-sm">
+                    <svg class="rtl-flip w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                </span>
                 <span x-text="t('checkout.back')">Geri Don</span>
             </a>
-            <div class="flex items-center gap-2">
+            <div class="header-brand flex w-full items-center justify-between gap-3 sm:w-auto sm:justify-start">
+                <div class="hidden rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-emerald-700 sm:inline-flex"
+                     x-text="t('checkout.header_badge')">
+                    Secure Checkout
+                </div>
+                <div class="font-display text-base font-bold text-slate-950">IP WATCH AI</div>
                 <img src="/static/icons/logo.jpeg" alt="IP WATⒸH AI" class="h-8 w-8 rounded-lg flex-shrink-0 object-cover">
                 <span class="text-sm font-bold text-gray-900">IP WATⒸH AI</span>
             </div>
@@ -31,54 +71,89 @@
     </nav>
 
     <!-- Main Content -->
-    <div class="max-w-5xl mx-auto px-4 py-8">
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+    <main class="relative z-10 max-w-6xl mx-auto px-4 py-8 sm:px-6 sm:py-10 lg:px-8 lg:py-12">
+        <section class="checkout-card mb-6 rounded-[28px] p-5 sm:rounded-[32px] sm:p-8">
+            <div class="flex flex-col gap-5 sm:gap-6 lg:flex-row lg:items-end lg:justify-between">
+                <div class="max-w-2xl">
+                    <p class="text-[11px] font-semibold uppercase tracking-[0.28em] text-indigo-600" x-text="t('checkout.hero_eyebrow')">Plan Checkout</p>
+                    <h1 class="font-display mt-3 text-[2rem] font-bold leading-tight text-slate-950 sm:text-4xl" x-text="t('checkout.hero_title')">
+                        Finish account setup and activate your plan.
+                    </h1>
+                    <p class="mt-4 text-sm leading-6 text-slate-600 sm:text-base" x-text="t('checkout.hero_desc')">
+                        Create or sign in, confirm billing, and continue to payment from a single checkout flow.
+                    </p>
+                </div>
+                <div class="w-full rounded-3xl border border-slate-200 bg-white/75 px-4 py-3 text-sm text-slate-600 shadow-sm sm:w-auto">
+                    <div class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500" x-text="t('checkout.session_label')">Session</div>
+                    <div class="mt-2 font-medium text-slate-900" x-text="planDisplayName + ' / ' + billingDisplayName()"></div>
+                </div>
+            </div>
+        </section>
+
+        <div class="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:gap-8">
 
             <!-- Left: Steps -->
-            <div class="lg:col-span-2 space-y-6">
+            <div class="order-last space-y-6 lg:order-none lg:col-span-2">
 
                 <!-- Step indicators -->
-                <div class="flex items-center gap-4 mb-6">
-                    <div class="flex items-center gap-2">
-                        <div class="w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold"
-                             :class="step === 'account' ? 'bg-indigo-600 text-white' : (isLoggedIn ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-500')">
+                <div class="grid gap-3 sm:grid-cols-2 mb-6">
+                    <div class="rounded-3xl border p-4 transition"
+                         :class="step === 'account' ? 'border-indigo-500 bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : (isLoggedIn ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white/80 text-slate-700')">
+                        <div class="flex items-center justify-between">
+                            <span class="text-[11px] font-semibold uppercase tracking-[0.22em] opacity-80" x-text="t('checkout.step_label', {n: 1})">Step 1</span>
+                            <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
+                                 :class="step === 'account' ? 'bg-white/15 text-white' : (isLoggedIn ? 'bg-green-500 text-white' : 'bg-slate-100 text-slate-500')">
                             <template x-if="isLoggedIn && step !== 'account'"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></template>
                             <template x-if="!isLoggedIn || step === 'account'"><span>1</span></template>
                         </div>
-                        <span class="text-sm font-medium" :class="step === 'account' ? 'text-gray-900' : 'text-gray-500'" x-text="t('checkout.step_account')">Hesap</span>
+                        </div>
+                        <p class="mt-6 text-base font-semibold" x-text="t('checkout.step_account')">Hesap</p>
+                        <p class="mt-1 text-sm opacity-80" x-text="t('checkout.step_account_desc')">Identity, access, and workspace details.</p>
                     </div>
-                    <div class="flex-1 h-px bg-gray-200"></div>
-                    <div class="flex items-center gap-2">
-                        <div class="w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold"
-                             :class="step === 'payment' ? 'bg-indigo-600 text-white' : (step === 'complete' ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-500')">
+                    <div class="rounded-3xl border p-4 transition"
+                         :class="step === 'payment' ? 'border-slate-900 bg-slate-950 text-white shadow-lg shadow-slate-950/10' : (step === 'complete' ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-slate-200 bg-white/80 text-slate-700')">
+                        <div class="flex items-center justify-between">
+                            <span class="text-[11px] font-semibold uppercase tracking-[0.22em] opacity-80" x-text="t('checkout.step_label', {n: 2})">Step 2</span>
+                            <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
+                                 :class="step === 'payment' ? 'bg-white/15 text-white' : (step === 'complete' ? 'bg-green-500 text-white' : 'bg-slate-100 text-slate-500')">
                             <template x-if="step === 'complete'"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></template>
                             <template x-if="step !== 'complete'"><span>2</span></template>
                         </div>
-                        <span class="text-sm font-medium" :class="step === 'payment' ? 'text-gray-900' : 'text-gray-500'" x-text="t('checkout.step_payment')">Odeme</span>
+                        </div>
+                        <p class="mt-6 text-base font-semibold" x-text="t('checkout.step_payment')">Odeme</p>
+                        <p class="mt-1 text-sm opacity-80" x-text="t('checkout.step_payment_desc')">Activation for free plans or secure checkout for paid plans.</p>
                     </div>
                 </div>
 
                 <!-- STEP 1: Account -->
-                <div x-show="step === 'account'" class="bg-white rounded-2xl border border-gray-200 p-6">
-                    <h2 class="text-lg font-bold text-gray-900 mb-4" x-text="t('checkout.step_account')">Hesap</h2>
+                <div x-show="step === 'account'" class="checkout-card rounded-[28px] p-5 sm:rounded-[32px] sm:p-8">
+                    <div class="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                        <div>
+                            <p class="text-[11px] font-semibold uppercase tracking-[0.28em] text-indigo-600" x-text="t('checkout.account_eyebrow')">Account Step</p>
+                            <h2 class="font-display mt-2 text-2xl font-bold text-slate-950" x-text="t('checkout.step_account')">Hesap</h2>
+                        </div>
+                        <p class="max-w-md text-sm leading-6 text-slate-600" x-text="t('checkout.account_desc')">
+                            Use a new account for this workspace or sign in to continue with your existing billing profile.
+                        </p>
+                    </div>
 
                     <!-- Already logged in -->
                     <template x-if="isLoggedIn">
                         <div>
-                            <div class="flex items-center justify-between p-4 bg-green-50 border border-green-200 rounded-xl">
+                            <div class="flex flex-col gap-4 rounded-[28px] border border-emerald-200 bg-emerald-50/90 p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
                                 <div class="flex items-center gap-3">
-                                    <div class="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
-                                        <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                                    <div class="w-12 h-12 rounded-2xl bg-emerald-500 flex items-center justify-center text-white shadow-lg shadow-emerald-500/20">
+                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                                     </div>
                                     <div>
-                                        <p class="text-sm font-medium text-gray-900" x-text="userEmail"></p>
-                                        <p class="text-xs text-green-600" x-text="t('checkout.logged_in')">Giris yapildi</p>
+                                        <p class="text-sm font-medium text-slate-900" x-text="userEmail"></p>
+                                        <p class="text-xs text-emerald-700" x-text="t('checkout.logged_in')">Giris yapildi</p>
                                     </div>
                                 </div>
-                                <button @click="logout()" class="text-xs text-gray-500 hover:text-gray-700 underline" x-text="t('checkout.switch_account')">Hesap degistir</button>
+                                <button @click="logout()" class="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900" x-text="t('checkout.switch_account')">Hesap degistir</button>
                             </div>
                             <div class="mt-4 flex justify-end">
-                                <button @click="goToPayment()" class="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-medium transition-colors" x-text="t('checkout.continue')">Devam Et</button>
+                                <button @click="goToPayment()" class="px-6 py-3 bg-slate-950 hover:bg-slate-800 text-white rounded-full text-sm font-semibold transition-colors" x-text="t('checkout.continue')">Devam Et</button>
                             </div>
                         </div>
                     </template>
@@ -87,83 +162,147 @@
                     <template x-if="!isLoggedIn">
                         <div>
                             <!-- Login / Register tabs -->
-                            <div class="flex border-b border-gray-200 mb-6">
-                                <button @click="authTab = 'register'" class="px-4 py-2 text-sm font-medium border-b-2 transition-colors"
-                                        :class="authTab === 'register' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'"
+                            <div class="mb-6 flex w-full max-w-md rounded-full bg-slate-100/90 p-1.5 shadow-inner">
+                                <button @click="authTab = 'register'; authError = ''; closeForgotPassword()" class="flex-1 px-5 py-2.5 text-sm font-semibold rounded-full transition-colors"
+                                        :class="authTab === 'register' ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-800'"
                                         x-text="t('checkout.tab_register')">Kayit Ol</button>
-                                <button @click="authTab = 'login'" class="px-4 py-2 text-sm font-medium border-b-2 transition-colors"
-                                        :class="authTab === 'login' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'"
+                                <button @click="authTab = 'login'; authError = ''; closeForgotPassword()" class="flex-1 px-5 py-2.5 text-sm font-semibold rounded-full transition-colors"
+                                        :class="authTab === 'login' ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-800'"
                                         x-text="t('checkout.tab_login')">Giris Yap</button>
                             </div>
 
                             <!-- Register form -->
-                            <div x-show="authTab === 'register'" class="space-y-4">
-                                <div class="grid grid-cols-2 gap-4">
+                            <div x-show="authTab === 'register'" class="space-y-5">
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-1" x-text="t('checkout.first_name')">Ad</label>
-                                        <input type="text" x-model="regFirstName" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                                        <label class="block text-sm font-medium text-slate-700 mb-2" x-text="t('checkout.first_name')">Ad</label>
+                                        <input type="text" x-model="regFirstName" class="field-input w-full px-4 py-3 rounded-2xl text-sm">
                                     </div>
                                     <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-1" x-text="t('checkout.last_name')">Soyad</label>
-                                        <input type="text" x-model="regLastName" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                                        <label class="block text-sm font-medium text-slate-700 mb-2" x-text="t('checkout.last_name')">Soyad</label>
+                                        <input type="text" x-model="regLastName" class="field-input w-full px-4 py-3 rounded-2xl text-sm">
                                     </div>
                                 </div>
                                 <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1" x-text="t('checkout.email')">E-posta</label>
-                                    <input type="email" x-model="regEmail" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                                    <label class="block text-sm font-medium text-slate-700 mb-2" x-text="t('checkout.email')">E-posta</label>
+                                    <input type="email" x-model="regEmail" class="field-input w-full px-4 py-3 rounded-2xl text-sm">
                                 </div>
                                 <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1" x-text="t('checkout.org_name')">Sirket Adi (Opsiyonel)</label>
-                                    <input type="text" x-model="regOrgName" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                                    <label class="block text-sm font-medium text-slate-700 mb-2" x-text="t('checkout.org_name')">Sirket Adi (Opsiyonel)</label>
+                                    <input type="text" x-model="regOrgName" class="field-input w-full px-4 py-3 rounded-2xl text-sm">
                                 </div>
                                 <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1" x-text="t('checkout.password')">Sifre</label>
-                                    <input type="password" x-model="regPassword" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                                    <label class="block text-sm font-medium text-slate-700 mb-2" x-text="t('checkout.password')">Sifre</label>
+                                    <input type="password" x-model="regPassword" class="field-input w-full px-4 py-3 rounded-2xl text-sm">
                                 </div>
-                                <p x-show="authError" class="text-sm text-red-600" x-text="authError"></p>
-                                <button @click="submitRegister()" :disabled="authLoading"
-                                        class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-medium transition-colors disabled:opacity-50">
+                                <p x-show="authError" class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" x-text="authError"></p>
+                                <button id="checkout-register-submit" @click="submitRegister()" :disabled="authLoading"
+                                        class="w-full py-3.5 bg-gradient-to-r from-indigo-600 via-indigo-500 to-sky-500 hover:opacity-95 text-white rounded-2xl text-sm font-semibold transition-colors shadow-lg shadow-indigo-500/20 disabled:opacity-50">
                                     <span x-show="!authLoading" x-text="t('checkout.create_account')">Hesap Olustur ve Devam Et</span>
                                     <span x-show="authLoading" x-text="t('checkout.processing')">Isleniyor...</span>
                                 </button>
                             </div>
 
                             <!-- Login form -->
-                            <div x-show="authTab === 'login'" class="space-y-4">
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1" x-text="t('checkout.email')">E-posta</label>
-                                    <input type="email" x-model="loginEmail" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                                           @keydown.enter="submitLogin()">
+                            <div x-show="authTab === 'login'" class="space-y-5">
+                                <div x-show="!showForgotPassword" class="space-y-5">
+                                    <div>
+                                        <label class="block text-sm font-medium text-slate-700 mb-2" x-text="t('checkout.email')">E-posta</label>
+                                        <input type="email" x-model="loginEmail" class="field-input w-full px-4 py-3 rounded-2xl text-sm"
+                                               @keydown.enter="submitLogin()">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-slate-700 mb-2" x-text="t('checkout.password')">Sifre</label>
+                                        <input type="password" x-model="loginPassword" class="field-input w-full px-4 py-3 rounded-2xl text-sm"
+                                               @keydown.enter="submitLogin()">
+                                    </div>
+                                    <div class="flex items-center justify-end">
+                                        <button id="checkout-forgot-link" type="button" @click="openForgotPassword()" class="text-sm font-medium text-indigo-600 underline underline-offset-4 hover:text-indigo-800" x-text="t('auth.forgot_password')">Sifremi unuttum</button>
+                                    </div>
+                                    <p x-show="authError" class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" x-text="authError"></p>
+                                    <button id="checkout-login-submit" @click="submitLogin()" :disabled="authLoading"
+                                            class="w-full py-3.5 bg-slate-950 hover:bg-slate-800 text-white rounded-2xl text-sm font-semibold transition-colors shadow-lg shadow-slate-950/15 disabled:opacity-50">
+                                        <span x-show="!authLoading" x-text="t('checkout.login_continue')">Giris Yap ve Devam Et</span>
+                                        <span x-show="authLoading" x-text="t('checkout.processing')">Isleniyor...</span>
+                                    </button>
                                 </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1" x-text="t('checkout.password')">Sifre</label>
-                                    <input type="password" x-model="loginPassword" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                                           @keydown.enter="submitLogin()">
+
+                                <div x-show="showForgotPassword" class="rounded-[28px] border border-slate-200 bg-slate-50/80 p-5 sm:p-6">
+                                    <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                        <div>
+                                            <h3 class="text-base font-semibold text-slate-950" x-text="t('auth.forgot_password_title')">Sifre Sifirlama</h3>
+                                            <p class="mt-1 text-sm leading-6 text-slate-600" x-text="forgotStep === 'email' ? t('auth.forgot_password_desc') : t('auth.enter_reset_code')">E-posta adresinizi girin, size bir sifirlama kodu gonderecegiz.</p>
+                                        </div>
+                                        <button id="checkout-forgot-back" type="button" @click="closeForgotPassword()" class="inline-flex items-center rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900" x-text="t('auth.back_to_login')">Girise don</button>
+                                    </div>
+
+                                    <div x-show="forgotStep === 'email'" class="mt-5 space-y-4">
+                                        <div>
+                                            <label class="block text-sm font-medium text-slate-700 mb-2" x-text="t('checkout.email')">E-posta</label>
+                                            <input type="email" x-model="forgotEmail" class="field-input w-full px-4 py-3 rounded-2xl text-sm"
+                                                   @keydown.enter="forgotRequestCode()">
+                                        </div>
+                                        <p x-show="forgotError" class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" x-text="forgotError"></p>
+                                        <p x-show="forgotSuccess" class="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700" x-text="forgotSuccess"></p>
+                                        <button id="checkout-forgot-request" type="button" @click="forgotRequestCode()" :disabled="forgotLoading"
+                                                class="w-full py-3.5 bg-gradient-to-r from-indigo-600 via-indigo-500 to-sky-500 hover:opacity-95 text-white rounded-2xl text-sm font-semibold transition-colors shadow-lg shadow-indigo-500/20 disabled:opacity-50">
+                                            <span x-show="!forgotLoading" x-text="t('auth.send_reset_code')">Kod Gonder</span>
+                                            <span x-show="forgotLoading" x-text="t('checkout.processing')">Isleniyor...</span>
+                                        </button>
+                                    </div>
+
+                                    <div x-show="forgotStep === 'code'" class="mt-5 space-y-4">
+                                        <div>
+                                            <label class="block text-sm font-medium text-slate-700 mb-2" x-text="t('auth.reset_code')">Sifirlama Kodu</label>
+                                            <input type="text" x-model="forgotCode" maxlength="6" pattern="[0-9]{6}" inputmode="numeric" placeholder="000000"
+                                                   class="field-input w-full rounded-2xl px-4 py-3 text-center font-mono text-base tracking-[0.2em] sm:tracking-[0.35em]"
+                                                    @keydown.enter="forgotResetPassword()">
+                                        </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-slate-700 mb-2" x-text="t('auth.new_password')">Yeni Sifre</label>
+                                            <input type="password" x-model="forgotNewPassword" class="field-input w-full px-4 py-3 rounded-2xl text-sm"
+                                                   @keydown.enter="forgotResetPassword()">
+                                        </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-slate-700 mb-2" x-text="t('auth.confirm_password')">Sifre Tekrar</label>
+                                            <input type="password" x-model="forgotConfirmPassword" class="field-input w-full px-4 py-3 rounded-2xl text-sm"
+                                                   @keydown.enter="forgotResetPassword()">
+                                        </div>
+                                        <p x-show="forgotError" class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700" x-text="forgotError"></p>
+                                        <p x-show="forgotSuccess" class="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700" x-text="forgotSuccess"></p>
+                                        <button id="checkout-forgot-reset" type="button" @click="forgotResetPassword()" :disabled="forgotLoading"
+                                                class="w-full py-3.5 bg-slate-950 hover:bg-slate-800 text-white rounded-2xl text-sm font-semibold transition-colors shadow-lg shadow-slate-950/15 disabled:opacity-50">
+                                            <span x-show="!forgotLoading" x-text="t('auth.reset_password_button')">Sifreyi Sifirla</span>
+                                            <span x-show="forgotLoading" x-text="t('checkout.processing')">Isleniyor...</span>
+                                        </button>
+                                    </div>
                                 </div>
-                                <p x-show="authError" class="text-sm text-red-600" x-text="authError"></p>
-                                <button @click="submitLogin()" :disabled="authLoading"
-                                        class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-medium transition-colors disabled:opacity-50">
-                                    <span x-show="!authLoading" x-text="t('checkout.login_continue')">Giris Yap ve Devam Et</span>
-                                    <span x-show="authLoading" x-text="t('checkout.processing')">Isleniyor...</span>
-                                </button>
                             </div>
                         </div>
                     </template>
                 </div>
 
                 <!-- STEP 2: Payment -->
-                <div x-show="step === 'payment'" class="bg-white rounded-2xl border border-gray-200 p-6">
-                    <h2 class="text-lg font-bold text-gray-900 mb-4" x-text="t('checkout.step_payment')">Odeme</h2>
+                <div x-show="step === 'payment'" class="checkout-card rounded-[28px] p-5 sm:rounded-[32px] sm:p-8">
+                    <div class="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                        <div>
+                            <p class="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500" x-text="t('checkout.payment_eyebrow')">Payment Step</p>
+                            <h2 class="font-display mt-2 text-2xl font-bold text-slate-950" x-text="t('checkout.step_payment')">Odeme</h2>
+                        </div>
+                        <p class="max-w-md text-sm leading-6 text-slate-600" x-text="t('checkout.payment_desc')">
+                            Free access activates immediately. Paid plans open the secure embedded payment form below.
+                        </p>
+                    </div>
 
                     <!-- Free plan: just activate -->
                     <template x-if="plan === 'free'">
-                        <div class="text-center py-8">
-                            <div class="w-16 h-16 mx-auto mb-4 bg-green-100 rounded-full flex items-center justify-center">
-                                <svg class="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                        <div class="rounded-[28px] border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-8 text-center">
+                            <div class="w-16 h-16 mx-auto mb-4 bg-emerald-500 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-emerald-500/20">
+                                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                             </div>
-                            <p class="text-gray-700 mb-4" x-text="t('checkout.free_desc')">Ucretsiz plani hemen etkinlestirin.</p>
+                            <p class="text-slate-700 mb-4" x-text="t('checkout.free_desc')">Ucretsiz plani hemen etkinlestirin.</p>
                             <button @click="activateFree()" :disabled="paymentLoading"
-                                    class="px-8 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-medium transition-colors disabled:opacity-50">
+                                    class="px-8 py-3.5 bg-slate-950 hover:bg-slate-800 text-white rounded-full text-sm font-semibold transition-colors shadow-lg shadow-slate-950/15 disabled:opacity-50">
                                 <span x-show="!paymentLoading" x-text="t('checkout.activate_free')">Ucretsiz Plani Etkinlestir</span>
                                 <span x-show="paymentLoading" x-text="t('checkout.processing')">Isleniyor...</span>
                             </button>
@@ -174,151 +313,178 @@
                     <template x-if="plan !== 'free'">
                         <div>
                             <!-- Loading state while initializing iyzico -->
-                            <div x-show="paymentLoading && !checkoutFormHtml" class="text-center py-8">
+                            <div x-show="paymentLoading && !checkoutFormHtml" class="rounded-[28px] border border-slate-200 bg-white/80 p-10 text-center shadow-sm">
                                 <div class="animate-spin w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full mx-auto mb-4"></div>
-                                <p class="text-sm text-gray-500" x-text="t('checkout.loading_payment')">Odeme formu yukleniyor...</p>
+                                <p class="text-sm text-slate-500" x-text="t('checkout.loading_payment')">Odeme formu yukleniyor...</p>
                             </div>
 
                             <!-- iyzico form container -->
-                            <div x-show="checkoutFormHtml" id="iyzico-checkout-form" x-html="checkoutFormHtml"></div>
+                            <div x-show="checkoutFormHtml" class="rounded-[28px] border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+                                <div x-show="checkoutFormHtml" id="iyzico-checkout-form" x-html="checkoutFormHtml"></div>
+                            </div>
 
                             <!-- Error state -->
-                            <div x-show="paymentError && !paymentLoading" class="text-center py-8">
-                                <div class="w-16 h-16 mx-auto mb-4 bg-red-100 rounded-full flex items-center justify-center">
+                            <div x-show="paymentError && !paymentLoading" class="rounded-[28px] border border-rose-200 bg-rose-50 p-8 text-center shadow-sm">
+                                <div class="w-16 h-16 mx-auto mb-4 bg-white rounded-2xl flex items-center justify-center">
                                     <svg class="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                                 </div>
                                 <p class="text-red-600 text-sm mb-4" x-text="paymentError"></p>
-                                <button @click="initializePayment()" class="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-medium transition-colors" x-text="t('checkout.retry')">Tekrar Dene</button>
+                                <button @click="initializePayment()" class="px-6 py-3 bg-slate-950 hover:bg-slate-800 text-white rounded-full text-sm font-semibold transition-colors" x-text="t('checkout.retry')">Tekrar Dene</button>
                             </div>
                         </div>
                     </template>
                 </div>
 
                 <!-- STEP: Complete (after successful payment) -->
-                <div x-show="step === 'complete'" class="bg-white rounded-2xl border border-gray-200 p-6 text-center">
-                    <div class="w-16 h-16 mx-auto mb-4 bg-green-100 rounded-full flex items-center justify-center">
-                        <svg class="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                <div x-show="step === 'complete'" class="checkout-card rounded-[28px] p-6 text-center sm:rounded-[32px] sm:p-8">
+                    <div class="w-20 h-20 mx-auto mb-4 bg-emerald-500 rounded-[28px] flex items-center justify-center text-white shadow-lg shadow-emerald-500/20">
+                        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                     </div>
-                    <h2 class="text-lg font-bold text-gray-900 mb-2" x-text="t('checkout.success_title')">Basarili!</h2>
-                    <p class="text-gray-600 mb-6" x-text="t('checkout.success_desc')">Planiniz etkinlestirildi. Dashboard'a yonlendiriliyorsunuz...</p>
+                    <h2 class="font-display text-3xl font-bold text-slate-950 mb-2" x-text="t('checkout.success_title')">Basarili!</h2>
+                    <p class="text-slate-600 mb-6" x-text="t('checkout.success_desc')">Planiniz etkinlestirildi. Dashboard'a yonlendiriliyorsunuz...</p>
                 </div>
 
             </div>
 
             <!-- Right: Order Summary -->
-            <div class="lg:col-span-1">
-                <div class="bg-white rounded-2xl border border-gray-200 p-6 lg:sticky lg:top-8">
-                    <h3 class="text-sm font-bold text-gray-900 uppercase tracking-wide mb-4" x-text="t('checkout.order_summary')">Siparis Ozeti</h3>
+            <div class="order-first lg:order-none lg:col-span-1">
+                <div class="checkout-card rounded-[28px] p-5 sm:rounded-[32px] sm:p-6 lg:sticky lg:top-8">
+                    <div class="rounded-[24px] bg-gradient-to-br from-indigo-950 via-indigo-700 to-sky-500 p-4 text-white shadow-xl shadow-indigo-950/20 sm:rounded-[28px] sm:p-5">
+                        <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-white/70" x-text="t('checkout.order_summary')">Siparis Ozeti</p>
+                        <div class="mt-4 flex items-start justify-between gap-4">
+                            <div class="min-w-0 flex-1">
+                                <h3 id="checkout-plan-display-name" class="font-display text-2xl font-bold leading-tight break-words sm:text-3xl" x-text="planDisplayName"></h3>
+                                <p class="mt-2 text-sm text-white/80" x-text="planSubtitle"></p>
+                            </div>
+                            <span class="shrink-0 rounded-full bg-white/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em]" x-text="plan === 'free' ? t('pricing.free_name') : billingDisplayName()"></span>
+                        </div>
+                        <div class="mt-8 flex items-end justify-between gap-4">
+                            <div>
+                                <div class="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/70" x-text="t('checkout.total')">Toplam</div>
+                                <div class="mt-2 text-3xl font-bold sm:text-4xl" x-text="plan === 'free' ? formatPrice(0) : formatPrice(totalPrice)"></div>
+                            </div>
+                            <div class="shrink-0 rounded-2xl bg-white/10 px-4 py-3 text-right">
+                            <div class="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/65" x-text="t('checkout.summary_billing_label')">Billing</div>
+                                <div class="mt-1 text-sm font-medium" x-text="plan === 'free' ? t('checkout.monthly') : billingDisplayName()"></div>
+                            </div>
+                        </div>
+                    </div>
 
                     <!-- Plan name -->
-                    <div class="flex items-center justify-between mb-3">
-                        <span class="text-sm text-gray-600" x-text="t('checkout.plan_label')">Plan</span>
-                        <span class="text-sm font-bold text-gray-900" x-text="planDisplayName"></span>
+                    <div class="mb-3 mt-5 flex items-start justify-between gap-4">
+                        <span class="text-sm text-slate-600" x-text="t('checkout.plan_label')">Plan</span>
+                        <span class="text-right text-sm font-bold text-slate-900" x-text="planDisplayName"></span>
                     </div>
 
                     <!-- Billing period toggle -->
                     <template x-if="plan !== 'free'">
                         <div class="mb-4">
                             <div class="flex items-center justify-between mb-2">
-                                <span class="text-sm text-gray-600" x-text="t('checkout.billing_period')">Fatura Donemi</span>
+                                <span class="text-sm text-slate-600" x-text="t('checkout.billing_period')">Fatura Donemi</span>
                             </div>
-                            <div class="flex bg-gray-100 rounded-lg p-1">
-                                <button @click="setBilling('monthly')" class="flex-1 py-1.5 text-xs font-medium rounded-md transition-colors"
-                                        :class="billing === 'monthly' ? 'bg-white shadow text-gray-900' : 'text-gray-500'"
+                            <div class="flex rounded-2xl bg-slate-100 p-1.5">
+                                <button id="checkout-billing-monthly" @click="setBilling('monthly')" class="flex-1 py-2.5 text-xs font-semibold rounded-[14px] transition-colors"
+                                        :class="billing === 'monthly' ? 'bg-white shadow text-slate-900' : 'text-slate-500'"
                                         x-text="t('checkout.monthly')">Aylik</button>
-                                <button @click="setBilling('annual')" class="flex-1 py-1.5 text-xs font-medium rounded-md transition-colors"
-                                        :class="billing === 'annual' ? 'bg-white shadow text-gray-900' : 'text-gray-500'"
-                                        x-text="t('checkout.annual')">Yillik</button>
+                                <button id="checkout-billing-annual" @click="setBilling('annual')" class="flex flex-1 flex-col items-center justify-center gap-1 py-2 text-xs font-semibold rounded-[14px] transition-colors"
+                                        :class="billing === 'annual' ? 'bg-white shadow text-slate-900' : 'text-slate-500'">
+                                    <span x-text="t('checkout.annual')">Yillik</span>
+                                    <span id="checkout-annual-discount-badge" class="rounded-full px-2 py-0.5 text-[10px] font-bold leading-none"
+                                          :class="billing === 'annual' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'"
+                                          x-text="t('checkout.annual_save_inline')">-20%</span>
+                                </button>
                             </div>
                             <template x-if="billing === 'annual'">
-                                <p class="text-xs text-green-600 mt-1" x-text="t('checkout.annual_discount')">%20 indirim uygulanir</p>
+                                <p class="text-xs text-emerald-700 mt-2" x-text="t('checkout.annual_discount')">%20 indirim uygulanir</p>
                             </template>
                         </div>
                     </template>
 
                     <!-- Divider -->
-                    <div class="border-t border-gray-200 my-4"></div>
+                    <div class="border-t border-slate-200 my-4"></div>
 
                     <!-- Price breakdown -->
                     <template x-if="plan !== 'free'">
                         <div class="space-y-2 mb-4">
-                            <div class="flex items-center justify-between">
-                                <span class="text-sm text-gray-600" x-text="billing === 'annual' ? t('checkout.price_per_month') : t('checkout.price_monthly')">Aylik fiyat</span>
-                                <span class="text-sm text-gray-900" x-text="'&#8378;' + monthlyPrice"></span>
+                            <div class="flex items-start justify-between gap-4">
+                                <span class="text-sm text-slate-600" x-text="billing === 'annual' ? t('checkout.price_per_month') : t('checkout.price_monthly')">Aylik fiyat</span>
+                                <span class="text-right text-sm text-slate-900" x-text="formatPrice(monthlyPrice)"></span>
                             </div>
                             <template x-if="billing === 'annual'">
-                                <div class="flex items-center justify-between">
-                                    <span class="text-sm text-gray-600" x-text="t('checkout.multiplied_12')">x 12 ay</span>
-                                    <span class="text-sm text-gray-900" x-text="'&#8378;' + totalPrice"></span>
+                                <div class="flex items-start justify-between gap-4">
+                                    <span class="text-sm text-slate-600" x-text="t('checkout.multiplied_12')">x 12 ay</span>
+                                    <span class="text-right text-sm text-slate-900" x-text="formatPrice(totalPrice)"></span>
                                 </div>
                             </template>
                         </div>
                     </template>
 
                     <!-- Total -->
-                    <div class="border-t border-gray-200 pt-4">
-                        <div class="flex items-center justify-between">
-                            <span class="text-base font-bold text-gray-900" x-text="t('checkout.total')">Toplam</span>
-                            <span class="text-xl font-bold text-gray-900" x-text="plan === 'free' ? '&#8378;0' : ('&#8378;' + totalPrice)"></span>
+                    <div class="border-t border-dashed border-slate-200 pt-4">
+                        <div class="flex items-start justify-between gap-4">
+                            <span class="text-base font-bold text-slate-900" x-text="t('checkout.total')">Toplam</span>
+                            <span class="text-right text-2xl font-bold text-slate-900" x-text="plan === 'free' ? formatPrice(0) : formatPrice(totalPrice)"></span>
                         </div>
                         <template x-if="billing === 'annual' && plan !== 'free'">
-                            <p class="text-xs text-gray-500 mt-1 text-right" x-text="t('checkout.billed_annually')">Yillik faturalandirilir</p>
+                            <p class="text-xs text-slate-500 mt-1 text-right" x-text="t('checkout.billed_annually')">Yillik faturalandirilir</p>
                         </template>
                         <template x-if="billing === 'monthly' && plan !== 'free'">
-                            <p class="text-xs text-gray-500 mt-1 text-right" x-text="t('checkout.billed_monthly')">Aylik faturalandirilir</p>
+                            <p class="text-xs text-slate-500 mt-1 text-right" x-text="t('checkout.billed_monthly')">Aylik faturalandirilir</p>
                         </template>
                     </div>
 
                     <!-- VAT note -->
-                    <p class="text-xs text-gray-400 mt-4" x-text="t('checkout.vat_note')">Tum fiyatlar KDV harictir.</p>
+                    <p class="text-xs text-slate-400 mt-4" x-text="t('checkout.vat_note')">Tum fiyatlar KDV harictir.</p>
 
                     <!-- Plan features summary -->
-                    <div class="border-t border-gray-200 mt-4 pt-4">
-                        <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2" x-text="t('checkout.includes')">Dahil olanlar</p>
-                        <ul class="space-y-1.5 text-xs text-gray-600">
+                    <div class="border-t border-slate-200 mt-4 pt-4">
+                        <p class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3" x-text="t('checkout.includes')">Dahil olanlar</p>
+                        <ul class="space-y-3 text-sm text-slate-700">
                             <li class="flex items-start gap-1.5">
                                 <svg class="w-3.5 h-3.5 text-green-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
-                                <span x-text="t('checkout.feat_search', {n: planData.max_daily_quick_searches || 5})"></span>
+                                <span x-text="summaryFeatureText('search')"></span>
                             </li>
                             <li class="flex items-start gap-1.5">
                                 <svg class="w-3.5 h-3.5 text-green-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
-                                <span x-text="t('checkout.feat_watchlist', {n: planData.max_watchlist_items || 3})"></span>
+                                <span x-text="summaryFeatureText('watchlist')"></span>
                             </li>
                             <template x-if="planData.monthly_live_searches > 0">
                                 <li class="flex items-start gap-1.5">
                                     <svg class="w-3.5 h-3.5 text-green-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
-                                    <span x-text="t('checkout.feat_live', {n: planData.monthly_live_searches})"></span>
+                                    <span x-text="summaryFeatureText('live')"></span>
                                 </li>
                             </template>
                             <template x-if="planData.monthly_logo_runs > 0">
                                 <li class="flex items-start gap-1.5">
                                     <svg class="w-3.5 h-3.5 text-green-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
-                                    <span x-text="t('checkout.feat_logo', {n: planData.monthly_logo_runs})"></span>
+                                    <span x-text="summaryFeatureText('logo')"></span>
                                 </li>
                             </template>
                         </ul>
                     </div>
 
                     <!-- Change plan link -->
-                    <div class="mt-4 text-center">
-                        <a href="/pricing" class="text-xs text-indigo-600 hover:text-indigo-800 underline" x-text="t('checkout.change_plan')">Plani Degistir</a>
+                    <div class="mt-5 text-center">
+                        <a href="/pricing" class="inline-flex items-center rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-indigo-600 hover:text-indigo-800" x-text="t('checkout.change_plan')">Plani Degistir</a>
                     </div>
                 </div>
             </div>
 
         </div>
+    </main>
     </div>
 
     <!-- i18n -->
-    <script src="/static/js/utils/i18n.js?v=17"></script>
+    <script src="/static/js/utils/i18n.js?v=32"></script>
     <script>
     // Plan data from server (Jinja2)
     var SERVER_PLANS = {{ plans | tojson }};
     var SELECTED_PLAN = '{{ selected_plan }}';
     var SELECTED_BILLING = '{{ selected_billing }}';
-
     function checkoutPage() {
         return {
+            lang_code: window.AppI18n ? window.AppI18n.getLocale() : 'tr',
+            locale_nonce: 0,
             // State
             step: 'account',
             plan: SELECTED_PLAN,
@@ -342,14 +508,37 @@
             // Login fields
             loginEmail: '',
             loginPassword: '',
+            showForgotPassword: false,
+            forgotStep: 'email',
+            forgotEmail: '',
+            forgotCode: '',
+            forgotNewPassword: '',
+            forgotConfirmPassword: '',
+            forgotLoading: false,
+            forgotError: '',
+            forgotSuccess: '',
 
             // Computed
             get planData() {
                 return SERVER_PLANS[this.plan] || SERVER_PLANS['free'] || {};
             },
             get planDisplayName() {
-                var names = { free: 'Free', starter: 'Starter', professional: 'Professional', enterprise: 'Enterprise' };
-                return names[this.plan] || this.plan;
+                var names = {
+                    free: 'pricing.free_name',
+                    starter: 'pricing.starter_name',
+                    professional: 'pricing.professional_name',
+                    enterprise: 'pricing.enterprise_name'
+                };
+                return this.t(names[this.plan] || '') || this.plan;
+            },
+            get planSubtitle() {
+                var subtitles = {
+                    free: 'pricing.free_desc',
+                    starter: 'pricing.starter_desc',
+                    professional: 'pricing.professional_desc',
+                    enterprise: 'pricing.enterprise_desc'
+                };
+                return this.t(subtitles[this.plan] || '');
             },
             get monthlyPrice() {
                 if (this.billing === 'annual') {
@@ -364,7 +553,25 @@
                 return this.planData.price_monthly || 0;
             },
 
+            refreshLocale() {
+                var locale = window.AppI18n ? window.AppI18n.getLocale() : 'tr';
+                this.lang_code = locale;
+                this.locale_nonce = Date.now();
+                document.title = this.t('checkout.page_title');
+            },
+
             init() {
+                var self = this;
+                window.addEventListener('locale-changed', function () {
+                    self.refreshLocale();
+                });
+                if (window.AppI18n && window.AppI18n.onReady) {
+                    window.AppI18n.onReady(function () {
+                        self.refreshLocale();
+                    });
+                }
+                this.refreshLocale();
+
                 // Check for existing auth
                 var token = localStorage.getItem('auth_token') || localStorage.getItem('access_token');
                 if (token) {
@@ -382,10 +589,48 @@
             },
 
             t(key, params) {
-                if (window.AppUtils && window.AppUtils.t) {
-                    return window.AppUtils.t(key, params);
+                void this.locale_nonce;
+                return window.AppI18n ? window.AppI18n.t(key, params) : key;
+            },
+
+            formatPrice(amount) {
+                void this.locale_nonce;
+                var locale = window.AppI18n ? window.AppI18n.getLocale() : 'tr';
+                var numberLocale = locale === 'ar' ? 'ar-SA' : (locale === 'en' ? 'en-US' : 'tr-TR');
+                return '\u20BA' + Number(amount || 0).toLocaleString(numberLocale);
+            },
+
+            billingDisplayName() {
+                return this.t(this.billing === 'annual' ? 'checkout.annual' : 'checkout.monthly');
+            },
+
+            isUnlimitedLimit(value) {
+                return Number(value || 0) >= 999999;
+            },
+
+            summaryFeatureText(kind) {
+                var planData = this.planData || {};
+                if (kind === 'search') {
+                    return this.isUnlimitedLimit(planData.max_daily_quick_searches)
+                        ? this.t('pricing.f_unlimited_searches')
+                        : this.t('checkout.feat_search', { n: planData.max_daily_quick_searches || 5 });
                 }
-                return key;
+                if (kind === 'watchlist') {
+                    return this.isUnlimitedLimit(planData.max_watchlist_items)
+                        ? this.t('pricing.f_unlimited_watchlist')
+                        : this.t('checkout.feat_watchlist', { n: planData.max_watchlist_items || 3 });
+                }
+                if (kind === 'live') {
+                    return this.isUnlimitedLimit(planData.monthly_live_searches)
+                        ? this.t('pricing.f_unlimited_live')
+                        : this.t('checkout.feat_live', { n: planData.monthly_live_searches || 0 });
+                }
+                if (kind === 'logo') {
+                    return this.isUnlimitedLimit(planData.monthly_logo_runs)
+                        ? this.t('pricing.f_logo_tracking')
+                        : this.t('checkout.feat_logo', { n: planData.monthly_logo_runs || 0 });
+                }
+                return '';
             },
 
             checkAuth(token) {
@@ -421,6 +666,9 @@
                 var url = new URL(window.location);
                 url.searchParams.set('billing', period);
                 window.history.replaceState({}, '', url);
+                if (this.step === 'payment' && this.plan !== 'free') {
+                    this.initializePayment();
+                }
             },
 
             goToPayment() {
@@ -438,6 +686,119 @@
                 this.userEmail = '';
                 this.step = 'account';
                 this.checkoutFormHtml = '';
+                this.closeForgotPassword();
+            },
+
+            openForgotPassword() {
+                this.showForgotPassword = true;
+                this.forgotStep = 'email';
+                this.forgotEmail = this.loginEmail || '';
+                this.forgotCode = '';
+                this.forgotNewPassword = '';
+                this.forgotConfirmPassword = '';
+                this.forgotError = '';
+                this.forgotSuccess = '';
+                this.authError = '';
+            },
+
+            closeForgotPassword() {
+                this.showForgotPassword = false;
+                this.forgotStep = 'email';
+                this.forgotCode = '';
+                this.forgotNewPassword = '';
+                this.forgotConfirmPassword = '';
+                this.forgotLoading = false;
+                this.forgotError = '';
+                this.forgotSuccess = '';
+            },
+
+            forgotRequestCode() {
+                if (!this.forgotEmail) {
+                    this.forgotError = this.t('checkout.error_fill_fields');
+                    return;
+                }
+                this.forgotLoading = true;
+                this.forgotError = '';
+                this.forgotSuccess = '';
+                var self = this;
+
+                fetch('/api/v1/auth/forgot-password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: this.forgotEmail,
+                        lang: window.AppI18n ? window.AppI18n.getLocale() : 'tr'
+                    })
+                })
+                .then(function(res) {
+                    if (!res.ok) throw new Error('request_failed');
+                    return res.json();
+                })
+                .then(function() {
+                    self.forgotStep = 'code';
+                    self.forgotCode = '';
+                    self.forgotNewPassword = '';
+                    self.forgotConfirmPassword = '';
+                    self.forgotSuccess = self.t('auth.check_email_for_code');
+                })
+                .catch(function() {
+                    self.forgotError = self.t('auth.error_generic');
+                })
+                .finally(function() {
+                    self.forgotLoading = false;
+                });
+            },
+
+            forgotResetPassword() {
+                if (!this.forgotCode || !this.forgotNewPassword || !this.forgotConfirmPassword) {
+                    this.forgotError = this.t('checkout.error_fill_fields');
+                    return;
+                }
+                if (this.forgotNewPassword !== this.forgotConfirmPassword) {
+                    this.forgotError = this.t('auth.passwords_not_match');
+                    return;
+                }
+                if (this.forgotNewPassword.length < 8) {
+                    this.forgotError = this.t('auth.password_min_length');
+                    return;
+                }
+                this.forgotLoading = true;
+                this.forgotError = '';
+                this.forgotSuccess = '';
+                var self = this;
+
+                fetch('/api/v1/auth/reset-password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        token: this.forgotCode,
+                        new_password: this.forgotNewPassword
+                    })
+                })
+                .then(function(res) {
+                    if (!res.ok) {
+                        return res.json().then(function(err) {
+                            throw new Error(err.detail || 'reset_failed');
+                        });
+                    }
+                    return res.json();
+                })
+                .then(function() {
+                    self.forgotSuccess = self.t('auth.password_reset_success');
+                    self.loginEmail = self.forgotEmail;
+                    self.loginPassword = '';
+                    setTimeout(function() {
+                        self.closeForgotPassword();
+                    }, 1200);
+                })
+                .catch(function(err) {
+                    self.forgotError = err.message === 'reset_failed'
+                        ? self.t('auth.error_generic')
+                        : (err.message || self.t('auth.error_generic'));
+                })
+                .finally(function() {
+                    self.forgotLoading = false;
+                });
             },
 
             submitRegister() {

@@ -53,13 +53,15 @@ def _get_body_state(page):
     return page.evaluate(
         """() => {
             const state = document.body._x_dataStack && document.body._x_dataStack[0];
+            const upgradeModal = document.getElementById('upgrade-modal');
             return {
                 searchResults: state ? (state.searchResults || []).length : -1,
                 searchError: state ? (state.searchError || '') : 'missing alpine state',
                 searchLoading: state ? !!state.searchLoading : false,
                 selectedClasses: state ? (state.selectedClasses || []) : [],
                 imageName: state ? (state.imageName || '') : '',
-                searchQuery: state ? (state.searchQuery || '') : ''
+                searchQuery: state ? (state.searchQuery || '') : '',
+                upgradeModalVisible: !!(upgradeModal && !upgradeModal.classList.contains('hidden'))
             };
         }"""
     )
@@ -291,6 +293,103 @@ def main() -> None:
                 public_search_with_image,
                 allow_console_errors=("status of 429",),
                 allow_request_failures=(f"429 POST {CONFIG.base_url}/api/v1/search/public",),
+            )
+
+            def upgrade_modal_plan_handoff_rules() -> None:
+                open_url(page, CONFIG, "/")
+                page.wait_for_function("() => !!(window.AppUpgradeModal && window.AppUpgradeModal.resolveOffer)", timeout=CONFIG.timeout_ms)
+                resolved = page.evaluate(
+                    """() => ({
+                        freeLeads: window.AppUpgradeModal.resolveOffer({ current_plan: 'free' }, 'leads').recommendedPlan,
+                        starterApi: window.AppUpgradeModal.resolveOffer({ current_plan: 'starter' }, 'api_access').recommendedPlan,
+                        freeWatchlistLogo: window.AppUpgradeModal.resolveOffer({ current_plan: 'free' }, 'watchlist_logo').recommendedPlan,
+                        dailyLimitHandled: window.AppUpgradeModal.maybeHandle({ error: 'daily_limit_exceeded', current_plan: 'free' }, 'quick_search'),
+                        dailyLimitPlan: (document.getElementById('upgrade-plan-code')?.textContent || '').trim().toLowerCase(),
+                        genericRateHandled: (() => {
+                            hideUpgradeModal();
+                            return window.AppUpgradeModal.maybeHandle({ message: 'Rate limit exceeded' }, 'quick_search');
+                        })(),
+                        modalVisibleAfterGenericRate: !!(document.getElementById('upgrade-modal') && !document.getElementById('upgrade-modal').classList.contains('hidden'))
+                    })"""
+                )
+                if resolved["freeLeads"] != "professional":
+                    raise AssertionError(f"expected free leads gate to recommend professional, got {resolved}")
+                if resolved["starterApi"] != "enterprise":
+                    raise AssertionError(f"expected starter api gate to recommend enterprise, got {resolved}")
+                if resolved["freeWatchlistLogo"] != "starter":
+                    raise AssertionError(f"expected free watchlist-logo gate to recommend starter, got {resolved}")
+                if resolved["dailyLimitHandled"] is not True or resolved["dailyLimitPlan"] != "starter":
+                    raise AssertionError(f"expected daily quick-search limit to open starter upgrade modal, got {resolved}")
+                if resolved["genericRateHandled"] is not False or resolved["modalVisibleAfterGenericRate"]:
+                    raise AssertionError(f"expected generic rate-limit payloads to avoid upgrade modal, got {resolved}")
+
+            run_browser_step(
+                "upgrade modal plan handoff rules",
+                REPORTER,
+                page,
+                monitor,
+                CONFIG,
+                upgrade_modal_plan_handoff_rules,
+            )
+
+            def public_search_daily_limit_upgrade_gate() -> None:
+                context.clear_cookies()
+                page.evaluate(
+                    """() => {
+                        localStorage.removeItem('auth_token');
+                        localStorage.removeItem('access_token');
+                        localStorage.removeItem('refresh_token');
+                        sessionStorage.removeItem('auth_token');
+                        sessionStorage.removeItem('access_token');
+                        sessionStorage.removeItem('refresh_token');
+                    }"""
+                )
+                open_url(page, CONFIG, "/")
+                page.fill("#search-input", "wosen")
+
+                response = None
+                for attempt in range(6):
+                    with page.expect_response(lambda candidate: "/api/v1/search/public" in candidate.url, timeout=CONFIG.timeout_ms) as response_info:
+                        _invoke_public_search(page)
+                    response = response_info.value
+                    _wait_for_public_search_idle(page, timeout_ms=max(CONFIG.timeout_ms, 60000))
+                    if attempt < 5:
+                        if response.status != 200:
+                            raise AssertionError(f"expected 200 before daily free limit, got {response.status}")
+                        state = _get_body_state(page)
+                        if state["upgradeModalVisible"]:
+                            raise AssertionError("upgrade modal should stay hidden before the free daily limit is exhausted")
+                        continue
+                    if response.status != 429:
+                        raise AssertionError(f"expected 429 on sixth public search, got {response.status}")
+
+                page.locator("#upgrade-modal").wait_for(state="visible", timeout=CONFIG.timeout_ms)
+                recommended_plan = (page.locator("#upgrade-plan-code").text_content() or "").strip().lower()
+                state = _get_body_state(page)
+                if not state["upgradeModalVisible"]:
+                    raise AssertionError("expected upgrade modal after the sixth public search")
+                if recommended_plan != "starter":
+                    raise AssertionError(f"expected starter recommendation after the public daily limit, got {recommended_plan!r}")
+                modal_offer = page.evaluate(
+                    """() => ({
+                        price: (document.getElementById('upgrade-plan-price')?.textContent || '').trim(),
+                        features: Array.from(document.querySelectorAll('#upgrade-feature-list li span:last-child')).map((el) => (el.textContent || '').trim())
+                    })"""
+                )
+                if "499" not in modal_offer["price"]:
+                    raise AssertionError(f"expected starter monthly price after public daily limit, got {modal_offer}")
+                if not any("50" in feature for feature in modal_offer["features"]):
+                    raise AssertionError(f"expected starter quick-search highlight after public daily limit, got {modal_offer}")
+
+            run_browser_step(
+                "public search daily free limit upgrade gate",
+                REPORTER,
+                page,
+                monitor,
+                CONFIG,
+                public_search_daily_limit_upgrade_gate,
+                allow_console_errors=("status of 429",),
+                allow_request_failures=(f"429 GET {CONFIG.base_url}/api/v1/search/public",),
             )
 
             def pricing_to_checkout() -> None:

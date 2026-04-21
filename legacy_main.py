@@ -203,6 +203,7 @@ public_search, public_search_post, _do_public_search = register_public_search_ro
     limiter=limiter,
     logger=logger,
     status_code_getter=lambda status: get_status_code(status),
+    rate_limit_getter=lambda key, default: _get_rl_value(key, default),
     allowed_image_types=ALLOWED_IMAGE_TYPES,
     max_image_size=MAX_IMAGE_SIZE,
     validate_image_magic_bytes=validate_image_magic_bytes,

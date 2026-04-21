@@ -6,25 +6,102 @@
     <link rel="icon" type="image/jpeg" href="/static/icons/logo.jpeg">
     <title x-data x-text="t('pricing.page_title') || 'Planlar - IP WATⒸH AI'">Planlar - IP WATⒸH AI</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <style>
-        body { font-family: 'Inter', sans-serif; }
-        .plan-feature-icon { width: 16px; height: 16px; flex-shrink: 0; margin-top: 2px; }
-        .toggle-bg { transition: background-color 0.2s; }
-        .toggle-dot { transition: transform 0.2s; }
+        :root { color-scheme: light; }
+        body { font-family: 'Inter', sans-serif; background: #dbeafe; }
+        .font-display { font-family: 'Space Grotesk', 'Inter', sans-serif; letter-spacing: -0.03em; }
+        [x-cloak] { display: none !important; }
+        .pricing-shell {
+            background:
+                radial-gradient(circle at top left, rgba(14, 165, 233, 0.18), transparent 32%),
+                radial-gradient(circle at top right, rgba(79, 70, 229, 0.2), transparent 28%),
+                linear-gradient(180deg, #eff6ff 0%, #f8fafc 46%, #eef2ff 100%);
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.84);
+            border: 1px solid rgba(148, 163, 184, 0.24);
+            box-shadow: 0 24px 60px rgba(15, 23, 42, 0.08);
+            backdrop-filter: blur(18px);
+        }
+        .pricing-brand > img {
+            height: 2.25rem;
+            width: 2.25rem;
+            border-radius: 0.75rem;
+        }
+        .pricing-brand > span:last-child {
+            display: none;
+        }
+        .plan-card {
+            position: relative;
+            min-width: 0;
+            border-radius: 1.75rem;
+            border: 1px solid rgba(203, 213, 225, 0.9);
+            background: rgba(255, 255, 255, 0.92);
+            box-shadow: 0 18px 45px rgba(15, 23, 42, 0.06);
+            transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
+        }
+        .plan-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 28px 60px rgba(15, 23, 42, 0.1);
+        }
+        .free-card {
+            background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(248,250,252,0.96));
+        }
+        .starter-card {
+            background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.96));
+        }
+        .pro-card {
+            border-color: rgba(99, 102, 241, 0.55);
+            box-shadow: 0 28px 70px rgba(79, 70, 229, 0.14);
+        }
+        .enterprise-card {
+            background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(240,249,255,0.95));
+        }
+        .plan-feature-icon { width: 18px; height: 18px; flex-shrink: 0; margin-top: 2px; }
+        .hero-grid {
+            background-image:
+                linear-gradient(rgba(148, 163, 184, 0.12) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(148, 163, 184, 0.12) 1px, transparent 1px);
+            background-size: 26px 26px;
+        }
+        .toggle-dot { transition: transform 0.22s ease; }
+        .faq-card[open] {
+            border-color: rgba(99, 102, 241, 0.3);
+            box-shadow: 0 16px 32px rgba(99, 102, 241, 0.08);
+        }
+        html.rtl .rtl-flip { transform: rotate(180deg); }
+        html.rtl .toggle-dot {
+            left: auto;
+            right: 0.25rem;
+        }
+        html.rtl .toggle-dot.translate-x-7 {
+            transform: translateX(-1.75rem);
+        }
     </style>
 </head>
-<body class="bg-gray-50 min-h-screen" x-data="pricingPage()">
+<body class="min-h-screen text-slate-900" x-data="pricingPage()" x-cloak>
+    <div class="pricing-shell relative min-h-screen overflow-hidden">
+        <div class="pointer-events-none absolute inset-x-0 top-0 h-80 bg-gradient-to-b from-white/55 to-transparent"></div>
+        <div class="pointer-events-none absolute -left-24 top-28 h-72 w-72 rounded-full bg-sky-300/20 blur-3xl"></div>
+        <div class="pointer-events-none absolute -right-24 top-12 h-80 w-80 rounded-full bg-indigo-300/20 blur-3xl"></div>
 
     <!-- Header -->
-    <nav class="bg-white border-b border-gray-200">
-        <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
-            <a href="/dashboard" class="flex items-center gap-2 text-gray-600 hover:text-gray-900 text-sm font-medium">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+    <nav class="relative z-10 border-b border-white/70 bg-white/70 backdrop-blur-xl">
+        <div class="mx-auto flex max-w-7xl flex-col items-start gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
+            <a href="/dashboard" class="inline-flex w-full items-center gap-3 text-sm font-medium text-slate-600 transition hover:text-slate-900 sm:w-auto">
+                <span class="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-sm">
+                    <svg class="rtl-flip w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                </span>
                 <span x-text="t('pricing.back_to_dashboard')">Dashboard'a Don</span>
             </a>
-            <div class="flex items-center gap-2">
+            <div class="pricing-brand flex w-full items-center justify-between gap-3 sm:w-auto sm:justify-start">
+                <div class="hidden rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-sky-700 sm:inline-flex"
+                     x-text="t('pricing.header_badge')">
+                    Flexible Billing
+                </div>
+                <span class="font-display text-sm font-bold text-slate-950 sm:text-base">IP WATCH AI</span>
                 <img src="/static/icons/logo.jpeg" alt="IP WATⒸH AI" class="h-8 w-8 rounded-lg flex-shrink-0 object-cover">
                 <span class="text-sm font-bold text-gray-900">IP WATⒸH AI</span>
             </div>
@@ -32,42 +109,49 @@
     </nav>
 
     <!-- Content -->
-    <div class="max-w-7xl mx-auto px-4 py-12">
-        <!-- Header -->
-        <div class="text-center mb-8">
-            <h1 class="text-3xl font-bold text-gray-900 mb-2" x-text="t('pricing.title')">Planlar ve Fiyatlandirma</h1>
-            <p class="text-gray-500" x-text="t('pricing.subtitle')">Isletmenize uygun plani secin</p>
-        </div>
-
-        <!-- Monthly / Annual Toggle -->
-        <div class="flex items-center justify-center gap-3 mb-10">
-            <span class="text-sm font-medium" :class="!annual ? 'text-gray-900' : 'text-gray-400'" x-text="t('pricing.monthly')">Aylik</span>
-            <button @click="annual = !annual" class="relative w-14 h-8 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-300 min-h-[44px] flex items-center"
-                    :class="annual ? 'bg-indigo-600' : 'bg-gray-300'">
-                <div class="absolute top-1 left-1 w-6 h-6 bg-white rounded-full shadow transition-transform"
-                     :class="annual ? 'translate-x-6' : ''"></div>
-            </button>
-            <span class="text-sm font-medium" :class="annual ? 'text-gray-900' : 'text-gray-400'" x-text="t('pricing.annual')">Yillik</span>
-            <span class="bg-green-100 text-green-700 text-xs font-bold px-2 py-0.5 rounded-full" x-text="t('pricing.save_badge')">%20 Tasarruf</span>
+    <main class="relative z-10 max-w-7xl mx-auto px-4 py-10 sm:px-6 lg:px-8 lg:py-12">
+        <div class="glass-panel hero-grid mb-8 rounded-[28px] p-5 sm:rounded-[32px] sm:p-8">
+            <div class="flex flex-col gap-6 sm:gap-8 lg:flex-row lg:items-end lg:justify-between">
+                <div class="max-w-3xl">
+                    <p class="text-[11px] font-semibold uppercase tracking-[0.28em] text-indigo-600" x-text="t('pricing.hero_eyebrow')">Plans</p>
+                    <h1 class="font-display mt-3 text-3xl font-bold text-slate-950 sm:text-4xl lg:text-5xl" x-text="t('pricing.title')">Planlar ve Fiyatlandirma</h1>
+                    <p class="mt-4 max-w-2xl text-sm leading-6 text-slate-600 sm:text-base" x-text="t('pricing.subtitle')">Isletmenize uygun plani secin</p>
+                </div>
+                <div class="glass-panel w-full rounded-[28px] p-5 sm:min-w-[320px] sm:w-auto">
+                    <div class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500" x-text="t('pricing.billing_cadence')">Billing cadence</div>
+                    <div class="mt-4 flex items-center justify-between gap-3 sm:justify-center">
+                        <span class="text-sm font-semibold transition-colors" :class="!annual ? 'text-slate-950' : 'text-slate-400'" x-text="t('pricing.monthly')">Aylik</span>
+                        <button id="pricing-billing-toggle" @click="annual = !annual" class="relative w-16 h-9 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-300 min-h-[44px] flex items-center"
+                                :class="annual ? 'bg-indigo-600' : 'bg-slate-300'">
+                            <div class="toggle-dot absolute top-1 left-1 w-7 h-7 bg-white rounded-full shadow"
+                                 :class="annual ? 'translate-x-7' : ''"></div>
+                        </button>
+                        <span class="flex items-center gap-2 text-sm font-semibold transition-colors" :class="annual ? 'text-slate-950' : 'text-slate-400'">
+                            <span x-text="t('pricing.annual')">Yillik</span>
+                            <span id="pricing-annual-discount-badge" class="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold leading-none text-emerald-700" x-text="t('pricing.annual_save_inline')">-20%</span>
+                        </span>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Plan Cards -->
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="grid grid-cols-1 gap-4 sm:gap-5 md:grid-cols-2 xl:grid-cols-4">
 
             {% set chk = '<svg class="plan-feature-icon text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>' %}
             {% set cross = '<svg class="plan-feature-icon text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>' %}
 
             <!-- Free Plan -->
-            <div class="bg-white rounded-2xl border border-gray-200 p-5 flex flex-col">
+            <div class="plan-card free-card flex flex-col p-5 sm:p-6">
                 <div class="mb-5">
-                    <h2 class="text-lg font-bold text-gray-900" x-text="t('pricing.free_name')">Ucretsiz</h2>
+                    <h2 class="text-xl font-bold text-slate-950" x-text="t('pricing.free_name')">Ucretsiz</h2>
                     <div class="mt-2">
-                        <span class="text-3xl font-bold text-gray-900">&#8378;0</span>
-                        <span class="text-gray-500" x-text="'/' + t('pricing.per_month')">/ay</span>
+                        <span class="text-3xl font-bold text-slate-950 sm:text-4xl">&#8378;0</span>
+                        <span class="text-slate-500" x-text="'/' + t('pricing.per_month')">/ay</span>
                     </div>
-                    <p class="text-sm text-gray-500 mt-2" x-text="t('pricing.free_desc')">Platformu kesfetmek icin</p>
+                    <p class="text-sm text-slate-500 mt-3" x-text="t('pricing.free_desc')">Platformu kesfetmek icin</p>
                 </div>
-                <ul class="space-y-2.5 text-sm text-gray-700 flex-1">
+                <ul class="space-y-3 text-sm text-slate-700 flex-1">
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_daily_searches', {n: {{ plans.free.max_daily_quick_searches }}})">Gunluk {{ plans.free.max_daily_quick_searches }} hizli arama</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_watchlist', {n: {{ plans.free.max_watchlist_items }}})">{{ plans.free.max_watchlist_items }} marka izleme</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_reports', {n: {{ plans.free.monthly_reports }}})">Ayda {{ plans.free.monthly_reports }} rapor</span></li>
@@ -85,7 +169,7 @@
                 </ul>
                 <div class="mt-5">
                     <a href="/checkout?plan=free&billing=monthly"
-                       class="block text-center px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-sm font-medium transition-colors no-underline"
+                       class="block text-center px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl text-sm font-semibold transition-colors no-underline"
                        x-text="t('pricing.cta_start')">
                         Basla
                     </a>
@@ -93,20 +177,20 @@
             </div>
 
             <!-- Starter Plan -->
-            <div class="bg-white rounded-2xl border border-gray-200 p-5 flex flex-col">
+            <div class="plan-card starter-card flex flex-col p-5 sm:p-6">
                 <div class="mb-5">
-                    <h2 class="text-lg font-bold text-gray-900">Starter</h2>
+                    <h2 id="pricing-plan-starter-name" class="text-xl font-bold text-slate-950" x-text="t('pricing.starter_name')">Starter</h2>
                     <div class="mt-2">
-                        <span class="text-3xl font-bold text-gray-900" x-text="'&#8378;' + (annual ? '{{ plans.starter.price_annual_monthly }}' : '{{ plans.starter.price_monthly }}')">&#8378;{{ plans.starter.price_monthly }}</span>
-                        <span class="text-gray-500" x-text="'/' + t('pricing.per_month')">/ay</span>
+                        <span class="text-3xl font-bold text-slate-950 sm:text-4xl" x-text="formatPrice(annual ? '{{ plans.starter.price_annual_monthly }}' : '{{ plans.starter.price_monthly }}')">&#8378;{{ plans.starter.price_monthly }}</span>
+                        <span class="text-slate-500" x-text="'/' + t('pricing.per_month')">/ay</span>
                     </div>
                     <template x-if="annual">
-                        <p class="text-xs text-green-600 mt-1" x-text="t('pricing.billed_annually', {total: {{ plans.starter.price_annual_monthly * 12 }}})">Yillik faturalandirilir</p>
+                        <p id="pricing-starter-billed-annually" class="text-xs text-emerald-700 mt-2" x-text="t('pricing.billed_annually', {total: formatPrice({{ plans.starter.price_annual_monthly * 12 }})})">Yillik faturalandirilir</p>
                     </template>
-                    <p class="text-sm text-gray-500 mt-2" x-text="t('pricing.starter_desc')">Bireysel vekiller icin</p>
-                    <p class="text-xs text-indigo-600 font-semibold mt-2 flex items-center gap-1"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.includes_free')">Ucretsiz+</span></p>
+                    <p class="text-sm text-slate-500 mt-3" x-text="t('pricing.starter_desc')">Bireysel vekiller icin</p>
+                    <p class="text-xs text-indigo-600 font-semibold mt-3 flex items-center gap-1"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.includes_free')">Ucretsiz+</span></p>
                 </div>
-                <ul class="space-y-2.5 text-sm text-gray-700 flex-1">
+                <ul class="space-y-3 text-sm text-slate-700 flex-1">
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_daily_searches', {n: {{ plans.starter.max_daily_quick_searches }}})">Gunluk {{ plans.starter.max_daily_quick_searches }} hizli arama</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_watchlist', {n: {{ plans.starter.max_watchlist_items }}})">{{ plans.starter.max_watchlist_items }} marka izleme</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_reports_export', {n: {{ plans.starter.monthly_reports }}})">Ayda {{ plans.starter.monthly_reports }} rapor + indirme</span></li>
@@ -124,7 +208,7 @@
                 </ul>
                 <div class="mt-5">
                     <a :href="'/checkout?plan=starter&billing=' + (annual ? 'annual' : 'monthly')"
-                       class="block text-center px-4 py-2.5 bg-gray-900 hover:bg-gray-800 text-white rounded-xl text-sm font-medium transition-colors no-underline"
+                       class="block text-center px-4 py-3 bg-slate-950 hover:bg-slate-800 text-white rounded-2xl text-sm font-semibold transition-colors no-underline"
                        x-text="t('pricing.cta_start')">
                         Basla
                     </a>
@@ -132,21 +216,21 @@
             </div>
 
             <!-- Professional Plan (POPULAR) -->
-            <div class="bg-white rounded-2xl border-2 border-indigo-500 p-5 flex flex-col relative shadow-lg">
-                <div class="absolute -top-3 left-1/2 -translate-x-1/2 bg-indigo-600 text-white text-xs font-bold px-3 py-1 rounded-full" x-text="t('pricing.popular_badge')">POPULER</div>
+            <div class="plan-card pro-card relative flex flex-col p-5 shadow-lg sm:p-6">
+                <div id="pricing-popular-badge" class="absolute -top-3 left-1/2 z-10 -translate-x-1/2 rounded-full bg-indigo-600 px-3 py-1 text-xs font-bold text-white" x-text="t('pricing.popular_badge')">POPULER</div>
                 <div class="mb-5">
-                    <h2 class="text-lg font-bold text-gray-900">Professional</h2>
+                    <h2 id="pricing-plan-professional-name" class="text-xl font-bold text-slate-950" x-text="t('pricing.professional_name')">Professional</h2>
                     <div class="mt-2">
-                        <span class="text-3xl font-bold text-gray-900" x-text="'&#8378;' + (annual ? '{{ plans.professional.price_annual_monthly }}' : '{{ plans.professional.price_monthly }}')">&#8378;{{ plans.professional.price_monthly }}</span>
-                        <span class="text-gray-500" x-text="'/' + t('pricing.per_month')">/ay</span>
+                        <span class="text-3xl font-bold text-slate-950 sm:text-4xl" x-text="formatPrice(annual ? '{{ plans.professional.price_annual_monthly }}' : '{{ plans.professional.price_monthly }}')">&#8378;{{ plans.professional.price_monthly }}</span>
+                        <span class="text-slate-500" x-text="'/' + t('pricing.per_month')">/ay</span>
                     </div>
                     <template x-if="annual">
-                        <p class="text-xs text-green-600 mt-1" x-text="t('pricing.billed_annually', {total: {{ plans.professional.price_annual_monthly * 12 }}})">Yillik faturalandirilir</p>
+                        <p class="text-xs text-emerald-700 mt-2" x-text="t('pricing.billed_annually', {total: formatPrice({{ plans.professional.price_annual_monthly * 12 }})})">Yillik faturalandirilir</p>
                     </template>
-                    <p class="text-sm text-gray-500 mt-2" x-text="t('pricing.professional_desc')">Marka vekilleri icin</p>
-                    <p class="text-xs text-indigo-600 font-semibold mt-2 flex items-center gap-1"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.includes_starter')">Baslangic+</span></p>
+                    <p class="text-sm text-slate-500 mt-3" x-text="t('pricing.professional_desc')">Marka vekilleri icin</p>
+                    <p class="text-xs text-indigo-600 font-semibold mt-3 flex items-center gap-1"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.includes_starter')">Baslangic+</span></p>
                 </div>
-                <ul class="space-y-2.5 text-sm text-gray-700 flex-1">
+                <ul class="space-y-3 text-sm text-slate-700 flex-1">
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_daily_searches', {n: {{ plans.professional.max_daily_quick_searches }}})">Gunluk {{ plans.professional.max_daily_quick_searches }} hizli arama</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_watchlist', {n: {{ plans.professional.max_watchlist_items }}})">{{ plans.professional.max_watchlist_items }} marka izleme</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_reports_export', {n: {{ plans.professional.monthly_reports }}})">Ayda {{ plans.professional.monthly_reports }} rapor + indirme</span></li>
@@ -164,7 +248,7 @@
                 </ul>
                 <div class="mt-5">
                     <a :href="'/checkout?plan=professional&billing=' + (annual ? 'annual' : 'monthly')"
-                       class="block text-center px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-medium transition-colors no-underline"
+                       class="block text-center px-4 py-3 bg-gradient-to-r from-indigo-600 to-sky-500 hover:opacity-95 text-white rounded-2xl text-sm font-semibold transition-colors no-underline shadow-lg shadow-indigo-500/20"
                        x-text="t('pricing.cta_start')">
                         Basla
                     </a>
@@ -172,20 +256,20 @@
             </div>
 
             <!-- Enterprise Plan -->
-            <div class="bg-white rounded-2xl border border-gray-200 p-5 flex flex-col">
+            <div class="plan-card enterprise-card flex flex-col p-5 sm:p-6">
                 <div class="mb-5">
-                    <h2 class="text-lg font-bold text-gray-900">Enterprise</h2>
+                    <h2 id="pricing-plan-enterprise-name" class="text-xl font-bold text-slate-950" x-text="t('pricing.enterprise_name')">Enterprise</h2>
                     <div class="mt-2">
-                        <span class="text-3xl font-bold text-gray-900" x-text="'&#8378;' + (annual ? '{{ plans.enterprise.price_annual_monthly }}' : '{{ plans.enterprise.price_monthly }}')">&#8378;{{ plans.enterprise.price_monthly }}</span>
-                        <span class="text-gray-500" x-text="'/' + t('pricing.per_month')">/ay</span>
+                        <span class="text-3xl font-bold text-slate-950 sm:text-4xl" x-text="formatPrice(annual ? '{{ plans.enterprise.price_annual_monthly }}' : '{{ plans.enterprise.price_monthly }}')">&#8378;{{ plans.enterprise.price_monthly }}</span>
+                        <span class="text-slate-500" x-text="'/' + t('pricing.per_month')">/ay</span>
                     </div>
                     <template x-if="annual">
-                        <p class="text-xs text-green-600 mt-1" x-text="t('pricing.billed_annually', {total: {{ plans.enterprise.price_annual_monthly * 12 }}})">Yillik faturalandirilir</p>
+                        <p class="text-xs text-emerald-700 mt-2" x-text="t('pricing.billed_annually', {total: formatPrice({{ plans.enterprise.price_annual_monthly * 12 }})})">Yillik faturalandirilir</p>
                     </template>
-                    <p class="text-sm text-gray-500 mt-2" x-text="t('pricing.enterprise_desc')">Buyuk firmalar icin</p>
-                    <p class="text-xs text-indigo-600 font-semibold mt-2 flex items-center gap-1"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.includes_professional')">Professional+</span></p>
+                    <p class="text-sm text-slate-500 mt-3" x-text="t('pricing.enterprise_desc')">Buyuk firmalar icin</p>
+                    <p class="text-xs text-indigo-600 font-semibold mt-3 flex items-center gap-1"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.includes_professional')">Professional+</span></p>
                 </div>
-                <ul class="space-y-2.5 text-sm text-gray-700 flex-1">
+                <ul class="space-y-3 text-sm text-slate-700 flex-1">
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_unlimited_searches')">Sinirsiz hizli arama</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_unlimited_watchlist')">Sinirsiz marka izleme</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_unlimited_reports')">Sinirsiz rapor + indirme</span></li>
@@ -203,7 +287,7 @@
                 </ul>
                 <div class="mt-5">
                     <a :href="'/checkout?plan=enterprise&billing=' + (annual ? 'annual' : 'monthly')"
-                       class="block text-center px-4 py-2.5 bg-gray-900 hover:bg-gray-800 text-white rounded-xl text-sm font-medium transition-colors no-underline"
+                       class="block text-center px-4 py-3 bg-slate-950 hover:bg-slate-800 text-white rounded-2xl text-sm font-semibold transition-colors no-underline"
                        x-text="t('pricing.cta_start')">
                         Basla
                     </a>
@@ -213,58 +297,82 @@
         </div>
 
         <!-- Footer note -->
-        <div class="text-center mt-10 text-sm text-gray-400" x-text="t('pricing.vat_note')">
+        <div class="text-center mt-10 text-sm text-slate-500" x-text="t('pricing.vat_note')">
             Tum fiyatlar KDV harictir.
         </div>
 
         <!-- FAQ Section -->
         <div class="max-w-3xl mx-auto mt-16">
-            <h2 class="text-2xl font-bold text-gray-900 text-center mb-8" x-text="t('pricing.faq_title')">Sikca Sorulan Sorular</h2>
+            <h2 class="font-display text-3xl font-bold text-slate-950 text-center mb-8" x-text="t('pricing.faq_title')">Sikca Sorulan Sorular</h2>
             <div class="space-y-4">
-                <details class="group bg-white rounded-xl border border-gray-200 p-4">
-                    <summary class="flex items-center justify-between cursor-pointer text-sm font-medium text-gray-900">
+                <details class="faq-card group glass-panel rounded-2xl p-5">
+                    <summary class="flex items-center justify-between cursor-pointer text-sm font-medium text-slate-900">
                         <span x-text="t('pricing.faq_q1')">Planlari diledigim zaman degistirebilir miyim?</span>
-                        <svg class="w-4 h-4 text-gray-400 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                        <svg class="w-4 h-4 text-slate-400 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
                     </summary>
-                    <p class="mt-3 text-sm text-gray-600" x-text="t('pricing.faq_a1')">Evet, planinizi istediginiz zaman yukseltebilir veya dusurtulebilirsiniz. Degisiklikler bir sonraki fatura donemine yansir.</p>
+                    <p class="mt-3 text-sm text-slate-600" x-text="t('pricing.faq_a1')">Evet, planinizi istediginiz zaman yukseltebilir veya dusurtulebilirsiniz. Degisiklikler bir sonraki fatura donemine yansir.</p>
                 </details>
-                <details class="group bg-white rounded-xl border border-gray-200 p-4">
-                    <summary class="flex items-center justify-between cursor-pointer text-sm font-medium text-gray-900">
+                <details class="faq-card group glass-panel rounded-2xl p-5">
+                    <summary class="flex items-center justify-between cursor-pointer text-sm font-medium text-slate-900">
                         <span x-text="t('pricing.faq_q2')">Canli arama nedir?</span>
-                        <svg class="w-4 h-4 text-gray-400 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                        <svg class="w-4 h-4 text-slate-400 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
                     </summary>
-                    <p class="mt-3 text-sm text-gray-600" x-text="t('pricing.faq_a2')">Canli arama, TURKPATENT portalindan gercek zamanli veri cekerek en guncel marka bilgilerine erismenizi saglar. Standart arama bulten verilerini kullanir.</p>
+                    <p class="mt-3 text-sm text-slate-600" x-text="t('pricing.faq_a2')">Canli arama, TURKPATENT portalindan gercek zamanli veri cekerek en guncel marka bilgilerine erismenizi saglar. Standart arama bulten verilerini kullanir.</p>
                 </details>
-                <details class="group bg-white rounded-xl border border-gray-200 p-4">
-                    <summary class="flex items-center justify-between cursor-pointer text-sm font-medium text-gray-900">
+                <details class="faq-card group glass-panel rounded-2xl p-5">
+                    <summary class="flex items-center justify-between cursor-pointer text-sm font-medium text-slate-900">
                         <span x-text="t('pricing.faq_q3')">Opposition Radar nedir?</span>
-                        <svg class="w-4 h-4 text-gray-400 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                        <svg class="w-4 h-4 text-slate-400 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
                     </summary>
-                    <p class="mt-3 text-sm text-gray-600" x-text="t('pricing.faq_a3')">Opposition Radar, izleme listenizdeki markalarla benzerlik gosteren yeni basvurulari otomatik tespit eder ve itiraz surelerini takip etmenizi saglar.</p>
+                    <p class="mt-3 text-sm text-slate-600" x-text="t('pricing.faq_a3')">Opposition Radar, izleme listenizdeki markalarla benzerlik gosteren yeni basvurulari otomatik tespit eder ve itiraz surelerini takip etmenizi saglar.</p>
                 </details>
-                <details class="group bg-white rounded-xl border border-gray-200 p-4">
-                    <summary class="flex items-center justify-between cursor-pointer text-sm font-medium text-gray-900">
+                <details class="faq-card group glass-panel rounded-2xl p-5">
+                    <summary class="flex items-center justify-between cursor-pointer text-sm font-medium text-slate-900">
                         <span x-text="t('pricing.faq_q4')">Odeme yontemleri nelerdir?</span>
-                        <svg class="w-4 h-4 text-gray-400 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                        <svg class="w-4 h-4 text-slate-400 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
                     </summary>
-                    <p class="mt-3 text-sm text-gray-600" x-text="t('pricing.faq_a4')">Banka havalesi ve kredi karti ile odeme yapabilirsiniz. Yillik planlarda %20 indirim uygulanir.</p>
+                    <p class="mt-3 text-sm text-slate-600" x-text="t('pricing.faq_a4')">Banka havalesi ve kredi karti ile odeme yapabilirsiniz. Yillik planlarda %20 indirim uygulanir.</p>
                 </details>
             </div>
         </div>
+    </main>
     </div>
 
     <!-- i18n + Alpine setup -->
-    <script src="/static/js/utils/i18n.js?v=16"></script>
+    <script src="/static/js/utils/i18n.js?v=32"></script>
     <script>
     function pricingPage() {
         return {
+            lang_code: window.AppI18n ? window.AppI18n.getLocale() : 'tr',
+            locale_nonce: 0,
             annual: false,
-            t(key, params) {
-                if (window.AppUtils && window.AppUtils.t) {
-                    return window.AppUtils.t(key, params);
+            refreshLocale() {
+                var locale = window.AppI18n ? window.AppI18n.getLocale() : 'tr';
+                this.lang_code = locale;
+                this.locale_nonce = Date.now();
+                document.title = this.t('pricing.page_title');
+            },
+            init() {
+                var self = this;
+                window.addEventListener('locale-changed', function () {
+                    self.refreshLocale();
+                });
+                if (window.AppI18n && window.AppI18n.onReady) {
+                    window.AppI18n.onReady(function () {
+                        self.refreshLocale();
+                    });
                 }
-                // Fallback: return key
-                return key;
+                this.refreshLocale();
+            },
+            t(key, params) {
+                void this.locale_nonce;
+                return window.AppI18n ? window.AppI18n.t(key, params) : key;
+            },
+            formatPrice(amount) {
+                void this.locale_nonce;
+                var locale = window.AppI18n ? window.AppI18n.getLocale() : 'tr';
+                var numberLocale = locale === 'ar' ? 'ar-SA' : (locale === 'en' ? 'en-US' : 'tr-TR');
+                return '\u20BA' + Number(amount || 0).toLocaleString(numberLocale);
             }
         };
     }

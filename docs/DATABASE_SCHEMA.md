@@ -69,11 +69,13 @@ Primary monitoring tables:
 - `reports`
 - `notification_queue`
 - `api_usage`
+- `public_search_usage`
 - `audit_log`
 
 Notes:
 - `_mt` tables are the current multi-tenant watchlist/alert surface
 - free/paid limits and report usage depend on organization-linked data
+- `public_search_usage` tracks anonymous landing-page free-search quota consumption by stable browser client id
 
 ### Search, Lead, And Creative Workflows
 

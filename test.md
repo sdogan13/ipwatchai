@@ -185,9 +185,9 @@ Current environment note:
 
 | Persona | Current Status | Current Proof | Missing Coverage |
 | --- | --- | --- | --- |
-| Public visitor | Covered | public pages, public search across text/class/image paths, browser landing search with short-query validation plus class/image journeys, auth gates, pricing to checkout flow, registration modal, email-verification modal resend/success flow, and forgot-password request/error/success/login flow | none on the current public-auth surface |
-| Authenticated member | Covered | dashboard, usage, credits, quick search, browser login/logout, watchlist CRUD browser flow, reports generation browser flow, free-plan application gate coverage, profile modal and avatar upload browser flow, free-plan watchlist logo gate coverage, alert acknowledge/resolve/dismiss browser journeys, inline opposition handoff into the appeal application form, and alert-detail opposition guidance modal coverage | paid application browser happy path when no paid persona is configured |
-| Free user | Covered | dedicated free persona live suite with self-registration fallback and plan-limit checks, explicit free quick-search live/browser coverage, browser watchlist CRUD and report generation flows on a fresh free persona, browser proof for free-plan application gates, free watchlist-logo gate coverage, free live-search upgrade-gate browser coverage, and checkout activation | longer-running quota and downgrade/upgrade edge cases |
+| Public visitor | Covered | public pages, public search across text/class/image paths, browser landing search with short-query validation plus class/image journeys, landing upgrade-modal plan handoff assertions, public-search daily free-quota upgrade coverage, auth gates, pricing to checkout flow, registration modal, email-verification modal resend/success flow, and forgot-password request/error/success/login flow | none on the current public-auth surface |
+| Authenticated member | Covered | dashboard, usage, credits, quick search, browser login/logout, watchlist CRUD browser flow, reports generation browser flow, free-plan application gate coverage with upgrade-modal recommendation, profile modal and avatar upload browser flow, free-plan watchlist logo gate coverage with upgrade-modal recommendation, alert acknowledge/resolve/dismiss browser journeys, inline opposition handoff into the appeal application form, and alert-detail opposition guidance modal coverage | paid application browser happy path when no paid persona is configured |
+| Free user | Covered | dedicated free persona live suite with self-registration fallback and plan-limit checks, explicit free quick-search live/browser coverage, browser watchlist CRUD and report generation flows on a fresh free persona, browser proof for free-plan application gates, free watchlist-logo gate coverage, free live-search upgrade-gate browser coverage with starter recommendation assertions, public-search daily free-quota upgrade coverage, and checkout activation | longer-running quota and downgrade/upgrade edge cases |
 | Paid user | Covered | dedicated paid persona live suite with superadmin-backed provisioning, explicit paid quick-search text/image live/browser coverage, paid watchlist-logo browser happy path, paid application browser CRUD, and aggregate live/browser coverage | deeper paid report/application browser journeys beyond the current starter-plan surface |
 | Business user | Covered | dedicated business persona live suite with superadmin-backed provisioning across lead credits, live search, holders, attorneys, and portfolio endpoints, plus browser live-search, holder, and attorney portfolio journeys | broader business destructive flows only if product workflow requires them |
 | Admin user | Covered | dedicated admin live suite on mounted admin/org routes plus aggregate live smoke delegation | destructive admin-action coverage only if product workflow requires it |
@@ -203,8 +203,8 @@ Current environment note:
 | Dashboard stats | Yes | Yes | Yes | Covered | expand negative-path assertions only if dashboard data regressions appear |
 | Usage and credits | Partial | Yes | Yes | Covered | deepen plan-specific quota edge cases only if plan rules change |
 | Quick search | Partial | Yes | Yes | Covered | extend only if plan-limit rules or new quick-search modes change |
-| Public search | Partial | Yes | Yes | Covered | extend only if the public-search contract or landing-page search UX changes |
-| Live search | Partial | Yes | Yes | Covered | extend only if the live-search UI, quota rules, or plan gates change |
+| Public search | Partial | Yes | Yes | Covered | extend only if the public-search contract, landing-page search UX, or upgrade-plan recommendation rules change |
+| Live search | Partial | Yes | Yes | Covered | extend only if the live-search UI, quota rules, or upgrade-plan recommendation rules change |
 | Watchlist | Yes | Yes | Yes | Covered | extend browser coverage to additional sort/filter states only if that UI is mounted again |
 | Alerts | Partial | Partial via watchlist | Yes | Covered | extend only if new alert actions, filter states, or escalation paths are added |
 | Applications | Partial | Yes | Yes | Covered | extend only if new paid-only application workflows are added |
@@ -248,23 +248,23 @@ Current environment note:
 
 ### Live HTTP
 
-- `tests/live/personas/test_public_live.py`: dedicated public visitor live suite with text, class-filter, and image public-search coverage
+- `tests/live/personas/test_public_live.py`: dedicated public visitor live suite with text, class-filter, and image public-search coverage plus the landing-page daily free-quota gate
 - `tests/live/personas/test_member_live.py`: dedicated authenticated member live suite
 - `tests/test_live_app_e2e.py`: broad live app smoke across core public/auth/dashboard/search surface
 - `tests/test_watchlist_e2e.py`: deep live watchlist flow coverage
 
 ### Browser E2E
 
-- `tests/browser/test_public_browser_smoke.py`: landing, public search text/class/image journeys, short-query validation, pricing-to-checkout, registration, email-verification modal resend/success, and forgot-password request/error/success browser journey coverage
+- `tests/browser/test_public_browser_smoke.py`: landing, public search text/class/image journeys, landing upgrade-modal plan handoff assertions, public-search daily free-quota upgrade coverage, pricing-to-checkout, registration, email-verification modal resend/success, and forgot-password request/error/success browser journey coverage
 - `tests/browser/test_member_browser_smoke.py`: login, dashboard overview KPI and usage-badge contract, dashboard quick search, tab navigation, and logout browser journey coverage
-- `tests/browser/test_search_browser.py`: dedicated free quick-search text plus paid quick-search text/image browser coverage with plan-limit assertions
-- `tests/browser/test_live_search_browser.py`: free-plan live-search upgrade-gate plus business live-search happy-path browser coverage
-- `tests/browser/test_member_feature_browser.py`: deeper member watchlist CRUD, report generation, free application gate, profile/avatar, and paid-application browser flows
+- `tests/browser/test_search_browser.py`: dedicated free quick-search text, localized single-result watchlist add success toast coverage, free quick-search daily-limit and single-result watchlist-limit upgrade-gate coverage, and paid quick-search text/image browser coverage with plan-limit assertions
+- `tests/browser/test_live_search_browser.py`: free-plan live-search upgrade-gate with starter recommendation assertions plus business live-search happy-path browser coverage
+- `tests/browser/test_member_feature_browser.py`: deeper member watchlist CRUD, capacity-aware inline bulk-watchlist upgrade guidance from the entity portfolio modal, report generation, free application gate with upgrade-modal recommendation, profile/avatar, and paid-application browser flows
 - `tests/browser/test_business_browser.py`: business holder/attorney portfolio modal journeys, in-modal entity search, and CSV export trigger coverage
-- `tests/browser/test_watchlist_assets_browser.py`: free-plan watchlist logo gate coverage plus env-gated paid watchlist logo upload/delete asset coverage
+- `tests/browser/test_watchlist_assets_browser.py`: free-plan watchlist logo gate coverage with upgrade-modal recommendation plus env-gated paid watchlist logo upload/delete asset coverage
 - `tests/browser/test_alerts_browser.py`: member alert detail acknowledge, inline resolve/dismiss, and appeals filter/sort browser journeys on seeded alerts
 - `tests/browser/test_opposition_browser.py`: opposition guidance modal plus inline alert-to-appeal handoff coverage on seeded alert data
-- `tests/browser/test_billing_browser.py`: checkout registration, checkout login, and paid-checkout initialization browser coverage
+- `tests/browser/test_billing_browser.py`: pricing/checkout locale render coverage for Turkish and Arabic RTL, mobile viewport billing coverage, checkout registration, checkout login, checkout forgot-password reset/login recovery, and paid-checkout initialization browser coverage
 - `tests/browser/test_admin_browser.py`: env-gated superadmin admin-panel browser navigation coverage
 - `tests/test_browser_e2e.py`: aggregate browser smoke runner
 
@@ -421,9 +421,12 @@ Current journeys:
 - landing bootstrap with no browser errors
 - public search from the landing page
 - pricing to checkout navigation
+- pricing and checkout locale render for Turkish and Arabic, including RTL on Arabic
+- pricing and checkout mobile viewport render with no horizontal overflow and usable billing controls
 - forgot-password request flow to the reset-code step
 - forgot-password invalid reset-code handling
 - full forgot-password reset-success and post-reset login flow
+- checkout forgot-password reset-success and post-reset login flow
 - registration modal to dashboard redirect
 - dashboard email-verification modal resend and successful verification flow
 - login via the landing modal
@@ -611,9 +614,9 @@ Environment Notes:
   - `python tests/browser/test_public_browser_smoke.py` (`8/8`)
   - `python tests/test_browser_e2e.py` (`9/9`)
   - `python tests/test_nightly_e2e.py` (`3/3`)
-- Expanded `tests/live/features/test_search_live.py` so quick-search coverage is now explicit across free text, paid text, and paid image paths, with per-plan quick-search limit assertions sourced from `/api/v1/usage/summary`.
-- Added `tests/browser/test_search_browser.py` and wired it into `tests/test_browser_e2e.py` so the browser lane now proves free quick-search text plus paid quick-search text/image journeys in isolated persona contexts.
-- The quick-search split exposed a runtime plan-override nuance in this environment: free-plan quick-search limits are higher than the code defaults, so the new assertions now verify the live contract (`free > 0`, `paid > free`) instead of pinning to static defaults.
+- Expanded `tests/live/features/test_search_live.py` so quick-search coverage is now explicit across free text, free daily-limit exhaustion, paid text, and paid image paths, with per-plan quick-search assertions sourced from `/api/v1/usage/summary`.
+- Added `tests/browser/test_search_browser.py` and wired it into `tests/test_browser_e2e.py` so the browser lane now proves free quick-search text, the free quick-search daily-limit upgrade gate, and paid quick-search text/image journeys in isolated persona contexts.
+- Aligned the stale runtime quick-search plan overrides in `app_settings` with the canonical product defaults (`free=5`, `starter=50`, `professional=2000`) on startup when those rows still match the known legacy values, and tightened the live/browser search assertions back to the exact plan contract.
 - Hardened `tests/browser/test_member_browser_smoke.py` so its login and dashboard quick-usage assertions stay stable under aggregate/nightly load while the rest of the dashboard contract remains strict.
 - Verified the quick-search split slice with:
   - `python -m py_compile tests/live/features/test_search_live.py tests/browser/test_search_browser.py tests/test_browser_e2e.py`

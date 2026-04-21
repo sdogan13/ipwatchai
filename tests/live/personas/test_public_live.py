@@ -143,6 +143,40 @@ def test_public_search_with_image_upload():
     _assert_public_search_results(name, response)
 
 
+def test_public_search_daily_limit_upgrade_gate():
+    name = "GET /api/v1/search/public daily free limit"
+    client = LiveClient(CONFIG)
+    response = None
+
+    for _ in range(6):
+        response = client.get("/api/v1/search/public", params={"query": "wosen"}, token=False)
+
+    if response is None:
+        REPORTER.fail(f"{name} -> no response")
+        REPORTER.record(name, False, "no response")
+        return
+
+    if response.status_code != 429:
+        REPORTER.fail(f"{name} -> expected 429, got {response.status_code}: {response.text[:200]}")
+        REPORTER.record(name, False, response.text[:200])
+        return
+
+    payload = response.json()
+    detail = payload.get("detail") or {}
+    if (
+        detail.get("error") == "daily_limit_exceeded"
+        and detail.get("current_plan") == "free"
+        and int(detail.get("daily_limit", 0)) == 5
+        and int(detail.get("remaining", -1)) == 0
+    ):
+        REPORTER.ok(f"{name} -> free daily limit gate returned structured upgrade detail")
+        REPORTER.record(name, True)
+        return
+
+    REPORTER.fail(f"{name} -> unexpected detail {detail}")
+    REPORTER.record(name, False, str(detail))
+
+
 def main() -> None:
     REPORTER.print_heading("PUBLIC PERSONA LIVE SUITE", server=CONFIG.base_url)
 
@@ -153,6 +187,7 @@ def main() -> None:
     test_public_search()
     test_public_search_with_class_filter()
     test_public_search_with_image_upload()
+    test_public_search_daily_limit_upgrade_gate()
 
     sys.exit(0 if REPORTER.summary("PUBLIC PERSONA SUMMARY") == 0 else 1)
 

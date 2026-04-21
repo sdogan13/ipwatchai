@@ -1042,7 +1042,7 @@
                 {% if plan_key == 'free' %}
                 <a href="/checkout?plan=free&billing=monthly" class="block w-full py-2.5 rounded-lg text-sm font-medium text-center no-underline" style="border:1px solid var(--color-primary);color:var(--color-primary)" x-text="t('landing.cta_try_free')">Ucretsiz Basla</a>
                 {% elif plan_key == 'enterprise' %}
-                <a href="/checkout?plan=enterprise&billing=monthly" class="block w-full py-2.5 rounded-lg text-sm font-medium text-center no-underline" style="border:1px solid var(--color-border);color:var(--color-text-primary)" x-text="t('landing.cta_contact')">Basla</a>
+                <a href="/checkout?plan=enterprise&billing=monthly" class="block w-full py-2.5 rounded-lg text-sm font-medium text-white text-center no-underline" style="background:var(--color-primary)" x-text="t('landing.cta_start')">Basla</a>
                 {% else %}
                 <a href="/checkout?plan={{ plan_key }}&billing=monthly" class="block w-full py-2.5 rounded-lg text-sm font-medium text-white text-center no-underline" style="background:var(--color-primary)" x-text="t('landing.cta_start')">Basla</a>
                 {% endif %}
@@ -1234,6 +1234,8 @@
         </div>
     </div>
 </footer>
+
+{% include 'shared/_upgrade_modal.html' %}
 
 <!-- ==================== LOGIN MODAL ==================== -->
 <div x-show="showLogin" x-cloak
@@ -1490,10 +1492,14 @@
 </div>
 
 <!-- Scripts -->
-<script src="/static/js/utils/i18n.js?v=31"></script>
+    <script>
+        window.SERVER_PLANS = {{ plans | default({}, true) | tojson }};
+    </script>
+    <script src="/static/js/utils/i18n.js?v=32"></script>
 <script src="/static/js/utils/helpers.js?v=33"></script>
 <script src="/static/js/utils/toast.js?v=31"></script>
+<script src="/static/js/utils/upgrade-modal.js?v=3"></script>
 <script src="/static/js/components/score-badge.js?v=31"></script>
-<script src="/static/js/marketing/landing.js?v=34"></script>
+    <script src="/static/js/marketing/landing.js?v=36"></script>
 </body>
 </html>

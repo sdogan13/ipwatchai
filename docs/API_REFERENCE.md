@@ -152,5 +152,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/reports/generate `
 ## Notes
 
 - public search is rate-limited separately from authenticated search
+- public landing-page search also enforces the free-tier daily quota and returns structured `429` detail when that quota is exhausted
+- authenticated quick search reads the plan daily cap from runtime settings, and startup now realigns the known legacy quick-search overrides to the current product defaults
 - some legacy routes remain for compatibility while newer flows live under `/api/v1`
 - browser and live E2E suites in `tests/` are often the best source for real end-to-end request/response behavior

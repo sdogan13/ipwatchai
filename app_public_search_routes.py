@@ -5,7 +5,7 @@ import os
 import tempfile
 from typing import Optional
 
-from fastapi import File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import File, Form, HTTPException, Query, Request, Response, UploadFile
 from PIL import Image
 
 
@@ -95,8 +95,58 @@ def register_public_search_routes(
     allowed_image_types,
     max_image_size,
     validate_image_magic_bytes,
+    rate_limit_getter=None,
 ):
     """Register the extracted public search routes on the app."""
+    from database.crud import Database
+    from services.search_service import (
+        PUBLIC_SEARCH_CLIENT_COOKIE,
+        PUBLIC_SEARCH_COOKIE_MAX_AGE_SECONDS,
+        check_public_search_eligibility,
+        get_public_search_daily_limit,
+        increment_public_search_usage,
+        resolve_public_search_client_id,
+    )
+
+    def _public_rate_limit() -> str:
+        configured = "10/minute"
+        if rate_limit_getter is not None:
+            configured = rate_limit_getter("rate_limit.public_search", "10/minute")
+
+        try:
+            configured_count = int(str(configured).split("/", 1)[0])
+        except (TypeError, ValueError):
+            configured_count = 10
+
+        minimum_count = max(10, get_public_search_daily_limit() + 1)
+        return f"{max(configured_count, minimum_count)}/minute"
+
+    def _set_public_search_cookie(response: Response, client_id: str) -> None:
+        response.set_cookie(
+            key=PUBLIC_SEARCH_CLIENT_COOKIE,
+            value=client_id,
+            max_age=PUBLIC_SEARCH_COOKIE_MAX_AGE_SECONDS,
+            httponly=True,
+            samesite="lax",
+            path="/",
+        )
+
+    def _enforce_public_search_limit(request: Request, response: Response):
+        client_id, should_set_cookie = resolve_public_search_client_id(request)
+        if should_set_cookie:
+            _set_public_search_cookie(response, client_id)
+
+        with Database() as db:
+            allowed, _, detail = check_public_search_eligibility(db, client_id)
+
+        if not allowed:
+            raise HTTPException(status_code=429, detail=detail)
+
+        return client_id
+
+    def _record_public_search_usage(client_id: str) -> None:
+        with Database() as db:
+            increment_public_search_usage(db, client_id)
 
     async def _do_public_search(
         query: str,
@@ -111,21 +161,26 @@ def register_public_search_routes(
             logger=logger,
         )
 
-    @limiter.limit("3/minute")
+    @limiter.limit(_public_rate_limit)
     async def public_search(
         request: Request,
+        response: Response,
         query: str = Query(..., min_length=2, max_length=100, description="Trademark name to search"),
     ):
         """
         Public (unauthenticated) trademark search for landing page.
-        Rate limited to 3 requests per minute per IP.
+        Uses the free-tier daily quota plus a short-term public throttle.
         Returns max 10 results with limited fields.
         """
-        return await _do_public_search(query=query)
+        client_id = _enforce_public_search_limit(request, response)
+        payload = await _do_public_search(query=query)
+        _record_public_search_usage(client_id)
+        return payload
 
-    @limiter.limit("3/minute")
+    @limiter.limit(_public_rate_limit)
     async def public_search_post(
         request: Request,
+        response: Response,
         query: Optional[str] = Form(None, max_length=100, description="Trademark name to search"),
         image: Optional[UploadFile] = File(None, description="Optional logo image for visual search"),
         classes: Optional[str] = Form(None, description="Nice classes, comma-separated (e.g. 9,35,42)"),
@@ -133,10 +188,11 @@ def register_public_search_routes(
         """
         Public (unauthenticated) trademark search with optional image upload.
         At least one of query or image must be provided.
-        Rate limited to 3 requests per minute per IP.
+        Uses the free-tier daily quota plus a short-term public throttle.
         Returns max 10 results with limited fields.
         """
-        return await public_search_post_impl(
+        client_id = _enforce_public_search_limit(request, response)
+        payload = await public_search_post_impl(
             query=query,
             image=image,
             classes=classes,
@@ -145,6 +201,8 @@ def register_public_search_routes(
             max_image_size=max_image_size,
             validate_image_magic_bytes=validate_image_magic_bytes,
         )
+        _record_public_search_usage(client_id)
+        return payload
 
     app.add_api_route(
         "/api/v1/search/public",
