@@ -333,9 +333,11 @@
                 if (typeof refreshWatchlistAndStats === 'function') refreshWatchlistAndStats();
                 showToast(t('watchlist.added_toast'), 'success');
             } catch (e) {
-                if (e.status === 400 && e.message && e.message.indexOf('limit') >= 0) {
+                var detail = e && e.data ? e.data.detail : null;
+                var errorCode = detail && detail.error ? detail.error : '';
+                if ((e.status === 403 && errorCode === 'limit_exceeded') || (e.status === 400 && e.message && e.message.indexOf('limit') >= 0)) {
                     this.open = false;
-                    if (typeof showUpgradeModal === 'function') showUpgradeModal();
+                    if (typeof showUpgradeModal === 'function') showUpgradeModal(detail);
                     else showToast(t('watchlist.plan_limit'), 'error');
                 } else if (e.status === 409 || (e.message && e.message.indexOf('zaten') >= 0)) {
                     this.open = false;

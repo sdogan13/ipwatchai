@@ -132,6 +132,66 @@ def _ensure_email_verified(session: PersonaSession) -> None:
         REPORTER.warn(f"{session.label} email verification -> setup failed ({exc})")
 
 
+def _watchlist_usage(session: PersonaSession) -> dict[str, int]:
+    response = session.client.get("/api/v1/usage/summary")
+    if response.status_code != 200:
+        raise AssertionError(f"unexpected usage summary status: {response.status_code}")
+
+    payload = response.json()
+    usage = payload.get("usage", {}).get("watchlist_items", {})
+    used = usage.get("used")
+    limit = usage.get("limit")
+    if not isinstance(used, int) or not isinstance(limit, int) or limit <= 0:
+        raise AssertionError(f"unexpected watchlist usage payload: {usage!r}")
+
+    return {"used": used, "limit": limit}
+
+
+def _create_watchlist_item_via_api(
+    session: PersonaSession,
+    *,
+    brand_name: str,
+    application_no: str,
+    description: str,
+) -> str:
+    payload = {
+        "brand_name": brand_name,
+        "nice_class_numbers": [9, 35],
+        "application_no": application_no,
+        "similarity_threshold": 0.75,
+        "description": description,
+        "monitor_text": True,
+        "monitor_visual": False,
+        "monitor_phonetic": False,
+        "alert_frequency": "daily",
+        "alert_email": False,
+    }
+    response = session.client.post("/api/v1/watchlist", json_data=payload)
+    if response.status_code not in (200, 201):
+        raise AssertionError(f"unexpected watchlist create status: {response.status_code}")
+
+    item_id = response.json().get("id")
+    if not item_id:
+        raise AssertionError("watchlist create response missing id")
+    return str(item_id)
+
+
+def _seed_watchlist_to_limit(session: PersonaSession, *, prefix: str) -> dict[str, int]:
+    usage = _watchlist_usage(session)
+    for _index in range(usage["used"], usage["limit"]):
+        suffix = uuid4().hex[:8].upper()
+        _create_watchlist_item_via_api(
+            session,
+            brand_name=f"{prefix} LIMIT {suffix}",
+            application_no=f"WL-LIMIT-{suffix}",
+            description="Browser watchlist limit seed",
+        )
+    final_usage = _watchlist_usage(session)
+    if final_usage["used"] != final_usage["limit"]:
+        raise AssertionError(f"expected watchlist to be full, got {final_usage}")
+    return final_usage
+
+
 def _login_and_clear_monitor(page, browser_config, monitor) -> None:
     login_via_modal(page, browser_config, monitor)
     monitor.clear()
@@ -248,6 +308,133 @@ def _run_free_persona_flows(playwright, session: PersonaSession) -> None:
             monitor,
             browser_config,
             watchlist_crud,
+        )
+
+        def watchlist_quick_add_limit_gate() -> None:
+            _seed_watchlist_to_limit(session, prefix=WATCHLIST_PREFIX)
+
+            page.click("#tab-btn-watchlist")
+            page.locator("#tab-content-watchlist").wait_for(state="visible")
+            page.locator('#tab-content-watchlist button[onclick="openQuickWatchlistAdd({})"]').click()
+            page.locator('input[x-model="formData.brand_name"]').wait_for(state="visible")
+            page.fill('input[x-model="formData.brand_name"]', f"{WATCHLIST_PREFIX} LIMIT {uuid4().hex[:8].upper()}")
+            page.fill('input[x-model="classesInput"]', "9, 35")
+            page.fill('input[x-model="formData.description"]', "Browser quick-add limit probe")
+
+            with page.expect_response(
+                lambda response: response.request.method == "POST" and "/api/v1/watchlist" in response.url,
+                timeout=browser_config.timeout_ms,
+            ) as create_response_info:
+                page.locator('div[x-show="open"] button.bg-blue-600').first.click()
+            create_response = create_response_info.value
+            if create_response.status != 403:
+                raise AssertionError(f"expected quick-add watchlist limit 403, got {create_response.status}")
+
+            page.locator('input[x-model="formData.brand_name"]').wait_for(state="hidden")
+            page.wait_for_function(
+                """() => {
+                    const modal = document.getElementById('upgrade-modal');
+                    return !!(modal && !modal.classList.contains('hidden'));
+                }""",
+                timeout=browser_config.timeout_ms,
+            )
+            page.evaluate(
+                """() => {
+                    if (typeof hideUpgradeModal === 'function') {
+                        hideUpgradeModal();
+                    }
+                }"""
+            )
+            page.locator("#upgrade-modal").wait_for(state="hidden")
+
+        run_browser_step(
+            "free member watchlist quick-add limit browser journey",
+            REPORTER,
+            page,
+            monitor,
+            browser_config,
+            watchlist_quick_add_limit_gate,
+            allow_console_errors=(
+                "status of 403",
+                "Failed to load resource: the server responded with a status of 403",
+            ),
+            allow_request_failures=("/api/v1/watchlist",),
+        )
+
+        def watchlist_bulk_upload_limit_gate() -> None:
+            _seed_watchlist_to_limit(session, prefix=WATCHLIST_PREFIX)
+
+            page.click("#tab-btn-watchlist")
+            page.locator("#tab-content-watchlist").wait_for(state="visible")
+            page.locator('#tab-content-watchlist button[onclick="openBulkUploadModal()"]').click()
+            page.locator("#watchlist-upload-modal").wait_for(state="visible")
+            page.locator("#upload-wl-file").set_input_files(
+                [
+                    {
+                        "name": "watchlist-limit.csv",
+                        "mimeType": "text/csv",
+                        "buffer": (
+                            b"Brand Name,Application No,Classes\n"
+                            b"Browser Upload Limit A,WL-UPLOAD-A,\"9,35\"\n"
+                            b"Browser Upload Limit B,WL-UPLOAD-B,25\n"
+                        ),
+                    }
+                ]
+            )
+
+            with page.expect_response(
+                lambda response: response.request.method == "POST"
+                and "/api/v1/watchlist/upload/detect-columns" in response.url,
+                timeout=browser_config.timeout_ms,
+            ) as detect_response_info:
+                page.click("#upload-wl-detect-btn")
+            detect_response = detect_response_info.value
+            if detect_response.status != 200:
+                raise AssertionError(f"unexpected upload detect status: {detect_response.status}")
+
+            page.locator("#upload-wl-step-2").wait_for(state="visible")
+            usage_counts = page.evaluate(
+                """() => Array.from(
+                    document.querySelectorAll('#upload-wl-usage span.text-sm.font-bold')
+                ).map((el) => el.textContent.trim())"""
+            )
+            if usage_counts[:2] != ["0", "2"]:
+                raise AssertionError(f"unexpected upload usage counts: {usage_counts}")
+
+            with page.expect_response(
+                lambda response: response.request.method == "POST"
+                and "/api/v1/watchlist/upload/with-mapping" in response.url,
+                timeout=browser_config.timeout_ms,
+            ) as upload_response_info:
+                page.click("#upload-wl-submit-btn")
+            upload_response = upload_response_info.value
+            if upload_response.status != 200:
+                raise AssertionError(f"unexpected upload submit status: {upload_response.status}")
+
+            payload = upload_response.json()
+            summary = payload.get("summary") or {}
+            if summary != {"total_rows": 2, "added": 0, "skipped": 0, "errors": 2}:
+                raise AssertionError(f"unexpected upload summary at limit: {summary}")
+            if len(payload.get("error_items") or []) != 2:
+                raise AssertionError(f"expected two upload limit errors, got {payload.get('error_items')!r}")
+
+            page.locator("#upload-wl-result").wait_for(state="visible")
+            page.evaluate(
+                """() => {
+                    if (typeof closeBulkUploadModal === 'function') {
+                        closeBulkUploadModal();
+                    }
+                }"""
+            )
+            page.locator("#watchlist-upload-modal").wait_for(state="hidden")
+
+        run_browser_step(
+            "free member watchlist upload limit browser journey",
+            REPORTER,
+            page,
+            monitor,
+            browser_config,
+            watchlist_bulk_upload_limit_gate,
         )
 
         def report_generation() -> None:

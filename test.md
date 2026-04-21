@@ -257,7 +257,7 @@ Current environment note:
 - `tests/browser/test_member_browser_smoke.py`: login, dashboard overview KPI and usage-badge contract, dashboard quick search, tab navigation, and logout browser journey coverage
 - `tests/browser/test_search_browser.py`: dedicated free quick-search text plus paid quick-search text/image browser coverage with plan-limit assertions
 - `tests/browser/test_live_search_browser.py`: free-plan live-search upgrade-gate plus business live-search happy-path browser coverage
-- `tests/browser/test_member_feature_browser.py`: deeper member watchlist CRUD, report generation, free application gate, profile/avatar, and paid-application browser flows
+- `tests/browser/test_member_feature_browser.py`: deeper member watchlist CRUD, quick-add limit gate, bulk-upload limit gate, report generation, free application gate, profile/avatar, and paid-application browser flows
 - `tests/browser/test_business_browser.py`: business holder/attorney portfolio modal journeys, in-modal entity search, and CSV export trigger coverage
 - `tests/browser/test_watchlist_assets_browser.py`: free-plan watchlist logo gate coverage plus env-gated paid watchlist logo upload/delete asset coverage
 - `tests/browser/test_alerts_browser.py`: member alert detail acknowledge, inline resolve/dismiss, and appeals filter/sort browser journeys on seeded alerts
@@ -650,6 +650,14 @@ Environment Notes:
 - Hardened `tests/browser/test_alerts_browser.py` so the seeded alert actions use the page’s inline resolve/dismiss handlers directly and the suite authenticates by token bootstrap instead of redoing repeated modal logins in late aggregate runs.
 - Hardened `tests/browser/test_member_feature_browser.py` to close any leftover report-generation modal before later application/profile steps, preventing one failed modal step from poisoning the rest of the browser delegate.
 - Hardened `tests/browser/test_billing_browser.py` so recoverable checkout-login `429` responses no longer fail the browser lane once the retry path succeeds.
+- Added direct watchlist-limit regressions for the remaining uncovered paths:
+  - `tests/browser/test_member_feature_browser.py` now proves the dashboard quick-add modal opens the upgrade flow at watchlist capacity and the dashboard bulk-upload modal shows `0 addable / N blocked` behavior plus the capped upload result at full capacity.
+  - `tests/test_api_endpoints.py` now proves `/api/v1/watchlist` maps repository watchlist-cap hits to the structured `403 limit_exceeded` payload, `/watchlist/bulk` marks overflow rows as failed, and both upload services stop at capacity while returning the correct error counts/items.
+- Fixed `services/watchlist_service.py` so manual watchlist creation maps the repository watchlist-limit `ValueError` into the same structured `403 limit_exceeded` contract used by the rest of the upgrade flows.
+- Verified the watchlist-limit coverage slice with:
+  - `python -m py_compile services/watchlist_service.py tests/test_api_endpoints.py tests/browser/test_member_feature_browser.py`
+  - `python -m pytest tests/test_api_endpoints.py -q -k "create_watchlist_item_record_maps_limit_value_error_to_structured_403 or watchlist_service_import_watchlist_items_bulk_marks_overflow_items_as_failed or watchlist_service_import_watchlist_upload_with_mapping_respects_watchlist_capacity or watchlist_service_import_watchlist_upload_file_respects_watchlist_capacity"` (`4 passed`)
+  - `python tests/browser/test_member_feature_browser.py` (`15/15`)
 - Hardened `tests/test_browser_e2e.py` to provision shared free/paid/business personas once per aggregate run, pass those creds into all browser delegates, and wait for `/health` recovery between delegates.
 - Hardened `tests/test_nightly_e2e.py` to provision the same shared personas once for the nightly lane, pass them into both the live and browser smoke phases, and wait for server recovery between live smoke, browser smoke, and the stateful lane.
 - Added `tests/live/helpers/test_accounts.py` so routine smoke coverage reuses deterministic managed free/starter/professional personas instead of self-registering random one-off accounts on every run.

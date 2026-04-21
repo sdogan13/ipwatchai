@@ -567,6 +567,17 @@ async def create_watchlist_item_record(
                 "scan_item_id": UUID(str(item["id"])),
             }
         except ValueError as exc:
+            if "maximum watchlist items limit" in str(exc).lower():
+                capacity = _get_watchlist_capacity(
+                    db,
+                    current_user,
+                    user_plan_getter=user_plan_getter,
+                    plan_limit_getter=plan_limit_getter,
+                )
+                _raise_watchlist_limit_exceeded(
+                    capacity["max_items"],
+                    capacity["current_count"],
+                )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(exc),

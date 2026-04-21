@@ -3670,6 +3670,51 @@ async def test_watchlist_service_create_watchlist_item_record_uses_trademark_ai_
 
 
 @pytest.mark.asyncio
+async def test_watchlist_service_create_watchlist_item_record_maps_limit_value_error_to_structured_403():
+    from fastapi import HTTPException
+    from models.schemas import WatchlistItemCreate
+    from services.watchlist_service import create_watchlist_item_record
+
+    current_user = MagicMock()
+    current_user.organization_id = uuid.uuid4()
+    current_user.id = uuid.uuid4()
+
+    create_db_cm = MagicMock()
+    create_db = MagicMock()
+    create_cursor = MagicMock()
+    create_db.cursor.return_value = create_cursor
+    create_db_cm.__enter__.return_value = create_db
+    create_db_cm.__exit__.return_value = False
+    create_cursor.fetchone.return_value = {"count": 3}
+
+    watchlist_crud = MagicMock()
+    watchlist_crud.create.side_effect = ValueError("Organization has reached maximum watchlist items limit")
+
+    data = WatchlistItemCreate(
+        brand_name="LIMIT TEST",
+        nice_class_numbers=[9, 35],
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await create_watchlist_item_record(
+            data=data,
+            current_user=current_user,
+            database_factory=MagicMock(return_value=create_db_cm),
+            watchlist_crud=watchlist_crud,
+            user_plan_getter=MagicMock(return_value={"plan_name": "free"}),
+            plan_limit_getter=MagicMock(return_value=3),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == {
+        "error": "limit_exceeded",
+        "message": "Izleme listesi limitinize ulastiniz (3). Daha fazla eklemek icin planinizi yukseltin.",
+        "current_count": 3,
+        "max_items": 3,
+    }
+
+
+@pytest.mark.asyncio
 async def test_extracted_get_watchlist_item_delegates_to_service():
     from api.watchlist_routes import get_watchlist_item
 
@@ -4317,6 +4362,79 @@ async def test_watchlist_service_import_watchlist_items_bulk_skips_duplicates_an
 
 
 @pytest.mark.asyncio
+async def test_watchlist_service_import_watchlist_items_bulk_marks_overflow_items_as_failed():
+    from models.schemas import WatchlistBulkImport, WatchlistItemCreate
+    from services.watchlist_service import import_watchlist_items_bulk
+
+    current_user = MagicMock()
+    current_user.id = uuid.uuid4()
+    current_user.organization_id = uuid.uuid4()
+
+    mock_db_cm = MagicMock()
+    mock_db = MagicMock()
+    mock_cursor = MagicMock()
+    mock_db.cursor.return_value = mock_cursor
+    mock_db_cm.__enter__.return_value = mock_db
+    mock_db_cm.__exit__.return_value = False
+    mock_cursor.fetchone.return_value = {"count": 1}
+    mock_cursor.fetchall.return_value = []
+
+    created_item_id = uuid.uuid4()
+    watchlist_crud = MagicMock()
+    watchlist_crud.create.return_value = {"id": created_item_id}
+
+    data = WatchlistBulkImport(
+        items=[
+            WatchlistItemCreate(
+                brand_name="Create 1",
+                nice_class_numbers=[9],
+                application_no="APP-1",
+            ),
+            WatchlistItemCreate(
+                brand_name="Overflow 1",
+                nice_class_numbers=[35],
+                application_no="APP-2",
+            ),
+            WatchlistItemCreate(
+                brand_name="Overflow 2",
+                nice_class_numbers=[42],
+                application_no="APP-3",
+            ),
+        ]
+    )
+
+    payload = await import_watchlist_items_bulk(
+        data=data,
+        current_user=current_user,
+        database_factory=MagicMock(return_value=mock_db_cm),
+        watchlist_crud=watchlist_crud,
+        user_plan_getter=MagicMock(return_value={"plan_name": "starter"}),
+        plan_limit_getter=MagicMock(return_value=2),
+    )
+
+    assert payload["result"] == {
+        "total": 3,
+        "created": 1,
+        "failed": 2,
+        "skipped": 0,
+        "errors": [
+            {
+                "index": 1,
+                "brand_name": "Overflow 1",
+                "error": "Izleme listesi limiti asildi (2)",
+            },
+            {
+                "index": 2,
+                "brand_name": "Overflow 2",
+                "error": "Izleme listesi limiti asildi (2)",
+            },
+        ],
+    }
+    assert payload["scan_item_ids"] == [created_item_id]
+    watchlist_crud.create.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_extracted_preview_portfolio_import_delegates_to_service():
     from api.watchlist_routes import preview_portfolio_import
     from models.schemas import PortfolioPreviewRequest
@@ -4725,6 +4843,58 @@ async def test_watchlist_service_import_watchlist_upload_with_mapping_generates_
 
 
 @pytest.mark.asyncio
+async def test_watchlist_service_import_watchlist_upload_with_mapping_respects_watchlist_capacity():
+    from services.watchlist_service import import_watchlist_upload_with_mapping
+
+    current_user = MagicMock()
+    current_user.id = uuid.uuid4()
+    current_user.organization_id = uuid.uuid4()
+
+    db_cm = MagicMock()
+    db = MagicMock()
+    cursor = MagicMock()
+    db.cursor.return_value = cursor
+    db_cm.__enter__.return_value = db
+    db_cm.__exit__.return_value = False
+    cursor.fetchall.return_value = []
+    cursor.fetchone.return_value = {"count": 1}
+
+    created_item_uuid = uuid.UUID("33333333-3333-3333-3333-333333333333")
+
+    payload = await import_watchlist_upload_with_mapping(
+        contents=(
+            b"Brand,Classes,Application No\n"
+            b"Fresh Mark 1,\"9, 35\",NEW-1\n"
+            b"Fresh Mark 2,25,NEW-2\n"
+        ),
+        filename="watchlist.csv",
+        column_mapping='{"brand_name":"Brand","nice_classes":"Classes","application_no":"Application No"}',
+        current_user=current_user,
+        database_factory=MagicMock(return_value=db_cm),
+        user_plan_getter=MagicMock(return_value={"plan_name": "starter"}),
+        plan_limit_getter=MagicMock(return_value=2),
+        uuid_factory=MagicMock(return_value=created_item_uuid),
+    )
+
+    assert payload["result"].summary.total_rows == 2
+    assert payload["result"].summary.added == 1
+    assert payload["result"].summary.skipped == 0
+    assert payload["result"].summary.errors == 1
+    assert len(payload["result"].error_items) == 1
+    assert payload["result"].error_items[0].row == 3
+    assert payload["result"].error_items[0].error == "Izleme listesi limiti asildi (2)"
+    assert payload["scan_item_ids"] == [created_item_uuid]
+
+    insert_calls = [
+        call
+        for call in cursor.execute.call_args_list
+        if "INSERT INTO watchlist_mt" in call.args[0]
+    ]
+    assert len(insert_calls) == 1
+    db.commit.assert_called_once_with()
+
+
+@pytest.mark.asyncio
 async def test_extracted_upload_file_delegates_to_service_and_schedules_scans():
     from api.watchlist_routes import (
         APP_NO_VARIANTS,
@@ -4814,6 +4984,71 @@ async def test_watchlist_service_import_watchlist_upload_file_reports_missing_co
             "reason": "Hangi siniflarda arama yapilacagini belirler",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_watchlist_service_import_watchlist_upload_file_respects_watchlist_capacity():
+    from api.watchlist_routes import (
+        APP_NO_VARIANTS,
+        BRAND_NAME_VARIANTS,
+        BULLETIN_VARIANTS,
+        CLASS_VARIANTS,
+        _find_column,
+        _parse_nice_classes,
+    )
+    from services.watchlist_service import import_watchlist_upload_file
+
+    current_user = MagicMock()
+    current_user.id = uuid.uuid4()
+    current_user.organization_id = uuid.uuid4()
+
+    db_cm = MagicMock()
+    db = MagicMock()
+    cursor = MagicMock()
+    db.cursor.return_value = cursor
+    db_cm.__enter__.return_value = db
+    db_cm.__exit__.return_value = False
+    cursor.fetchall.return_value = []
+    cursor.fetchone.return_value = {"count": 0}
+
+    created_item_uuid = uuid.UUID("44444444-4444-4444-4444-444444444444")
+
+    payload = await import_watchlist_upload_file(
+        contents=(
+            b"Brand Name,Application No,Classes\n"
+            b"Fresh Mark 1,NEW-1,\"9,35\"\n"
+            b"Fresh Mark 2,NEW-2,25\n"
+        ),
+        filename="watchlist.csv",
+        current_user=current_user,
+        brand_name_variants=BRAND_NAME_VARIANTS,
+        application_no_variants=APP_NO_VARIANTS,
+        class_variants=CLASS_VARIANTS,
+        bulletin_variants=BULLETIN_VARIANTS,
+        find_column=_find_column,
+        parse_nice_classes=_parse_nice_classes,
+        database_factory=MagicMock(return_value=db_cm),
+        user_plan_getter=MagicMock(return_value={"plan_name": "free"}),
+        plan_limit_getter=MagicMock(return_value=1),
+        uuid_factory=MagicMock(return_value=created_item_uuid),
+    )
+
+    assert payload["result"].summary.total_rows == 2
+    assert payload["result"].summary.added == 1
+    assert payload["result"].summary.skipped == 0
+    assert payload["result"].summary.errors == 1
+    assert len(payload["result"].error_items) == 1
+    assert payload["result"].error_items[0].row == 3
+    assert payload["result"].error_items[0].error == "Izleme listesi limiti asildi (1)"
+    assert payload["scan_item_ids"] == [created_item_uuid]
+
+    insert_calls = [
+        call
+        for call in cursor.execute.call_args_list
+        if "INSERT INTO watchlist_mt" in call.args[0]
+    ]
+    assert len(insert_calls) == 1
+    db.commit.assert_called_once_with()
 
 
 @pytest.mark.asyncio
