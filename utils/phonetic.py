@@ -18,6 +18,8 @@ Usage:
 
 from difflib import SequenceMatcher
 
+from utils.idf_scoring import normalize_turkish
+
 # Turkish consonant voicing pairs — these are perceptually similar in Turkish
 # d↔t, b↔p, g↔k (hard g), v↔f, z↔s
 TURKISH_PHONETIC_MAP = {
@@ -37,16 +39,10 @@ _VOWELS = set('aeıioöuüAEIİOÖUÜ')
 
 
 def _normalize_for_phonetic(text: str) -> str:
-    """Lowercase + fold Turkish chars to ASCII for phonetic comparison."""
+    """Use shared text folding, then remove separators for phonetic comparison."""
     if not text:
         return ""
-    # Turkish-aware lowercasing
-    text = text.replace('İ', 'i').replace('I', 'ı')
-    text = text.lower()
-    for tr_char, en_char in _TR_FOLD.items():
-        text = text.replace(tr_char, en_char)
-    # Keep only alphanumeric
-    return ''.join(c for c in text if c.isalnum())
+    return ''.join(c for c in normalize_turkish(text) if c.isalnum())
 
 
 def _levenshtein(s1: str, s2: str) -> int:

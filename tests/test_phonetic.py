@@ -55,6 +55,9 @@ class TestNormalization:
         result = _normalize_for_phonetic("I")
         assert result == "i"
 
+    def test_extended_latin_diacritic_uses_shared_fold(self):
+        assert _normalize_for_phonetic("meyâl") == "meyal"
+
 
 # ============================================================
 # Levenshtein Distance

@@ -69,6 +69,9 @@ class TestNormalizeTurkish:
     def test_mixed(self):
         assert normalize_turkish("İSTANBUL ŞEHRİ") == "istanbul sehri"
 
+    def test_extended_latin_diacritic_fold(self):
+        assert normalize_turkish("meyâl") == "meyal"
+
 
 # ============================================================
 # Substring Containment

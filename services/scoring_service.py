@@ -46,11 +46,14 @@ _PARTIAL_MULTI_ANCHOR_CHANGED_MATTER_CAP = 0.58
 _SINGLE_ANCHOR_ASYMMETRIC_ADDED_MATTER_CAP = 0.68
 _WEAK_FUZZY_ANCHOR_FRAGMENT_CAP = 0.62
 _WEAK_FUZZY_ANCHOR_QUALITY_CAP = 0.68
+_WEAK_PHONETIC_ANCHOR_FRAGMENT_CAP = 0.58
+_WEAK_PHONETIC_ANCHOR_QUALITY_CAP = 0.68
 _FUZZY_ANCHOR_FRAGMENT_LENGTH_RATIO = 0.78
 _FUZZY_ANCHOR_STRONG_LENGTH_RATIO = 0.80
 _FUZZY_ANCHOR_STRONG_RAW_MIN = 0.78
 _MISSING_DOMINANT_ANCHOR_CAP = 0.62
 _SHORT_ANCHOR_NON_EXACT_MAX_LENGTH = 2
+_SHORT_NON_EXACT_VISUAL_MAX_LENGTH = 6
 _SHORT_ANCHOR_NON_EXACT_CAP = 0.45
 _WEAK_TEXT_VISUAL_LOW_MAX = 0.80
 _WEAK_TEXT_VISUAL_MID_MAX = 0.90
@@ -80,6 +83,8 @@ _LIMITED_TEXT_CAP_MARKERS = frozenset(
         "added_matter_single_anchor_asymmetric_added_matter_cap",
         "weak_fuzzy_anchor_fragment_cap",
         "weak_fuzzy_anchor_quality_cap",
+        "weak_phonetic_anchor_fragment_cap",
+        "weak_phonetic_anchor_quality_cap",
     }
 )
 
@@ -1173,7 +1178,7 @@ def _fuzzy_anchor_metrics(
     }
 
 
-def _weak_fuzzy_anchor_guard(
+def _anchor_quality_guard(
     *,
     q_classes: Dict[str, Set[str]],
     t_classes: Dict[str, Set[str]],
@@ -1198,13 +1203,15 @@ def _weak_fuzzy_anchor_guard(
         "calibrated_score_cap": None,
         "calibration_breakdown": {},
         "metrics": {},
+        "match_type": "",
     }
 
     if not query_anchor_tokens or len(anchor_matches) != 1:
         return base_record
 
     match = anchor_matches[0]
-    if match.get("match_type") != "fuzzy":
+    match_type = match.get("match_type")
+    if match_type not in {"fuzzy", "phonetic"}:
         return base_record
 
     metrics = _fuzzy_anchor_metrics(
@@ -1243,22 +1250,36 @@ def _weak_fuzzy_anchor_guard(
             {
                 "reason": "strong_near_miss",
                 "metrics": metrics,
+                "match_type": match_type,
             }
         )
         return record
 
     fragment_like = metrics["length_ratio"] < _FUZZY_ANCHOR_FRAGMENT_LENGTH_RATIO
-    floor = 0.46 if fragment_like else 0.56
-    ceiling = (
-        _WEAK_FUZZY_ANCHOR_FRAGMENT_CAP
-        if fragment_like
-        else _WEAK_FUZZY_ANCHOR_QUALITY_CAP
-    )
-    cap_reason = (
-        "weak_fuzzy_anchor_fragment_cap"
-        if fragment_like
-        else "weak_fuzzy_anchor_quality_cap"
-    )
+    if match_type == "phonetic":
+        floor = 0.42 if fragment_like else 0.54
+        ceiling = (
+            _WEAK_PHONETIC_ANCHOR_FRAGMENT_CAP
+            if fragment_like
+            else _WEAK_PHONETIC_ANCHOR_QUALITY_CAP
+        )
+        cap_reason = (
+            "weak_phonetic_anchor_fragment_cap"
+            if fragment_like
+            else "weak_phonetic_anchor_quality_cap"
+        )
+    else:
+        floor = 0.46 if fragment_like else 0.56
+        ceiling = (
+            _WEAK_FUZZY_ANCHOR_FRAGMENT_CAP
+            if fragment_like
+            else _WEAK_FUZZY_ANCHOR_QUALITY_CAP
+        )
+        cap_reason = (
+            "weak_fuzzy_anchor_fragment_cap"
+            if fragment_like
+            else "weak_fuzzy_anchor_quality_cap"
+        )
     raw_evidence = (
         (metrics["raw_fuzzy_ratio"] * 0.35)
         + (metrics["length_ratio"] * 0.25)
@@ -1270,10 +1291,15 @@ def _weak_fuzzy_anchor_guard(
 
     return {
         "applies": True,
-        "reason": "fragment_like_fuzzy_anchor" if fragment_like else "weak_fuzzy_anchor_quality",
+        "reason": (
+            f"fragment_like_{match_type}_anchor"
+            if fragment_like
+            else f"weak_{match_type}_anchor_quality"
+        ),
         "cap_reason": cap_reason,
         "score_cap": ceiling,
         "calibrated_score_cap": calibrated_score,
+        "match_type": match_type,
         "calibration_breakdown": _calibration_record(
             floor=floor,
             ceiling=ceiling,
@@ -1290,6 +1316,22 @@ def _weak_fuzzy_anchor_guard(
         ),
         "metrics": metrics,
     }
+
+
+def _weak_fuzzy_anchor_guard(
+    *,
+    q_classes: Dict[str, Set[str]],
+    t_classes: Dict[str, Set[str]],
+    matches: List[Dict],
+    use_translated_idf: bool = False,
+) -> Dict:
+    """Compatibility wrapper for callers that still use the old guard name."""
+    return _anchor_quality_guard(
+        q_classes=q_classes,
+        t_classes=t_classes,
+        matches=matches,
+        use_translated_idf=use_translated_idf,
+    )
 
 
 def _count_grouped_tokens(groups: Dict[str, List[str]], *keys: str) -> int:
@@ -1740,6 +1782,20 @@ def _score_textual_path_v2(
     if not q_tokens or not t_tokens:
         score = min(max(text_sim, semantic_sim, phonetic_sim) * 0.50, 0.45)
         breakdown["scoring_path"] = "TEXT_EMPTY"
+        breakdown["caps_applied"] = [
+            "semantic_or_phonetic_without_lexical_anchor_cap:0.45"
+        ]
+        breakdown["anchor_quality_guard"] = {
+            "applies": False,
+            "reason": "no_lexical_anchor",
+            "cap_reason": "",
+            "score_cap": None,
+            "calibrated_score_cap": None,
+            "calibration_breakdown": {},
+            "metrics": {},
+            "match_type": "",
+        }
+        breakdown["fuzzy_anchor_guard"] = breakdown["anchor_quality_guard"]
         breakdown["total"] = round(score, 4)
         return breakdown["total"], breakdown
 
@@ -1942,7 +1998,7 @@ def _score_textual_path_v2(
         matches=matches,
         use_translated_idf=use_translated_idf,
     )
-    fuzzy_anchor_guard = _weak_fuzzy_anchor_guard(
+    anchor_quality_guard = _anchor_quality_guard(
         q_classes=q_classes,
         t_classes=t_classes,
         matches=matches,
@@ -2039,13 +2095,13 @@ def _score_textual_path_v2(
         score = min(score, added_matter_effective_cap or added_matter_cap)
         cap_notes.append(f"added_matter_{added_matter_cap_reason}_cap:{added_matter_cap:.2f}")
 
-    fuzzy_anchor_cap = fuzzy_anchor_guard.get("score_cap")
-    fuzzy_anchor_effective_cap = fuzzy_anchor_guard.get("calibrated_score_cap")
-    fuzzy_anchor_cap_reason = fuzzy_anchor_guard.get("cap_reason")
-    if fuzzy_anchor_guard.get("applies") and fuzzy_anchor_cap_reason:
-        score = min(score, fuzzy_anchor_effective_cap or fuzzy_anchor_cap)
-        cap_notes.append(f"{fuzzy_anchor_cap_reason}:{fuzzy_anchor_cap:.2f}")
-        scoring_path = "TEXT_WEAK_FUZZY_ANCHOR"
+    anchor_quality_cap = anchor_quality_guard.get("score_cap")
+    anchor_quality_effective_cap = anchor_quality_guard.get("calibrated_score_cap")
+    anchor_quality_cap_reason = anchor_quality_guard.get("cap_reason")
+    if anchor_quality_guard.get("applies") and anchor_quality_cap_reason:
+        score = min(score, anchor_quality_effective_cap or anchor_quality_cap)
+        cap_notes.append(f"{anchor_quality_cap_reason}:{anchor_quality_cap:.2f}")
+        scoring_path = "TEXT_WEAK_NON_EXACT_ANCHOR"
 
     if (
         breakdown["short_anchor_guard"]
@@ -2078,10 +2134,11 @@ def _score_textual_path_v2(
     breakdown["phonetic_support_score"] = round(phonetic_support_score, 4)
     breakdown["dominant_core_score"] = round(dominant_core_score, 4)
     breakdown["added_matter_breakdown"] = added_matter_breakdown
-    breakdown["fuzzy_anchor_guard"] = fuzzy_anchor_guard
+    breakdown["anchor_quality_guard"] = anchor_quality_guard
+    breakdown["fuzzy_anchor_guard"] = anchor_quality_guard
     breakdown["calibration_breakdown"] = (
-        fuzzy_anchor_guard.get("calibration_breakdown")
-        if fuzzy_anchor_guard.get("applies")
+        anchor_quality_guard.get("calibration_breakdown")
+        if anchor_quality_guard.get("applies")
         else added_matter_breakdown.get("calibration_breakdown", {})
     )
     breakdown["dominant_anchor_guard"] = dominant_anchor_guard
@@ -2641,7 +2698,7 @@ def _combine_text_visual_v2(
     support = min(text_score, visual_score)
     if not allow_agreement_boost:
         boost = 0.0
-        reason = "limited text visual max-only score"
+        reason = "guarded text visual max-only score"
     elif text_score >= 0.40 and visual_score >= 0.40:
         boost = min(0.08, support * 0.10)
         reason = "text and visual agreement boost"
@@ -2686,6 +2743,97 @@ def _has_weak_fuzzy_anchor_cap(breakdown: Optional[Dict]) -> bool:
         str(cap_note).startswith("weak_fuzzy_anchor_")
         for cap_note in breakdown.get("caps_applied") or []
     )
+
+
+def _has_weak_phonetic_anchor_cap(breakdown: Optional[Dict]) -> bool:
+    if not breakdown:
+        return False
+    return any(
+        str(cap_note).startswith("weak_phonetic_anchor_")
+        for cap_note in breakdown.get("caps_applied") or []
+    )
+
+
+def _has_weak_anchor_quality_cap(breakdown: Optional[Dict]) -> bool:
+    return _has_weak_fuzzy_anchor_cap(breakdown) or _has_weak_phonetic_anchor_cap(
+        breakdown
+    )
+
+
+def _short_non_exact_anchor_visual_guard(
+    breakdown: Optional[Dict],
+    visual_score: float,
+    visual_breakdown: Optional[Dict],
+) -> Dict:
+    record = {
+        "applies": False,
+        "reason": "",
+        "anchor_token": "",
+        "match_type": "",
+        "ocr_disagreement": False,
+        "visual_score": round(_clamp_score(visual_score), 4),
+    }
+    if not breakdown or _clamp_score(visual_score) <= 0.0:
+        return record
+    if _visual_has_strong_ocr(visual_breakdown) or _visual_has_very_strong_clip_dino(
+        visual_breakdown
+    ):
+        return record
+
+    token_classes = breakdown.get("token_classes") or {}
+    query_classes = token_classes.get("query") or {}
+    query_anchor_tokens = set()
+    query_token_count = 0
+    for role, tokens in query_classes.items():
+        token_set = set(tokens or [])
+        query_token_count += len(token_set)
+        if role in _ANCHOR_TOKEN_ROLES:
+            query_anchor_tokens.update(token_set)
+    if query_token_count != 1 or len(query_anchor_tokens) != 1:
+        return record
+
+    anchor_token = next(iter(query_anchor_tokens))
+    if len(anchor_token) > _SHORT_NON_EXACT_VISUAL_MAX_LENGTH:
+        return record
+
+    anchor_matches = [
+        match
+        for match in breakdown.get("matched_words") or []
+        if (
+            match.get("query_word") == anchor_token
+            and match.get("token_role") in _ANCHOR_TOKEN_ROLES
+            and match.get("match_type") in {"fuzzy", "phonetic"}
+        )
+    ]
+    if len(anchor_matches) != 1:
+        return record
+
+    ocr_value = _visual_component_value(visual_breakdown, "ocr")
+    ocr_disagreement = bool(
+        visual_breakdown
+        and (
+            visual_breakdown.get("ocr_disagreement") is True
+            or (ocr_value > 0.0 and ocr_value < _OCR_DISAGREEMENT_MAX)
+        )
+    )
+    if not ocr_disagreement:
+        return record
+
+    record.update(
+        {
+            "applies": True,
+            "reason": "short_non_exact_anchor_ocr_disagreement",
+            "anchor_token": anchor_token,
+            "match_type": anchor_matches[0].get("match_type", ""),
+            "ocr_disagreement": True,
+            "ocr_similarity": round(ocr_value, 4),
+            "strong_ocr": _visual_has_strong_ocr(visual_breakdown),
+            "very_strong_clip_dino": _visual_has_very_strong_clip_dino(
+                visual_breakdown
+            ),
+        }
+    )
+    return record
 
 
 def _visual_component_value(visual_breakdown: Optional[Dict], component: str) -> float:
@@ -2984,11 +3132,22 @@ def score_pair(
             breakdown_b=breakdown_b,
         )
         translation_weak_fuzzy_anchor = _has_weak_fuzzy_anchor_cap(breakdown_b)
-        if translation_weak_fuzzy_anchor and path_b_score > path_a_score:
+        translation_weak_phonetic_anchor = _has_weak_phonetic_anchor_cap(breakdown_b)
+        translation_weak_anchor_quality = _has_weak_anchor_quality_cap(breakdown_b)
+        if translation_weak_anchor_quality and path_b_score > path_a_score:
             translation_quality_flags = list(translation_quality_flags)
             if "translation_weak_fuzzy_anchor" not in translation_quality_flags:
                 translation_quality_flags.append("translation_weak_fuzzy_anchor")
+            if (
+                translation_weak_phonetic_anchor
+                and "translation_weak_phonetic_anchor" not in translation_quality_flags
+            ):
+                translation_quality_flags.append("translation_weak_phonetic_anchor")
+            if "translation_weak_non_exact_anchor" not in translation_quality_flags:
+                translation_quality_flags.append("translation_weak_non_exact_anchor")
         breakdown_b["translation_weak_fuzzy_anchor"] = translation_weak_fuzzy_anchor
+        breakdown_b["translation_weak_phonetic_anchor"] = translation_weak_phonetic_anchor
+        breakdown_b["translation_weak_non_exact_anchor"] = translation_weak_anchor_quality
         if translation_quality_flags:
             if translation_path_b_cap is not None:
                 breakdown_b["raw_total"] = raw_path_b_score
@@ -3027,13 +3186,24 @@ def score_pair(
         visual_sim,
         visual_diag,
     )
+    short_non_exact_anchor_visual_guard = _short_non_exact_anchor_visual_guard(
+        selected_breakdown,
+        visual_sim,
+        visual_diag,
+    )
+    short_non_exact_anchor_visual_guard_active = bool(
+        short_non_exact_anchor_visual_guard.get("applies")
+    )
+    agreement_boost_suppressed = (
+        limited_text_visual_guard_active or short_non_exact_anchor_visual_guard_active
+    )
     combiner_text_score = (
         0.0 if weak_text_cap_active and visual_sim > 0 else selected_text_score
     )
     combined = _combine_text_visual_v2(
         combiner_text_score,
         visual_sim,
-        allow_agreement_boost=not limited_text_visual_guard_active,
+        allow_agreement_boost=not agreement_boost_suppressed,
     )
     (
         final_total,
@@ -3081,7 +3251,11 @@ def score_pair(
         "weak_text_cap_active": weak_text_cap_active,
         "limited_text_cap_active": limited_text_cap_active,
         "limited_text_visual_guard_active": limited_text_visual_guard_active,
-        "agreement_boost_suppressed": limited_text_visual_guard_active,
+        "short_non_exact_anchor_visual_guard": short_non_exact_anchor_visual_guard,
+        "short_non_exact_anchor_visual_guard_active": (
+            short_non_exact_anchor_visual_guard_active
+        ),
+        "agreement_boost_suppressed": agreement_boost_suppressed,
         "effective_text_score_for_combiner": round(combiner_text_score, 4),
         "weak_text_visual_cap": weak_text_visual_cap,
         "weak_text_visual_cap_reason": weak_text_visual_cap_reason,
@@ -3117,6 +3291,11 @@ def score_pair(
         "weak_text_cap_active": weak_text_cap_active,
         "limited_text_cap_active": limited_text_cap_active,
         "limited_text_visual_guard_active": limited_text_visual_guard_active,
+        "short_non_exact_anchor_visual_guard_active": (
+            short_non_exact_anchor_visual_guard_active
+        ),
+        "short_non_exact_anchor_visual_guard": short_non_exact_anchor_visual_guard,
+        "agreement_boost_suppressed": agreement_boost_suppressed,
         "weak_text_visual_cap": weak_text_visual_cap,
         "weak_text_visual_cap_reason": weak_text_visual_cap_reason,
         "weak_text_visual_calibration": weak_text_visual_calibration,
@@ -3133,6 +3312,8 @@ def score_pair(
         breakdown["decision_reason"] += "; weak text visual cap applied"
     if limited_text_visual_guard_active:
         breakdown["decision_reason"] += "; limited text visual agreement suppressed"
+    if short_non_exact_anchor_visual_guard_active:
+        breakdown["decision_reason"] += "; short non-exact anchor visual agreement suppressed"
     if limited_text_visual_cap is not None:
         breakdown["decision_reason"] += "; limited text visual cap applied"
 

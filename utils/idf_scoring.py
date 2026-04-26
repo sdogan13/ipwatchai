@@ -27,8 +27,9 @@ Usage:
     # result['adjusted_score'] will be ~0.15 (only generic "patent" matches)
 """
 
-import re
 import logging
+import re
+import unicodedata
 from typing import Dict, List, Tuple, Optional, Set
 from functools import lru_cache
 from difflib import SequenceMatcher
@@ -283,6 +284,13 @@ def normalize_turkish(text: str) -> str:
 
     for tr_char, en_char in replacements.items():
         text = text.replace(tr_char, en_char)
+
+    # Fold extended Latin diacritics after Turkish-specific I/İ handling.
+    text = ''.join(
+        char
+        for char in unicodedata.normalize('NFKD', text)
+        if not unicodedata.combining(char)
+    )
 
     # Replace all non-alphanumeric characters with spaces
     text = re.sub(r'[^a-z0-9\s]', ' ', text)

@@ -158,7 +158,8 @@ Current version: `v2_text_visual`.
 - weak textual evidence, including generic-only, missing-anchor, dominant-anchor-missing, or semantic/phonetic-only support, prevents moderate visual similarity from creating a high conflict score
 - partial multi-anchor matches with changed matter on both sides are capped as limited text evidence, so one shared token cannot be boosted into high risk by moderate visual similarity
 - single-anchor matches with generic/service query matter and different target identity matter are treated as limited text evidence unless the full core is copied
-- weak fuzzy dominant-anchor matches are calibrated by length ratio, edit distance, and anchor coverage; full-length one-edit variants can remain meaningful while fragment-like or weak translated fuzzy matches are capped as limited text evidence
+- weak non-exact dominant-anchor matches, including fuzzy and phonetic anchors, are calibrated by length ratio, edit distance, and anchor coverage; full-length one-edit variants can remain meaningful while fragment-like or weak translated matches are capped as limited text evidence
+- short one-token marks suppress text/visual agreement boosts when their only anchor match is non-exact and wordmark OCR disagrees, unless OCR is strong or CLIP+DINO are independently very strong
 - guarded caps are calibrated continuously from coverage, match quality, and added-matter evidence; cap values remain policy ceilings rather than automatic final scores
 - OCR disagreement between wordmark logos caps moderate CLIP/DINO visual evidence; weak-text cases require strong OCR agreement or very strong CLIP+DINO evidence before visual similarity can drive high risk
 - `name_tr` values that normalize to the original candidate name cannot beat Path A solely because translated IDF flags classify tokens differently

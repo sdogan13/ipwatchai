@@ -198,6 +198,10 @@ class TestTokenization:
         result = normalize_turkish("DOĞAN PATENT")
         assert result == "dogan patent"
 
+    def test_extended_latin_diacritics_fold_without_fragmenting(self):
+        result = normalize_turkish("meyâl café")
+        assert result == "meyal cafe"
+
     def test_single_char_excluded(self):
         tokens = tokenize("A B NIKE")
         assert tokens == {"nike"}
@@ -1902,6 +1906,127 @@ class TestRegressionKnownPairs:
         guard = breakdown["fuzzy_anchor_guard"]
         assert guard["applies"] is True
         assert guard["metrics"]["strong_near_miss"] is False
+
+    def test_full_length_one_edit_short_anchor_remains_meaningful(self):
+        TestIDFWaterfall._seed_distinctive_tokens("nayya", "naya")
+
+        result = score_pair(
+            "nayya",
+            "naya",
+            text_sim=0.75,
+            semantic_sim=0.2,
+        )
+
+        assert result["text_idf_score"] >= 0.70
+        assert not any("weak_" in cap and "_anchor_" in cap for cap in result["caps_applied"])
+        guard = result["textual_breakdown"]["path_a"]["anchor_quality_guard"]
+        assert guard["applies"] is False
+        assert guard["reason"] == "strong_near_miss"
+
+    def test_short_phonetic_fragment_anchor_is_capped_below_high(self):
+        TestIDFWaterfall._seed_distinctive_tokens("zeyya", "zey")
+
+        score, breakdown = compute_idf_weighted_score(
+            "zeyya",
+            "zey",
+            text_sim=0.75,
+            semantic_sim=0.2,
+        )
+
+        assert score <= 0.58
+        assert "weak_phonetic_anchor_fragment_cap:0.58" in breakdown["caps_applied"]
+        guard = breakdown["anchor_quality_guard"]
+        assert guard["applies"] is True
+        assert guard["match_type"] == "phonetic"
+        assert guard["metrics"]["length_ratio"] < 0.78
+
+    def test_fullish_multi_edit_phonetic_anchor_is_capped_below_high(self):
+        TestIDFWaterfall._seed_distinctive_tokens("luseva", "luesfa")
+
+        score, breakdown = compute_idf_weighted_score(
+            "luseva",
+            "luesfa",
+            text_sim=0.66,
+            semantic_sim=0.2,
+        )
+
+        assert score <= 0.68
+        assert "weak_phonetic_anchor_quality_cap:0.68" in breakdown["caps_applied"]
+        guard = breakdown["anchor_quality_guard"]
+        assert guard["applies"] is True
+        assert guard["match_type"] == "phonetic"
+
+    def test_short_non_exact_anchor_with_ocr_disagreement_gets_no_visual_boost(self):
+        TestIDFWaterfall._seed_distinctive_tokens("nayya", "naya")
+        visual_breakdown = {
+            "total": 0.48,
+            "active_components": ["clip", "dinov2", "ocr"],
+            "components": {"clip": 0.52, "dinov2": 0.50, "ocr": 0.40},
+            "ocr_disagreement": True,
+            "ocr_strong_match": False,
+            "very_strong_visual_components": False,
+        }
+
+        result = score_pair(
+            "nayya",
+            "naya",
+            text_sim=0.75,
+            semantic_sim=0.2,
+            visual_sim=0.48,
+            visual_breakdown=visual_breakdown,
+        )
+
+        assert result["total"] == result["text_idf_score"]
+        guard = result["text_visual_guard"]["short_non_exact_anchor_visual_guard"]
+        assert guard["applies"] is True
+        assert result["text_visual_guard"]["agreement_boost_suppressed"] is True
+
+    def test_no_anchor_empty_target_text_uses_weak_visual_cap(self):
+        TestIDFWaterfall._seed_distinctive_tokens("luseva")
+        visual_breakdown = {
+            "total": 0.58,
+            "active_components": ["clip", "dinov2", "ocr"],
+            "components": {"clip": 0.60, "dinov2": 0.56, "ocr": 0.20},
+            "ocr_disagreement": True,
+            "ocr_strong_match": False,
+            "very_strong_visual_components": False,
+        }
+
+        result = score_pair(
+            "luseva",
+            "m.t.a.",
+            text_sim=0.1,
+            semantic_sim=0.5,
+            visual_sim=0.58,
+            visual_breakdown=visual_breakdown,
+        )
+
+        assert result["total"] <= 0.45
+        assert "semantic_or_phonetic_without_lexical_anchor_cap:0.45" in result["caps_applied"]
+        assert result["text_visual_guard"]["weak_text_cap_active"] is True
+
+    def test_weak_phonetic_translated_path_cannot_inflate_to_high_risk(self):
+        TestIDFWaterfall._seed_distinctive_tokens("luseva", "unrelated", "mark")
+        TestIDFWaterfall._seed_distinctive_tokens_tr("luseva", "luesfa")
+
+        result = score_pair(
+            "luseva",
+            "unrelated mark",
+            text_sim=0.05,
+            semantic_sim=0.2,
+            visual_sim=0.55,
+            candidate_translations={"name_tr": "luesfa"},
+        )
+
+        assert result["scoring_path_source"] == "TRANSLATED"
+        assert result["total"] < 0.70
+        assert result["translation_similarity"] <= 0.68
+        flags = result["textual_breakdown"]["translation_quality_flags"]
+        assert "translation_weak_phonetic_anchor" in flags
+        assert "translation_weak_non_exact_anchor" in flags
+        assert "weak_phonetic_anchor_quality_cap:0.68" in (
+            result["textual_breakdown"]["path_b"]["caps_applied"]
+        )
 
     def test_weak_fuzzy_anchor_with_moderate_visual_stays_below_high(self):
         TestIDFWaterfall._seed_distinctive_tokens("zarpil", "zapi")
