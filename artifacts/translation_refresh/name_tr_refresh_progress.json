@@ -1,0 +1,37 @@
+{
+  "version": 4,
+  "status": "running",
+  "backend": "madlad",
+  "null_only": false,
+  "limit": null,
+  "dry_run": false,
+  "metadata_root": "C:\\Users\\701693\\turk_patent\\bulletins\\Marka",
+  "run_dir": "C:\\Users\\701693\\turk_patent\\artifacts\\translation_refresh\\name_tr_refresh_20260425_102823",
+  "snapshot_path": "C:\\Users\\701693\\turk_patent\\artifacts\\translation_refresh\\name_tr_refresh_20260425_102823\\snapshot.jsonl.gz",
+  "ordering_mode": "application_date_desc",
+  "campaign_watermark": "2026-04-24T21:34:29Z",
+  "translate_batch_size": 16,
+  "started_at": "2026-04-25T10:28:23Z",
+  "updated_at": "2026-04-26T20:24:11Z",
+  "last_processed_id": "8ef2339f-f194-4970-862b-655e9a6e5c4c",
+  "summary": {
+    "processed": 1196032,
+    "translation_changed": 499856,
+    "lang_changed": 3265,
+    "provenance_changed": 1196032,
+    "translated": 222793,
+    "preserved": 973239,
+    "model_rows": 1196032,
+    "errors": 0,
+    "dry_run": false,
+    "backend": "madlad",
+    "ordering_mode": "application_date_desc",
+    "campaign_watermark": "2026-04-24T21:34:29Z",
+    "translate_batch_size": 16
+  },
+  "metadata_sync": {
+    "completed_files": []
+  },
+  "snapshot_row_count": 2647132,
+  "snapshot_duration_seconds": 40.8
+}

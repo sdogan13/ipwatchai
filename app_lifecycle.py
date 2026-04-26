@@ -61,6 +61,26 @@ def run_startup_tasks(logger, settings):
     except Exception as exc:
         logger.warning(f"   Payment refund columns check failed (non-fatal): {exc}")
 
+    try:
+        from migrations.run_education_progress_migration import ensure_education_progress_table
+
+        if ensure_education_progress_table():
+            logger.info("   Education progress table ready")
+        else:
+            logger.warning("   Education progress migration skipped or failed (non-fatal)")
+    except Exception as exc:
+        logger.warning(f"   Education progress table check failed (non-fatal): {exc}")
+
+    try:
+        from migrations.run_pipeline_runs_migration import run_migration
+
+        if run_migration():
+            logger.info("   Pipeline runs table ready")
+        else:
+            logger.warning("   Pipeline runs migration skipped or failed (non-fatal)")
+    except Exception as exc:
+        logger.warning(f"   Pipeline runs table check failed (non-fatal): {exc}")
+
     from utils.settings_manager import settings_manager
 
     try:

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>IP WATⒸH AI — Trademark Intelligence Platform</title>
+    <title>IPWatchAI — Trademark Intelligence Platform</title>
 
     <!-- SEO -->
     <meta name="description" content="AI-powered trademark risk assessment for the Turkish market. Search, analyze, and protect your brand.">
@@ -60,6 +60,115 @@
         .feature-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-card-hover); }
         /* Strength meter segments */
         .strength-segment { height: 4px; flex: 1; border-radius: 2px; transition: background var(--transition-fast); }
+        /* Education theme system */
+        .education-theme-shell {
+            background:
+                radial-gradient(circle at top right, rgba(var(--education-accent-rgb), 0.22), transparent 54%),
+                linear-gradient(145deg, rgba(var(--education-accent-rgb), 0.16) 0%, rgba(var(--education-accent-rgb), 0.06) 45%, rgba(15, 23, 42, 0.08) 100%);
+            border: 1px solid rgba(var(--education-accent-rgb), 0.24);
+            box-shadow: 0 24px 72px rgba(var(--education-shadow-rgb), 0.16);
+        }
+        .education-theme-panel {
+            background:
+                linear-gradient(180deg, rgba(var(--education-accent-rgb), 0.09) 0%, rgba(var(--education-accent-rgb), 0.03) 16%, var(--color-bg-card) 100%);
+            border: 1px solid rgba(var(--education-accent-rgb), 0.18);
+            box-shadow: 0 18px 44px rgba(var(--education-shadow-rgb), 0.14);
+        }
+        .education-theme-soft-card {
+            background: linear-gradient(180deg, rgba(var(--education-accent-rgb), 0.12) 0%, rgba(var(--education-accent-rgb), 0.04) 100%);
+            border: 1px solid rgba(var(--education-accent-rgb), 0.22);
+        }
+        .education-theme-stat-card {
+            background: linear-gradient(180deg, rgba(var(--education-accent-rgb), 0.1) 0%, rgba(var(--education-accent-rgb), 0.03) 100%);
+            border: 1px solid rgba(var(--education-accent-rgb), 0.18);
+        }
+        .education-theme-card-idle {
+            background: linear-gradient(180deg, rgba(var(--education-accent-rgb), 0.08) 0%, rgba(var(--education-accent-rgb), 0.025) 100%);
+            border: 1px solid rgba(var(--education-accent-rgb), 0.16);
+        }
+        .education-theme-card-active {
+            background:
+                radial-gradient(circle at top right, rgba(var(--education-accent-rgb), 0.24), transparent 52%),
+                linear-gradient(165deg, rgba(var(--education-accent-rgb), 0.16) 0%, rgba(var(--education-accent-rgb), 0.08) 56%, rgba(var(--education-accent-rgb), 0.03) 100%);
+            border: 1px solid rgba(var(--education-accent-rgb), 0.34);
+            box-shadow: 0 18px 36px rgba(var(--education-shadow-rgb), 0.16);
+        }
+        .education-theme-chip {
+            background: linear-gradient(180deg, rgba(var(--education-accent-rgb), 0.1) 0%, rgba(var(--education-accent-rgb), 0.03) 100%);
+            border: 1px solid rgba(var(--education-accent-rgb), 0.18);
+            color: var(--color-text-primary);
+        }
+        .education-theme-chip-active {
+            background: linear-gradient(135deg, rgba(var(--education-accent-rgb), 0.24) 0%, rgba(var(--education-accent-rgb), 0.12) 100%);
+            border: 1px solid rgba(var(--education-accent-rgb), 0.36);
+            color: var(--color-text-primary);
+            box-shadow: 0 10px 28px rgba(var(--education-shadow-rgb), 0.16);
+        }
+        .education-theme-primary-button {
+            background: linear-gradient(135deg, var(--education-accent) 0%, var(--education-accent-deep) 100%);
+            color: white;
+            border: 1px solid transparent;
+            box-shadow: 0 14px 30px rgba(var(--education-shadow-rgb), 0.22);
+        }
+        .education-theme-secondary-button {
+            background: rgba(var(--education-accent-rgb), 0.1);
+            color: var(--color-text-primary);
+            border: 1px solid rgba(var(--education-accent-rgb), 0.22);
+        }
+        .education-theme-badge {
+            background: rgba(var(--education-accent-rgb), 0.14);
+            color: var(--education-accent-strong);
+            border: 1px solid rgba(var(--education-accent-rgb), 0.22);
+        }
+        .education-theme-accent {
+            color: var(--education-accent-strong);
+        }
+        .education-theme-inner {
+            background: linear-gradient(180deg, rgba(var(--education-accent-rgb), 0.08) 0%, rgba(15, 23, 42, 0.08) 100%);
+            border: 1px solid rgba(var(--education-accent-rgb), 0.14);
+        }
+        .education-theme-question-card {
+            background: linear-gradient(180deg, rgba(var(--education-accent-rgb), 0.12) 0%, rgba(15, 23, 42, 0.16) 100%);
+            border: 1px solid rgba(var(--education-accent-rgb), 0.18);
+        }
+        .education-theme-explain-panel {
+            background: linear-gradient(180deg, rgba(var(--education-accent-rgb), 0.1) 0%, rgba(2, 6, 23, 0.78) 100%);
+            border: 1px solid rgba(var(--education-accent-rgb), 0.2);
+        }
+        .education-theme-option-pill {
+            background: rgba(var(--education-accent-rgb), 0.14);
+            color: var(--education-accent-strong);
+            border: 1px solid rgba(var(--education-accent-rgb), 0.18);
+        }
+        .education-thinking-dots {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.32rem;
+        }
+        .education-thinking-dot {
+            width: 0.45rem;
+            height: 0.45rem;
+            border-radius: 9999px;
+            background: var(--education-accent-strong);
+            opacity: 0.3;
+            animation: education-thinking-dot 1.2s infinite ease-in-out;
+        }
+        .education-thinking-dot:nth-child(2) {
+            animation-delay: 0.18s;
+        }
+        .education-thinking-dot:nth-child(3) {
+            animation-delay: 0.36s;
+        }
+        @keyframes education-thinking-dot {
+            0%, 80%, 100% {
+                opacity: 0.3;
+                transform: translateY(0) scale(0.92);
+            }
+            40% {
+                opacity: 1;
+                transform: translateY(-2px) scale(1);
+            }
+        }
         /* Mobile nav */
         @media (max-width: 768px) {
             .modal-mobile-fullscreen { align-items: stretch !important; padding: 0 !important; }
@@ -86,8 +195,8 @@
 
     <!-- Logo -->
     <a href="#" @click.prevent="activeTab = 'home'; window.scrollTo({top:0,behavior:'smooth'})" class="flex items-center gap-2 no-underline cursor-pointer">
-        <img src="/static/icons/logo.jpeg" alt="IP WATⒸH AI" class="h-8 w-8 rounded-lg flex-shrink-0 object-cover">
-        <span class="font-bold text-sm hidden sm:inline" style="color:var(--color-text-primary)">IP WATⒸH AI</span>
+        <img src="/static/icons/logo.jpeg" alt="IPWatchAI" class="h-8 w-8 rounded-lg flex-shrink-0 object-cover">
+        <span class="font-bold text-sm hidden sm:inline" style="color:var(--color-text-primary)">IPWatchAI</span>
     </a>
 
     <!-- Desktop Nav Links -->
@@ -108,6 +217,11 @@
            :class="activeTab === 'mission' ? 'bg-indigo-600 text-white' : ''"
            :style="activeTab !== 'mission' ? 'color:var(--color-text-secondary)' : ''"
            x-text="t('landing.nav_mission')">Misyonumuz</a>
+        <a href="#" @click.prevent="activeTab = 'education'; window.scrollTo({top:0,behavior:'smooth'})"
+           class="px-3 py-1.5 rounded-lg text-sm font-medium no-underline transition-all whitespace-nowrap cursor-pointer"
+           :class="activeTab === 'education' ? 'bg-indigo-600 text-white' : ''"
+           :style="activeTab !== 'education' ? 'color:var(--color-text-secondary)' : ''"
+           x-text="t('landing.nav_education')">Education</a>
     </div>
 
     <!-- Right Side -->
@@ -200,9 +314,12 @@
 <div x-show="mobileMenu" x-cloak @click.self="mobileMenu = false"
      class="fixed inset-0 md:hidden" style="z-index:calc(var(--z-nav) - 1);background:var(--color-bg-overlay)">
     <div class="absolute top-14 left-0 right-0 p-4 flex flex-col gap-3" style="background:var(--color-bg-card);border-bottom:1px solid var(--color-border)">
-        <a href="#features" @click="mobileMenu = false" class="py-2 text-sm font-medium no-underline" style="color:var(--color-text-primary)" x-text="t('landing.nav_features')">Hizmetler</a>
-        <a href="#pricing" @click="mobileMenu = false" class="py-2 text-sm font-medium no-underline" style="color:var(--color-text-primary)" x-text="t('landing.nav_pricing')">Fiyatlar</a>
-        <a href="#about" @click="mobileMenu = false" class="py-2 text-sm font-medium no-underline" style="color:var(--color-text-primary)" x-text="t('landing.nav_about')">Hakkimizda</a>
+        <a href="#" @click.prevent="activeTab = 'home'; mobileMenu = false; $nextTick(() => document.getElementById('search-input')?.scrollIntoView({behavior:'smooth',block:'center'}))" class="py-2 text-sm font-medium no-underline" style="color:var(--color-text-primary)" x-text="t('landing.nav_search')">Arama</a>
+        <a href="#features" @click.prevent="activeTab = 'home'; mobileMenu = false; $nextTick(() => document.getElementById('features')?.scrollIntoView({behavior:'smooth'}))" class="py-2 text-sm font-medium no-underline" style="color:var(--color-text-primary)" x-text="t('landing.nav_features')">Hizmetler</a>
+        <a href="#pricing" @click.prevent="activeTab = 'home'; mobileMenu = false; $nextTick(() => document.getElementById('pricing')?.scrollIntoView({behavior:'smooth'}))" class="py-2 text-sm font-medium no-underline" style="color:var(--color-text-primary)" x-text="t('landing.nav_pricing')">Fiyatlar</a>
+        <a href="#" @click.prevent="activeTab = 'about'; mobileMenu = false; window.scrollTo({top:0,behavior:'smooth'})" class="py-2 text-sm font-medium no-underline" style="color:var(--color-text-primary)" x-text="t('landing.nav_about')">Hakkimizda</a>
+        <a href="#" @click.prevent="activeTab = 'mission'; mobileMenu = false; window.scrollTo({top:0,behavior:'smooth'})" class="py-2 text-sm font-medium no-underline" style="color:var(--color-text-primary)" x-text="t('landing.nav_mission')">Misyonumuz</a>
+        <a href="#" @click.prevent="activeTab = 'education'; mobileMenu = false; window.scrollTo({top:0,behavior:'smooth'})" class="py-2 text-sm font-medium no-underline" style="color:var(--color-text-primary)" x-text="t('landing.nav_education')">Education</a>
     </div>
 </div>
 
@@ -879,7 +996,7 @@
         <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
             {% for plan_key, plan in plans.items() %}
             {% if plan_key != 'superadmin' %}
-            <div class="p-6 rounded-xl relative {% if plan_key == 'professional' %}ring-2{% endif %}"
+            <div class="p-6 rounded-xl relative transform-gpu transition-all duration-300 hover:-translate-y-2 hover:shadow-2xl {% if plan_key == 'professional' %}ring-2{% endif %}"
                  style="background:var(--color-bg-card);border:1px solid var(--color-border);box-shadow:var(--shadow-card);{% if plan_key == 'professional' %}border-color:var(--color-primary){% endif %}">
                 {% if plan_key == 'professional' %}
                 <div class="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full text-xs font-bold text-white" style="background:var(--color-primary)" x-text="t('landing.popular_badge')">Populer</div>
@@ -904,15 +1021,7 @@
                     <span class="text-sm" style="color:var(--color-text-muted)">/ay</span>
                     {% endif %}
                 </div>
-                {% if plan_key == 'starter' %}
-                <p class="text-xs font-semibold mb-3 flex items-center gap-1" style="color:var(--color-primary)"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.includes_free')">Ucretsiz+</span></p>
-                {% elif plan_key == 'professional' %}
-                <p class="text-xs font-semibold mb-3 flex items-center gap-1" style="color:var(--color-primary)"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.includes_starter')">Baslangic+</span></p>
-                {% elif plan_key == 'enterprise' %}
-                <p class="text-xs font-semibold mb-3 flex items-center gap-1" style="color:var(--color-primary)"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.includes_professional')">Professional+</span></p>
-                {% else %}
                 <div class="mb-3"></div>
-                {% endif %}
                 {% set chk = '<svg class="w-4 h-4 flex-shrink-0" style="color:#22c55e" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>' %}
                 {% set cross = '<svg class="w-4 h-4 flex-shrink-0" style="color:#d1d5db" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>' %}
                 <ul class="space-y-2 mb-6 text-sm" style="color:var(--color-text-secondary)">
@@ -1166,7 +1275,7 @@
             </div>
             <div class="p-5 rounded-xl" style="background:var(--color-bg-card);border:1px solid var(--color-border)">
                 <div class="flex items-center gap-3 mb-3">
-                    <img src="/static/icons/logo.jpeg" alt="IP WATⒸH AI" class="w-10 h-10 rounded-lg object-cover">
+                    <img src="/static/icons/logo.jpeg" alt="IPWatchAI" class="w-10 h-10 rounded-lg object-cover">
                     <h3 class="font-semibold" style="color:var(--color-text-primary)" x-text="t('landing.mission_val2_title')">Guvenilirlik</h3>
                 </div>
                 <p class="text-sm leading-relaxed" style="color:var(--color-text-secondary)" x-text="t('landing.mission_val2_desc')"></p>
@@ -1191,11 +1300,582 @@
             </div>
         </div>
 
-        <!-- Why IP WATⒸH AI -->
+        <!-- Why IPWatchAI -->
         <div class="p-6 rounded-xl" style="background:var(--color-bg-card);border:1px solid var(--color-border)">
-            <h3 class="font-semibold mb-3" style="color:var(--color-text-primary)" x-text="t('landing.mission_why_title')">Neden IP WATⒸH AI?</h3>
+            <h3 class="font-semibold mb-3" style="color:var(--color-text-primary)" x-text="t('landing.mission_why_title')">Neden IPWatchAI?</h3>
             <p class="text-sm leading-relaxed" style="color:var(--color-text-secondary)" x-text="t('landing.mission_why_desc')"></p>
         </div>
+    </div>
+</div>
+
+<!-- ==================== EDUCATION TAB ==================== -->
+<div x-show="activeTab === 'education'" x-cloak class="pt-24 pb-16 px-4">
+    <div class="max-w-6xl mx-auto space-y-8">
+        <section class="overflow-hidden rounded-[32px] education-theme-shell" :style="getEducationCategoryThemeVars(getEducationActiveCategory() || 'genel')">
+            <div class="grid xl:grid-cols-[1.25fr_0.75fr] gap-6 p-6 md:p-8">
+                <div>
+                    <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-[0.18em] education-theme-badge">
+                        <span x-text="t('landing.nav_education')">Education</span>
+                    </div>
+                    <h1 class="mt-4 text-3xl md:text-4xl font-bold leading-tight" style="color:var(--color-text-primary)" x-text="t('landing.education_title')">Vekillik Sinavi Education Hub</h1>
+                    <p class="mt-3 max-w-3xl text-base md:text-lg leading-relaxed" style="color:var(--color-text-secondary)" x-text="t('landing.education_subtitle')"></p>
+                    <p class="mt-4 text-sm" style="color:var(--color-text-muted)" x-text="t('landing.education_materials_note')"></p>
+
+                    <template x-if="educationCatalog && getEducationActiveCategory()">
+                        <div class="mt-5 md:hidden rounded-[24px] p-4 education-theme-soft-card" :style="getEducationCategoryThemeVars(getEducationActiveCategory())">
+                            <div class="flex items-start justify-between gap-4">
+                                <div>
+                                    <div class="text-xs uppercase tracking-[0.16em]" style="color:var(--color-text-faint)" x-text="t('landing.education_active_category')"></div>
+                                    <div class="mt-1 text-lg font-semibold" style="color:var(--color-text-primary)" x-text="getEducationActiveCategory().title"></div>
+                                </div>
+                                <div class="text-right">
+                                    <div class="text-xs" style="color:var(--color-text-faint)" x-text="t('landing.education_category_progress')"></div>
+                                    <div class="mt-1 text-lg font-semibold" style="color:var(--color-text-primary)" x-text="getEducationCategoryPercentLabel(getEducationActiveCategory().id)"></div>
+                                </div>
+                            </div>
+
+                            <div class="mt-4 grid grid-cols-3 gap-3">
+                                <div class="rounded-2xl p-3 education-theme-stat-card">
+                                    <div class="text-xs" style="color:var(--color-text-faint)" x-text="t('landing.education_completed_modules')"></div>
+                                    <div class="mt-1 text-base font-semibold" style="color:var(--color-text-primary)" x-text="educationCompletedCount()">0</div>
+                                </div>
+                                <div class="rounded-2xl p-3 education-theme-stat-card">
+                                    <div class="text-xs" style="color:var(--color-text-faint)" x-text="t('landing.education_flashcards')"></div>
+                                    <div class="mt-1 text-base font-semibold" style="color:var(--color-text-primary)" x-text="getEducationActiveCategory().flashcard_deck_id ? getEducationPercentLabel('flashcard', getEducationActiveCategory().flashcard_deck_id) : '0%'">0%</div>
+                                </div>
+                                <div class="rounded-2xl p-3 education-theme-stat-card">
+                                    <div class="text-xs" style="color:var(--color-text-faint)" x-text="t('landing.education_quizzes')"></div>
+                                    <div class="mt-1 text-base font-semibold" style="color:var(--color-text-primary)" x-text="getEducationActiveCategory().quiz_section_id ? getEducationPercentLabel('quiz', getEducationActiveCategory().quiz_section_id) : '0%'">0%</div>
+                                </div>
+                            </div>
+
+                            <div class="mt-4 flex flex-wrap gap-2">
+                                <button data-testid="education-mobile-quick-quiz" x-show="hasEducationQuickAction('quiz')" x-cloak @click="openEducationMobileSection('quiz')" class="px-4 py-2.5 rounded-xl text-sm font-semibold education-theme-primary-button" x-text="getEducationQuickActionLabel('quiz')">Continue quiz</button>
+                                <button data-testid="education-mobile-quick-flashcards" x-show="hasEducationQuickAction('flashcards')" x-cloak @click="openEducationMobileSection('flashcards')" class="px-4 py-2.5 rounded-xl text-sm font-semibold education-theme-secondary-button" x-text="getEducationQuickActionLabel('flashcards')">Continue deck</button>
+                                <button data-testid="education-mobile-quick-pdfs" x-show="hasEducationQuickAction('pdfs')" x-cloak @click="openEducationMobileSection('pdfs')" class="px-4 py-2.5 rounded-xl text-sm font-semibold education-theme-secondary-button" x-text="getEducationQuickActionLabel('pdfs')">PDF Library</button>
+                            </div>
+
+                            <div class="mt-4 flex flex-wrap gap-2">
+                                <button x-show="!isLoggedIn" x-cloak @click="beginEducationSync()"
+                                        class="px-4 py-2 rounded-xl text-sm font-semibold education-theme-primary-button"
+                                        x-text="t('landing.education_sign_in_to_sync')">Sign in to sync</button>
+                                <button x-show="isLoggedIn" x-cloak @click="syncEducationProgress()"
+                                        class="px-4 py-2 rounded-xl text-sm font-semibold education-theme-primary-button"
+                                        x-text="t('landing.education_sync_now')">Sync now</button>
+                            </div>
+                        </div>
+                    </template>
+
+                    <div class="mt-6 hidden md:grid sm:grid-cols-2 xl:grid-cols-4 gap-3">
+                        <div class="rounded-2xl p-4 education-theme-stat-card">
+                            <div class="text-xs uppercase tracking-[0.18em]" style="color:var(--color-text-faint)" x-text="t('landing.education_pdf_library')">PDF Library</div>
+                            <div class="mt-2 text-3xl font-bold" style="color:var(--color-text-primary)" x-text="educationCatalog ? (educationCatalog.stats.pdf_count || 0) : '0'">0</div>
+                        </div>
+                        <div class="rounded-2xl p-4 education-theme-stat-card">
+                            <div class="text-xs uppercase tracking-[0.18em]" style="color:var(--color-text-faint)" x-text="t('landing.education_flashcards')">Flashcards</div>
+                            <div class="mt-2 text-3xl font-bold" style="color:var(--color-text-primary)" x-text="educationCatalog ? (educationCatalog.stats.flashcard_card_count || 0) : '0'">0</div>
+                        </div>
+                        <div class="rounded-2xl p-4 education-theme-stat-card">
+                            <div class="text-xs uppercase tracking-[0.18em]" style="color:var(--color-text-faint)" x-text="t('landing.education_quizzes')">Quizzes</div>
+                            <div class="mt-2 text-3xl font-bold" style="color:var(--color-text-primary)" x-text="educationCatalog ? (educationCatalog.stats.question_count || 0) : '0'">0</div>
+                        </div>
+                        <div class="rounded-2xl p-4 education-theme-stat-card">
+                            <div class="text-xs uppercase tracking-[0.18em]" style="color:var(--color-text-faint)" x-text="t('landing.education_progress_title')">Progress</div>
+                            <div class="mt-2 text-3xl font-bold" style="color:var(--color-text-primary)" x-text="educationCompletedCount()">0</div>
+                            <div class="text-xs mt-1" style="color:var(--color-text-muted)" x-text="t('landing.education_completed_modules')"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="hidden md:block rounded-[28px] p-6 h-full education-theme-panel">
+                    <div class="flex items-start justify-between gap-4">
+                        <div>
+                            <div class="text-xs uppercase tracking-[0.18em]" style="color:var(--color-text-faint)" x-text="t('landing.education_progress_title')">Progress</div>
+                            <h2 class="mt-2 text-xl font-semibold" style="color:var(--color-text-primary)" x-text="isLoggedIn ? t('landing.education_progress_synced') : t('landing.education_progress_local')"></h2>
+                        </div>
+                        <div class="rounded-2xl px-3 py-2 text-right education-theme-soft-card">
+                            <div class="text-xs" style="color:var(--color-text-faint)" x-text="t('landing.education_categories_started')"></div>
+                            <div class="text-2xl font-bold" style="color:var(--color-text-primary)" x-text="educationStartedCategoryCount()">0</div>
+                        </div>
+                    </div>
+
+                    <p class="mt-4 text-sm leading-relaxed" style="color:var(--color-text-secondary)" x-text="t('landing.education_sync_hint')"></p>
+
+                    <div class="mt-5 grid sm:grid-cols-3 gap-3">
+                        <div class="rounded-2xl p-3 education-theme-stat-card">
+                            <div class="text-xs" style="color:var(--color-text-faint)" x-text="t('landing.education_completed_modules')"></div>
+                            <div class="mt-1 text-lg font-semibold" style="color:var(--color-text-primary)" x-text="educationCompletedCount()">0</div>
+                        </div>
+                        <div class="rounded-2xl p-3 education-theme-stat-card">
+                            <div class="text-xs" style="color:var(--color-text-faint)" x-text="t('landing.education_in_progress_label')"></div>
+                            <div class="mt-1 text-lg font-semibold" style="color:var(--color-text-primary)" x-text="educationInProgressCount()">0</div>
+                        </div>
+                        <div class="rounded-2xl p-3 education-theme-stat-card">
+                            <div class="text-xs" style="color:var(--color-text-faint)" x-text="t('landing.education_categories')"></div>
+                            <div class="mt-1 text-lg font-semibold" style="color:var(--color-text-primary)" x-text="educationCatalog ? (educationCatalog.categories || []).length : 0">0</div>
+                        </div>
+                    </div>
+
+                    <template x-if="educationCatalog && getEducationActiveCategory()">
+                        <div class="mt-5 rounded-2xl p-4 education-theme-soft-card" :style="getEducationCategoryThemeVars(getEducationActiveCategory())">
+                            <div class="flex items-start justify-between gap-4">
+                                <div>
+                                    <div class="text-xs uppercase tracking-[0.16em]" style="color:var(--color-text-faint)" x-text="t('landing.education_active_category')"></div>
+                                    <div class="mt-1 text-lg font-semibold" style="color:var(--color-text-primary)" x-text="getEducationActiveCategory().title"></div>
+                                </div>
+                                <div class="text-right">
+                                    <div class="text-xs" style="color:var(--color-text-faint)" x-text="t('landing.education_category_progress')"></div>
+                                    <div class="mt-1 text-lg font-semibold" style="color:var(--color-text-primary)" x-text="getEducationCategoryPercentLabel(getEducationActiveCategory().id)"></div>
+                                </div>
+                            </div>
+                            <div class="mt-4 grid grid-cols-2 gap-3">
+                                <div class="rounded-2xl p-3 education-theme-stat-card">
+                                    <div class="text-xs" style="color:var(--color-text-faint)" x-text="t('landing.education_flashcards')"></div>
+                                    <div class="mt-1 text-base font-semibold" style="color:var(--color-text-primary)" x-text="getEducationActiveCategory().flashcard_deck_id ? getEducationPercentLabel('flashcard', getEducationActiveCategory().flashcard_deck_id) : '0%'">0%</div>
+                                </div>
+                                <div class="rounded-2xl p-3 education-theme-stat-card">
+                                    <div class="text-xs" style="color:var(--color-text-faint)" x-text="t('landing.education_quizzes')"></div>
+                                    <div class="mt-1 text-base font-semibold" style="color:var(--color-text-primary)" x-text="getEducationActiveCategory().quiz_section_id ? getEducationPercentLabel('quiz', getEducationActiveCategory().quiz_section_id) : '0%'">0%</div>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+
+                    <div x-show="educationProgressNotice" x-cloak class="mt-4 rounded-2xl px-4 py-3 text-sm education-theme-soft-card" x-text="educationProgressNotice"></div>
+
+                    <div class="mt-5 flex flex-wrap gap-3">
+                        <button x-show="!isLoggedIn" x-cloak @click="beginEducationSync()"
+                                class="px-4 py-2.5 rounded-xl text-sm font-semibold education-theme-primary-button"
+                                x-text="t('landing.education_sign_in_to_sync')">Sign in to sync</button>
+                        <button x-show="isLoggedIn" x-cloak @click="syncEducationProgress()"
+                                class="px-4 py-2.5 rounded-xl text-sm font-semibold education-theme-primary-button"
+                                x-text="t('landing.education_sync_now')">Sync now</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <div x-show="educationError" x-cloak class="rounded-2xl px-4 py-3 text-sm" style="background:var(--color-risk-critical-bg);color:var(--color-risk-critical-text)" x-text="educationError"></div>
+
+        <template x-if="educationLoading && !educationCatalog">
+            <div class="rounded-[28px] p-6 text-center" style="background:var(--color-bg-card);border:1px solid var(--color-border);color:var(--color-text-secondary)" x-text="t('landing.education_loading')">Loading study materials...</div>
+        </template>
+
+        <template x-if="educationCatalog">
+            <div class="flex flex-col gap-8">
+                <section id="education-progress-overview" class="order-1 rounded-[28px] p-6 md:p-8 education-theme-panel" :style="getEducationCategoryThemeVars(getEducationActiveCategory() || 'genel') + ';scroll-margin-top:6.5rem'">
+                    <div class="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-6">
+                        <div>
+                            <div class="text-xs uppercase tracking-[0.18em]" style="color:var(--color-text-faint)" x-text="t('landing.nav_education')">Education</div>
+                            <h2 class="mt-2 text-2xl font-semibold" style="color:var(--color-text-primary)" x-text="t('landing.education_categories')">Study Categories</h2>
+                        </div>
+                        <p class="text-sm max-w-2xl" style="color:var(--color-text-muted)" x-text="t('landing.education_choose_category')"></p>
+                    </div>
+
+                    <div class="md:hidden -mx-1 overflow-x-auto pb-2">
+                        <div class="flex gap-3 px-1 min-w-max">
+                            <template x-for="category in getEducationCategories()" :key="category.id + '-mobile'">
+                                <button type="button"
+                                        :data-testid="'education-mobile-category-' + category.id"
+                                        @click="setEducationCategory(category.id)"
+                                        class="shrink-0 rounded-full px-4 py-2.5 text-sm font-semibold transition-all"
+                                        :style="getEducationCategoryThemeVars(category)"
+                                        :class="educationSelectedCategoryId === category.id ? 'education-theme-chip-active' : 'education-theme-chip'"
+                                        x-text="category.title"></button>
+                            </template>
+                        </div>
+                    </div>
+
+                    <div class="hidden md:grid md:grid-cols-2 xl:grid-cols-5 gap-4">
+                        <template x-for="category in getEducationCategories()" :key="category.id">
+                            <button type="button" @click="setEducationCategory(category.id)"
+                                    class="rounded-2xl p-4 text-left transition-all"
+                                    :style="getEducationCategoryThemeVars(category)"
+                                    :class="educationSelectedCategoryId === category.id ? 'education-theme-card-active' : 'education-theme-card-idle'">
+                                <div class="flex items-start justify-between gap-3">
+                                    <div>
+                                        <h3 class="font-semibold" style="color:var(--color-text-primary)" x-text="category.title"></h3>
+                                        <div class="mt-2 text-sm" style="color:var(--color-text-muted)">
+                                            <span x-text="category.flashcard_card_count"></span>
+                                            <span x-text="t('landing.education_cards')"></span>
+                                            <span>&bull;</span>
+                                            <span x-text="category.question_count"></span>
+                                            <span x-text="t('landing.education_questions')"></span>
+                                        </div>
+                                    </div>
+                                    <div class="text-right">
+                                        <div class="text-xs uppercase tracking-[0.16em]" style="color:var(--color-text-faint)" x-text="getEducationCategoryStatusLabel(category.id)"></div>
+                                        <div class="mt-1 text-sm font-semibold" style="color:var(--color-text-primary)" x-text="getEducationCategoryPercentLabel(category.id)"></div>
+                                    </div>
+                                </div>
+                            </button>
+                        </template>
+                    </div>
+
+                    <template x-if="getEducationActiveCategory()">
+                        <div class="mt-6 rounded-[24px] p-5 education-theme-soft-card">
+                            <div class="flex flex-wrap items-start justify-between gap-4">
+                                <div>
+                                    <div class="text-xs uppercase tracking-[0.16em]" style="color:var(--color-text-faint)" x-text="t('landing.education_active_category')"></div>
+                                    <h3 class="mt-2 text-xl font-semibold" style="color:var(--color-text-primary)" x-text="getEducationActiveCategory().title"></h3>
+                                </div>
+                                <div class="text-right">
+                                    <div class="text-xs uppercase tracking-[0.16em]" style="color:var(--color-text-faint)" x-text="t('landing.education_category_progress')"></div>
+                                    <div class="mt-1 text-2xl font-bold" style="color:var(--color-text-primary)" x-text="getEducationCategoryPercentLabel(getEducationActiveCategory().id)"></div>
+                                </div>
+                            </div>
+                            <div class="mt-5 grid md:grid-cols-2 gap-4">
+                                <div class="rounded-2xl p-4 education-theme-stat-card">
+                                    <div class="flex items-center justify-between gap-3">
+                                        <div>
+                                            <div class="text-xs uppercase tracking-[0.16em]" style="color:var(--color-text-faint)" x-text="t('landing.education_flashcards')"></div>
+                                            <div class="mt-2 text-lg font-semibold" style="color:var(--color-text-primary)" x-text="getEducationActiveCategory().flashcard_card_count + ' ' + t('landing.education_cards')"></div>
+                                        </div>
+                                        <div class="text-right">
+                                            <div class="text-xs uppercase tracking-[0.16em]" style="color:var(--color-text-faint)" x-text="getEducationActiveCategory().flashcard_deck_id ? getEducationStatusLabel('flashcard', getEducationActiveCategory().flashcard_deck_id) : t('landing.education_status_not_started')"></div>
+                                            <div class="mt-1 text-lg font-semibold" style="color:var(--color-text-primary)" x-text="getEducationActiveCategory().flashcard_deck_id ? getEducationPercentLabel('flashcard', getEducationActiveCategory().flashcard_deck_id) : '0%'">0%</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="rounded-2xl p-4 education-theme-stat-card">
+                                    <div class="flex items-center justify-between gap-3">
+                                        <div>
+                                            <div class="text-xs uppercase tracking-[0.16em]" style="color:var(--color-text-faint)" x-text="t('landing.education_quizzes')"></div>
+                                            <div class="mt-2 text-lg font-semibold" style="color:var(--color-text-primary)" x-text="getEducationActiveCategory().question_count + ' ' + t('landing.education_questions')"></div>
+                                        </div>
+                                        <div class="text-right">
+                                            <div class="text-xs uppercase tracking-[0.16em]" style="color:var(--color-text-faint)" x-text="getEducationActiveCategory().quiz_section_id ? getEducationStatusLabel('quiz', getEducationActiveCategory().quiz_section_id) : t('landing.education_status_not_started')"></div>
+                                            <div class="mt-1 text-lg font-semibold" style="color:var(--color-text-primary)" x-text="getEducationActiveCategory().quiz_section_id ? getEducationPercentLabel('quiz', getEducationActiveCategory().quiz_section_id) : '0%'">0%</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+
+                </section>
+
+                <div id="education-mobile-workspace-nav" class="order-2 md:hidden sticky top-20 z-20 -mt-2 -mx-2 px-2" :style="getEducationCategoryThemeVars(getEducationActiveCategory() || 'genel')">
+                    <div class="flex gap-2 overflow-x-auto rounded-2xl p-2 education-theme-panel" style="backdrop-filter:blur(14px)">
+                        <button data-testid="education-mobile-nav-quiz" type="button" @click="setEducationMobileSection('quiz')" class="shrink-0 px-4 py-2 rounded-xl text-sm font-semibold transition-all" :class="isEducationMobileSectionActive('quiz') ? 'education-theme-primary-button' : 'education-theme-secondary-button'" x-text="t('landing.education_quizzes')">Quiz Bank</button>
+                        <button data-testid="education-mobile-nav-flashcards" type="button" @click="setEducationMobileSection('flashcards')" class="shrink-0 px-4 py-2 rounded-xl text-sm font-semibold transition-all" :class="isEducationMobileSectionActive('flashcards') ? 'education-theme-primary-button' : 'education-theme-secondary-button'" x-text="t('landing.education_flashcards')">Flashcards</button>
+                        <button data-testid="education-mobile-nav-pdfs" type="button" @click="setEducationMobileSection('pdfs')" class="shrink-0 px-4 py-2 rounded-xl text-sm font-semibold transition-all" :class="isEducationMobileSectionActive('pdfs') ? 'education-theme-primary-button' : 'education-theme-secondary-button'" x-text="t('landing.education_pdf_library')">PDF Library</button>
+                    </div>
+                </div>
+
+                <section id="education-pdf-library-panel" class="order-3 md:order-2 rounded-[28px] p-6 md:p-8 education-theme-panel" :class="educationMobileSection !== 'pdfs' ? 'hidden md:block' : ''" :style="getEducationCategoryThemeVars(getEducationActiveCategory() || 'genel') + ';scroll-margin-top:6.5rem'">
+                    <div class="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-6">
+                        <div>
+                            <div class="text-xs uppercase tracking-[0.18em]" style="color:var(--color-text-faint)" x-text="t('landing.nav_education')">Education</div>
+                            <h2 class="mt-2 text-2xl font-semibold" style="color:var(--color-text-primary)" x-text="t('landing.education_pdf_library')">PDF Library</h2>
+                        </div>
+                        <p class="text-sm max-w-2xl" style="color:var(--color-text-muted)" x-text="t('landing.education_pdf_hint')"></p>
+                    </div>
+
+                    <div class="grid lg:grid-cols-2 xl:grid-cols-3 gap-4">
+                        <template x-for="pdf in educationCatalog.pdfs" :key="pdf.id">
+                            <article class="rounded-2xl p-5 h-full education-theme-inner">
+                                <div class="flex items-start justify-between gap-3">
+                                    <div>
+                                        <h3 class="font-semibold leading-snug" style="color:var(--color-text-primary)" x-text="pdf.title"></h3>
+                                        <div class="mt-2 text-xs uppercase tracking-[0.16em]" style="color:var(--color-text-faint)" x-text="getEducationStatusLabel('pdf', pdf.id)"></div>
+                                    </div>
+                                    <div class="rounded-full px-2.5 py-1 text-xs font-semibold education-theme-badge" x-text="(pdf.language || 'tr').toUpperCase()"></div>
+                                </div>
+                                <div class="mt-4 flex items-center justify-between text-sm" style="color:var(--color-text-muted)">
+                                    <span x-text="((pdf.file_size_bytes || 0) / (1024 * 1024)).toFixed(1) + ' MB'"></span>
+                                    <span x-text="getEducationPercentLabel('pdf', pdf.id)"></span>
+                                </div>
+                                <div class="mt-5 flex flex-wrap gap-2">
+                                    <button @click="openEducationPdf(pdf)" class="px-4 py-2 rounded-xl text-sm font-semibold education-theme-primary-button" x-text="t('landing.education_open_pdf')">Open PDF</button>
+                                    <button @click="markEducationPdfReviewed(pdf)" class="px-4 py-2 rounded-xl text-sm font-semibold education-theme-secondary-button" x-text="t('landing.education_mark_reviewed')">Mark reviewed</button>
+                                </div>
+                            </article>
+                        </template>
+                    </div>
+                </section>
+
+                <div class="order-3 md:order-3 xl:grid-cols-2 gap-6" :class="educationMobileSection === 'pdfs' ? 'hidden md:grid' : 'grid'">
+                    <section id="education-flashcards-panel" class="rounded-[28px] p-6 md:p-8 education-theme-panel" :class="educationMobileSection !== 'flashcards' ? 'hidden md:block' : 'block'" :style="getEducationCategoryThemeVars(getEducationActiveCategory() || 'genel') + ';scroll-margin-top:6.5rem'">
+                        <div class="flex items-end justify-between gap-4 mb-6">
+                            <div>
+                                <div class="text-xs uppercase tracking-[0.18em]" style="color:var(--color-text-faint)" x-text="t('landing.nav_education')">Education</div>
+                                <h2 class="mt-2 text-2xl font-semibold" style="color:var(--color-text-primary)" x-text="t('landing.education_flashcards')">Flashcards</h2>
+                            </div>
+                            <template x-if="getEducationActiveCategory()">
+                                <div class="text-sm" style="color:var(--color-text-muted)" x-text="getEducationActiveCategory().title"></div>
+                            </template>
+                        </div>
+
+                        <template x-if="getEducationCategoryDeck(getEducationActiveCategory())">
+                            <div class="rounded-[24px] p-5 min-h-[420px] education-theme-inner">
+                                <template x-if="educationDeckLoading && (!educationSelectedDeck || educationSelectedDeck.id !== getEducationCategoryDeck(getEducationActiveCategory()).id)">
+                                    <div class="h-full flex items-center justify-center text-center text-sm" style="color:var(--color-text-secondary)" x-text="t('landing.education_loading')">Loading study materials...</div>
+                                </template>
+                                <template x-if="educationSelectedDeck && getEducationCategoryDeck(getEducationActiveCategory()) && educationSelectedDeck.id === getEducationCategoryDeck(getEducationActiveCategory()).id">
+                                    <div class="h-full flex flex-col">
+                                        <div class="flex items-start justify-between gap-4">
+                                            <div>
+                                                <div class="text-xs uppercase tracking-[0.16em]" style="color:var(--color-text-faint)" x-text="t('landing.education_flashcards')"></div>
+                                                <h3 class="mt-2 text-xl font-semibold" style="color:var(--color-text-primary)" x-text="educationSelectedDeck.title"></h3>
+                                            </div>
+                                            <div class="text-right">
+                                                <div class="text-xs uppercase tracking-[0.16em]" style="color:var(--color-text-faint)" x-text="getEducationStatusLabel('flashcard', educationSelectedDeck.id)"></div>
+                                                <div class="mt-1 text-lg font-semibold" style="color:var(--color-text-primary)" x-text="getEducationPercentLabel('flashcard', educationSelectedDeck.id)"></div>
+                                            </div>
+                                        </div>
+
+                                        <div class="mt-4 text-sm" style="color:var(--color-text-muted)">
+                                            <span x-text="(educationFlashcardIndex + 1)"></span>
+                                            <span>/</span>
+                                            <span x-text="(educationSelectedDeck.cards || []).length || 0"></span>
+                                            <span x-text="t('landing.education_cards')"></span>
+                                        </div>
+
+                                        <button @click="toggleEducationFlashcard()" class="mt-5 flex-1 rounded-[28px] p-6 text-left transition-all education-theme-soft-card">
+                                            <div class="text-xs uppercase tracking-[0.18em]" style="color:var(--color-text-faint)" x-text="educationFlashcardFlipped ? t('landing.education_back_label') : t('landing.education_front_label')">Front</div>
+                                            <div class="mt-4 text-lg md:text-xl leading-relaxed" style="color:var(--color-text-primary)" x-text="educationFlashcardFlipped ? (currentEducationFlashcard() ? currentEducationFlashcard().back : '') : (currentEducationFlashcard() ? currentEducationFlashcard().front : '')"></div>
+                                            <div class="mt-6 text-sm font-medium education-theme-accent" x-text="t('landing.education_tap_to_flip')"></div>
+                                        </button>
+
+                                        <template x-if="educationCanModerate && currentEducationFlashcard()">
+                                            <div data-testid="education-flashcard-tester-tools" class="mt-4 rounded-[24px] p-4 education-theme-stat-card">
+                                                <div class="text-xs uppercase tracking-[0.16em]" style="color:var(--color-text-faint)" x-text="t('landing.education_tester_tools')">Tester tools</div>
+                                                <div class="mt-3 flex flex-col gap-3">
+                                                    <label class="block">
+                                                        <span class="text-xs font-semibold" style="color:var(--color-text-faint)" x-text="t('landing.education_tester_category')">Category</span>
+                                                        <select data-testid="education-flashcard-category-select"
+                                                                class="mt-2 w-full rounded-xl border px-3 py-2 text-sm"
+                                                                style="background:rgba(15,23,42,0.22);border-color:var(--color-border);color:var(--color-text-primary)"
+                                                                :disabled="isEducationModerationBusy('flashcard', currentEducationFlashcard().id)"
+                                                                :value="currentEducationFlashcard() ? (currentEducationFlashcard().category_title || '') : ''"
+                                                                @change="setEducationFlashcardTesterCategory($event.target.value)">
+                                                            <template x-for="categoryTitle in getEducationModeratorCategories()" :key="'flashcard-category-' + categoryTitle">
+                                                                <option :value="categoryTitle" x-text="categoryTitle"></option>
+                                                            </template>
+                                                        </select>
+                                                    </label>
+                                                    <div class="flex flex-wrap gap-2">
+                                                        <button type="button"
+                                                                data-testid="education-flashcard-delete-button"
+                                                                @click="deleteEducationFlashcard()"
+                                                                :disabled="isEducationModerationBusy('flashcard', currentEducationFlashcard().id)"
+                                                                class="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
+                                                                style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.32);color:rgb(252 165 165)"
+                                                                x-text="t('landing.education_tester_delete')">x</button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </template>
+
+                                        <div class="mt-5 flex items-center justify-between gap-3">
+                                            <button @click="previousEducationFlashcard()" :disabled="educationFlashcardIndex <= 0" class="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50 education-theme-secondary-button" x-text="t('landing.education_previous')">Previous</button>
+                                            <button @click="nextEducationFlashcard()" class="px-4 py-2 rounded-xl text-sm font-semibold education-theme-primary-button" x-text="educationSelectedDeck && educationFlashcardIndex >= ((educationSelectedDeck.cards || []).length - 1) ? t('landing.education_finish_deck') : t('landing.education_next')">Next</button>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                        </template>
+
+                        <template x-if="!getEducationCategoryDeck(getEducationActiveCategory())">
+                            <div class="rounded-[24px] p-5 min-h-[320px] flex items-center justify-center text-center text-sm education-theme-inner" style="color:var(--color-text-secondary)" x-text="t('landing.education_no_flashcards')">No flashcards available for this category yet.</div>
+                        </template>
+                    </section>
+
+                    <section id="education-quiz-panel" class="rounded-[28px] p-6 md:p-8 education-theme-panel" :class="educationMobileSection !== 'quiz' ? 'hidden md:block' : 'block'" :style="getEducationCategoryThemeVars(getEducationActiveCategory() || 'genel') + ';scroll-margin-top:6.5rem'">
+                        <div class="flex items-end justify-between gap-4 mb-6">
+                            <div>
+                                <div class="text-xs uppercase tracking-[0.18em]" style="color:var(--color-text-faint)" x-text="t('landing.nav_education')">Education</div>
+                                <h2 class="mt-2 text-2xl font-semibold" style="color:var(--color-text-primary)" x-text="t('landing.education_quizzes')">Quizzes</h2>
+                            </div>
+                            <template x-if="getEducationActiveCategory()">
+                                <div class="text-sm" style="color:var(--color-text-muted)" x-text="getEducationActiveCategory().title"></div>
+                            </template>
+                        </div>
+
+                        <template x-if="getEducationCategoryQuiz(getEducationActiveCategory())">
+                            <div class="rounded-[24px] p-5 min-h-[420px] education-theme-inner">
+                                <template x-if="educationQuizLoading && (!educationSelectedQuiz || educationSelectedQuiz.id !== getEducationCategoryQuiz(getEducationActiveCategory()).id)">
+                                    <div class="h-full flex items-center justify-center text-center text-sm" style="color:var(--color-text-secondary)" x-text="t('landing.education_loading')">Loading study materials...</div>
+                                </template>
+                                <template x-if="educationSelectedQuiz && getEducationCategoryQuiz(getEducationActiveCategory()) && educationSelectedQuiz.id === getEducationCategoryQuiz(getEducationActiveCategory()).id">
+                                    <div class="h-full flex flex-col">
+                                        <div class="flex flex-wrap items-start justify-between gap-4">
+                                            <div>
+                                                <div class="text-xs uppercase tracking-[0.16em]" style="color:var(--color-text-faint)" x-text="t('landing.education_quizzes')"></div>
+                                                <h3 class="mt-2 text-xl font-semibold" style="color:var(--color-text-primary)" x-text="educationSelectedQuiz.title"></h3>
+                                            </div>
+                                            <div class="grid grid-cols-3 gap-2 text-right">
+                                                <div class="rounded-xl px-3 py-2 education-theme-stat-card">
+                                                    <div class="text-xs" style="color:var(--color-text-faint)" x-text="t('landing.education_answered_label')"></div>
+                                                    <div class="text-lg font-semibold" style="color:var(--color-text-primary)" x-text="educationQuizAnsweredCount() + ' / ' + ((((educationSelectedQuiz && educationSelectedQuiz.questions) || []).length) || 0)"></div>
+                                                </div>
+                                                <div class="rounded-xl px-3 py-2 education-theme-stat-card">
+                                                    <div class="text-xs" style="color:var(--color-text-faint)" x-text="t('landing.education_progress_title')"></div>
+                                                    <div class="text-lg font-semibold" style="color:var(--color-text-primary)" x-text="getEducationPercentLabel('quiz', educationSelectedQuiz.id)"></div>
+                                                </div>
+                                                <div class="rounded-xl px-3 py-2 education-theme-stat-card">
+                                                    <div class="text-xs" style="color:var(--color-text-faint)" x-text="t('landing.education_score')"></div>
+                                                    <div class="text-lg font-semibold" style="color:var(--color-text-primary)" x-text="educationQuizCorrectCount()"></div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <template x-if="currentEducationQuizQuestion()">
+                                            <div class="mt-5 flex-1 flex flex-col">
+                                                <div data-testid="education-quiz-question-card" class="rounded-[26px] p-5 education-theme-question-card">
+                                                    <div class="flex items-center justify-between gap-3">
+                                                        <div class="text-xs uppercase tracking-[0.16em]" style="color:var(--color-text-faint)" x-text="t('landing.education_question_label')"></div>
+                                                        <div class="text-sm font-semibold" style="color:var(--color-text-primary)" x-text="(educationQuizIndex + 1) + ' / ' + ((((educationSelectedQuiz && educationSelectedQuiz.questions) || []).length) || 0)"></div>
+                                                    </div>
+                                                    <p class="mt-4 text-base leading-relaxed" style="color:var(--color-text-primary)" x-text="currentEducationQuizQuestion() ? currentEducationQuizQuestion().prompt : ''"></p>
+                                                </div>
+
+                                                <div data-testid="education-quiz-options" class="mt-4 space-y-3">
+                                                    <template x-for="option in (currentEducationQuizQuestion() ? currentEducationQuizQuestion().options : [])" :key="option.id">
+                                                        <button @click="answerEducationQuestion(option.id)"
+                                                                :data-testid="'education-quiz-option-' + option.id.toLowerCase()"
+                                                                :disabled="currentEducationQuizQuestion() ? !!getEducationQuizAnswer(currentEducationQuizQuestion().id) : true"
+                                                                :class="currentEducationQuizQuestion() ? getEducationQuizOptionClasses(currentEducationQuizQuestion(), option) : ''"
+                                                                :style="currentEducationQuizQuestion() ? getEducationQuizOptionStyle(currentEducationQuizQuestion(), option) : ''"
+                                                                class="disabled:cursor-default">
+                                                            <div class="flex items-start gap-3">
+                                                                <span class="inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-semibold shrink-0 education-theme-option-pill" x-text="option.id"></span>
+                                                                <div class="flex-1">
+                                                                    <div class="leading-relaxed" x-text="option.text"></div>
+                                                                    <div x-show="shouldShowEducationQuizOptionFeedback(currentEducationQuizQuestion(), option)" x-cloak class="mt-3">
+                                                                        <div x-show="getEducationQuizOptionFeedbackKey(currentEducationQuizQuestion(), option)" x-cloak class="text-sm font-semibold" :style="getEducationQuizOptionFeedbackStyle(currentEducationQuizQuestion(), option)" x-text="t(getEducationQuizOptionFeedbackKey(currentEducationQuizQuestion(), option))"></div>
+                                                                        <div x-show="option.short_feedback" x-cloak class="mt-2 text-sm leading-relaxed whitespace-pre-line" style="color:var(--color-text-secondary)" x-text="option.short_feedback"></div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </button>
+                                                    </template>
+                                                </div>
+
+                                                <div x-show="shouldShowEducationQuizExplainButton(currentEducationQuizQuestion())" x-cloak class="mt-4 flex items-center justify-start">
+                                                    <button data-testid="education-quiz-explain-button"
+                                                            @click="toggleEducationQuizExplanation()"
+                                                            :disabled="educationQuizExplanationLoading"
+                                                            class="px-4 py-2 rounded-full text-sm font-semibold education-theme-secondary-button"
+                                                            x-text="educationQuizExplanationLoading ? t('landing.education_preparing_explanation') : (educationQuizExplanationOpen ? t('landing.education_hide_explanation') : t('landing.education_explain'))">Explain</button>
+                                                </div>
+
+                                                <div x-show="educationQuizExplanationLoading && shouldShowEducationQuizExplainButton(currentEducationQuizQuestion())"
+                                                     x-cloak
+                                                     data-testid="education-quiz-explanation-loading"
+                                                     class="mt-4 rounded-[24px] p-5 education-theme-explain-panel">
+                                                    <div class="flex items-center justify-between gap-4">
+                                                        <div class="text-xs uppercase tracking-[0.16em]" style="color:var(--color-text-faint)" x-text="t('landing.education_explanation_title')"></div>
+                                                        <div class="education-thinking-dots" aria-hidden="true">
+                                                            <span class="education-thinking-dot"></span>
+                                                            <span class="education-thinking-dot"></span>
+                                                            <span class="education-thinking-dot"></span>
+                                                        </div>
+                                                    </div>
+                                                    <p class="mt-3 text-sm leading-relaxed" style="color:var(--color-text-secondary)" x-text="t('landing.education_preparing_explanation')"></p>
+                                                </div>
+
+                                                <div x-show="educationQuizExplanationOpen && shouldShowEducationQuizExplainButton(currentEducationQuizQuestion())"
+                                                     x-cloak
+                                                     data-testid="education-quiz-explanation-panel"
+                                                     class="mt-4 rounded-[24px] p-5 education-theme-explain-panel">
+                                                    <div class="text-xs uppercase tracking-[0.16em]" style="color:var(--color-text-faint)" x-text="t('landing.education_explanation_title')"></div>
+                                                    <p x-show="getEducationQuizExplanationText(currentEducationQuizQuestion())" x-cloak class="mt-3 text-sm leading-7 whitespace-pre-line" style="color:var(--color-text-secondary)" x-text="getEducationQuizExplanationText(currentEducationQuizQuestion())"></p>
+                                                    <p x-show="getEducationQuizSummaryText(currentEducationQuizQuestion())" x-cloak class="mt-4 text-sm font-semibold leading-relaxed whitespace-pre-line" style="color:var(--color-text-primary)" x-text="getEducationQuizSummaryText(currentEducationQuizQuestion())"></p>
+                                                </div>
+
+                                                <template x-if="educationCanModerate && currentEducationQuizQuestion()">
+                                                    <div data-testid="education-quiz-tester-tools" class="mt-4 rounded-[24px] p-4 education-theme-stat-card">
+                                                        <div class="text-xs uppercase tracking-[0.16em]" style="color:var(--color-text-faint)" x-text="t('landing.education_tester_tools')">Tester tools</div>
+                                                        <div class="mt-3 flex flex-col gap-3">
+                                                            <label class="block">
+                                                                <span class="text-xs font-semibold" style="color:var(--color-text-faint)" x-text="t('landing.education_tester_category')">Category</span>
+                                                                <select data-testid="education-quiz-category-select"
+                                                                        class="mt-2 w-full rounded-xl border px-3 py-2 text-sm"
+                                                                        style="background:rgba(15,23,42,0.22);border-color:var(--color-border);color:var(--color-text-primary)"
+                                                                        :disabled="isEducationModerationBusy('quiz_question', currentEducationQuizQuestion().id)"
+                                                                        :value="currentEducationQuizQuestion() ? (currentEducationQuizQuestion().category_title || '') : ''"
+                                                                        @change="setEducationQuizTesterCategory($event.target.value)">
+                                                                    <template x-for="categoryTitle in getEducationModeratorCategories()" :key="'quiz-category-' + categoryTitle">
+                                                                        <option :value="categoryTitle" x-text="categoryTitle"></option>
+                                                                    </template>
+                                                                </select>
+                                                            </label>
+                                                            <div class="flex flex-wrap gap-2">
+                                                                <button type="button"
+                                                                        data-testid="education-quiz-edit-explanation-button"
+                                                                        @click="openEducationQuizExplanationEditor()"
+                                                                        :disabled="isEducationModerationBusy('quiz_question', currentEducationQuizQuestion().id)"
+                                                                        class="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60 education-theme-secondary-button"
+                                                                        x-text="t('landing.education_tester_edit_explanation')">Edit explanation</button>
+                                                                <button type="button"
+                                                                        data-testid="education-quiz-delete-button"
+                                                                        @click="deleteEducationQuizQuestion()"
+                                                                        :disabled="isEducationModerationBusy('quiz_question', currentEducationQuizQuestion().id)"
+                                                                        class="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
+                                                                        style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.32);color:rgb(252 165 165)"
+                                                                        x-text="t('landing.education_tester_delete')">x</button>
+                                                            </div>
+                                                            <div x-show="isEducationQuizExplanationEditorOpen(currentEducationQuizQuestion())"
+                                                                 x-cloak
+                                                                 data-testid="education-quiz-explanation-editor"
+                                                                 class="rounded-[22px] p-4 education-theme-inner">
+                                                                <div class="flex flex-col gap-4">
+                                                                    <label class="block">
+                                                                        <span class="text-xs font-semibold" style="color:var(--color-text-faint)" x-text="t('landing.education_tester_explanation_label')">Explanation</span>
+                                                                        <textarea data-testid="education-quiz-explanation-input"
+                                                                                  x-model="educationQuizExplanationDraft"
+                                                                                  rows="7"
+                                                                                  class="mt-2 w-full rounded-xl border px-3 py-3 text-sm leading-6"
+                                                                                  style="background:rgba(15,23,42,0.22);border-color:var(--color-border);color:var(--color-text-primary);resize:vertical"></textarea>
+                                                                    </label>
+                                                                    <label class="block">
+                                                                        <span class="text-xs font-semibold" style="color:var(--color-text-faint)" x-text="t('landing.education_tester_summary_label')">Summary</span>
+                                                                        <textarea data-testid="education-quiz-summary-input"
+                                                                                  x-model="educationQuizSummaryDraft"
+                                                                                  rows="4"
+                                                                                  class="mt-2 w-full rounded-xl border px-3 py-3 text-sm leading-6"
+                                                                                  style="background:rgba(15,23,42,0.22);border-color:var(--color-border);color:var(--color-text-primary);resize:vertical"></textarea>
+                                                                    </label>
+                                                                    <div class="flex flex-wrap gap-2">
+                                                                        <button type="button"
+                                                                                data-testid="education-quiz-explanation-save-button"
+                                                                                @click="saveEducationQuizExplanationEdit()"
+                                                                                :disabled="isEducationModerationBusy('quiz_question', currentEducationQuizQuestion().id)"
+                                                                                class="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60 education-theme-primary-button"
+                                                                                x-text="t('landing.education_tester_save')">Save</button>
+                                                                        <button type="button"
+                                                                                data-testid="education-quiz-explanation-cancel-button"
+                                                                                @click="cancelEducationQuizExplanationEdit()"
+                                                                                :disabled="isEducationModerationBusy('quiz_question', currentEducationQuizQuestion().id)"
+                                                                                class="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60 education-theme-secondary-button"
+                                                                                x-text="t('landing.education_tester_cancel')">Cancel</button>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </template>
+
+                                                <div class="mt-5 flex items-center justify-between gap-3">
+                                                    <button data-testid="education-quiz-previous-button" @click="previousEducationQuizQuestion()" :disabled="educationQuizIndex <= 0" class="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50 education-theme-secondary-button" x-text="t('landing.education_previous')">Previous</button>
+                                                    <button data-testid="education-quiz-next-button" @click="nextEducationQuizQuestion()" class="px-4 py-2 rounded-xl text-sm font-semibold education-theme-primary-button" x-text="isEducationQuizComplete() || (educationSelectedQuiz && educationQuizIndex >= ((((educationSelectedQuiz && educationSelectedQuiz.questions) || []).length) - 1)) ? t('landing.education_finish_quiz') : t('landing.education_next')">Next</button>
+                                                </div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+                            </div>
+                        </template>
+
+                        <template x-if="!getEducationCategoryQuiz(getEducationActiveCategory())">
+                            <div class="rounded-[24px] p-5 min-h-[320px] flex items-center justify-center text-center text-sm education-theme-inner" style="color:var(--color-text-secondary)" x-text="t('landing.education_no_quiz')">No quiz available for this category yet.</div>
+                        </template>
+                    </section>
+                </div>
+            </div>
+        </template>
     </div>
 </div>
 
@@ -1205,8 +1885,8 @@
         <div class="grid md:grid-cols-3 gap-8 mb-8">
             <div>
                 <div class="flex items-center gap-2 mb-3">
-                    <img src="/static/icons/logo.jpeg" alt="IP WATⒸH AI" class="h-6 w-6 rounded flex-shrink-0 object-cover">
-                    <span class="text-sm font-bold" style="color:var(--color-text-primary)">IP WATⒸH AI</span>
+                    <img src="/static/icons/logo.jpeg" alt="IPWatchAI" class="h-6 w-6 rounded flex-shrink-0 object-cover">
+                    <span class="text-sm font-bold" style="color:var(--color-text-primary)">IPWatchAI</span>
                 </div>
                 <p class="text-sm" style="color:var(--color-text-muted)" x-text="t('landing.footer_tagline')">Yapay zeka destekli marka risk analizi platformu.</p>
             </div>
@@ -1219,6 +1899,7 @@
                     <a href="#" @click.prevent="isLoggedIn ? (window.location.href='/dashboard') : (showLogin = true)" class="no-underline hover:opacity-80 cursor-pointer" style="color:var(--color-text-muted)" x-text="t('landing.go_dashboard')">Dashboard</a>
                     <a href="#" @click.prevent="activeTab = 'about'; window.scrollTo({top:0,behavior:'smooth'})" class="no-underline hover:opacity-80 cursor-pointer" style="color:var(--color-text-muted)" x-text="t('landing.nav_about')">Hakkimizda</a>
                     <a href="#" @click.prevent="activeTab = 'mission'; window.scrollTo({top:0,behavior:'smooth'})" class="no-underline hover:opacity-80 cursor-pointer" style="color:var(--color-text-muted)" x-text="t('landing.nav_mission')">Misyonumuz</a>
+                    <a href="#" @click.prevent="activeTab = 'education'; window.scrollTo({top:0,behavior:'smooth'})" class="no-underline hover:opacity-80 cursor-pointer" style="color:var(--color-text-muted)" x-text="t('landing.nav_education')">Education</a>
                 </div>
             </div>
             <div>
@@ -1230,7 +1911,7 @@
             </div>
         </div>
         <div class="pt-6 text-center text-xs" style="border-top:1px solid var(--color-border);color:var(--color-text-faint)">
-            <span>&copy; 2026 IP WATⒸH AI.</span> <span x-text="t('landing.footer_rights')">Tum haklari saklidir.</span>
+            <span>&copy; 2026 IPWatchAI.</span> <span x-text="t('landing.footer_rights')">Tum haklari saklidir.</span>
         </div>
     </div>
 </footer>
@@ -1495,11 +2176,11 @@
     <script>
         window.SERVER_PLANS = {{ plans | default({}, true) | tojson }};
     </script>
-    <script src="/static/js/utils/i18n.js?v=32"></script>
+<script src="/static/js/utils/i18n.js?v=38"></script>
 <script src="/static/js/utils/helpers.js?v=33"></script>
 <script src="/static/js/utils/toast.js?v=31"></script>
-<script src="/static/js/utils/upgrade-modal.js?v=3"></script>
+<script src="/static/js/utils/upgrade-modal.js?v=4"></script>
 <script src="/static/js/components/score-badge.js?v=31"></script>
-    <script src="/static/js/marketing/landing.js?v=36"></script>
+<script src="/static/js/marketing/landing.js?v=50"></script>
 </body>
 </html>

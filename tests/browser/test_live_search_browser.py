@@ -241,10 +241,20 @@ def main() -> None:
                 raise AssertionError(f"expected starter upgrade recommendation for free live-search gate, got {recommended_plan!r}")
             modal_offer = page.evaluate(
                 """() => ({
+                    title: (document.getElementById('upgrade-modal-title')?.textContent || '').trim(),
+                    description: (document.getElementById('upgrade-modal-description')?.textContent || '').trim(),
                     price: (document.getElementById('upgrade-plan-price')?.textContent || '').trim(),
                     features: Array.from(document.querySelectorAll('#upgrade-feature-list li span:last-child')).map((el) => (el.textContent || '').trim())
                 })"""
             )
+            expected_copy = page.evaluate(
+                """() => ({
+                    title: window.AppI18n.t('upgrade.live_search_title'),
+                    description: window.AppI18n.t('upgrade.live_search_description')
+                })"""
+            )
+            if modal_offer["title"] != expected_copy["title"] or modal_offer["description"] != expected_copy["description"]:
+                raise AssertionError(f"expected live-search upgrade copy, got {modal_offer}, expected {expected_copy}")
             if "499" not in modal_offer["price"]:
                 raise AssertionError(f"expected starter monthly price in live-search upgrade modal, got {modal_offer}")
             if not any("50" in feature for feature in modal_offer["features"]):

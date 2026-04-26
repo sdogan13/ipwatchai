@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "status": "running",
+  "backend": "madlad",
+  "null_only": false,
+  "limit": 1,
+  "dry_run": true,
+  "metadata_root": "C:\\Users\\701693\\turk_patent\\bulletins\\Marka",
+  "run_dir": "C:\\Users\\701693\\turk_patent\\.tmp_launcher_exact\\name_tr_refresh_20260424_190125",
+  "snapshot_path": "C:\\Users\\701693\\turk_patent\\.tmp_launcher_exact\\name_tr_refresh_20260424_190125\\snapshot.jsonl.gz",
+  "started_at": "2026-04-24T19:01:25Z",
+  "updated_at": "2026-04-24T19:01:44Z",
+  "last_processed_id": null,
+  "summary": {},
+  "metadata_sync": {
+    "completed_files": []
+  },
+  "snapshot_row_count": 1,
+  "snapshot_duration_seconds": 18.9
+}

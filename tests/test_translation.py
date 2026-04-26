@@ -7,9 +7,13 @@ All NLLB model calls are mocked — tests run without GPU or model downloads.
 import sys
 import os
 from unittest.mock import patch, MagicMock
+from pathlib import Path
 
 import pytest
 
+import utils.translation as translation
+
+FIXTURE_ROOT = Path("tests/fixtures/model_cache").resolve()
 
 from utils.translation import (
     detect_language_fasttext,
@@ -20,6 +24,9 @@ from utils.translation import (
     get_search_variants,
     get_cross_language_similarity,
     NLLB_LANG_MAP,
+    get_translation_backend_info,
+    build_translation_provenance,
+    has_prompt_leakage,
 )
 
 
@@ -101,13 +108,13 @@ class TestLanguageDetection:
         assert iso == "en"
 
     @patch("utils.translation._load_fasttext_langid")
-    def test_low_confidence_falls_back_to_english(self, mock_load):
+    def test_low_confidence_returns_unknown(self, mock_load):
         """Non-EN/non-TR with confidence < 0.7 → English fallback."""
         mock_model = MagicMock()
         mock_model.predict = lambda t: (["__label__pol_Latn"], [0.45])
         mock_load.return_value = mock_model
         iso, _, conf = detect_language_fasttext("cicek masali")
-        assert iso == "en"  # Fallback to English
+        assert iso == "unknown"
 
     @patch("utils.translation._load_fasttext_langid")
     def test_high_confidence_non_english_kept(self, mock_load):
@@ -119,11 +126,41 @@ class TestLanguageDetection:
         assert iso == "ku"
 
     @patch("utils.translation._load_fasttext_langid")
-    def test_model_unavailable_falls_back_to_english(self, mock_load):
+    def test_model_unavailable_returns_unknown(self, mock_load):
         """FastText model not available → English fallback."""
         mock_load.return_value = None
         iso, _, _ = detect_language_fasttext("any text")
-        assert iso == "en"
+        assert iso == "unknown"
+
+    @patch("utils.translation._load_fasttext_langid")
+    def test_model_unavailable_does_not_guess_turkish(self, mock_load):
+        mock_load.return_value = None
+        iso, _, _ = detect_language_fasttext("ŞEKER")
+        assert iso == "unknown"
+
+    @patch("utils.translation._load_fasttext_langid")
+    def test_model_unavailable_does_not_guess_arabic(self, mock_load):
+        mock_load.return_value = None
+        iso, _, _ = detect_language_fasttext("تفاح")
+        assert iso == "unknown"
+
+    @patch("utils.translation._load_fasttext_langid")
+    def test_model_unavailable_does_not_guess_persian(self, mock_load):
+        mock_load.return_value = None
+        iso, _, _ = detect_language_fasttext("سیب")
+        assert iso == "unknown"
+
+    @patch("utils.translation._load_fasttext_langid")
+    def test_model_unavailable_does_not_guess_mixed_descriptor_case(self, mock_load):
+        mock_load.return_value = None
+        iso, _, _ = detect_language_fasttext("DOĞAN electronics")
+        assert iso == "unknown"
+
+    @patch("utils.translation._load_fasttext_langid")
+    def test_model_unavailable_does_not_guess_ascii_brand(self, mock_load):
+        mock_load.return_value = None
+        iso, _, _ = detect_language_fasttext("NAIK")
+        assert iso == "unknown"
 
     @patch("utils.translation._load_fasttext_langid")
     def test_returns_confidence(self, mock_load):
@@ -195,6 +232,164 @@ class TestTranslateToTurkish:
         r2 = translate_to_turkish("STAR")
         assert r1 == r2
         assert mock_translate.call_count == 1
+
+    @patch("utils.translation.detect_language_fasttext", return_value=("en", "eng_Latn", 0.95))
+    @patch("utils.translation.translate", return_value="elma")
+    def test_madlad_backend_supported(self, mock_translate, mock_detect):
+        translate_to_turkish.cache_clear()
+        result = translate_to_turkish("APPLE", backend="madlad")
+        assert result == "elma"
+        assert mock_translate.call_args.kwargs["backend"] == "madlad"
+
+    @patch("utils.translation.detect_language_fasttext", return_value=("tr", "tur_Latn", 0.99))
+    @patch("utils.translation.translate", return_value="çeviri")
+    def test_madlad_backend_still_calls_model_for_detected_turkish(self, mock_translate, mock_detect):
+        translate_to_turkish.cache_clear()
+        result = translate_to_turkish("ŞEKER", backend="madlad")
+        assert result == "çeviri"
+        assert mock_translate.call_args.kwargs["backend"] == "madlad"
+
+
+class TestBatchTranslateToTurkishMadlad:
+    @patch("utils.translation.detect_language_fasttext")
+    @patch("utils.translation.batch_translate")
+    def test_uses_madlad_backend_for_all_rows_regardless_of_detected_lang(self, mock_batch_translate, mock_detect):
+        mock_detect.side_effect = [
+            ("en", "eng_Latn", 0.95),
+            ("tr", "tur_Latn", 0.99),
+        ]
+        mock_batch_translate.return_value = ["elma", "şeker çeviri"]
+
+        results = translation.batch_translate_to_turkish(["APPLE", "DOĞAN"], backend="madlad")
+
+        assert results == [("elma", "en"), ("şeker çeviri", "tr")]
+        assert mock_batch_translate.call_args.kwargs["backend"] == "madlad"
+
+
+class TestMadladPostprocessing:
+    def test_guard_prompt_can_override_brand_like_false_translation(self):
+        result = translation._pick_madlad_candidate(
+            original_text="NAIK",
+            model_input="naik",
+            primary_decoded="Yükselt",
+            guard_decoded="Türkçeye çeviri: naik",
+        )
+        assert result is None
+
+    def test_guard_prompt_removes_color_suffix_noise(self):
+        result = translation._pick_madlad_candidate(
+            original_text="GOLD",
+            model_input="gold",
+            primary_decoded="altıncolor",
+            guard_decoded="Türkçeye çeviri: altın",
+        )
+        assert result == "altın"
+
+    def test_postprocess_strips_prompt_prefix_and_punctuation(self):
+        result = translation._postprocess_translation("Türkçeye çeviri: elma.", "apple")
+        assert result == "elma"
+
+    def test_postprocess_strips_generic_language_prefixed_prompt(self):
+        result = translation._postprocess_translation("Almanca'ya çeviri: elma.", "apple")
+        assert result == "elma"
+
+    def test_postprocess_strips_nested_prompt_prefixes_iteratively(self):
+        result = translation._postprocess_translation("Türkçe'ye çeviri: Translate to Turkish: elma.", "apple")
+        assert result == "elma"
+
+    def test_postprocess_strips_turkceye_ceviren_prefix(self):
+        result = translation._postprocess_translation("türkçeye çeviren: d.r.m atilla durmaz", "d.r.m atilla durmaz")
+        assert result is None
+
+    def test_pick_madlad_candidate_rejects_digit_drift(self):
+        result = translation._pick_madlad_candidate(
+            original_text="atakum ortaokulu samsun 2020",
+            model_input="atakum ortaokulu samsun 2020",
+            primary_decoded="atakum ortaokulu samsun 2010",
+            guard_decoded=None,
+        )
+        assert result is None
+
+
+def test_has_prompt_leakage_detects_turkceye_ceviren():
+    assert has_prompt_leakage("türkçeye çeviren: d.r.m atilla durmaz") is True
+    assert has_prompt_leakage("Türkçeye çeviri: elma") is True
+    assert has_prompt_leakage("Almanca'ya çeviri: elma") is True
+    assert has_prompt_leakage("Translate to Turkish: apple") is True
+    assert has_prompt_leakage("d.r.m atilla durmaz") is False
+
+
+class TestMadladDigitPreservation:
+    def test_pick_madlad_candidate_rejects_grouped_digit_drift(self):
+        result = translation._pick_madlad_candidate(
+            original_text="bos assistance yol yardım 0850 259 21 12",
+            model_input="bos assistance yol yardım 0850 259 21 12",
+            primary_decoded="bos assistance yol yardım 0850 259 21 13",
+            guard_decoded=None,
+        )
+        assert result is None
+
+
+def test_resolve_translation_model_source_prefers_cached_snapshot(monkeypatch):
+    monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(FIXTURE_ROOT / "hf-hub"))
+    monkeypatch.setattr(translation, "MODEL_NAME", "facebook/nllb-200-distilled-600M")
+
+    assert translation._resolve_translation_model_source() == str(
+        FIXTURE_ROOT / "hf-hub" / "models--facebook--nllb-200-distilled-600M" / "snapshots" / "0001"
+    )
+
+
+def test_resolve_fasttext_langid_model_path_prefers_cached_file(monkeypatch):
+    monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", str(FIXTURE_ROOT / "hf-hub"))
+
+    assert translation._resolve_fasttext_langid_model_path() == str(
+        FIXTURE_ROOT / "hf-hub" / "models--facebook--fasttext-language-identification" / "snapshots" / "0001" / "model.bin"
+    )
+
+
+def test_backend_info_defaults_to_nllb():
+    info = get_translation_backend_info()
+    assert info["backend"] == "nllb"
+    assert "nllb" in info["model_name"]
+
+
+def test_backend_info_for_madlad():
+    info = get_translation_backend_info("madlad")
+    assert info["backend"] == "madlad"
+    assert "madlad400-3b-mt" in info["model_name"]
+
+
+def test_get_madlad_translate_batch_size_defaults_to_16():
+    assert translation.get_madlad_translate_batch_size() == 16
+    assert translation.get_madlad_translate_batch_size(override=24) == 24
+    assert translation.get_madlad_translate_batch_size(override=0) == 1
+
+
+def test_build_translation_provenance_uses_backend_model():
+    provenance = build_translation_provenance("madlad")
+    assert provenance["name_tr_backend"] == "madlad"
+    assert "madlad400-3b-mt" in provenance["name_tr_model"]
+    assert provenance["name_tr_updated_at"].endswith("Z")
+
+
+def test_ai_settings_pipeline_translation_backend_defaults_to_madlad(monkeypatch):
+    monkeypatch.delenv("PIPELINE_TRANSLATION_BACKEND", raising=False)
+    monkeypatch.delenv("MADLAD_TRANSLATE_BATCH_SIZE", raising=False)
+
+    from config.settings import AISettings
+
+    ai_settings = AISettings(_env_file=None)
+    assert ai_settings.pipeline_translation_backend == "madlad"
+    assert ai_settings.madlad_translate_batch_size == 16
+
+
+def test_batch_translate_to_turkish_madlad_forwards_batch_size():
+    with patch.object(translation, "detect_language_fasttext", return_value=("en", "eng_Latn", 0.99)), \
+         patch.object(translation, "batch_translate", return_value=["elma"]) as mock_batch_translate:
+        results = translation.batch_translate_to_turkish(["APPLE"], backend="madlad", batch_size=7)
+
+    assert results == [("elma", "en")]
+    assert mock_batch_translate.call_args.kwargs["batch_size"] == 7
 
 
 # ============================================================

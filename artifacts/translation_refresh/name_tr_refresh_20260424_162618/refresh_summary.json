@@ -1,0 +1,15 @@
+{
+  "processed": 1000,
+  "translation_changed": 179,
+  "lang_changed": 38,
+  "provenance_changed": 488,
+  "translated": 156,
+  "preserved": 844,
+  "model_rows": 208,
+  "errors": 0,
+  "dry_run": false,
+  "backend": "madlad",
+  "duration_seconds": 520.1,
+  "benchmark_report": "C:\\Users\\701693\\turk_patent\\artifacts\\translation_refresh\\name_tr_refresh_20260424_162618\\benchmark_report.json",
+  "snapshot_path": "C:\\Users\\701693\\turk_patent\\artifacts\\translation_refresh\\name_tr_refresh_20260424_162618\\snapshot.jsonl.gz"
+}

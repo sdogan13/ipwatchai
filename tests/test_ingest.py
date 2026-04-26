@@ -10,8 +10,9 @@ import os
 import json
 import uuid
 import pytest
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from contextlib import contextmanager
+from types import ModuleType
 from unittest.mock import MagicMock, patch
 from psycopg2.extras import Json
 
@@ -43,6 +44,7 @@ from pipeline.ingest import (
     _has_tmbulletin_source,
     _repair_corrupt_metadata,
     pre_scan_and_repair,
+    determine_db_status,
     determine_status,
     get_source_rank,
     get_status_rank,
@@ -53,6 +55,242 @@ from pipeline.ingest import (
     calculate_expiration_status,
     extract_tpe_id,
 )
+
+UPDATE_ROW_KEYS = [
+    "name",
+    "status",
+    "nice_classes",
+    "goods",
+    "last_date",
+    "appeal",
+    "expiry",
+    "b_no",
+    "b_date",
+    "g_no",
+    "g_date",
+    "img_path",
+    "app_date",
+    "reg_date",
+    "img_emb",
+    "dino_emb",
+    "txt_emb",
+    "color_emb",
+    "ocr_text",
+    "name_tr",
+    "detected_lang",
+    "name_tr_backend",
+    "name_tr_model",
+    "name_tr_updated_at",
+    "holder_name",
+    "holder_tpe_client_id",
+    "attorney_name",
+    "attorney_no",
+    "src_tag",
+    "reg_no",
+    "wipo_no",
+    "vienna_classes",
+    "app_no",
+]
+
+
+def make_metadata_record(
+    *,
+    application_no="2024/001",
+    folder_status="",
+    trademark_name="TEST MARK",
+    application_date="15/01/2024",
+    register_no=None,
+    register_date=None,
+    bulletin_no="490",
+    bulletin_date="2026-04-13",
+    gazette_no=None,
+    gazette_date=None,
+):
+    trademark = {
+        "NAME": trademark_name,
+        "APPLICATIONDATE": application_date,
+        "REGISTERNO": register_no,
+        "REGISTERDATE": register_date,
+        "BULLETIN_NO": bulletin_no,
+        "BULLETIN_DATE": bulletin_date,
+        "GAZETTE_NO": gazette_no,
+        "GAZETTE_DATE": gazette_date,
+        "NICECLASSES_LIST": [25, 35],
+        "VIENNACLASSES_LIST": [1, 2],
+    }
+    return {
+        "APPLICATIONNO": application_no,
+        "STATUS": folder_status,
+        "TRADEMARK": trademark,
+        "EXTRACTEDGOODS": [{"CLASSID": "25", "TEXT": "Clothing"}],
+        "HOLDERS": [{"TITLE": "REAL HOLDER (12345)", "TPECLIENTID": ""}],
+        "ATTORNEYS": [{"NAME": "REAL ATTORNEY (67890)", "NO": ""}],
+        "IMAGE": None,
+        "name_tr": "GERCEK MARKA",
+        "detected_lang": "tr",
+        "name_tr_backend": "nllb",
+        "name_tr_model": "facebook/nllb-200-distilled-600M",
+        "name_tr_updated_at": "2026-04-24T12:00:00Z",
+    }
+
+
+def write_metadata_file(base_dir, folder_name, records=None, raw_text=None):
+    folder = Path(base_dir) / folder_name
+    folder.mkdir(parents=True, exist_ok=True)
+    metadata_path = folder / "metadata.json"
+    if raw_text is not None:
+        metadata_path.write_text(raw_text, encoding="utf-8")
+    else:
+        metadata_path.write_text(json.dumps(records or [], ensure_ascii=False), encoding="utf-8")
+    return metadata_path
+
+
+def insert_row_dict(row):
+    return dict(zip(ingest._INSERT_COLUMNS, row))
+
+
+def update_row_dict(row):
+    return dict(zip(UPDATE_ROW_KEYS, row))
+
+
+class FakeCursor:
+    def __init__(self, conn):
+        self.conn = conn
+        self._fetchone = None
+        self._fetchall = []
+
+    def execute(self, sql, params=None):
+        sql_text = " ".join(str(sql).split())
+        self.conn.executed.append((sql_text, params))
+
+        if sql_text.startswith("SELECT status, COALESCE(record_count, 0) FROM processed_files"):
+            key = params[0]
+            record = self.conn.processed_files.get(key)
+            self._fetchone = None if record is None else (record["status"], record.get("record_count", 0))
+            return
+
+        if sql_text.startswith("INSERT INTO processed_files"):
+            key = params[0]
+            entry = self.conn.processed_files.setdefault(key, {})
+            entry.update({"status": "processing"})
+            return
+
+        if sql_text.startswith("UPDATE processed_files SET status = %s, record_count = 0, error_log = NULL"):
+            status, key = params
+            entry = self.conn.processed_files.setdefault(key, {})
+            entry.update({"status": status, "record_count": 0, "error_log": None})
+            return
+
+        if sql_text.startswith("UPDATE processed_files SET status = %s, record_count = %s, error_log = NULL"):
+            status, record_count, key = params
+            entry = self.conn.processed_files.setdefault(key, {})
+            entry.update({"status": status, "record_count": record_count, "error_log": None})
+            return
+
+        if sql_text.startswith("UPDATE processed_files SET status = %s, error_log = %s"):
+            status, error_log, key = params
+            entry = self.conn.processed_files.setdefault(key, {})
+            entry.update({"status": status, "error_log": error_log})
+            return
+
+        if sql_text.startswith("UPDATE processed_files SET status = 'failed', error_log = %s"):
+            error_log, key = params
+            entry = self.conn.processed_files.setdefault(key, {})
+            entry.update({"status": "failed", "error_log": error_log})
+            return
+
+        if sql_text.startswith("SELECT application_no, id, last_event_date, current_status, expiry_date, status_source FROM trademarks"):
+            app_nos = params[0]
+            rows = []
+            for app_no in app_nos:
+                existing = self.conn.existing_trademarks.get(app_no)
+                if existing:
+                    rows.append(
+                        (
+                            app_no,
+                            existing["id"],
+                            existing.get("last_event_date"),
+                            existing.get("current_status"),
+                            existing.get("expiry_date"),
+                            existing.get("status_source"),
+                        )
+                    )
+            self._fetchall = rows
+            return
+
+        if sql_text.startswith("SELECT id FROM trademarks WHERE application_no = ANY"):
+            app_nos = params[0]
+            rows = []
+            for app_no in app_nos:
+                if app_no in self.conn.inserted_ids:
+                    rows.append((self.conn.inserted_ids[app_no],))
+                elif app_no in self.conn.existing_trademarks:
+                    rows.append((self.conn.existing_trademarks[app_no]["id"],))
+            self._fetchall = rows
+            return
+
+        if (
+            sql_text.startswith("SAVEPOINT")
+            or sql_text.startswith("RELEASE SAVEPOINT")
+            or sql_text.startswith("ROLLBACK TO SAVEPOINT")
+        ):
+            return
+
+    def fetchone(self):
+        return self._fetchone
+
+    def fetchall(self):
+        return list(self._fetchall)
+
+
+class FakeConnection:
+    def __init__(self, *, existing_trademarks=None, processed_files=None):
+        self.existing_trademarks = existing_trademarks or {}
+        self.processed_files = processed_files or {}
+        self.executed = []
+        self.inserted_rows = []
+        self.updated_rows = []
+        self.history_rows = []
+        self.inserted_ids = {}
+        self.next_id = 9000
+        self.commits = 0
+        self.rollbacks = 0
+
+    def cursor(self):
+        return FakeCursor(self)
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        self.rollbacks += 1
+
+
+def fake_execute_values(cur, sql, rows):
+    sql_text = " ".join(str(sql).split())
+    if sql_text.startswith("INSERT INTO trademarks"):
+        for row in rows:
+            cur.conn.inserted_rows.append(row)
+            cur.conn.inserted_ids[row[0]] = cur.conn.next_id
+            cur.conn.next_id += 1
+        return
+
+    if sql_text.startswith("UPDATE trademarks AS tm SET") or sql_text.startswith("UPDATE trademarks tm SET"):
+        cur.conn.updated_rows.extend(rows)
+        return
+
+    if sql_text.startswith("INSERT INTO trademark_history"):
+        cur.conn.history_rows.extend(rows)
+        return
+
+    raise AssertionError(f"Unexpected execute_values SQL: {sql_text}")
+
+
+def module_with_attrs(name, **attrs):
+    module = ModuleType(name)
+    for key, value in attrs.items():
+        setattr(module, key, value)
+    return module
 
 
 # ============================================================
@@ -344,7 +582,8 @@ class TestCoalesceDirection:
 
         # Shared fields must protect APP_/GZ_ data (existing first when higher source)
         for field in ['holder_name', 'holder_tpe_client_id', 'attorney_name',
-                      'attorney_no', 'name_tr', 'detected_lang']:
+                      'attorney_no', 'name_tr', 'detected_lang',
+                      'name_tr_backend', 'name_tr_model', 'name_tr_updated_at']:
             assert f"COALESCE(tm.{field}," in blt_sql, \
                 f"BLT_ must protect existing {field} from higher-authority sources"
 
@@ -424,15 +663,12 @@ class TestCoalesceDirection:
 
     def test_insert_sql_has_attorney_columns(self):
         """INSERT SQL must include attorney_name and attorney_no columns."""
-        import inspect
-        source = inspect.getsource(ingest.process_file_batch)
-
-        insert_section = source[source.find("INSERT INTO trademarks"):]
-        insert_end = insert_section.find("execute_values")
-        insert_sql = insert_section[:insert_end]
+        insert_sql = ingest._build_insert_sql()
 
         assert "attorney_name" in insert_sql
         assert "attorney_no" in insert_sql
+        assert "attorney_name" in ingest._INSERT_COLUMNS
+        assert "attorney_no" in ingest._INSERT_COLUMNS
         # COALESCE on conflict for attorney
         assert "attorney_name = COALESCE(EXCLUDED.attorney_name, trademarks.attorney_name)" in insert_sql
         assert "attorney_no = COALESCE(EXCLUDED.attorney_no, trademarks.attorney_no)" in insert_sql
@@ -480,6 +716,59 @@ class TestDetermineStatus:
         assert determine_status("BLT_119", "", reg_no_val="null") == "Published"
         assert determine_status("BLT_119", "", reg_no_val="") == "Published"
         assert determine_status("BLT_119", "", reg_no_val="None") == "Published"
+
+    def test_mojibake_keyword_is_repaired(self):
+        assert determine_status("BLT_119", "yayÄ±nlandÄ±") == "Published"
+
+    def test_status_text_wins_over_blt_default(self):
+        assert determine_status("BLT_119", "tescil edildi") == "Registered"
+
+    def test_status_text_wins_over_gz_default(self):
+        assert determine_status("GZ_315", "yayınlandı") == "Published"
+
+    def test_status_text_wins_over_app_default(self):
+        assert determine_status("APP_1", "tescil edildi") == "Registered"
+
+    def test_status_text_wins_over_register_no_inference(self):
+        assert determine_status("GZ_315", "feragat edildi", reg_no_val="12345") == "Withdrawn"
+
+    def test_mojibake_conflict_text_still_wins(self):
+        assert determine_status("GZ_315", "yayÄ±nlandÄ±", reg_no_val="12345") == "Published"
+
+
+class TestDetermineDbStatus:
+    def test_returns_canonical_published_enum(self):
+        assert determine_db_status("BLT_119", "Application/Published") == "Yayında"
+
+    def test_repairs_mojibake_before_matching(self):
+        assert determine_db_status("BLT_119", "yayÄ±nlandÄ±") == "Yayında"
+
+    def test_returns_canonical_withdrawn_enum(self):
+        assert determine_db_status("GZ_315", "feragat edildi") == "Geri Çekildi"
+
+    def test_blt_folder_with_registered_text_uses_text(self):
+        assert determine_db_status("BLT_119", "tescil edildi") == "Tescil Edildi"
+
+    def test_blt_folder_with_refused_text_uses_text(self):
+        assert determine_db_status("BLT_119", "başvuru geçersiz") == "Reddedildi"
+
+    def test_blt_folder_with_cancelled_text_uses_text(self):
+        assert determine_db_status("BLT_119", "iptal edildi") == "İptal Edildi"
+
+    def test_gz_folder_with_published_text_uses_text(self):
+        assert determine_db_status("GZ_315", "yayınlandı") == "Yayında"
+
+    def test_gz_folder_with_withdrawn_text_uses_text(self):
+        assert determine_db_status("GZ_315", "geri çekildi") == "Geri Çekildi"
+
+    def test_app_folder_with_refused_text_uses_text(self):
+        assert determine_db_status("APP_1", "reddedildi") == "Reddedildi"
+
+    def test_status_text_beats_register_no_inference(self):
+        assert determine_db_status("GZ_315", "geri çekildi", reg_no_val="12345") == "Geri Çekildi"
+
+    def test_mojibake_conflict_text_beats_folder_family(self):
+        assert determine_db_status("GZ_315", "yayÄ±nlandÄ±", reg_no_val="12345") == "Yayında"
 
 
 # ============================================================
@@ -591,6 +880,21 @@ class TestCleanName:
     def test_empty_returns_none(self):
         assert clean_name("") is None
 
+    def test_strips_sekil_suffix(self):
+        assert clean_name("MARKA ŞEKİL") == "MARKA"
+
+    def test_strips_ascii_sekil_suffix(self):
+        assert clean_name("MARKA SEKIL") == "MARKA"
+
+    def test_strips_plus_sekil_suffix(self):
+        assert clean_name("MARKA + ŞEKİL") == "MARKA"
+
+    def test_strips_mixed_case_and_preserves_brand_text(self):
+        assert clean_name("  Marka   + SeKiL  ") == "Marka"
+
+    def test_preserves_non_suffix_text(self):
+        assert clean_name("ŞEKİL OFİS") == "OFİS"
+
 
 class TestExtractBulletinInfo:
     def test_blt_format(self):
@@ -608,6 +912,294 @@ class TestExtractBulletinInfo:
         assert no is None
         assert dt is None
 
+    def test_live_style_blt_folder(self):
+        no, dt = extract_bulletin_info("BLT_490_2026-04-13")
+        assert no == "490"
+        assert dt == date(2026, 4, 13)
+
+    def test_live_style_gz_folder(self):
+        no, dt = extract_bulletin_info("GZ_500_2026-03-31")
+        assert no == "500"
+        assert dt == date(2026, 3, 31)
+
+
+class TestCalculateExpirationStatus:
+    def test_regular_date_adds_ten_years_and_183_days(self):
+        assert calculate_expiration_status("2024-01-15") == date(2034, 7, 17)
+
+    def test_leap_day_uses_fallback_calendar_math(self):
+        assert calculate_expiration_status(date(2020, 2, 29)) == date(2030, 8, 30)
+
+
+class TestProcessFileBatchBehavior:
+    def _run_batch(self, metadata_path, conn, *, force=False, repair_side_effect=None, execute_side_effect=None):
+        reconcile_calls = []
+        watchlist_calls = []
+        queue_calls = []
+
+        def reconcile_stub(_conn, app_nos):
+            reconcile_calls.append(list(app_nos))
+
+        def watchlist_stub(trademark_ids, source_type, folder_name):
+            watchlist_calls.append(
+                {
+                    "trademark_ids": list(trademark_ids),
+                    "source_type": source_type,
+                    "folder_name": folder_name,
+                }
+            )
+
+        def queue_stub(**kwargs):
+            queue_calls.append(kwargs)
+
+        execute_impl = execute_side_effect or fake_execute_values
+        patches = [
+            patch("pipeline.ingest_runtime.execute_values", side_effect=execute_impl),
+            patch("pipeline.ingest_runtime.add_to_scan_queue", side_effect=queue_stub),
+        ]
+        if repair_side_effect is not None:
+            patches.append(patch("pipeline.ingest_runtime._repair_corrupt_metadata", side_effect=repair_side_effect))
+
+        with patch.dict(
+            sys.modules,
+            {
+                "utils.status_reconciler": module_with_attrs(
+                    "utils.status_reconciler",
+                    update_final_status_batch=reconcile_stub,
+                ),
+                "watchlist.scanner": module_with_attrs(
+                    "watchlist.scanner",
+                    trigger_watchlist_scan=watchlist_stub,
+                ),
+            },
+        ):
+            with patches[0], patches[1]:
+                if len(patches) == 3:
+                    with patches[2]:
+                        result = ingest.process_file_batch(conn, metadata_path, force=force)
+                else:
+                    result = ingest.process_file_batch(conn, metadata_path, force=force)
+
+        return result, reconcile_calls, watchlist_calls, queue_calls
+
+    def test_empty_metadata_marks_success_with_zero_records(self):
+        with temp_dir() as tmp:
+            metadata_path = write_metadata_file(tmp, "BLT_490_2026-04-13", records=[])
+            conn = FakeConnection()
+
+            result, reconcile_calls, watchlist_calls, queue_calls = self._run_batch(metadata_path, conn)
+
+        file_key = "BLT_490_2026-04-13/metadata.json"
+        assert result["status"] == "success"
+        assert conn.processed_files[file_key]["status"] == "success"
+        assert conn.processed_files[file_key]["record_count"] == 0
+        assert conn.inserted_rows == []
+        assert conn.updated_rows == []
+        assert conn.history_rows == []
+        assert reconcile_calls == []
+        assert watchlist_calls == []
+        assert queue_calls == []
+
+    def test_repaired_empty_metadata_marks_repaired_with_zero_records(self):
+        with temp_dir() as tmp:
+            metadata_path = write_metadata_file(tmp, "BLT_490_2026-04-13", raw_text='{"broken":')
+            conn = FakeConnection()
+
+            def repair_stub(path):
+                path.write_text("[]", encoding="utf-8")
+                return {"status": "repaired", "records": 0}
+
+            result, reconcile_calls, watchlist_calls, queue_calls = self._run_batch(
+                metadata_path,
+                conn,
+                repair_side_effect=repair_stub,
+            )
+
+        file_key = "BLT_490_2026-04-13/metadata.json"
+        assert result["status"] == "repaired"
+        assert conn.processed_files[file_key]["status"] == "repaired"
+        assert conn.processed_files[file_key]["record_count"] == 0
+        assert reconcile_calls == []
+        assert watchlist_calls == []
+        assert queue_calls == []
+
+    def test_failure_marks_processed_file_failed(self):
+        with temp_dir() as tmp:
+            record = make_metadata_record()
+            metadata_path = write_metadata_file(tmp, "BLT_490_2026-04-13", records=[record])
+            conn = FakeConnection()
+
+            def failing_execute_values(cur, sql, rows):
+                sql_text = " ".join(str(sql).split())
+                if sql_text.startswith("INSERT INTO trademarks"):
+                    raise RuntimeError("db insert failed")
+                return fake_execute_values(cur, sql, rows)
+
+            result, _, _, _ = self._run_batch(
+                metadata_path,
+                conn,
+                execute_side_effect=failing_execute_values,
+            )
+
+        file_key = "BLT_490_2026-04-13/metadata.json"
+        assert result["status"] == "failed"
+        assert "db insert failed" in result["error"]
+        assert conn.rollbacks == 1
+        assert conn.processed_files[file_key]["status"] == "failed"
+        assert "db insert failed" in conn.processed_files[file_key]["error_log"]
+
+    def test_blt_insert_writes_dates_and_triggers_side_effects(self):
+        from utils.deadline import calculate_appeal_deadline
+
+        with temp_dir() as tmp:
+            record = make_metadata_record()
+            metadata_path = write_metadata_file(tmp, "BLT_490_2026-04-13", records=[record])
+            conn = FakeConnection()
+
+            result, reconcile_calls, watchlist_calls, queue_calls = self._run_batch(metadata_path, conn)
+
+        inserted = insert_row_dict(conn.inserted_rows[0])
+        assert result["status"] == "success"
+        assert result["inserted"] == 1
+        assert inserted["current_status"] == "Yayında"
+        assert inserted["appeal_deadline"] == calculate_appeal_deadline(date(2026, 4, 13))
+        assert inserted["expiry_date"] == date(2034, 7, 17)
+        assert inserted["bulletin_no"] == "490"
+        assert inserted["bulletin_date"] == date(2026, 4, 13)
+        assert inserted["name_tr_backend"] == "nllb"
+        assert inserted["name_tr_model"] == "facebook/nllb-200-distilled-600M"
+        assert inserted["name_tr_updated_at"] == datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc)
+        assert reconcile_calls == [["2024/001"]]
+        assert watchlist_calls == [
+            {
+                "trademark_ids": [9000],
+                "source_type": "bulletin",
+                "folder_name": "BLT_490_2026-04-13",
+            }
+        ]
+        assert len(queue_calls) == 1
+        assert queue_calls[0]["bulletin_no"] == "490"
+        assert queue_calls[0]["bulletin_date"] == date(2026, 4, 13)
+        assert queue_calls[0]["trademark_ids"] == [9000]
+
+    @pytest.mark.parametrize(
+        ("folder_name", "expected_status", "expected_source_type"),
+        [
+            ("GZ_500_2026-03-31", "Tescil Edildi", "gazette"),
+            ("APP_1", "Başvuruldu", "application"),
+        ],
+    )
+    def test_non_blt_inserts_do_not_queue_scan(self, folder_name, expected_status, expected_source_type):
+        with temp_dir() as tmp:
+            record = make_metadata_record(
+                gazette_no="500" if folder_name.startswith("GZ_") else None,
+                gazette_date="2026-03-31" if folder_name.startswith("GZ_") else None,
+            )
+            metadata_path = write_metadata_file(tmp, folder_name, records=[record])
+            conn = FakeConnection()
+
+            result, reconcile_calls, watchlist_calls, queue_calls = self._run_batch(metadata_path, conn)
+
+        inserted = insert_row_dict(conn.inserted_rows[0])
+        assert result["inserted"] == 1
+        assert inserted["current_status"] == expected_status
+        assert reconcile_calls == [["2024/001"]]
+        assert watchlist_calls[0]["source_type"] == expected_source_type
+        assert queue_calls == []
+
+    def test_status_change_writes_trademark_history(self):
+        with temp_dir() as tmp:
+            record = make_metadata_record(
+                folder_status="tescil edildi",
+                register_no="12345",
+                register_date="2026-03-31",
+                gazette_no="500",
+                gazette_date="2026-03-31",
+            )
+            metadata_path = write_metadata_file(tmp, "GZ_500_2026-03-31", records=[record])
+            conn = FakeConnection(
+                existing_trademarks={
+                    "2024/001": {
+                        "id": 77,
+                        "current_status": "Yayında",
+                        "expiry_date": date(2024, 1, 1),
+                        "status_source": "BLT",
+                    }
+                }
+            )
+
+            result, reconcile_calls, watchlist_calls, queue_calls = self._run_batch(metadata_path, conn)
+
+        updated = update_row_dict(conn.updated_rows[0])
+        history_row = conn.history_rows[0]
+        assert result["updated"] == 1
+        assert updated["status"] == "Tescil Edildi"
+        assert history_row[0] == 77
+        assert history_row[2] == "STATUS_CHANGE"
+        assert history_row[3] == "metadata.json"
+        assert "Yayında -> Tescil Edildi" in history_row[4]
+        assert reconcile_calls == [["2024/001"]]
+        assert watchlist_calls == []
+        assert queue_calls == []
+
+    def test_renewal_writes_renewal_history_and_status(self):
+        with temp_dir() as tmp:
+            record = make_metadata_record(
+                folder_status="tescil edildi",
+                register_no="12345",
+                register_date="2026-03-31",
+                gazette_no="500",
+                gazette_date="2026-03-31",
+            )
+            metadata_path = write_metadata_file(tmp, "GZ_500_2026-03-31", records=[record])
+            conn = FakeConnection(
+                existing_trademarks={
+                    "2024/001": {
+                        "id": 88,
+                        "current_status": "Tescil Edildi",
+                        "expiry_date": date(2025, 1, 1),
+                        "status_source": "GZ",
+                    }
+                }
+            )
+
+            result, _, watchlist_calls, queue_calls = self._run_batch(metadata_path, conn)
+
+        updated = update_row_dict(conn.updated_rows[0])
+        history_row = conn.history_rows[0]
+        assert result["updated"] == 1
+        assert updated["status"] == "Yenilendi"
+        assert history_row[0] == 88
+        assert history_row[2] == "RENEWAL"
+        assert "Tescil Edildi -> Yenilendi" in history_row[4]
+        assert watchlist_calls == []
+        assert queue_calls == []
+
+    def test_app_update_preserves_existing_strong_status_and_source_tag(self):
+        with temp_dir() as tmp:
+            record = make_metadata_record(folder_status="")
+            metadata_path = write_metadata_file(tmp, "APP_1", records=[record])
+            conn = FakeConnection(
+                existing_trademarks={
+                    "2024/001": {
+                        "id": 99,
+                        "current_status": "Tescil Edildi",
+                        "expiry_date": date(2040, 1, 1),
+                        "status_source": "GZ",
+                    }
+                }
+            )
+
+            result, reconcile_calls, watchlist_calls, queue_calls = self._run_batch(metadata_path, conn)
+
+        updated = update_row_dict(conn.updated_rows[0])
+        assert result["updated"] == 1
+        assert updated["status"] == "Tescil Edildi"
+        assert updated["src_tag"] == "GZ"
+        assert reconcile_calls == [["2024/001"]]
+        assert watchlist_calls == []
+        assert queue_calls == []
+
 
 class TestGetStatusRank:
     def test_ranking_order(self):
@@ -624,18 +1216,40 @@ class TestSchemaColumns:
     """Verify schema migration includes attorney columns."""
 
     def test_attorney_columns_in_schema(self):
-        """check_and_migrate_schema must add attorney_name and attorney_no."""
-        import inspect
-        source = inspect.getsource(ingest.check_and_migrate_schema)
-        assert '("attorney_name", "VARCHAR(500)")' in source
-        assert '("attorney_no", "VARCHAR(50)")' in source
+        """Explicit ingest runtime setup must include attorney columns."""
+        source = Path("migrations/ingest_runtime.sql").read_text(encoding="utf-8")
+        assert "ALTER TABLE trademarks ADD COLUMN IF NOT EXISTS attorney_name VARCHAR(500);" in source
+        assert "ALTER TABLE trademarks ADD COLUMN IF NOT EXISTS attorney_no VARCHAR(50);" in source
 
     def test_attorney_indexes_in_schema(self):
-        """Schema must create indexes for attorney columns."""
-        import inspect
-        source = inspect.getsource(ingest.check_and_migrate_schema)
+        """Explicit ingest runtime setup must create attorney indexes."""
+        source = Path("migrations/ingest_runtime.sql").read_text(encoding="utf-8")
         assert "idx_tm_attorney_name" in source
         assert "idx_tm_attorney_no" in source
+
+    def test_processed_files_statuses_in_setup(self):
+        source = Path("migrations/ingest_runtime.sql").read_text(encoding="utf-8")
+        assert "repaired" in source
+        assert "unrecoverable" in source
+        assert "regen_failed" in source
+
+    def test_translation_provenance_columns_in_schema(self):
+        source = Path("migrations/ingest_runtime.sql").read_text(encoding="utf-8")
+        assert "ALTER TABLE trademarks ADD COLUMN IF NOT EXISTS name_tr_backend VARCHAR(32);" in source
+        assert "ALTER TABLE trademarks ADD COLUMN IF NOT EXISTS name_tr_model VARCHAR(255);" in source
+        assert "ALTER TABLE trademarks ADD COLUMN IF NOT EXISTS name_tr_updated_at TIMESTAMP;" in source
+
+
+class TestInsertPayloadShape:
+    def test_insert_column_list_matches_expected_runtime_shape(self):
+        assert len(ingest._INSERT_COLUMNS) == 33
+        assert ingest._INSERT_COLUMNS[:3] == ["application_no", "name", "current_status"]
+        assert ingest._INSERT_COLUMNS[-3:] == ["attorney_name", "attorney_no", "status_source"]
+
+    def test_insert_sql_uses_all_insert_columns_once(self):
+        insert_sql = ingest._build_insert_sql()
+        for column in ingest._INSERT_COLUMNS:
+            assert insert_sql.count(column) >= 1
 
 
 class TestNoGoodsFallback:
@@ -978,6 +1592,18 @@ class TestPreScanAndRepair:
             stats = pre_scan_and_repair(Path(tmp))
             assert stats["repaired"] == []
 
+    def test_scrape_only_folder_is_not_ingest_ready(self):
+        with temp_dir() as tmp:
+            base = Path(tmp)
+            folder = base / "BLT_SCRAPE_ONLY"
+            folder.mkdir()
+            (folder / "scraped_metadata.json").write_text("[]", encoding="utf-8")
+
+            stats = pre_scan_and_repair(base)
+            assert stats["repaired"] == []
+            assert stats["unrecoverable"] == []
+            assert stats["regen_failed"] == []
+
     def test_process_file_batch_has_safety_net(self):
         """process_file_batch must have JSONDecodeError safety net."""
         import inspect
@@ -990,20 +1616,38 @@ class TestPreScanAndRepair:
             "process_file_batch must track repair status"
 
     def test_run_ingest_calls_pre_scan(self):
-        """run_ingest must call pre_scan_and_repair before folder loop."""
-        import inspect
-        source = inspect.getsource(ingest.run_ingest)
-        assert "pre_scan_and_repair" in source, \
-            "run_ingest must call pre_scan_and_repair"
-        assert "repair_stats" in source, \
-            "run_ingest must track repair_stats"
+        """run_ingest must pre-scan on full runs and aggregate runtime stats."""
+        fake_conn = object()
+        with patch("pipeline.ingest_runtime.get_connection", return_value=fake_conn), \
+             patch("pipeline.ingest_runtime.release_connection") as mock_release, \
+             patch("pipeline.ingest_runtime._bootstrap.assert_ingest_runtime_ready") as mock_ready, \
+             patch("pipeline.ingest_runtime.pre_scan_and_repair", return_value={"repaired": [], "unrecoverable": [], "regen_failed": []}) as mock_scan, \
+             patch("pipeline.ingest_runtime._collect_metadata_files", return_value=[]), \
+             patch("pipeline.ingest_runtime._process_metadata_files", return_value={"inserted": 2, "updated": 3, "skipped": 4, "processed_files": 1, "failed_files": 0, "file_results": []}):
+            result = ingest.run_ingest()
+
+        mock_ready.assert_called_once_with(fake_conn)
+        mock_scan.assert_called_once()
+        mock_release.assert_called_once_with(fake_conn)
+        assert result["inserted"] == 2
+        assert result["updated"] == 3
+        assert result["skipped"] == 4
 
     def test_main_calls_pre_scan(self):
-        """main() must call pre_scan_and_repair before folder loop."""
-        import inspect
-        source = inspect.getsource(ingest.main)
-        assert "pre_scan_and_repair" in source, \
-            "main() must call pre_scan_and_repair"
+        """main() must delegate to the CLI runtime entrypoint."""
+        with patch("pipeline.ingest_runtime.run_ingest_cli") as mock_run:
+            with patch.object(sys, "argv", ["pipeline.ingest"]):
+                ingest.main()
+        mock_run.assert_called_once_with(force=False, folder_name=None)
+
+    def test_run_ingest_fails_fast_when_runtime_not_ready(self):
+        fake_conn = object()
+        with patch("pipeline.ingest_runtime.get_connection", return_value=fake_conn), \
+             patch("pipeline.ingest_runtime.release_connection") as mock_release, \
+             patch("pipeline.ingest_runtime._bootstrap.assert_ingest_runtime_ready", side_effect=RuntimeError("setup required")), \
+             pytest.raises(RuntimeError, match="setup required"):
+            ingest.run_ingest()
+        mock_release.assert_called_once_with(fake_conn)
 
 
 class TestExtractTpeId:
@@ -1188,6 +1832,15 @@ class TestPipelineSortKey:
         result = sorted(folders, key=folder_sort_key)
         assert result == ["BLT_500", "GZ_500", "APP_500"]
 
+    def test_parallel_db_worker_uses_runtime_readiness_helper(self):
+        import inspect
+        from pipeline import parallel
+
+        source = inspect.getsource(parallel.db_worker)
+        assert "assert_ingest_runtime_ready" in source
+        assert "check_and_migrate_schema" not in source
+        assert "load_nice_classes" not in source
+
 
 # ============================================================
 # Source authority update decision tests
@@ -1236,9 +1889,17 @@ class TestSourceAuthorityDecision:
         """Verify the else branch with 'continue' exists in process_file_batch."""
         import inspect
         source = inspect.getsource(ingest.process_file_batch)
-        # Lower authority → skip entirely
         assert "should_update = True" in source
-        assert "final_status = curr_status" in source
+        assert "next_status = curr_status" in source
+
+    def test_final_status_fields_are_not_written_directly_in_insert_sql(self):
+        """pipeline.ingest should leave final_status* ownership to the reconciler."""
+        import inspect
+        source = inspect.getsource(ingest.process_file_batch)
+        assert "application_no, name, current_status, final_status, final_status_source" not in source
+        assert "final_status = " not in source
+        assert "final_source_tag" not in source
+        assert "from utils.status_reconciler import update_final_status_batch" in source
 
     def test_no_status_rank_in_decision_logic(self):
         """The update decision should NOT use get_status_rank — purely source-based."""
@@ -1251,7 +1912,8 @@ class TestSourceAuthorityDecision:
         import inspect
         source = inspect.getsource(ingest.process_file_batch)
         assert "strong_statuses" in source
-        assert "'Tescil Edildi'" in source
+        assert "DB_STATUS_REGISTERED" in source
+        assert "DB_STATUS_APPLIED" in source
 
 
 # ============================================================

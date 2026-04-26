@@ -22,6 +22,7 @@ from pipeline import ingest
 from pipeline import ai  # Optimization: Reuse models loaded here
 from services.scoring_service import (
     RISK_THRESHOLDS,
+    _calculate_visual_breakdown,
     _dynamic_combine,
     calculate_adjusted_score,
     calculate_multilevel_similarity,
@@ -67,6 +68,43 @@ from logging_config import get_logger, log_timing, setup_logging
 
 _LOCAL_PROJECT_ROOT = Path(__file__).resolve().parent
 _LOCAL_DEFAULT_BULLETINS_ROOT = _LOCAL_PROJECT_ROOT / "bulletins" / "Marka"
+
+
+def _sql_turkish_fold_expr(column: str) -> str:
+    """Return SQL that folds Turkish characters without embedding non-ASCII literals."""
+    expr = f"COALESCE({column}, '')"
+    replacements = [
+        ("CHR(287)", "'g'"),  # ğ
+        ("CHR(286)", "'g'"),  # Ğ
+        ("CHR(305)", "'i'"),  # ı
+        ("CHR(304)", "'i'"),  # İ
+        ("CHR(246)", "'o'"),  # ö
+        ("CHR(214)", "'o'"),  # Ö
+        ("CHR(252)", "'u'"),  # ü
+        ("CHR(220)", "'u'"),  # Ü
+        ("CHR(351)", "'s'"),  # ş
+        ("CHR(350)", "'s'"),  # Ş
+        ("CHR(231)", "'c'"),  # ç
+        ("CHR(199)", "'c'"),  # Ç
+    ]
+    for source, target in replacements:
+        expr = f"REPLACE({expr}, {source}, {target})"
+    return f"LOWER({expr})"
+
+
+def _sql_turkish_normalized_expr(column: str) -> str:
+    folded = _sql_turkish_fold_expr(column)
+    non_alnum_folded = f"REGEXP_REPLACE({folded}, '[^a-z0-9]+', ' ', 'g')"
+    return f"TRIM(REGEXP_REPLACE({non_alnum_folded}, '[[:space:]]+', ' ', 'g'))"
+
+
+def _sql_turkish_compact_expr(column: str) -> str:
+    normalized = _sql_turkish_normalized_expr(column)
+    return f"REPLACE({normalized}, ' ', '')"
+
+
+def _sql_like_escape(value: str) -> str:
+    return str(value).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _resolve_local_risk_root(value: str | None, default: Path) -> Path:
@@ -324,18 +362,89 @@ class RiskEngine:
             self.conn.rollback()
             return []
 
+    def _record_candidate_retrieval(self, candidate_id, stage, fields, variant=None):
+        if not hasattr(self, "_candidate_retrieval_metadata"):
+            self._candidate_retrieval_metadata = {}
+
+        key = str(candidate_id)
+        metadata = self._candidate_retrieval_metadata.setdefault(
+            key,
+            {
+                "retrieval_sources": [],
+                "retrieval_matched_fields": [],
+                "retrieval_matched_stages": [],
+                "retrieval_query_variants": [],
+            },
+        )
+
+        clean_fields = sorted({field for field in fields if field})
+        source = {"stage": stage, "fields": clean_fields}
+        if variant:
+            source["variant"] = variant
+
+        if source not in metadata["retrieval_sources"]:
+            metadata["retrieval_sources"].append(source)
+
+        for field in clean_fields:
+            if field not in metadata["retrieval_matched_fields"]:
+                metadata["retrieval_matched_fields"].append(field)
+        if stage not in metadata["retrieval_matched_stages"]:
+            metadata["retrieval_matched_stages"].append(stage)
+        if variant and variant not in metadata["retrieval_query_variants"]:
+            metadata["retrieval_query_variants"].append(variant)
+
+    @staticmethod
+    def _row_text_fields(row, fallback_fields=("name", "name_tr"), offset=6):
+        fields = []
+        if len(row) > offset and row[offset]:
+            fields.append("name")
+        if len(row) > offset + 1 and row[offset + 1]:
+            fields.append("name_tr")
+        return fields or list(fallback_fields)
+
     def pre_screen_candidates(self, name_input, target_classes=None, limit=500, attorney_no=None, q_img_vec=None, q_dino_vec=None, q_ocr_text=None):
         cur = self.conn.cursor()
-
-        # Normalize query for Turkish character matching
+        name_input = name_input or ""
         name_normalized = normalize_turkish(name_input)
         seen_ids = set()
         all_candidates = []
+        self._candidate_retrieval_metadata = {}
 
-        # â”€â”€ Model-based translation for cross-language candidate discovery â”€â”€
+        name_norm_expr = _sql_turkish_normalized_expr("name")
+        name_tr_norm_expr = _sql_turkish_normalized_expr("name_tr")
+        name_compact_expr = _sql_turkish_compact_expr("name")
+        name_tr_compact_expr = _sql_turkish_compact_expr("name_tr")
+        ocr_norm_expr = _sql_turkish_normalized_expr("logo_ocr_text")
+
+        def apply_common_filters(sql, params):
+            sql += " AND (application_date >= NOW() - INTERVAL '11 years' OR application_date IS NULL)"
+            if attorney_no:
+                sql += " AND attorney_no = %s"
+                params.append(attorney_no)
+            if target_classes and len(target_classes) > 0:
+                sql += " AND (nice_class_numbers && %s::integer[] OR 99 = ANY(nice_class_numbers))"
+                params.append(target_classes)
+            return sql, params
+
+        def add_matches(matches, stage, variant, fields_getter=None, fallback_fields=None):
+            for match in matches:
+                if len(all_candidates) >= limit and match[0] not in seen_ids:
+                    continue
+                fields = fields_getter(match) if fields_getter else list(fallback_fields or [])
+                self._record_candidate_retrieval(match[0], stage, fields, variant)
+                if match[0] not in seen_ids:
+                    seen_ids.add(match[0])
+                    all_candidates.append(match[:6])
+
+        def run_stage(sql, params, stage, variant, fields_getter=None, fallback_fields=None):
+            if len(all_candidates) >= limit:
+                return
+            cur.execute(sql, params)
+            add_matches(cur.fetchall(), stage, variant, fields_getter, fallback_fields)
+
         translated_name = None
         translated_normalized = None
-        detected_lang = 'unknown'
+        detected_lang = "unknown"
         try:
             from utils.translation import auto_translate_to_turkish
             tr_result, detected_lang = auto_translate_to_turkish(name_input)
@@ -356,306 +465,277 @@ class RiskEngine:
                 extra={"error": str(e)},
             )
 
-        # First, check for EXACT matches (highest priority)
-        exact_sql = """
-            SELECT id, application_no, name, nice_class_numbers, image_path,
-                   1.0 as lexical_score
-            FROM trademarks
-            WHERE (LOWER(
-                REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-                REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(name,
-                'ÄŸ','g'),'Äž','g'),'Ä±','i'),'Ä°','i'),'Ã¶','o'),'Ã–','o'),
-                'Ã¼','u'),'Ãœ','u'),'ÅŸ','s'),'Åž','s'),'Ã§','c'),'Ã‡','c')
-            ) = %s
-            OR LOWER(
-                REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-                REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(name_tr,
-                'ÄŸ','g'),'Äž','g'),'Ä±','i'),'Ä°','i'),'Ã¶','o'),'Ã–','o'),
-                'Ã¼','u'),'Ãœ','u'),'ÅŸ','s'),'Åž','s'),'Ã§','c'),'Ã‡','c')
-            ) = %s)
-        """
-        exact_params = [name_normalized, name_normalized]
+        query_variants = []
+        seen_variants = set()
 
-        exact_sql += " AND (application_date >= NOW() - INTERVAL '11 years' OR application_date IS NULL)"
+        def add_query_variant(kind, value):
+            normalized = normalize_turkish(value or "")
+            if len(normalized) < 2 or normalized in seen_variants:
+                return
+            seen_variants.add(normalized)
+            query_variants.append({"kind": kind, "value": normalized})
 
-        if attorney_no:
-            exact_sql += " AND attorney_no = %s"
-            exact_params.append(attorney_no)
-
-        if target_classes and len(target_classes) > 0:
-            exact_sql += " AND (nice_class_numbers && %s::integer[] OR 99 = ANY(nice_class_numbers))"
-            exact_params.append(target_classes)
-
-        exact_sql += " LIMIT 20;"
-        cur.execute(exact_sql, exact_params)
-        exact_matches = cur.fetchall()
-
-        for match in exact_matches:
-            if match[0] not in seen_ids:
-                seen_ids.add(match[0])
-                all_candidates.append(match)
-
-        if name_normalized != turkish_lower(name_input):
-            # Search for Turkish variants using normalized form
-            normalized_sql = """
-                SELECT id, application_no, name, nice_class_numbers, image_path,
-                       1.0 as lexical_score
-                FROM trademarks
-                WHERE LOWER(
-                    REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-                    REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(name,
-                    'ÄŸ','g'),'Äž','g'),'Ä±','i'),'Ä°','i'),'Ã¶','o'),'Ã–','o'),
-                    'Ã¼','u'),'Ãœ','u'),'ÅŸ','s'),'Åž','s'),'Ã§','c'),'Ã‡','c')
-                ) = %s
-            """
-            norm_params = [name_normalized]
-
-            # 11-year renewal window
-            normalized_sql += " AND (application_date >= NOW() - INTERVAL '11 years' OR application_date IS NULL)"
-
-            if attorney_no:
-                normalized_sql += " AND attorney_no = %s"
-                norm_params.append(attorney_no)
-
-            if target_classes and len(target_classes) > 0:
-                normalized_sql += " AND (nice_class_numbers && %s::integer[] OR 99 = ANY(nice_class_numbers))"
-                norm_params.append(target_classes)
-
-            normalized_sql += " LIMIT 20;"
-            cur.execute(normalized_sql, norm_params)
-            norm_matches = cur.fetchall()
-
-            for match in norm_matches:
-                if match[0] not in seen_ids:
-                    seen_ids.add(match[0])
-                    all_candidates.append(match)
-
+        add_query_variant("normalized", name_normalized)
         if translated_normalized:
-            tr_exact_sql = """
+            add_query_variant("translated", translated_normalized)
+
+        for variant in query_variants:
+            value = variant["value"]
+            label = f"{variant['kind']}:{value}"
+            exact_sql = f"""
                 SELECT id, application_no, name, nice_class_numbers, image_path,
-                       0.9 as lexical_score
+                       1.0 as lexical_score,
+                       ({name_norm_expr} = %s) as retrieval_name_match,
+                       ({name_tr_norm_expr} = %s) as retrieval_name_tr_match
                 FROM trademarks
-                WHERE (LOWER(
-                    REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-                    REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(name,
-                    'ÄŸ','g'),'Äž','g'),'Ä±','i'),'Ä°','i'),'Ã¶','o'),'Ã–','o'),
-                    'Ã¼','u'),'Ãœ','u'),'ÅŸ','s'),'Åž','s'),'Ã§','c'),'Ã‡','c')
-                ) = %s
-                OR LOWER(
-                    REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-                    REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(name_tr,
-                    'ÄŸ','g'),'Äž','g'),'Ä±','i'),'Ä°','i'),'Ã¶','o'),'Ã–','o'),
-                    'Ã¼','u'),'Ãœ','u'),'ÅŸ','s'),'Åž','s'),'Ã§','c'),'Ã‡','c')
-                ) = %s)
+                WHERE ({name_norm_expr} = %s OR {name_tr_norm_expr} = %s)
             """
-            tr_exact_params = [translated_normalized, translated_normalized]
+            exact_params = [value, value, value, value]
+            exact_sql, exact_params = apply_common_filters(exact_sql, exact_params)
+            exact_sql += " ORDER BY length(name) ASC LIMIT 25;"
+            run_stage(
+                exact_sql,
+                exact_params,
+                "exact",
+                label,
+                fields_getter=self._row_text_fields,
+            )
 
-            # 11-year renewal window
-            tr_exact_sql += " AND (application_date >= NOW() - INTERVAL '11 years' OR application_date IS NULL)"
-
-            if attorney_no:
-                tr_exact_sql += " AND attorney_no = %s"
-                tr_exact_params.append(attorney_no)
-
-            if target_classes and len(target_classes) > 0:
-                tr_exact_sql += " AND (nice_class_numbers && %s::integer[] OR 99 = ANY(nice_class_numbers))"
-                tr_exact_params.append(target_classes)
-
-            tr_exact_sql += " LIMIT 20;"
-            cur.execute(tr_exact_sql, tr_exact_params)
-            tr_exact_matches = cur.fetchall()
-
-            for match in tr_exact_matches:
-                if match[0] not in seen_ids:
-                    seen_ids.add(match[0])
-                    all_candidates.append(match)
-
-        from services.scoring_service import tokenize as _tok
+        from services.scoring_service import _GENERIC_SUFFIXES, tokenize as _tok
         from idf_lookup import IDFLookup as _IDF
-        _q_tokens = _tok(name_input)
-        if translated_name:
-            _q_tokens = _q_tokens | _tok(translated_name)
 
-        # Compound token: computed here, injected into _base_tokens later â€” NOT _q_tokens.
-        # Keeping it out of _q_tokens means _distinctive_tokens is derived only from
-        # real query words, so the rarest-token fallbacks below work correctly.
-        _compound_token = None
-        if len(_tok(name_input)) > 1:
-            _cand = name_normalized.replace(" ", "")
-            if len(_cand) >= 4:
-                _compound_token = _cand
+        true_generic_terms = set(_GENERIC_SUFFIXES)
+        try:
+            true_generic_terms.update(_IDF.get_descriptor_suffixes())
+            true_generic_terms.update(
+                _IDF.get_descriptor_suffixes(use_translated_idf=True)
+            )
+        except Exception as exc:
+            logger.debug("Descriptor suffix lookup failed during retrieval: %s", exc)
 
-        # Derive distinctive tokens strictly from original query words.
-        _distinctive_tokens = [w for w in _q_tokens if _IDF.get_word_class(w) == 'distinctive']
+        def is_true_generic(token, use_translated_idf=False):
+            token = normalize_turkish(token or "")
+            return token in true_generic_terms or _IDF.is_descriptor_like(
+                token,
+                use_translated_idf=use_translated_idf,
+            )
 
-        # Fallback 1: use semi-generic words if no distinctive found.
-        if not _distinctive_tokens:
-            _distinctive_tokens = [w for w in _q_tokens if _IDF.get_word_class(w) == 'semi_generic']
+        def is_anchor_token(token, use_translated_idf=False):
+            token = normalize_turkish(token or "")
+            if len(token) < 2 or is_true_generic(token, use_translated_idf):
+                return False
+            get_class = _IDF.get_word_class_tr if use_translated_idf else _IDF.get_word_class
+            get_idf = _IDF.get_idf_tr if use_translated_idf else _IDF.get_idf
+            word_class = get_class(token)
+            return word_class in {"distinctive", "semi_generic"} or (
+                word_class == "generic"
+                and get_idf(token) >= 6.5
+                and not _IDF.is_descriptor_like(
+                    token,
+                    use_translated_idf=use_translated_idf,
+                )
+            )
 
-        # Fallback 2: all-generic query â€” promote rarest token (IDF >= 7.0) as anchor.
-        # Mirrors the Fix B logic in the scorer so the DB fetches the right candidates.
-        if not _distinctive_tokens:
-            _generic_tokens = [w for w in _q_tokens if _IDF.get_word_class(w) == 'generic']
-            if _generic_tokens:
-                _rarest = max(_generic_tokens, key=lambda w: _IDF.get_idf(w))
-                if _IDF.get_idf(_rarest) >= 7.0:
-                    _distinctive_tokens = [_rarest]
+        ordered_tokens = name_normalized.split()
+        translated_ordered_tokens = translated_normalized.split() if translated_normalized else []
+        original_token_set = set(_tok(name_input))
+        translated_token_set = set(_tok(translated_name)) if translated_name else set()
 
-        # Add back high value semi-generics to the distinctive list for the AND search
-        # so queries like 'dogan patent' don't get flooded by 'dogan' alone
-        elif len(_distinctive_tokens) == 1 and len([w for w in _q_tokens if _IDF.get_word_class(w) == 'semi_generic']) > 0:
-            _distinctive_tokens.extend([w for w in _q_tokens if _IDF.get_word_class(w) == 'semi_generic'])
+        compact_variants = []
+        seen_compact_variants = set()
 
-        if _distinctive_tokens and len(_distinctive_tokens) == 1:
-            # Single distinctive word â€” containment search
-            dtok = _distinctive_tokens[0]
-            escaped = dtok.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
-            contain_sql = """
+        def add_compact_variant(kind, value):
+            compact_value = normalize_turkish(value or "").replace(" ", "")
+            if len(compact_value) < 4 or compact_value in seen_compact_variants:
+                return
+            seen_compact_variants.add(compact_value)
+            compact_variants.append({"kind": kind, "value": compact_value})
+
+        for variant in query_variants:
+            add_compact_variant(f"{variant['kind']}_compact", variant["value"])
+
+        for tokens, kind, use_tr in (
+            (ordered_tokens, "core_compact", False),
+            (translated_ordered_tokens, "translated_core_compact", True),
+        ):
+            for index, token in enumerate(tokens[:-1]):
+                next_token = tokens[index + 1]
+                if is_anchor_token(token, use_translated_idf=use_tr) and is_true_generic(
+                    next_token,
+                    use_translated_idf=use_tr,
+                ):
+                    add_compact_variant(kind, token + next_token)
+            for token in tokens:
+                if is_true_generic(token, use_translated_idf=use_tr):
+                    continue
+                for suffix in true_generic_terms:
+                    if len(suffix) >= 3 and token.endswith(suffix):
+                        root = token[: -len(suffix)]
+                        if len(root) >= 4 and is_anchor_token(
+                            root,
+                            use_translated_idf=use_tr,
+                        ):
+                            add_compact_variant(kind, token)
+                            break
+
+        for variant in compact_variants:
+            compact_value = variant["value"]
+            pattern = f"%{_sql_like_escape(compact_value)}%"
+            label = f"{variant['kind']}:{compact_value}"
+            compact_sql = f"""
                 SELECT id, application_no, name, nice_class_numbers, image_path,
-                       0.85 as lexical_score
+                       0.88 as lexical_score,
+                       ({name_compact_expr} LIKE %s ESCAPE '\\') as retrieval_name_match,
+                       ({name_tr_compact_expr} LIKE %s ESCAPE '\\') as retrieval_name_tr_match
                 FROM trademarks
-                WHERE LOWER(
-                    REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-                    REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(name,
-                    'ÄŸ','g'),'Äž','g'),'Ä±','i'),'Ä°','i'),'Ã¶','o'),'Ã–','o'),
-                    'Ã¼','u'),'Ãœ','u'),'ÅŸ','s'),'Åž','s'),'Ã§','c'),'Ã‡','c')
-                ) LIKE %s ESCAPE '\\'
-
-                  AND (application_date >= NOW() - INTERVAL '11 years' OR application_date IS NULL)
+                WHERE ({name_compact_expr} LIKE %s ESCAPE '\\'
+                    OR {name_tr_compact_expr} LIKE %s ESCAPE '\\')
             """
-            contain_params = [f'%{escaped}%']
+            compact_params = [pattern, pattern, pattern, pattern]
+            compact_sql, compact_params = apply_common_filters(compact_sql, compact_params)
+            compact_sql += f"""
+                ORDER BY CASE
+                    WHEN {name_compact_expr} = %s OR {name_tr_compact_expr} = %s THEN 0
+                    ELSE 1
+                END,
+                length(name) ASC
+                LIMIT 80;
+            """
+            compact_params.extend([compact_value, compact_value])
+            run_stage(
+                compact_sql,
+                compact_params,
+                "compact",
+                label,
+                fields_getter=self._row_text_fields,
+            )
 
-            if attorney_no:
-                contain_sql += " AND attorney_no = %s"
-                contain_params.append(attorney_no)
-
-            if target_classes and len(target_classes) > 0:
-                contain_sql += " AND (nice_class_numbers && %s::integer[] OR 99 = ANY(nice_class_numbers))"
-                contain_params.append(target_classes)
-
-            if translated_normalized and _distinctive_tokens:
-                tr_dtok = normalize_turkish(translated_name) if translated_name else None
-                if tr_dtok and tr_dtok != escaped:
-                    tr_escaped = tr_dtok.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
-                    contain_sql += """
-                        OR LOWER(
-                            REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-                            REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(name,
-                            'ÄŸ','g'),'Äž','g'),'Ä±','i'),'Ä°','i'),'Ã¶','o'),'Ã–','o'),
-                            'Ã¼','u'),'Ãœ','u'),'ÅŸ','s'),'Åž','s'),'Ã§','c'),'Ã‡','c')
-                        ) LIKE %s ESCAPE '\\'
-                    """
-                    contain_params.append(f'%{tr_escaped}%')
-
-            contain_sql += " ORDER BY length(name) ASC LIMIT 30;"
-            cur.execute(contain_sql, contain_params)
-            contain_matches = cur.fetchall()
-
-            for match in contain_matches:
-                if match[0] not in seen_ids:
-                    seen_ids.add(match[0])
-                    all_candidates.append(match)
-
-        # Try to gather tokens for the AND search based STRICTLY on the original input.
-        # Including translation tokens (like "patenti" for "patent") breaks AND searches
-        # because candidates won't contain both the English and Turkish suffix at the same time.
-        _base_tokens = list(_tok(name_input))
-
-        # Inject compound token so the AND/OR ILIKE block fires even for all-generic queries.
-        # "doganpatent" is unknown to IDF â†’ classified distinctive â†’ qualifies as anchor.
-        if _compound_token and _compound_token not in _base_tokens:
-            _base_tokens.append(_compound_token)
-
-        # We want to AND both distinctive and high-value semi-generic words
-        # so queries like "dogan patent" mandate both words, preventing floods of "dogan" alone.
-        _and_search_tokens = [w for w in _base_tokens if _IDF.get_word_class(w) in ['distinctive', 'semi_generic']]
-
-        if _and_search_tokens and len(_base_tokens) > 1:
-            # 1) Search for candidates that contain ALL important tokens (AND logic)
-            # This is critical for finding 'd.p. doÄŸan patent' when searching 'dogan patent'.
-            # An OR logic query gets flooded by short single-word matches.
-            and_clauses = []
-            and_params = []
-            for dtok in _and_search_tokens:
-                escaped = dtok.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
-                and_clauses.append("""
-                    LOWER(
-                        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-                        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(name,
-                        'ÄŸ','g'),'Äž','g'),'Ä±','i'),'Ä°','i'),'Ã¶','o'),'Ã–','o'),
-                        'Ã¼','u'),'Ãœ','u'),'ÅŸ','s'),'Åž','s'),'Ã§','c'),'Ã‡','c')
-                    ) LIKE %s ESCAPE '\\'
-                """)
-                and_params.append(f'%{escaped}%')
-
-            and_sql = """
+        containment_variants = [
+            variant for variant in query_variants
+            if len(variant["value"]) >= 4 and (" " in variant["value"] or variant["kind"] == "translated")
+        ]
+        for variant in containment_variants:
+            value = variant["value"]
+            pattern = f"%{_sql_like_escape(value)}%"
+            label = f"{variant['kind']}_containment:{value}"
+            contain_sql = f"""
                 SELECT id, application_no, name, nice_class_numbers, image_path,
-                       0.85 as lexical_score
+                       0.86 as lexical_score,
+                       ({name_norm_expr} LIKE %s ESCAPE '\\') as retrieval_name_match,
+                       ({name_tr_norm_expr} LIKE %s ESCAPE '\\') as retrieval_name_tr_match
                 FROM trademarks
-                WHERE (""" + " AND ".join(and_clauses) + """)
-
-                  AND (application_date >= NOW() - INTERVAL '11 years' OR application_date IS NULL)
+                WHERE ({name_norm_expr} LIKE %s ESCAPE '\\'
+                    OR {name_tr_norm_expr} LIKE %s ESCAPE '\\')
             """
-            tok_and_params = list(and_params)
+            contain_params = [pattern, pattern, pattern, pattern]
+            contain_sql, contain_params = apply_common_filters(contain_sql, contain_params)
+            contain_sql += " ORDER BY length(name) ASC LIMIT 60;"
+            run_stage(
+                contain_sql,
+                contain_params,
+                "containment",
+                label,
+                fields_getter=self._row_text_fields,
+            )
 
-            if attorney_no:
-                and_sql += " AND attorney_no = %s"
-                tok_and_params.append(attorney_no)
+        anchor_candidates = {}
+        for token in original_token_set:
+            if is_anchor_token(token):
+                anchor_candidates[token] = max(anchor_candidates.get(token, 0.0), _IDF.get_idf(token))
+        for token in translated_token_set:
+            if is_anchor_token(token, use_translated_idf=True):
+                anchor_candidates[token] = max(
+                    anchor_candidates.get(token, 0.0),
+                    _IDF.get_idf_tr(token),
+                )
 
-            if target_classes and len(target_classes) > 0:
-                and_sql += " AND (nice_class_numbers && %s::integer[] OR 99 = ANY(nice_class_numbers))"
-                tok_and_params.append(target_classes)
+        anchor_tokens = sorted(
+            anchor_candidates,
+            key=lambda token: anchor_candidates[token],
+            reverse=True,
+        )[:8]
 
-            and_sql += " ORDER BY length(name) ASC LIMIT 50;"
-            cur.execute(and_sql, tok_and_params)
-            and_matches = cur.fetchall()
+        def token_clause(norm_expr, compact_expr, tokens, joiner):
+            clauses = []
+            params = []
+            for token in tokens:
+                token_pattern = f"%{_sql_like_escape(token)}%"
+                compact_pattern = f"%{_sql_like_escape(token.replace(' ', ''))}%"
+                clauses.append(
+                    f"({norm_expr} LIKE %s ESCAPE '\\' OR {compact_expr} LIKE %s ESCAPE '\\')"
+                )
+                params.extend([token_pattern, compact_pattern])
+            return f" {joiner} ".join(clauses), params
 
-            for match in and_matches:
-                if match[0] not in seen_ids:
-                    seen_ids.add(match[0])
-                    all_candidates.append(match)
-
-            # 2) Fallback to OR logic for partial matches
-            like_clauses = []
-            token_params = []
-            for dtok in _distinctive_tokens:
-                escaped = dtok.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
-                like_clauses.append("""
-                    LOWER(
-                        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-                        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(name,
-                        'ÄŸ','g'),'Äž','g'),'Ä±','i'),'Ä°','i'),'Ã¶','o'),'Ã–','o'),
-                        'Ã¼','u'),'Ãœ','u'),'ÅŸ','s'),'Åž','s'),'Ã§','c'),'Ã‡','c')
-                    ) LIKE %s ESCAPE '\\'
-                """)
-                token_params.append(f'%{escaped}%')
-
-            token_sql = """
+        def run_token_stage(stage, tokens, joiner, score, stage_limit):
+            if not tokens:
+                return
+            name_clause, name_params = token_clause(name_norm_expr, name_compact_expr, tokens, joiner)
+            name_tr_clause, name_tr_params = token_clause(name_tr_norm_expr, name_tr_compact_expr, tokens, joiner)
+            token_sql = f"""
                 SELECT id, application_no, name, nice_class_numbers, image_path,
-                       0.8 as lexical_score
+                       {score} as lexical_score,
+                       ({name_clause}) as retrieval_name_match,
+                       ({name_tr_clause}) as retrieval_name_tr_match
                 FROM trademarks
-                WHERE (""" + " OR ".join(like_clauses) + """)
-
-                  AND (application_date >= NOW() - INTERVAL '11 years' OR application_date IS NULL)
+                WHERE (({name_clause}) OR ({name_tr_clause}))
             """
-            tok_params = list(token_params)
+            token_params = name_params + name_tr_params + name_params + name_tr_params
+            token_sql, token_params = apply_common_filters(token_sql, token_params)
+            token_sql += f" ORDER BY length(name) ASC LIMIT {stage_limit};"
+            run_stage(
+                token_sql,
+                token_params,
+                stage,
+                "tokens:" + ",".join(tokens),
+                fields_getter=self._row_text_fields,
+            )
 
-            if attorney_no:
-                token_sql += " AND attorney_no = %s"
-                tok_params.append(attorney_no)
+        if len(anchor_tokens) > 1:
+            run_token_stage("all-token", anchor_tokens, "AND", "0.85", 100)
+        if anchor_tokens:
+            run_token_stage("any-token", anchor_tokens, "OR", "0.80", 80)
 
-            if target_classes and len(target_classes) > 0:
-                token_sql += " AND (nice_class_numbers && %s::integer[] OR 99 = ANY(nice_class_numbers))"
-                tok_params.append(target_classes)
-
-            token_sql += " ORDER BY length(name) ASC LIMIT 20;"
-            cur.execute(token_sql, tok_params)
-            token_matches = cur.fetchall()
-
-            for match in token_matches:
-                if match[0] not in seen_ids:
-                    seen_ids.add(match[0])
-                    all_candidates.append(match)
+        remaining_limit = max(limit - len(all_candidates), 0)
+        if remaining_limit > 0:
+            for variant in query_variants:
+                value = variant["value"]
+                label = f"{variant['kind']}_fuzzy:{value}"
+                fuzzy_sql = f"""
+                    SELECT id, application_no, name, nice_class_numbers, image_path,
+                           GREATEST(
+                               similarity({name_norm_expr}, %s),
+                               COALESCE(similarity({name_tr_norm_expr}, %s), 0)
+                           ) as lexical_score,
+                           (similarity({name_norm_expr}, %s) >= 0.3) as retrieval_name_match,
+                           (COALESCE(similarity({name_tr_norm_expr}, %s), 0) >= 0.3) as retrieval_name_tr_match
+                    FROM trademarks
+                    WHERE LOWER(COALESCE(name, '')) != LOWER(%s)
+                      AND GREATEST(
+                          similarity({name_norm_expr}, %s),
+                          COALESCE(similarity({name_tr_norm_expr}, %s), 0)
+                      ) >= 0.3
+                """
+                fuzzy_params = [value, value, value, value, name_input, value, value]
+                fuzzy_sql, fuzzy_params = apply_common_filters(fuzzy_sql, fuzzy_params)
+                fuzzy_sql += f"""
+                    ORDER BY GREATEST(
+                        similarity({name_norm_expr}, %s),
+                        COALESCE(similarity({name_tr_norm_expr}, %s), 0)
+                    ) DESC
+                    LIMIT %s;
+                """
+                fuzzy_params.extend([value, value, min(remaining_limit, 120)])
+                run_stage(
+                    fuzzy_sql,
+                    fuzzy_params,
+                    "fuzzy",
+                    label,
+                    fields_getter=self._row_text_fields,
+                )
+                remaining_limit = max(limit - len(all_candidates), 0)
+                if remaining_limit <= 0:
+                    break
 
         try:
             q_text_vec = self.text_model.encode(name_input).tolist()
@@ -664,29 +744,12 @@ class RiskEngine:
                        (1 - (text_embedding <=> %s::halfvec)) as lexical_score
                 FROM trademarks
                 WHERE text_embedding IS NOT NULL
-
-                  AND (application_date >= NOW() - INTERVAL '11 years' OR application_date IS NULL)
             """
             vec_params = [str(q_text_vec)]
-
-            if attorney_no:
-                vec_sql += " AND attorney_no = %s"
-                vec_params.append(attorney_no)
-
-            if target_classes and len(target_classes) > 0:
-                vec_sql += " AND (nice_class_numbers && %s::integer[] OR 99 = ANY(nice_class_numbers))"
-                vec_params.append(target_classes)
-
+            vec_sql, vec_params = apply_common_filters(vec_sql, vec_params)
             vec_sql += " ORDER BY text_embedding <=> %s::halfvec LIMIT 50;"
             vec_params.append(str(q_text_vec))
-
-            cur.execute(vec_sql, vec_params)
-            vec_matches = cur.fetchall()
-
-            for match in vec_matches:
-                if match[0] not in seen_ids:
-                    seen_ids.add(match[0])
-                    all_candidates.append(match)
+            run_stage(vec_sql, vec_params, "semantic", "text_embedding", fallback_fields=["semantic"])
         except Exception as e:
             logger.warning(
                 "Text vector search stage failed, continuing without",
@@ -700,29 +763,12 @@ class RiskEngine:
                            (1 - (image_embedding <=> %s::halfvec)) as lexical_score
                     FROM trademarks
                     WHERE image_embedding IS NOT NULL
-
-                      AND (application_date >= NOW() - INTERVAL '11 years' OR application_date IS NULL)
                 """
-                img_p = [str(q_img_vec)]
-
-                if attorney_no:
-                    img_sql += " AND attorney_no = %s"
-                    img_p.append(attorney_no)
-
-                if target_classes and len(target_classes) > 0:
-                    img_sql += " AND (nice_class_numbers && %s::integer[] OR 99 = ANY(nice_class_numbers))"
-                    img_p.append(target_classes)
-
+                img_params = [str(q_img_vec)]
+                img_sql, img_params = apply_common_filters(img_sql, img_params)
                 img_sql += " ORDER BY image_embedding <=> %s::halfvec LIMIT 50;"
-                img_p.append(str(q_img_vec))
-
-                cur.execute(img_sql, img_p)
-                img_matches = cur.fetchall()
-
-                for match in img_matches:
-                    if match[0] not in seen_ids:
-                        seen_ids.add(match[0])
-                        all_candidates.append(match)
+                img_params.append(str(q_img_vec))
+                run_stage(img_sql, img_params, "visual", "image_embedding", fallback_fields=["visual"])
             except Exception as e:
                 logger.warning(
                     "Image vector search stage failed, continuing without",
@@ -730,10 +776,10 @@ class RiskEngine:
                 )
 
         ocr_queries = set()
-        if name_input and name_input.strip():
-            ocr_queries.add(normalize_turkish(name_input.strip()))
-        if translated_name:
-            ocr_queries.add(normalize_turkish(translated_name.strip()))
+        if name_input.strip():
+            ocr_queries.add(name_normalized)
+        if translated_normalized:
+            ocr_queries.add(translated_normalized)
         if q_ocr_text and q_ocr_text.strip():
             ocr_queries.add(normalize_turkish(q_ocr_text.strip()))
 
@@ -741,182 +787,79 @@ class RiskEngine:
             if len(ocr_q) < 2:
                 continue
             try:
-                escaped_ocr = ocr_q.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
-                ocr_sql = """
+                escaped_ocr = f"%{_sql_like_escape(ocr_q)}%"
+                ocr_sql = f"""
                     SELECT id, application_no, name, nice_class_numbers, image_path,
                            0.75 as lexical_score
                     FROM trademarks
                     WHERE logo_ocr_text IS NOT NULL AND logo_ocr_text != ''
-                      AND LOWER(
-                          REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-                          REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(logo_ocr_text,
-                          'ÄŸ','g'),'Äž','g'),'Ä±','i'),'Ä°','i'),'Ã¶','o'),'Ã–','o'),
-                          'Ã¼','u'),'Ãœ','u'),'ÅŸ','s'),'Åž','s'),'Ã§','c'),'Ã‡','c')
-                      ) LIKE %s ESCAPE '\\'
-
-                      AND (application_date >= NOW() - INTERVAL '11 years' OR application_date IS NULL)
+                      AND {ocr_norm_expr} LIKE %s ESCAPE '\\'
                 """
-                ocr_params = [f'%{escaped_ocr}%']
-
-                if attorney_no:
-                    ocr_sql += " AND attorney_no = %s"
-                    ocr_params.append(attorney_no)
-
-                if target_classes and len(target_classes) > 0:
-                    ocr_sql += " AND (nice_class_numbers && %s::integer[] OR 99 = ANY(nice_class_numbers))"
-                    ocr_params.append(target_classes)
-
+                ocr_params = [escaped_ocr]
+                ocr_sql, ocr_params = apply_common_filters(ocr_sql, ocr_params)
                 ocr_sql += " ORDER BY length(name) ASC LIMIT 20;"
-                cur.execute(ocr_sql, ocr_params)
-                ocr_matches = cur.fetchall()
-
-                for match in ocr_matches:
-                    if match[0] not in seen_ids:
-                        seen_ids.add(match[0])
-                        all_candidates.append(match)
+                run_stage(
+                    ocr_sql,
+                    ocr_params,
+                    "OCR",
+                    f"ocr:{ocr_q}",
+                    fallback_fields=["logo_ocr_text"],
+                )
             except Exception as e:
                 logger.warning(
                     "OCR text search failed for query",
                     extra={"ocr_query": ocr_q, "error": str(e)},
                 )
 
-        # â”€â”€ Stage 4.6: Phonetic pre-screening (dmetaphone) â”€â”€
-        if name_input and name_input.strip() and len(name_normalized) >= 2:
+        if name_normalized and len(name_normalized) >= 2:
             try:
-                qlen = len(name_input.strip())
-                phon_sql = """
+                qlen = len(name_normalized)
+                name_phonetic = f"dmetaphone({name_norm_expr}) = dmetaphone(%s)"
+                name_tr_phonetic = f"dmetaphone({name_tr_norm_expr}) = dmetaphone(%s)"
+                phon_sql = f"""
                     SELECT id, application_no, name, nice_class_numbers, image_path,
-                           0.70 as lexical_score
+                           0.70 as lexical_score,
+                           ({name_phonetic}) as retrieval_name_match,
+                           ({name_tr_phonetic}) as retrieval_name_tr_match
                     FROM trademarks
-                    WHERE name IS NOT NULL
-                      AND length(name) BETWEEN GREATEST(2, %s - 2) AND %s + 4
-                      AND dmetaphone(
-                          LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-                          REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(name,
-                          'ÄŸ','g'),'Äž','g'),'Ä±','i'),'Ä°','i'),'Ã¶','o'),'Ã–','o'),
-                          'Ã¼','u'),'Ãœ','u'),'ÅŸ','s'),'Åž','s'),'Ã§','c'),'Ã‡','c'))
-                      ) = dmetaphone(%s)
-
-                      AND (application_date >= NOW() - INTERVAL '11 years' OR application_date IS NULL)
+                    WHERE (
+                        length({name_norm_expr}) BETWEEN GREATEST(2, %s - 2) AND %s + 4
+                        OR length({name_tr_norm_expr}) BETWEEN GREATEST(2, %s - 2) AND %s + 4
+                    )
+                      AND ({name_phonetic} OR {name_tr_phonetic})
                 """
-                phon_params = [qlen, qlen, name_normalized]
-
-                if attorney_no:
-                    phon_sql += " AND attorney_no = %s"
-                    phon_params.append(attorney_no)
-
-                if target_classes and len(target_classes) > 0:
-                    phon_sql += " AND (nice_class_numbers && %s::integer[] OR 99 = ANY(nice_class_numbers))"
-                    phon_params.append(target_classes)
-
-                phon_sql += " ORDER BY levenshtein(LOWER(name), LOWER(%s)) ASC, length(name) ASC LIMIT 100;"
-                phon_params.append(name_input)
-                cur.execute(phon_sql, phon_params)
-                phon_matches = cur.fetchall()
-
-                # DEBUG: log phonetic matches
-                logger.info(f"PHON_DEBUG: query={name_input!r} normalized={name_normalized!r} "
-                           f"total_matches={len(phon_matches)} already_seen={len(seen_ids)}")
-                for pm in phon_matches[:10]:
-                    pm_name = pm[2] if len(pm) > 2 else '?'
-                    pm_in_seen = pm[0] in seen_ids
-                    logger.info(f"  PHON_MATCH: name={pm_name!r} already_seen={pm_in_seen}")
-
-                phon_added = 0
-                for match in phon_matches:
-                    if match[0] not in seen_ids:
-                        seen_ids.add(match[0])
-                        all_candidates.append(match)
-                        phon_added += 1
-
-                if phon_added > 0:
-                    logger.info(f"PHON_ADDED: {phon_added} new candidates from phonetic pre-screen")
-                else:
-                    logger.info("PHON_ADDED: 0 new candidates (all already seen)")
+                phon_params = [
+                    name_normalized,
+                    name_normalized,
+                    qlen,
+                    qlen,
+                    qlen,
+                    qlen,
+                    name_normalized,
+                    name_normalized,
+                ]
+                phon_sql, phon_params = apply_common_filters(phon_sql, phon_params)
+                phon_sql += f"""
+                    ORDER BY LEAST(
+                        levenshtein({name_norm_expr}, %s),
+                        levenshtein({name_tr_norm_expr}, %s)
+                    ) ASC,
+                    length(name) ASC
+                    LIMIT 100;
+                """
+                phon_params.extend([name_normalized, name_normalized])
+                run_stage(
+                    phon_sql,
+                    phon_params,
+                    "phonetic",
+                    f"phonetic:{name_normalized}",
+                    fields_getter=self._row_text_fields,
+                )
             except Exception as e:
                 logger.warning(
                     "Phonetic pre-screen failed, continuing without",
                     extra={"error": str(e)},
                 )
-
-        remaining_limit = limit - len(all_candidates)
-        if remaining_limit > 0:
-            tr_sim_cols = ""
-            tr_order_cols = ""
-            tr_select_params = []
-            tr_order_params = []
-            if translated_name:
-                tr_sim_cols = """,
-                    COALESCE(similarity(name, %s), 0),
-                    COALESCE(similarity(name_tr, %s), 0)"""
-                tr_order_cols = """,
-                    COALESCE(similarity(name, %s), 0),
-                    COALESCE(similarity(name_tr, %s), 0)"""
-                tr_select_params = [translated_name, translated_name]
-                tr_order_params = [translated_name, translated_name]
-
-            sql = f"""
-                SELECT id, application_no, name, nice_class_numbers, image_path,
-                       GREATEST(
-                           similarity(name, %s),
-                           similarity(
-                               LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-                               REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(name,
-                               'ÄŸ','g'),'Äž','g'),'Ä±','i'),'Ä°','i'),'Ã¶','o'),'Ã–','o'),
-                               'Ã¼','u'),'Ãœ','u'),'ÅŸ','s'),'Åž','s'),'Ã§','c'),'Ã‡','c')),
-                               %s
-                           ),
-                           COALESCE(similarity(name_tr, %s), 0)
-                           {tr_sim_cols}
-                       ) as lexical_score
-                FROM trademarks
-                WHERE LOWER(name) != LOWER(%s)
-                  AND (application_date >= NOW() - INTERVAL '11 years' OR application_date IS NULL)
-                  AND GREATEST(
-                      similarity(name, %s),
-                      similarity(
-                          LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-                          REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(name,
-                          'ÄŸ','g'),'Äž','g'),'Ä±','i'),'Ä°','i'),'Ã¶','o'),'Ã–','o'),
-                          'Ã¼','u'),'Ãœ','u'),'ÅŸ','s'),'Åž','s'),'Ã§','c'),'Ã‡','c')),
-                          %s
-                      ),
-                      COALESCE(similarity(name_tr, %s), 0)
-                  ) >= 0.3
-            """
-            params = [name_input, name_normalized, name_input] + tr_select_params + [name_input, name_input, name_normalized, name_input]
-
-            if attorney_no:
-                sql += " AND attorney_no = %s"
-                params.append(attorney_no)
-
-            if target_classes and len(target_classes) > 0:
-                sql += " AND (nice_class_numbers && %s::integer[] OR 99 = ANY(nice_class_numbers))"
-                params.append(target_classes)
-
-            sql += f"""
-                ORDER BY GREATEST(
-                    similarity(name, %s),
-                    similarity(
-                        LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-                        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(name,
-                        'ÄŸ','g'),'Äž','g'),'Ä±','i'),'Ä°','i'),'Ã¶','o'),'Ã–','o'),
-                        'Ã¼','u'),'Ãœ','u'),'ÅŸ','s'),'Åž','s'),'Ã§','c'),'Ã‡','c')),
-                        %s
-                    ),
-                    COALESCE(similarity(name_tr, %s), 0)
-                    {tr_order_cols}
-                ) DESC LIMIT %s;
-            """
-            params.extend([name_input, name_normalized, name_input] + tr_order_params + [remaining_limit])
-
-            cur.execute(sql, params)
-            similar_matches = cur.fetchall()
-
-            for match in similar_matches:
-                if match[0] not in seen_ids:
-                    seen_ids.add(match[0])
-                    all_candidates.append(match)
 
         return all_candidates
 
@@ -1040,7 +983,7 @@ class RiskEngine:
             has_eg = bool(r[21]) if len(r) > 21 and r[21] is not None else False
             raw_extracted_goods = r[22] if len(r) > 22 else None
 
-            vis = calculate_visual_similarity(
+            vis, visual_breakdown = _calculate_visual_breakdown(
                 clip_sim=clip_sim,
                 dinov2_sim=dino_sim,
                 color_sim=color_sim,
@@ -1058,8 +1001,28 @@ class RiskEngine:
                 phonetic_sim=calculate_phonetic_similarity(name_input, candidate_name),
                 candidate_translations={
                     'name_tr': candidate_name_tr,
-                }
+                },
+                visual_breakdown=visual_breakdown,
             )
+            candidate_trademark_id = str(r[23]) if len(r) > 23 and r[23] else None
+            retrieval_metadata = getattr(self, "_candidate_retrieval_metadata", {}).get(
+                candidate_trademark_id,
+                {},
+            )
+            if retrieval_metadata:
+                score_breakdown["retrieval_sources"] = retrieval_metadata.get("retrieval_sources", [])
+                score_breakdown["retrieval_matched_fields"] = retrieval_metadata.get(
+                    "retrieval_matched_fields",
+                    [],
+                )
+                score_breakdown["retrieval_matched_stages"] = retrieval_metadata.get(
+                    "retrieval_matched_stages",
+                    [],
+                )
+                score_breakdown["retrieval_query_variants"] = retrieval_metadata.get(
+                    "retrieval_query_variants",
+                    [],
+                )
 
             results.append({
                 "application_no": r[0],
@@ -1080,7 +1043,7 @@ class RiskEngine:
                 "scores": score_breakdown,
                 "has_extracted_goods": has_eg,
                 "extracted_goods": raw_extracted_goods if has_eg else None,
-                "trademark_id": str(r[23]) if len(r) > 23 and r[23] else None,
+                "trademark_id": candidate_trademark_id,
                 "holder_id": str(r[24]) if len(r) > 24 and r[24] else None,
             })
 

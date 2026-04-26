@@ -7,6 +7,7 @@ Run directly:
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
@@ -46,6 +47,7 @@ CHECKOUT_FORGOT_EMAIL = os.environ.get(
     "managed-browser-checkout-forgot@example.com",
 )
 MOBILE_VIEWPORT = {"width": 390, "height": 844}
+I18N_ASSET_VERSION = "38"
 pytestmark = pytest.mark.skip(reason="Browser E2E script; run directly with python tests/browser/test_billing_browser.py")
 
 
@@ -140,6 +142,36 @@ def _assert_no_horizontal_overflow(page, label: str) -> None:
             f"clientWidth={metrics['clientWidth']}, scrollWidth={metrics['scrollWidth']}, "
             f"bodyScrollWidth={metrics['bodyScrollWidth']}"
         )
+
+
+def _read_locale_bundle(locale: str) -> dict:
+    return json.loads((ROOT / "static" / "locales" / f"{locale}.json").read_text(encoding="utf-8"))
+
+
+def _seed_locale_bundle_cache(page, locale: str) -> None:
+    page.evaluate(
+        """({ locale, bundle, version }) => {
+            localStorage.setItem('app_locale', locale);
+            localStorage.setItem('app_locale_bundle::' + locale + '::v' + version, JSON.stringify(bundle));
+        }""",
+        {"locale": locale, "bundle": _read_locale_bundle(locale), "version": I18N_ASSET_VERSION},
+    )
+
+
+def _read_i18n_render_state(page, pattern: str, selector: str) -> dict:
+    return page.evaluate(
+        """({ pattern, selector }) => {
+            const regex = new RegExp(pattern, 'g');
+            return {
+                ready: !!(window.AppI18n && window.AppI18n._ready),
+                dir: document.documentElement.getAttribute('dir') || '',
+                title: document.title || '',
+                sample: (document.querySelector(selector)?.textContent || '').trim(),
+                rawKeys: document.body.innerText.match(regex) || []
+            };
+        }""",
+        {"pattern": pattern, "selector": selector},
+    )
 
 
 def main() -> None:
@@ -325,6 +357,50 @@ def main() -> None:
             run_isolated_browser_step(
                 "billing locale render journey",
                 billing_locale_render,
+            )
+
+            def billing_locale_cache_bootstrap(page, _monitor) -> None:
+                locale = "ar"
+                route_pattern = f"**/static/locales/{locale}.json?v=*"
+
+                def delay_locale_request(route) -> None:
+                    time.sleep(1.5)
+                    route.continue_()
+
+                open_url(page, CONFIG, "/")
+                _seed_locale_bundle_cache(page, locale)
+                page.route(route_pattern, delay_locale_request)
+                try:
+                    with page.expect_response(
+                        lambda candidate: f"/static/locales/{locale}.json" in candidate.url,
+                        timeout=CONFIG.timeout_ms,
+                    ) as locale_response_info:
+                        page.goto(f"{CONFIG.base_url}/pricing", wait_until="domcontentloaded", timeout=CONFIG.timeout_ms)
+                        page.wait_for_timeout(250)
+                        pricing_state = _read_i18n_render_state(
+                            page,
+                            r"(?:pricing|checkout)\.[\w_]+",
+                            "#pricing-plan-starter-name",
+                        )
+                        if pricing_state["dir"] != "rtl":
+                            raise AssertionError(f"expected cached pricing dir=rtl during delayed locale fetch, got {pricing_state!r}")
+                        if not pricing_state["ready"]:
+                            raise AssertionError(f"expected cached pricing locale to be ready during delayed fetch, got {pricing_state!r}")
+                        if not pricing_state["title"] or pricing_state["title"].startswith("pricing."):
+                            raise AssertionError(f"unexpected cached pricing title during delayed fetch: {pricing_state!r}")
+                        if not pricing_state["sample"] or pricing_state["sample"].startswith("pricing."):
+                            raise AssertionError(f"unexpected cached pricing text during delayed locale fetch: {pricing_state!r}")
+                        if pricing_state["rawKeys"]:
+                            raise AssertionError(f"unexpected raw pricing keys during delayed locale fetch: {pricing_state['rawKeys']}")
+
+                    if locale_response_info.value.status != 200:
+                        raise AssertionError(f"unexpected delayed locale response status: {locale_response_info.value.status}")
+                finally:
+                    page.unroute(route_pattern, delay_locale_request)
+
+            run_isolated_browser_step(
+                "billing cached locale bootstrap",
+                billing_locale_cache_bootstrap,
             )
 
             def billing_mobile_layout(page, _monitor) -> None:

@@ -1,0 +1,29 @@
+{
+  "pid": 59412,
+  "created_at": "2026-04-25T10:28:28Z",
+  "cwd": "C:\\Users\\701693\\turk_patent",
+  "stdout_path": "C:\\Users\\701693\\turk_patent\\artifacts\\translation_refresh\\name_tr_refresh_bg_20260425_102808.stdout.log",
+  "stderr_path": "C:\\Users\\701693\\turk_patent\\artifacts\\translation_refresh\\name_tr_refresh_bg_20260425_102808.stderr.log",
+  "command": [
+    "C:\\Program Files\\Python313\\pythonw.exe",
+    "-u",
+    "C:\\Users\\701693\\turk_patent\\scripts\\regenerate_name_tr.py",
+    "--backend",
+    "madlad",
+    "--skip-benchmark",
+    "--translate-batch-size",
+    "16",
+    "--ordering-mode",
+    "application_date_desc",
+    "--campaign-watermark",
+    "2026-04-24T21:34:29Z",
+    "--output-root",
+    "C:\\Users\\701693\\turk_patent\\artifacts\\translation_refresh",
+    "--metadata-root",
+    "C:\\Users\\701693\\turk_patent\\bulletins\\Marka"
+  ],
+  "creationflags": 134218240,
+  "startup_wait_seconds": 20,
+  "startup_returncode": null,
+  "startup_healthy": true
+}

@@ -4,12 +4,21 @@ import asyncio
 import logging
 import time
 import argparse
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional, List, Set, Dict, Any
 from urllib.parse import unquote, urljoin
 
 import requests
 from playwright.async_api import async_playwright
+
+from ui_scrape_collection import (
+    SCRAPED_METADATA_NAME,
+    UIScrapeSession,
+    collect_blt_issue,
+    collect_gz_issue,
+)
 
 _LOCAL_PROJECT_ROOT = Path(__file__).resolve().parent
 _LOCAL_DEFAULT_BULLETINS_DIR = _LOCAL_PROJECT_ROOT / "bulletins"
@@ -38,6 +47,12 @@ try:
     HEADLESS = _pipe.headless_browser
     CATEGORIES: List[str] = list(_pipe.categories)
     READ_TIMEOUT = _pipe.download_timeout
+    INCREMENTAL_LOOKBACK = _pipe.incremental_lookback
+    RECENT_WINDOW_DAYS = _pipe.recent_window_days
+    MIN_GAZETTE_ISSUE_NUMBER = _pipe.min_gazette_issue_number
+    UI_SCRAPE_ENABLED = _pipe.enable_ui_scrape
+    SCRAPE_MAX_SCROLL_SECONDS = _pipe.scrape_max_scroll_seconds
+    SCRAPE_LIMIT = _pipe.scrape_limit
 except Exception:
     TARGET_URL = "https://www.turkpatent.gov.tr/bultenler"
     BASE_DOWNLOAD_DIR = str(
@@ -49,12 +64,15 @@ except Exception:
     HEADLESS = True
     CATEGORIES = ["Marka"]
     READ_TIMEOUT = 600
+    INCREMENTAL_LOOKBACK = int(os.environ.get("PIPELINE_INCREMENTAL_LOOKBACK", "5"))
+    RECENT_WINDOW_DAYS = int(os.environ.get("PIPELINE_RECENT_WINDOW_DAYS", "60"))
+    MIN_GAZETTE_ISSUE_NUMBER = int(os.environ.get("PIPELINE_MIN_GAZETTE_ISSUE_NUMBER", "300"))
+    UI_SCRAPE_ENABLED = os.environ.get("PIPELINE_ENABLE_UI_SCRAPE", "true").lower() not in {"0", "false", "no"}
+    SCRAPE_MAX_SCROLL_SECONDS = int(os.environ.get("PIPELINE_SCRAPE_MAX_SCROLL_SECONDS", "0"))
+    SCRAPE_LIMIT = int(os.environ.get("PIPELINE_SCRAPE_LIMIT", "0"))
 
 SLOW_MO_MS = 150
 VIEWPORT = {"width": 1400, "height": 900}
-
-# Incremental mode: stop scrolling after this many consecutive existing cards
-INCREMENTAL_LOOKBACK = 5
 
 DOWNLOAD_LABEL_SELECTOR = r"text=/^\s*(İNDİR|İndir|INDIR|Indir)\s*$/"
 
@@ -72,6 +90,9 @@ MENU_WAIT_MS = 4000
 CHUNK_BYTES = 1024 * 1024
 CONNECT_TIMEOUT = 30
 MAX_RETRIES = 2
+REQUIRED_ISSUE_MARKERS = ("metadata.json", "events.json")
+RAW_DOWNLOAD_EXTENSIONS = {".pdf", ".zip", ".rar", ".7z", ".xml", ".bin"}
+RAW_SOURCE_SUFFIXES = {".pdf", ".script", ".data", ".properties", ".log", ".bak", ".txt", ".sql", ".xml", ".zip"}
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - [COLLECTOR] - %(levelname)s - %(message)s")
 logger = logging.getLogger("turkpatent.collector")
@@ -110,6 +131,15 @@ def safe_filename_keep_text(name: str, max_len: int = 180) -> str:
 
 def stem_from_menu_text(text: str) -> str:
     return safe_filename_keep_text(text)
+
+
+def build_issue_download_stem(card_id: str, card_date: Optional[str], is_gazette: bool) -> str:
+    prefix = "GZ" if is_gazette else "BLT"
+    parts = [prefix, card_id]
+    if card_date:
+        parts.append(card_date)
+    return "_".join(parts)
+
 
 def filename_from_content_disposition(cd: Optional[str]) -> Optional[str]:
     if not cd:
@@ -160,8 +190,187 @@ def build_key_regex(key: str) -> re.Pattern:
         return re.compile(rf"\b{re.escape(a)}\s*[-\u2013\u2014]\s*{re.escape(b)}\b")
     return re.compile(rf"\b{re.escape(key)}\b")
 
-def check_local_existence(folder: str, card_id: str, is_gazette: bool,
-                          pdf_only: bool = False) -> bool:
+
+def parse_issue_date(value: Optional[str]) -> Optional[date]:
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def extract_primary_issue_number(card_id: Optional[str]) -> Optional[int]:
+    if not card_id:
+        return None
+    match = re.match(r"(\d+)", card_id.strip())
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def normalize_card_metadata(
+    meta: Dict[str, Optional[str]],
+    *,
+    min_gazette_issue_number: Optional[int] = None,
+) -> Dict[str, Optional[str]]:
+    """Normalize scraped card metadata and reject impossible Gazette ids."""
+    card_id = (meta.get("id") or "").strip() or None
+    card_date = (meta.get("date") or "").strip() or None
+    is_gazette = bool(meta.get("is_gazette"))
+    issue_number = extract_primary_issue_number(card_id)
+    threshold = MIN_GAZETTE_ISSUE_NUMBER if min_gazette_issue_number is None else min_gazette_issue_number
+
+    if (
+        is_gazette
+        and threshold > 0
+        and issue_number is not None
+        and issue_number < threshold
+    ):
+        logger.warning(
+            "Treating card %s dated %s as BLT because Gazette numbers start at %s",
+            card_id,
+            card_date or "unknown",
+            threshold,
+        )
+        is_gazette = False
+
+    return {"id": card_id, "date": card_date, "is_gazette": is_gazette}
+
+
+def is_recent_issue(
+    card_date: Optional[str],
+    *,
+    today: Optional[date] = None,
+    lookback_days: Optional[int] = None,
+) -> bool:
+    issue_date = parse_issue_date(card_date)
+    if issue_date is None:
+        return True
+
+    reference_day = today or date.today()
+    window_days = RECENT_WINDOW_DAYS if lookback_days is None else lookback_days
+    cutoff_day = reference_day - timedelta(days=max(0, window_days))
+    return issue_date >= cutoff_day
+
+
+def build_issue_folder_candidates(card_id: str, card_date: Optional[str], is_gazette: bool) -> List[str]:
+    prefix = "GZ" if is_gazette else "BLT"
+    candidates: List[str] = []
+    if card_date:
+        candidates.append(f"{prefix}_{card_id}_{card_date}")
+    candidates.append(f"{prefix}_{card_id}")
+    return candidates
+
+
+def issue_folder_has_required_markers(issue_folder: Path) -> bool:
+    return issue_folder.is_dir() and all(
+        (issue_folder / marker).is_file() for marker in REQUIRED_ISSUE_MARKERS
+    )
+
+
+def has_matching_pdf_artifact(folder: str | Path, card_id: str, is_gazette: bool) -> bool:
+    root = Path(folder)
+    if not root.exists():
+        return False
+
+    target_id = card_id.strip()
+    id_pattern = re.compile(rf"(?:^|\D){re.escape(target_id)}(?:\D|$)")
+
+    for child in root.iterdir():
+        fn_lower = child.name.lower()
+
+        file_is_gazette = "gazete" in fn_lower or fn_lower.startswith("gz_")
+        if is_gazette and not file_is_gazette:
+            continue
+        if not is_gazette and file_is_gazette:
+            continue
+        if not id_pattern.search(child.name):
+            continue
+
+        try:
+            if child.is_file() and child.suffix.lower() == ".pdf" and child.stat().st_size > 0:
+                return True
+            if child.is_dir():
+                for sub in child.iterdir():
+                    if sub.is_file() and sub.suffix.lower() == ".pdf" and sub.stat().st_size > 0:
+                        return True
+        except Exception:
+            pass
+
+    return False
+
+
+@dataclass
+class IncrementalScanTracker:
+    threshold: int
+    lookback_days: int
+    today: date = field(default_factory=date.today)
+    recent_counts: Dict[str, int] = field(
+        default_factory=lambda: {"BLT": 0, "GZ": 0}
+    )
+    cutoff_reached: Dict[str, bool] = field(
+        default_factory=lambda: {"BLT": False, "GZ": False}
+    )
+
+    def observe(self, *, card_date: Optional[str], is_gazette: bool) -> bool:
+        issue_type = "GZ" if is_gazette else "BLT"
+        recent = is_recent_issue(
+            card_date,
+            today=self.today,
+            lookback_days=self.lookback_days,
+        )
+        if recent:
+            self.recent_counts[issue_type] += 1
+        else:
+            self.cutoff_reached[issue_type] = True
+        return recent
+
+    def should_stop(self) -> bool:
+        return all(
+            self.cutoff_reached[issue_type] or self.recent_counts[issue_type] >= self.threshold
+            for issue_type in ("BLT", "GZ")
+        )
+
+
+@dataclass
+class CollectionCounters:
+    downloaded_raw: int = 0
+    download_failed: int = 0
+    scraped: int = 0
+    scrape_failed: int = 0
+    partial_issues: int = 0
+    retry_needed: int = 0
+    skipped: int = 0
+
+    def add(self, other: "CollectionCounters") -> None:
+        self.downloaded_raw += other.downloaded_raw
+        self.download_failed += other.download_failed
+        self.scraped += other.scraped
+        self.scrape_failed += other.scrape_failed
+        self.partial_issues += other.partial_issues
+        self.retry_needed += other.retry_needed
+        self.skipped += other.skipped
+
+    def to_summary(self, *, duration_seconds: float) -> Dict[str, Any]:
+        return {
+            "downloaded": self.downloaded_raw + self.scraped,
+            "skipped": self.skipped,
+            "failed": self.download_failed + self.scrape_failed,
+            "downloaded_raw": self.downloaded_raw,
+            "download_failed": self.download_failed,
+            "scraped": self.scraped,
+            "scrape_failed": self.scrape_failed,
+            "partial_issues": self.partial_issues,
+            "retry_needed": self.retry_needed,
+            "duration_seconds": round(duration_seconds, 1),
+        }
+
+def _legacy_check_local_existence(folder: str, card_id: str, is_gazette: bool,
+                                  pdf_only: bool = False) -> bool:
     """
     Robustly checks if the file or extracted directory exists,
     handling legacy names, ranges, new formats, and GZ_/BLT_ directory prefixes.
@@ -221,6 +430,194 @@ def check_local_existence(folder: str, card_id: str, is_gazette: bool,
             except Exception:
                 pass
     return False
+
+
+def check_local_existence(
+    folder: str,
+    card_id: str,
+    is_gazette: bool,
+    *,
+    card_date: Optional[str] = None,
+    pdf_only: bool = False,
+) -> bool:
+    """
+    Check whether this issue is already available locally.
+
+    When pdf_only=True, only returns True if a PDF file exists for this bulletin
+    (either at the top level or inside its subfolder).
+
+    In normal pipeline mode, an issue counts as complete only when its canonical
+    BLT_/GZ_ folder contains both metadata.json and events.json.
+    """
+    root = Path(folder)
+    if not root.exists():
+        return False
+
+    if pdf_only:
+        return has_matching_pdf_artifact(root, card_id, is_gazette)
+
+    for candidate in build_issue_folder_candidates(card_id, card_date, is_gazette):
+        if issue_folder_has_required_markers(root / candidate):
+            return True
+    return False
+
+
+def build_issue_folder_path(
+    category_folder: str | Path,
+    card_id: str,
+    card_date: Optional[str],
+    is_gazette: bool,
+) -> Path:
+    return Path(category_folder) / build_issue_download_stem(card_id, card_date, is_gazette)
+
+
+def issue_folder_has_scraped_metadata(issue_folder: Path) -> bool:
+    return issue_folder.is_dir() and (issue_folder / SCRAPED_METADATA_NAME).is_file()
+
+
+def _is_raw_source_file(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    if path.name in REQUIRED_ISSUE_MARKERS or path.name == SCRAPED_METADATA_NAME:
+        return False
+    if path.name.lower() == "bulletin.pdf":
+        return True
+    if path.suffix.lower() in RAW_SOURCE_SUFFIXES:
+        return True
+    return path.name.lower().startswith("tmbulletin")
+
+
+def issue_folder_has_raw_sources(issue_folder: Path) -> bool:
+    if not issue_folder.is_dir():
+        return False
+    try:
+        for child in issue_folder.rglob("*"):
+            if _is_raw_source_file(child):
+                return True
+    except Exception:
+        return False
+    return False
+
+
+def has_matching_download_artifact(
+    folder: str | Path,
+    card_id: str,
+    is_gazette: bool,
+    *,
+    card_date: Optional[str] = None,
+) -> bool:
+    root = Path(folder)
+    if not root.exists():
+        return False
+
+    target_id = card_id.strip()
+    id_pattern = re.compile(rf"(?:^|\D){re.escape(target_id)}(?:\D|$)")
+
+    for child in root.iterdir():
+        child_lower = child.name.lower()
+        child_is_gazette = "gazete" in child_lower or child_lower.startswith("gz_")
+        if is_gazette and not child_is_gazette:
+            continue
+        if not is_gazette and child_is_gazette:
+            continue
+        if not id_pattern.search(child.name):
+            continue
+
+        try:
+            if child.is_file() and child.suffix.lower() in RAW_DOWNLOAD_EXTENSIONS and child.stat().st_size > 0:
+                return True
+            if child.is_dir() and (
+                child.name in build_issue_folder_candidates(card_id, card_date, is_gazette)
+                or child.name == build_issue_download_stem(card_id, card_date, is_gazette)
+            ):
+                if issue_folder_has_raw_sources(child):
+                    return True
+        except Exception:
+            pass
+    return False
+
+
+def ensure_issue_folder(
+    category_folder: str | Path,
+    card_id: str,
+    card_date: Optional[str],
+    is_gazette: bool,
+) -> Path:
+    issue_folder = build_issue_folder_path(category_folder, card_id, card_date, is_gazette)
+    issue_folder.mkdir(parents=True, exist_ok=True)
+    return issue_folder
+
+
+async def maybe_scrape_issue(
+    issue_no: str,
+    issue_date: Optional[str],
+    issue_folder: Path,
+    *,
+    is_gazette: bool,
+    scrape_session: Optional[UIScrapeSession],
+    scrape_enabled: bool,
+    scrape_max_scroll_seconds: int,
+    scrape_limit: int,
+) -> Dict[str, Any]:
+    existing_sidecar = issue_folder / SCRAPED_METADATA_NAME
+    if existing_sidecar.exists() and existing_sidecar.stat().st_size > 0:
+        return {"available": True, "created": 0, "attempted": False, "result": None}
+    if not scrape_enabled or scrape_session is None:
+        return {"available": False, "created": 0, "attempted": False, "result": None}
+
+    issue_folder.mkdir(parents=True, exist_ok=True)
+    if is_gazette:
+        result = await collect_gz_issue(
+            issue_no,
+            issue_date,
+            issue_folder,
+            session=scrape_session,
+            max_scroll_seconds=scrape_max_scroll_seconds,
+            limit=scrape_limit,
+        )
+    else:
+        result = await collect_blt_issue(
+            issue_no,
+            issue_date,
+            issue_folder,
+            session=scrape_session,
+            max_scroll_seconds=scrape_max_scroll_seconds,
+            limit=scrape_limit,
+        )
+
+    available = existing_sidecar.exists() and existing_sidecar.stat().st_size > 0
+    return {
+        "available": available,
+        "created": 1 if result.get("status") == "success" and available else 0,
+        "attempted": True,
+        "result": result,
+    }
+
+
+def summarize_issue_sources(
+    *,
+    raw_available: bool,
+    scrape_available: bool,
+    raw_created: int,
+    scrape_created: int,
+    raw_attempted: bool,
+    scrape_attempted: bool,
+) -> CollectionCounters:
+    counters = CollectionCounters(
+        downloaded_raw=raw_created,
+        scraped=scrape_created,
+    )
+    raw_considered = raw_attempted or raw_available
+    scrape_considered = scrape_attempted or scrape_available
+    if raw_attempted and not raw_available:
+        counters.download_failed = 1
+    if scrape_attempted and not scrape_available:
+        counters.scrape_failed = 1
+    if raw_considered and scrape_considered and raw_available != scrape_available:
+        counters.partial_issues = 1
+    if (raw_attempted or scrape_attempted) and not raw_available and not scrape_available:
+        counters.retry_needed = 1
+    return counters
 
 # ----------------------------
 # Site interactions
@@ -451,6 +848,22 @@ async def list_menu_items(page, timeout_ms: int) -> List[Dict[str, Any]]:
     return list(dedup.values())
 
 
+def build_download_plan(items: List[Dict[str, Any]], *, pdf_only: bool = False) -> List[Dict[str, Any]]:
+    """Choose which menu items to fetch for a single non-grouped issue."""
+    cd_items = [it for it in items if it.get("is_cd")]
+    non_cd_items = [it for it in items if not it.get("is_cd")]
+    numbered_items = [it for it in non_cd_items if it.get("key")]
+
+    plan: List[Dict[str, Any]] = []
+    if not pdf_only and cd_items:
+        plan.append({"item": cd_items[0], "is_cd_file": True})
+
+    pick = numbered_items[0] if numbered_items else (non_cd_items[0] if non_cd_items else None)
+    if pick:
+        plan.append({"item": pick, "is_cd_file": False})
+    return plan
+
+
 # ----------------------------
 # Download helpers
 # ----------------------------
@@ -568,6 +981,39 @@ async def direct_click_download(page, clickable, out_base_path: str) -> bool:
         return False
 
 
+def _looks_like_download_href(href: Optional[str]) -> bool:
+    if not href:
+        return False
+    normalized = href.strip().lower()
+    return normalized not in {"", "#"} and not normalized.startswith("javascript:")
+
+
+async def get_clickable_download_href(clickable) -> Optional[str]:
+    """Resolve a usable direct-download href from the visible card action."""
+    try:
+        href = await clickable.get_attribute("href")
+        if _looks_like_download_href(href):
+            return href
+    except Exception:
+        pass
+
+    try:
+        href = await clickable.evaluate(
+            """(el) => {
+                const anchor = el.tagName === "A"
+                    ? el
+                    : (el.closest("a[href]") || el.querySelector("a[href]"));
+                return anchor ? anchor.getAttribute("href") : null;
+            }"""
+        )
+        if _looks_like_download_href(href):
+            return href
+    except Exception:
+        pass
+
+    return None
+
+
 # ----------------------------
 # Core per-card logic
 # ----------------------------
@@ -617,116 +1063,251 @@ async def download_one_item(page, context, clickable, menu_item: Dict[str, Any],
         logger.warning(f"[!] Giving up on item: {menu_item['text']}")
     return False
 
-async def process_card(page, context, clickable, category_folder: str, card_id: str,
-                       card_date: Optional[str], is_gazette: bool,
-                       pdf_only: bool = False) -> int:
+async def process_card(
+    page,
+    context,
+    clickable,
+    category_folder: str,
+    card_id: str,
+    card_date: Optional[str],
+    is_gazette: bool,
+    *,
+    pdf_only: bool = False,
+    scrape_session: Optional[UIScrapeSession] = None,
+    scrape_enabled: bool = True,
+    scrape_max_scroll_seconds: int = 0,
+    scrape_limit: int = 0,
+) -> CollectionCounters:
+    target_name = build_issue_download_stem(card_id, card_date, is_gazette)
 
-    # --- HELPER: Construct target filename ---
-    # Bulletin: {ID}_CD_{Date}
-    # Gazette:  {ID}_Gazete_CD_{Date}
-    # Note: Using .bin suffix for download path setup, but actual file takes extension
-    def make_target_name(is_cd_file: bool) -> str:
-        parts = [card_id]
-        if is_gazette: parts.append("Gazete")
-        if is_cd_file: parts.append("CD")
-        if card_date: parts.append(card_date)
-        return "_".join(parts)
+    if check_local_existence(
+        category_folder,
+        card_id,
+        is_gazette,
+        card_date=card_date,
+        pdf_only=pdf_only,
+    ):
+        return CollectionCounters(skipped=1)
 
-    # Quick pre-check: skip cards that already exist locally (avoids slow menu open)
-    if check_local_existence(category_folder, card_id, is_gazette, pdf_only=pdf_only):
-        return 0
+    async def _collect_single_issue(
+        issue_no: str,
+        *,
+        raw_download_coro=None,
+        target_prefix: Optional[str] = None,
+    ) -> CollectionCounters:
+        raw_available = has_matching_download_artifact(
+            category_folder,
+            issue_no,
+            is_gazette,
+            card_date=card_date,
+        )
+        raw_created = 0
+        raw_attempted = False
+        if not raw_available and raw_download_coro is not None:
+            raw_attempted = True
+            ok = False
+            try:
+                ok = await raw_download_coro()
+            except Exception as exc:
+                logger.warning("[!] Raw download failed for %s: %r", issue_no, exc)
+            raw_created = 1 if ok else 0
+            raw_available = has_matching_download_artifact(
+                category_folder,
+                issue_no,
+                is_gazette,
+                card_date=card_date,
+            )
+
+        issue_folder = build_issue_folder_path(category_folder, issue_no, card_date, is_gazette)
+        scrape_state = await maybe_scrape_issue(
+            issue_no,
+            card_date,
+            issue_folder,
+            is_gazette=is_gazette,
+            scrape_session=scrape_session,
+            scrape_enabled=scrape_enabled,
+            scrape_max_scroll_seconds=scrape_max_scroll_seconds,
+            scrape_limit=scrape_limit,
+        )
+        counters = summarize_issue_sources(
+            raw_available=raw_available,
+            scrape_available=bool(scrape_state["available"]),
+            raw_created=raw_created,
+            scrape_created=int(scrape_state["created"]),
+            raw_attempted=raw_attempted,
+            scrape_attempted=bool(scrape_state["attempted"]),
+        )
+
+        if counters.partial_issues:
+            logger.info(
+                "[*] %s marked partial (raw_available=%s, scrape_available=%s)",
+                target_prefix or issue_no,
+                raw_available,
+                bool(scrape_state["available"]),
+            )
+        if counters.retry_needed:
+            logger.warning("[!] %s needs retry; both source collections are unavailable", target_prefix or issue_no)
+        return counters
+
+    direct_href = await get_clickable_download_href(clickable)
+    if direct_href:
+        abs_url = urljoin(page.url, direct_href)
+        out_base = os.path.join(category_folder, f"{target_name}.bin")
+        logger.info(f"[*] Card {card_id}: direct download href detected")
+
+        async def _download_direct_href() -> bool:
+            last_err = None
+            for attempt in range(1, MAX_RETRIES + 2):
+                try:
+                    ok = await stream_download_with_browser_session(context, page, abs_url, out_base)
+                    if ok:
+                        return True
+                except Exception as exc:
+                    last_err = exc
+                    logger.warning(f"[!] Direct href attempt {attempt} failed: {exc!r}")
+                    await page.wait_for_timeout(1000)
+            if last_err:
+                logger.info(f"[i] Direct href stream failed for card {card_id}; falling back to menu/click flow")
+            return False
+
+        direct_counters = await _collect_single_issue(
+            card_id,
+            raw_download_coro=_download_direct_href,
+            target_prefix=target_name,
+        )
+        if has_matching_download_artifact(
+            category_folder,
+            card_id,
+            is_gazette,
+            card_date=card_date,
+        ):
+            return direct_counters
 
     menu = await open_download_menu(page, clickable)
     if not menu:
-        # Fallback for Direct Click (Usually non-CD)
-        fname = make_target_name(is_cd_file=False)
-        if check_local_existence(category_folder, card_id, is_gazette, pdf_only=pdf_only):
-            return 0
+        if check_local_existence(
+            category_folder,
+            card_id,
+            is_gazette,
+            card_date=card_date,
+            pdf_only=pdf_only,
+        ):
+            return CollectionCounters(skipped=1)
         logger.info(f"[*] Card {card_id}: menu did not open -> direct click download")
-        ok = await direct_click_download(page, clickable, os.path.join(category_folder, f"{fname}.bin"))
-        return 1 if ok else 0
+
+        async def _download_direct_click() -> bool:
+            return await direct_click_download(page, clickable, os.path.join(category_folder, f"{target_name}.bin"))
+
+        return await _collect_single_issue(
+            card_id,
+            raw_download_coro=_download_direct_click,
+            target_prefix=target_name,
+        )
 
     items = await list_menu_items(page, timeout_ms=MENU_WAIT_MS)
-    cd_items = [it for it in items if it.get("is_cd")]
     numbered_items = [it for it in items if (not it.get("is_cd") and it.get("key"))]
     is_grouped = len(numbered_items) > 1
 
     if not is_grouped:
-        # In pdf_only mode, skip CD items entirely — we only want the PDF
-        if cd_items and not pdf_only:
-            fname = make_target_name(is_cd_file=True)
-            if check_local_existence(category_folder, card_id, is_gazette, pdf_only=pdf_only):
-                try: await force_close_menus(page)
-                except Exception: pass
-                return 0
-            logger.info(f"[*] {card_id}: CD found -> downloading")
-            ok = await download_one_item(page, context, clickable, cd_items[0], category_folder, fname)
-            try: await force_close_menus(page)
-            except Exception: pass
-            return 1 if ok else 0
+        plan = build_download_plan(items, pdf_only=pdf_only)
+        if not plan:
+            try:
+                await force_close_menus(page)
+            except Exception:
+                pass
+            return await _collect_single_issue(card_id, target_prefix=target_name)
 
-        # No CD available (or pdf_only mode), try normal item (usually the PDF)
-        fname = make_target_name(is_cd_file=False)
-        if check_local_existence(category_folder, card_id, is_gazette, pdf_only=pdf_only):
-            try: await force_close_menus(page)
-            except Exception: pass
-            return 0
-        pick = numbered_items[0] if numbered_items else (items[0] if items else None)
-        if not pick:
-            try: await force_close_menus(page)
-            except Exception: pass
-            return 0
+        async def _download_plan_items() -> bool:
+            ok_count = 0
+            for planned in plan:
+                item = planned["item"]
+                is_cd_file = planned["is_cd_file"]
+                action_label = "CD" if is_cd_file else "PDF/Other"
+                logger.info(f"[*] {card_id}: downloading {action_label}")
+                ok = await download_one_item(page, context, clickable, item, category_folder, target_name)
+                ok_count += 1 if ok else 0
+            return ok_count > 0
 
-        logger.info(f"[*] {card_id}: {'pdf_only mode -> ' if pdf_only else 'no CD -> '}downloading PDF/Other")
-        ok = await download_one_item(page, context, clickable, pick, category_folder, fname)
-        try: await force_close_menus(page)
-        except Exception: pass
-        return 1 if ok else 0
+        try:
+            return await _collect_single_issue(
+                card_id,
+                raw_download_coro=_download_plan_items,
+                target_prefix=target_name,
+            )
+        finally:
+            try:
+                await force_close_menus(page)
+            except Exception:
+                pass
 
-    # GROUPED (e.g. 103-106)
-    # First check if the parent card_id already has data locally
-    if check_local_existence(category_folder, card_id, is_gazette, pdf_only=pdf_only):
+    if check_local_existence(
+        category_folder,
+        card_id,
+        is_gazette,
+        card_date=card_date,
+        pdf_only=pdf_only,
+    ):
         logger.info(f"[*] Group card {card_id}: already exists locally, skipping all sub-items")
-        try: await force_close_menus(page)
-        except Exception: pass
-        return 0
+        try:
+            await force_close_menus(page)
+        except Exception:
+            pass
+        return CollectionCounters(skipped=1)
 
     logger.info(f"[*] Group card {card_id}: downloading {len(numbered_items)} items")
-    ok_count = 0
+    counters = CollectionCounters()
     href_first = [it for it in numbered_items if it.get("href")]
     click_later = [it for it in numbered_items if not it.get("href")]
 
-    for it in href_first + click_later:
-        # Grouped items usually just map to the item's key/text
-        sub_id = it.get("key") or it["stem"]
+    try:
+        for item in href_first + click_later:
+            sub_id = item.get("key") or item["stem"]
+            if check_local_existence(
+                category_folder,
+                sub_id,
+                is_gazette,
+                card_date=card_date,
+                pdf_only=pdf_only,
+            ):
+                counters.skipped += 1
+                continue
 
-        # Check existence for THIS specific sub-item
-        if check_local_existence(category_folder, sub_id, is_gazette, pdf_only=pdf_only):
-            continue
-            
-        # Naming: {SubID}_...
-        is_sub_cd = it.get("is_cd", False)
-        sub_parts = [sub_id]
-        if is_gazette: sub_parts.append("Gazete")
-        if is_sub_cd: sub_parts.append("CD")
-        if card_date: sub_parts.append(card_date)
-        item_prefix = "_".join(sub_parts)
-        
-        logger.info(f"    -> {it['text']}")
-        ok = await download_one_item(page, context, clickable, it, category_folder, item_prefix)
-        ok_count += 1 if ok else 0
+            item_prefix = build_issue_download_stem(sub_id, card_date, is_gazette)
+            logger.info(f"    -> {item['text']}")
 
-    try: await force_close_menus(page)
-    except Exception: pass
-    return ok_count
+            async def _download_group_item(it=item, prefix=item_prefix) -> bool:
+                return await download_one_item(page, context, clickable, it, category_folder, prefix)
+
+            counters.add(
+                await _collect_single_issue(
+                    sub_id,
+                    raw_download_coro=_download_group_item,
+                    target_prefix=item_prefix,
+                )
+            )
+    finally:
+        try:
+            await force_close_menus(page)
+        except Exception:
+            pass
+    return counters
 
 
 # ----------------------------
 # Category loop
 # ----------------------------
-async def download_all_for_category(page, context, category_name: str,
-                                     full_scan: bool = False,
-                                     pdf_only: bool = False) -> int:
+async def download_all_for_category(
+    page,
+    context,
+    category_name: str,
+    *,
+    full_scan: bool = False,
+    pdf_only: bool = False,
+    scrape_session: Optional[UIScrapeSession] = None,
+    scrape_enabled: bool = True,
+    scrape_max_scroll_seconds: int = 0,
+    scrape_limit: int = 0,
+) -> CollectionCounters:
     category_folder = os.path.join(BASE_DOWNLOAD_DIR, slugify(category_name))
     os.makedirs(category_folder, exist_ok=True)
 
@@ -734,17 +1315,18 @@ async def download_all_for_category(page, context, category_name: str,
     last_height = 0
     stall_rounds = 0
 
-    # Incremental mode tracking: consecutive existing cards per type
-    consecutive_existing_blt = 0
-    consecutive_existing_gz = 0
-    downloaded_count = 0
+    tracker = None if full_scan else IncrementalScanTracker(
+        threshold=INCREMENTAL_LOOKBACK,
+        lookback_days=RECENT_WINDOW_DAYS,
+    )
+    counters = CollectionCounters()
 
     while True:
         clickables = await collect_download_clickables(page)
         count = await clickables.count()
         logger.info(f"Visible cards (İNDİR): {count}")
 
-        new_files_in_pass = 0
+        new_sources_in_pass = 0
 
         for i in range(count):
             clickable = clickables.nth(i)
@@ -753,7 +1335,7 @@ async def download_all_for_category(page, context, category_name: str,
             except Exception: continue
 
             # Extract Metadata
-            meta = await extract_card_metadata(clickable)
+            meta = normalize_card_metadata(await extract_card_metadata(clickable))
             card_id = meta.get("id")
             card_date = meta.get("date")
             is_gz = meta.get("is_gazette")
@@ -765,8 +1347,32 @@ async def download_all_for_category(page, context, category_name: str,
             suffix_log = " (Gazete)" if is_gz else " (Bülten)"
             date_log = f" [{card_date}]" if card_date else ""
 
+            if tracker is not None:
+                within_recent_window = tracker.observe(card_date=card_date, is_gazette=is_gz)
+                if not within_recent_window:
+                    done_cards.add(dedup_key)
+                    logger.info(
+                        f"[-] {card_id}{suffix_log}{date_log} is older than the "
+                        f"{RECENT_WINDOW_DAYS}-day recent window, skipping"
+                    )
+                    continue
+
+                already_exists = check_local_existence(
+                    category_folder,
+                    card_id,
+                    is_gz,
+                    card_date=card_date,
+                    pdf_only=pdf_only,
+                )
+                if already_exists:
+                    done_cards.add(dedup_key)
+                    logger.info(
+                        f"[=] {card_id}{suffix_log}{date_log} is complete locally, skipping"
+                    )
+                    continue
+
             # Incremental mode: check if we already have this card locally
-            if not full_scan:
+            if False and not full_scan:
                 already_exists = check_local_existence(category_folder, card_id, is_gz,
                                                        pdf_only=pdf_only)
                 if already_exists:
@@ -786,28 +1392,53 @@ async def download_all_for_category(page, context, category_name: str,
 
             logger.info(f"[*] Checking {card_id}{suffix_log}{date_log}...")
 
-            got = await process_card(page, context, clickable, category_folder, card_id, card_date, is_gz,
-                                    pdf_only=pdf_only)
-            new_files_in_pass += got
-            downloaded_count += got
+            issue_counters = await process_card(
+                page,
+                context,
+                clickable,
+                category_folder,
+                card_id,
+                card_date,
+                is_gz,
+                pdf_only=pdf_only,
+                scrape_session=scrape_session,
+                scrape_enabled=scrape_enabled,
+                scrape_max_scroll_seconds=scrape_max_scroll_seconds,
+                scrape_limit=scrape_limit,
+            )
+            counters.add(issue_counters)
+            new_sources_in_pass += issue_counters.downloaded_raw + issue_counters.scraped
             done_cards.add(dedup_key)
 
             await page.wait_for_timeout(200)
 
+        if tracker is not None and tracker.should_stop():
+            logger.info(
+                "Incremental stop: recent window covered "
+                f"(days={RECENT_WINDOW_DAYS}, threshold={INCREMENTAL_LOOKBACK}, "
+                f"recent_blt={tracker.recent_counts['BLT']}, "
+                f"recent_gz={tracker.recent_counts['GZ']}, "
+                f"cutoff_blt={tracker.cutoff_reached['BLT']}, "
+                f"cutoff_gz={tracker.cutoff_reached['GZ']}, "
+                f"downloaded_raw={counters.downloaded_raw}, "
+                f"scraped={counters.scraped})."
+            )
+            break
+
         # Incremental mode: stop if we've seen enough consecutive existing cards
-        if not full_scan:
+        if False and not full_scan:
             if (consecutive_existing_blt >= INCREMENTAL_LOOKBACK and
                     consecutive_existing_gz >= INCREMENTAL_LOOKBACK):
                 logger.info(
                     f"Incremental stop: {consecutive_existing_blt} consecutive existing BLT "
                     f"and {consecutive_existing_gz} consecutive existing GZ cards. "
-                    f"Downloaded {downloaded_count} new files."
+                    f"Downloaded {counters.downloaded_raw} raw files."
                 )
                 break
 
         height = await page.evaluate("document.body.scrollHeight")
         # Logic to detect end of scroll (no new files and height didn't change)
-        if height == last_height and new_files_in_pass == 0:
+        if height == last_height and new_sources_in_pass == 0:
             stall_rounds += 1
         else:
             stall_rounds = 0
@@ -820,22 +1451,29 @@ async def download_all_for_category(page, context, category_name: str,
         await page.mouse.wheel(0, 5000)
         await page.wait_for_timeout(2000)
 
-    return downloaded_count
+    return counters
 
 
 # ----------------------------
 # Main
 # ----------------------------
-async def run_collection(settings=None, full_scan: bool = False,
-                         pdf_only: bool = False) -> dict:
+async def run_collection(
+    settings=None,
+    full_scan: bool = False,
+    pdf_only: bool = False,
+    enable_ui_scrape: Optional[bool] = None,
+    scrape_max_scroll_seconds: Optional[int] = None,
+    scrape_limit: Optional[int] = None,
+) -> dict:
     """
     Run bulletin collection. Returns summary dict.
 
     Args:
         settings: Optional PipelineSettings override. If None, uses module-level config.
         full_scan: If True, scroll through ALL bulletins (original behavior).
-                   If False (default), stop after INCREMENTAL_LOOKBACK consecutive
-                   existing cards per type — only downloads new bulletins.
+                   If False (default), inspect recent issues within
+                   RECENT_WINDOW_DAYS and stop once the recent window is covered
+                   or the per-type threshold is reached.
         pdf_only:  If True, only download PDF files. Skips CD/ZIP items and only
                    considers a bulletin as "existing" if a PDF is already present.
                    Use with full_scan=True to backfill PDFs for all bulletins.
@@ -844,6 +1482,8 @@ async def run_collection(settings=None, full_scan: bool = False,
         { "downloaded": int, "skipped": int, "failed": int, "duration_seconds": float }
     """
     global TARGET_URL, BASE_DOWNLOAD_DIR, HEADLESS, CATEGORIES, READ_TIMEOUT
+    global INCREMENTAL_LOOKBACK, RECENT_WINDOW_DAYS, MIN_GAZETTE_ISSUE_NUMBER
+    global UI_SCRAPE_ENABLED, SCRAPE_MAX_SCROLL_SECONDS, SCRAPE_LIMIT
 
     if settings is not None:
         TARGET_URL = settings.turkpatent_url
@@ -851,8 +1491,22 @@ async def run_collection(settings=None, full_scan: bool = False,
         HEADLESS = settings.headless_browser
         CATEGORIES = list(settings.categories)
         READ_TIMEOUT = settings.download_timeout
+        INCREMENTAL_LOOKBACK = settings.incremental_lookback
+        RECENT_WINDOW_DAYS = settings.recent_window_days
+        MIN_GAZETTE_ISSUE_NUMBER = settings.min_gazette_issue_number
+        UI_SCRAPE_ENABLED = settings.enable_ui_scrape
+        SCRAPE_MAX_SCROLL_SECONDS = settings.scrape_max_scroll_seconds
+        SCRAPE_LIMIT = settings.scrape_limit
+
+    if enable_ui_scrape is not None:
+        UI_SCRAPE_ENABLED = enable_ui_scrape
+    if scrape_max_scroll_seconds is not None:
+        SCRAPE_MAX_SCROLL_SECONDS = scrape_max_scroll_seconds
+    if scrape_limit is not None:
+        SCRAPE_LIMIT = scrape_limit
 
     mode = "PDF-ONLY FULL" if pdf_only else ("FULL" if full_scan else "INCREMENTAL")
+    effective_ui_scrape = UI_SCRAPE_ENABLED and not pdf_only
     # pdf_only implies full_scan — must scroll through everything
     if pdf_only:
         full_scan = True
@@ -862,12 +1516,23 @@ async def run_collection(settings=None, full_scan: bool = False,
     logger.info(f"Target URL: {TARGET_URL}")
     logger.info(f"Categories: {CATEGORIES}")
     logger.info(f"Headless: {HEADLESS}")
-    logger.info(f"Mode: {mode} (lookback={INCREMENTAL_LOOKBACK})")
+    logger.info(
+        f"Mode: {mode} (threshold={INCREMENTAL_LOOKBACK}, "
+        f"recent_window_days={RECENT_WINDOW_DAYS}, "
+        f"min_gazette_issue_number={MIN_GAZETTE_ISSUE_NUMBER})"
+    )
+    logger.info(
+        "UI scrape: enabled=%s max_scroll_seconds=%s limit=%s",
+        effective_ui_scrape,
+        SCRAPE_MAX_SCROLL_SECONDS,
+        SCRAPE_LIMIT,
+    )
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=HEADLESS, slow_mo=SLOW_MO_MS)
         context = await browser.new_context(accept_downloads=True, viewport=VIEWPORT)
         page = await context.new_page()
+        scrape_page = await context.new_page() if effective_ui_scrape else None
         try:
             logger.info(f"Opening {TARGET_URL} ...")
             await page.goto(TARGET_URL, wait_until="domcontentloaded")
@@ -875,28 +1540,36 @@ async def run_collection(settings=None, full_scan: bool = False,
             await maybe_dismiss_overlays(page)
             await page.locator(DOWNLOAD_LABEL_SELECTOR).first.wait_for(state="visible", timeout=20000)
 
-            total_downloaded = 0
+            total_counters = CollectionCounters()
+            scrape_session = UIScrapeSession(scrape_page) if scrape_page is not None else None
             for category in CATEGORIES:
                 logger.info(f"--- Category: {category} ---")
                 await page.evaluate("window.scrollTo(0, 0)")
                 await page.wait_for_timeout(600)
                 await select_category(page, category)
-                total_downloaded += await download_all_for_category(page, context, category,
-                                                                    full_scan=full_scan,
-                                                                    pdf_only=pdf_only)
+                total_counters.add(
+                    await download_all_for_category(
+                        page,
+                        context,
+                        category,
+                        full_scan=full_scan,
+                        pdf_only=pdf_only,
+                        scrape_session=scrape_session,
+                        scrape_enabled=effective_ui_scrape,
+                        scrape_max_scroll_seconds=SCRAPE_MAX_SCROLL_SECONDS,
+                        scrape_limit=SCRAPE_LIMIT,
+                    )
+                )
             logger.info("Mass download complete.")
         finally:
+            if scrape_page is not None:
+                await scrape_page.close()
             await context.close()
             await browser.close()
 
     duration = time.time() - t0
     logger.info(f"Collection finished in {duration:.1f}s ({mode} mode)")
-    return {
-        "downloaded": total_downloaded,
-        "skipped": 0,
-        "failed": 0,
-        "duration_seconds": round(duration, 1),
-    }
+    return total_counters.to_summary(duration_seconds=duration)
 
 
 async def run():
@@ -916,5 +1589,30 @@ if __name__ == "__main__":
         help="Download only PDF files, skipping CD/ZIP items. Implies --full. "
              "Use to backfill PDFs for existing bulletins that only have ZIP extracts."
     )
+    parser.add_argument(
+        "--no-ui-scrape",
+        action="store_true",
+        help="Disable the secondary trademark search UI scraper for this run.",
+    )
+    parser.add_argument(
+        "--scrape-max-scroll-seconds",
+        type=int,
+        default=None,
+        help="Override max scroll time for the UI scraper (0 means unlimited).",
+    )
+    parser.add_argument(
+        "--scrape-limit",
+        type=int,
+        default=None,
+        help="Override max row limit for the UI scraper (0 means unlimited).",
+    )
     args = parser.parse_args()
-    asyncio.run(run_collection(full_scan=args.full, pdf_only=args.pdf_only))
+    asyncio.run(
+        run_collection(
+            full_scan=args.full,
+            pdf_only=args.pdf_only,
+            enable_ui_scrape=False if args.no_ui_scrape else None,
+            scrape_max_scroll_seconds=args.scrape_max_scroll_seconds,
+            scrape_limit=args.scrape_limit,
+        )
+    )

@@ -14,6 +14,15 @@ def _run_python(code: str) -> str:
     return result.stdout.strip()
 
 
+def _run_command(args: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        args,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
 def test_main_exports_fastapi_app():
     output = _run_python(
         """
@@ -1021,6 +1030,13 @@ def test_pipeline_ingest_root_uses_local_project_boundary_and_env_overrides():
     )
 
     assert output == '{"default_root_matches_local_project": true, "pipeline_env_root_matches": true, "data_env_root_matches": true, "hardcoded_literal_absent": true}'
+
+
+def test_pipeline_ingest_script_entrypoint_supports_direct_cli_execution():
+    result = _run_command([sys.executable, "pipeline/ingest.py", "--help"])
+
+    assert result.returncode == 0, result.stderr
+    assert "usage:" in result.stdout.lower()
 
 
 def test_ingest_events_root_uses_local_project_boundary_and_env_overrides():

@@ -232,7 +232,7 @@
 <!-- WATCHLIST BULK UPLOAD MODAL                  -->
 <!-- ============================================ -->
 <div id="watchlist-upload-modal" class="hidden fixed inset-0 flex items-center justify-center p-4" style="background:var(--color-bg-overlay);z-index:var(--z-modal)" onclick="if(event.target===this)closeBulkUploadModal()">
-    <div class="rounded-xl shadow-xl max-w-lg w-full overflow-hidden" style="background:var(--color-bg-card);border:1px solid var(--color-border)" onclick="event.stopPropagation()">
+    <div id="watchlist-upload-modal-card" class="rounded-xl shadow-xl max-w-lg w-full overflow-hidden" style="background:var(--color-bg-card);border:1px solid var(--color-border)" onclick="event.stopPropagation()">
         <div class="px-6 py-4 flex items-center justify-between" style="border-bottom:1px solid var(--color-border)">
             <h3 class="text-lg font-semibold" style="color:var(--color-text-primary)" x-text="t('watchlist.bulk_upload_title')">Toplu Yukle</h3>
             <button onclick="closeBulkUploadModal()" class="text-2xl leading-none min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg" style="color:var(--color-text-faint)">&times;</button>
@@ -267,14 +267,44 @@
 
             <!-- Step 2: Column mapping -->
             <div id="upload-wl-step-2" class="hidden">
-                <!-- Usage / capacity info -->
-                <div id="upload-wl-usage"></div>
+                <div id="upload-wl-step-2-layout" class="grid gap-6">
+                    <div class="min-w-0">
+                        <!-- Usage / capacity info -->
+                        <div id="upload-wl-usage"></div>
 
-                <p class="text-sm mb-3" style="color:var(--color-text-muted)" x-text="t('watchlist.map_columns_desc')">Map file columns to fields.</p>
-                <div id="upload-wl-mapping"></div>
-                <div class="flex justify-end gap-3 mt-4">
-                    <button onclick="document.getElementById('upload-wl-step-1').classList.remove('hidden');document.getElementById('upload-wl-step-2').classList.add('hidden')" class="px-4 py-2 text-sm rounded-lg" style="color:var(--color-text-secondary)" x-text="t('common.back')">Geri</button>
-                    <button id="upload-wl-submit-btn" onclick="submitBulkUpload()" class="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition disabled:opacity-50" x-text="t('watchlist.upload_now')">Yukle</button>
+                        <p class="text-sm mb-3" style="color:var(--color-text-muted)" x-text="t('watchlist.map_columns_desc')">Map file columns to fields.</p>
+                        <div id="upload-wl-mapping"></div>
+                        <div class="flex justify-end gap-3 mt-4">
+                            <button onclick="showBulkUploadStepOne()" class="px-4 py-2 text-sm rounded-lg" style="color:var(--color-text-secondary)" x-text="t('common.back')">Geri</button>
+                            <button id="upload-wl-submit-btn" onclick="submitBulkUpload()" class="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition disabled:opacity-50" x-text="t('watchlist.upload_now')">Yukle</button>
+                        </div>
+                    </div>
+
+                    <aside id="upload-wl-upgrade-offer" class="hidden self-start rounded-2xl p-5 border"
+                        style="background:linear-gradient(180deg, rgba(30,41,59,0.98), rgba(15,23,42,0.98));border-color:rgba(99,102,241,0.35)">
+                        <div class="mb-2 text-[11px] font-semibold uppercase tracking-[0.3em]" style="color:#a5b4fc" x-text="t('upgrade.eyebrow')">Plan Upgrade</div>
+                        <h4 id="upload-wl-upgrade-title" class="text-lg font-bold mb-2" style="color:#ffffff" x-text="t('watchlist.upload_upgrade_title')">Need more watchlist capacity for this file?</h4>
+                        <p id="upload-wl-upgrade-desc" class="text-sm mb-4" style="color:rgba(255,255,255,0.72)" x-text="t('watchlist.upload_upgrade_desc', { count: 0 })">Upgrade to import the remaining rows from this file.</p>
+
+                        <div class="rounded-2xl p-4 border mb-4" style="background:linear-gradient(135deg, rgba(79,70,229,0.96), rgba(14,165,233,0.92));border-color:rgba(255,255,255,0.12)">
+                            <div class="flex items-center justify-between gap-3 mb-2">
+                                <div id="upload-wl-upgrade-plan-name" class="text-lg font-bold" style="color:#ffffff">Starter</div>
+                                <div id="upload-wl-upgrade-badge" class="rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em]" style="background:rgba(255,255,255,0.18);color:#eef2ff" x-text="t('upgrade.recommended_badge')">Recommended</div>
+                            </div>
+                            <div class="flex items-end gap-2">
+                                <div id="upload-wl-upgrade-price" class="text-3xl font-bold" style="color:#ffffff">₺499</div>
+                                <div id="upload-wl-upgrade-period" class="text-sm" style="color:rgba(255,255,255,0.7)">/month</div>
+                            </div>
+                        </div>
+
+                        <div id="upload-wl-upgrade-includes-label" class="mb-3 text-[11px] font-semibold uppercase tracking-[0.3em]" style="color:rgba(191,219,254,0.82)" x-text="t('checkout.includes')">Includes</div>
+                        <ul id="upload-wl-upgrade-features" class="space-y-2 text-sm mb-5" style="color:rgba(255,255,255,0.86)"></ul>
+
+                        <div class="flex gap-3">
+                            <button onclick="closeBulkUploadModal()" class="flex-1 px-4 py-3 rounded-xl text-sm font-medium transition btn-press min-h-[48px]" style="background:rgba(255,255,255,0.08);color:#e2e8f0;border:1px solid rgba(255,255,255,0.08)" x-text="t('upgrade.maybe_later')">Maybe Later</button>
+                            <a id="upload-wl-upgrade-cta" class="flex-1 px-4 py-3 rounded-xl text-sm font-semibold text-center no-underline transition btn-press min-h-[48px] flex items-center justify-center" style="background:linear-gradient(90deg,#8b5cf6,#ec4899);color:#ffffff" href="/pricing" x-text="t('watchlist.upgrade_now')">Upgrade Plan</a>
+                        </div>
+                    </aside>
                 </div>
             </div>
 

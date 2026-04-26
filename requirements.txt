@@ -1,5 +1,5 @@
 # ==========================================
-# IP WATCH AI - Windows / Python 3.13 Compatible
+# IPWatchAI - Windows / Python 3.13 Compatible
 # ==========================================
 
 # Core Framework

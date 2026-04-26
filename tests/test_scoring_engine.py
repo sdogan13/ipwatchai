@@ -7,7 +7,7 @@ Covers:
 - risk_engine._dynamic_combine() — 3-signal confidence weighting
 - risk_engine.score_pair() — full scoring orchestrator
 - risk_engine.get_risk_level() — threshold classification
-- risk_engine.calculate_visual_similarity() — CLIP+DINOv2+color+OCR composite
+- risk_engine.calculate_visual_similarity() — CLIP+DINOv2+OCR composite
 """
 import sys
 import os
@@ -18,7 +18,12 @@ from unittest.mock import patch
 import pytest
 
 
-from services.scoring_service import compute_idf_weighted_score, tokenize, normalize_turkish
+from services.scoring_service import (
+    _calculate_visual_breakdown,
+    compute_idf_weighted_score,
+    tokenize,
+    normalize_turkish,
+)
 from risk_engine import (
     get_risk_level,
     calculate_visual_similarity,
@@ -87,54 +92,95 @@ class TestGetRiskLevel:
 # ============================================================
 
 class TestCalculateVisualSimilarity:
-    """Test calculate_visual_similarity() — 4-component composite."""
+    """Test calculate_visual_similarity() — CLIP, DINOv2, and OCR composite."""
 
     def test_all_zeros(self):
         assert calculate_visual_similarity() == 0.0
 
     def test_clip_only(self):
         score = calculate_visual_similarity(clip_sim=0.80)
-        assert abs(score - 0.80 * 0.35) < 0.001
+        assert abs(score - 0.80) < 0.001
 
     def test_dinov2_only(self):
         score = calculate_visual_similarity(dinov2_sim=0.70)
-        assert abs(score - 0.70 * 0.30) < 0.001
+        assert abs(score - 0.70) < 0.001
 
-    def test_color_only(self):
+    def test_color_only_is_ignored(self):
         score = calculate_visual_similarity(color_sim=0.60)
-        assert abs(score - 0.60 * 0.15) < 0.001
+        assert score == 0.0
 
     def test_ocr_only(self):
         score = calculate_visual_similarity(ocr_text_a="NIKE", ocr_text_b="NIKE")
-        assert abs(score - 1.0 * 0.20) < 0.001
+        assert abs(score - 0.55) < 0.001
 
     def test_all_components(self):
         score = calculate_visual_similarity(
             clip_sim=0.80, dinov2_sim=0.70, color_sim=0.60,
             ocr_text_a="NIKE", ocr_text_b="NIKE",
         )
-        expected = 0.80 * 0.35 + 0.70 * 0.30 + 0.60 * 0.15 + 1.0 * 0.20
+        expected = (0.80 * 0.45 + 0.70 * 0.35 + 1.0 * 0.15) / (0.45 + 0.35 + 0.15)
         assert abs(score - expected) < 0.001
 
     def test_ocr_zero_when_one_empty(self):
         score = calculate_visual_similarity(
             clip_sim=0.80, ocr_text_a="", ocr_text_b="NIKE"
         )
-        assert abs(score - 0.80 * 0.35) < 0.001
+        assert abs(score - 0.80) < 0.001
 
     def test_ocr_partial_match(self):
         score = calculate_visual_similarity(ocr_text_a="NIKE", ocr_text_b="NIKEA")
         # SequenceMatcher("nike", "nikea").ratio() ≈ 0.89
-        assert 0.15 < score < 0.20
+        assert score == 0.55
 
     def test_ocr_case_insensitive(self):
         s1 = calculate_visual_similarity(ocr_text_a="NIKE", ocr_text_b="nike")
         s2 = calculate_visual_similarity(ocr_text_a="NIKE", ocr_text_b="NIKE")
         assert abs(s1 - s2) < 0.001
 
-    def test_weights_sum_to_1(self):
-        """CLIP 0.35 + DINOv2 0.30 + color 0.15 + OCR 0.20 = 1.0"""
-        assert abs(0.35 + 0.30 + 0.15 + 0.20 - 1.0) < 0.001
+    def test_color_is_not_an_active_component(self):
+        score, breakdown = _calculate_visual_breakdown(
+            clip_sim=0.80,
+            dinov2_sim=0.70,
+            color_sim=1.0,
+            ocr_text_a="NIKE",
+            ocr_text_b="NIKE",
+        )
+        assert score > 0.0
+        assert "color" not in breakdown["active_components"]
+        assert "color" not in breakdown["components"]
+        assert "color" not in breakdown["weights"]
+
+    def test_color_does_not_raise_ocr_only_score(self):
+        score = calculate_visual_similarity(
+            color_sim=0.90,
+            ocr_text_a="NIKE",
+            ocr_text_b="NIKE",
+        )
+        assert score == 0.55
+
+    def test_ocr_disagreement_caps_moderate_neural_visual(self):
+        score, breakdown = _calculate_visual_breakdown(
+            clip_sim=0.7310,
+            dinov2_sim=0.9053,
+            ocr_text_a="Oksipital",
+            ocr_text_b="Qorvital",
+        )
+
+        assert score <= 0.69
+        assert breakdown["ocr_disagreement"] is True
+        assert "ocr_disagreement_cap:0.69" in breakdown["caps_applied"]
+
+    def test_very_strong_clip_and_dino_can_survive_ocr_disagreement(self):
+        score, breakdown = _calculate_visual_breakdown(
+            clip_sim=0.94,
+            dinov2_sim=0.93,
+            ocr_text_a="ALPHA",
+            ocr_text_b="OMEGA",
+        )
+
+        assert score >= 0.80
+        assert breakdown["very_strong_visual_components"] is True
+        assert "ocr_disagreement_cap:0.69" not in breakdown["caps_applied"]
 
 
 # ============================================================
@@ -170,12 +216,162 @@ class TestTokenization:
         assert "corp" in tokens
 
 
+class TestDescriptorProfileComputation:
+    """Pure descriptor-stat classifier tests without DB access."""
+
+    @staticmethod
+    def _profile(**overrides):
+        from compute_idf import _descriptor_profile
+
+        params = {
+            "word": "descriptorx",
+            "doc_freq": 1_000,
+            "total_docs": 1_000_000,
+            "first_count": 40,
+            "last_count": 700,
+            "single_count": 2,
+            "unique_partner_count": 700,
+            "unique_holder_count": 500,
+            "unique_class_count": 20,
+            "compact_suffix_hits": 0,
+            "original_word_class": "generic",
+        }
+        params.update(overrides)
+        return _descriptor_profile(**params)
+
+    def test_suffix_category_pattern_becomes_descriptor_like(self):
+        descriptor_like, score, stats = self._profile()
+
+        assert descriptor_like is True
+        assert score >= 0.72
+        assert "mostly_suffix" in stats["reason_flags"]
+
+    def test_brand_like_high_first_position_use_is_not_descriptor_like(self):
+        descriptor_like, _, stats = self._profile(
+            first_count=500,
+            last_count=300,
+            single_count=10,
+        )
+
+        assert descriptor_like is False
+        assert stats["first_rate"] > 0.25
+
+    def test_moderate_suffix_with_high_dispersion_becomes_descriptor_like(self):
+        descriptor_like, score, stats = self._profile(
+            first_count=40,
+            last_count=180,
+            single_count=0,
+            unique_partner_count=900,
+            unique_holder_count=700,
+            unique_class_count=20,
+        )
+
+        assert descriptor_like is True
+        assert score >= 0.72
+        assert "moderate_suffix_with_dispersion" in stats["reason_flags"]
+
+    def test_compact_suffix_evidence_can_make_descriptor_like(self):
+        descriptor_like, score, stats = self._profile(
+            word="suffixx",
+            first_count=20,
+            last_count=50,
+            single_count=0,
+            unique_partner_count=500,
+            unique_holder_count=350,
+            unique_class_count=8,
+            compact_suffix_hits=100,
+        )
+
+        assert descriptor_like is True
+        assert score >= 0.72
+        assert "compound_suffix" in stats["reason_flags"]
+
+
 # ============================================================
 # IDF Waterfall (compute_idf_weighted_score)
 # ============================================================
 
 class TestIDFWaterfall:
     """Test compute_idf_weighted_score() — Cases EXACT through F."""
+
+    @staticmethod
+    def _seed_distinctive_tokens(*tokens):
+        from idf_lookup import IDFLookup
+
+        for token in tokens:
+            IDFLookup._cache[token] = {
+                "idf": 8.0,
+                "is_generic": False,
+                "doc_freq": 100,
+                "word_class": "distinctive",
+            }
+
+    @staticmethod
+    def _seed_distinctive_tokens_tr(*tokens):
+        from idf_lookup import IDFLookup
+
+        for token in tokens:
+            IDFLookup._cache_tr[token] = {
+                "idf": 8.0,
+                "is_generic": False,
+                "doc_freq": 100,
+                "word_class": "distinctive",
+            }
+
+    @staticmethod
+    def _seed_descriptor_tokens(*tokens):
+        from idf_lookup import IDFLookup
+
+        for token in tokens:
+            IDFLookup._cache[token] = {
+                "idf": 8.2,
+                "is_generic": True,
+                "doc_freq": 1_000,
+                "word_class": "generic",
+                "descriptor_like": True,
+                "descriptor_score": 0.9,
+                "descriptor_stats": {
+                    "original_word_class": "generic",
+                    "reason_flags": ["mostly_suffix", "high_partner_dispersion"],
+                },
+            }
+
+    @staticmethod
+    def _seed_legacy_override_material_tokens(*tokens):
+        from idf_lookup import IDFLookup
+
+        for token in tokens:
+            IDFLookup._cache[token] = {
+                "idf": 2.0,
+                "is_generic": True,
+                "doc_freq": 600,
+                "word_class": "generic",
+                "descriptor_like": False,
+                "descriptor_score": 0.35,
+                "descriptor_stats": {
+                    "original_word_class": "distinctive",
+                    "final_word_class": "distinctive",
+                    "doc_frequency": 600,
+                },
+            }
+
+    @staticmethod
+    def _seed_descriptor_tokens_tr(*tokens):
+        from idf_lookup import IDFLookup
+
+        for token in tokens:
+            IDFLookup._cache_tr[token] = {
+                "idf": 8.2,
+                "is_generic": True,
+                "doc_freq": 1_000,
+                "word_class": "generic",
+                "descriptor_like": True,
+                "descriptor_score": 0.9,
+                "descriptor_stats": {
+                    "original_word_class": "generic",
+                    "reason_flags": ["mostly_suffix", "high_partner_dispersion"],
+                },
+            }
 
     def test_exact_match_returns_1(self):
         """Exact match → 1.0, scoring path EXACT_MATCH."""
@@ -184,7 +380,14 @@ class TestIDFWaterfall:
         )
         assert score == 1.0
         assert breakdown["exact_match"] is True
-        assert breakdown["scoring_path"] == "TIER_1_EXACT"
+        assert breakdown["scoring_path"] == "TEXT_EXACT"
+
+    def test_compact_exact_returns_096(self):
+        score, breakdown = compute_idf_weighted_score(
+            query="COCA COLA", target="COCACOLA", text_sim=0.4, semantic_sim=0.4,
+        )
+        assert score == 0.96
+        assert breakdown["scoring_path"] == "TEXT_COMPACT_EXACT"
 
     def test_exact_match_case_insensitive(self):
         """Case-insensitive exact match."""
@@ -206,7 +409,7 @@ class TestIDFWaterfall:
             query="NIKE", target="NIKE SPORTS", text_sim=0.5, semantic_sim=0.5,
         )
         assert score >= 0.83, f"Expected >=0.83 for exact distinctive match +1 word, got {score}"
-        assert "TIER_2_CONTAINMENT" in breakdown["scoring_path"]
+        assert breakdown["scoring_path"] in {"TEXT_CONTAINMENT", "TEXT_TOKEN_EXACT"}
 
     def test_exact_token_target_in_query(self):
         """'nike' (target) all tokens in 'nike sports' (query) → still high score."""
@@ -216,15 +419,15 @@ class TestIDFWaterfall:
         assert score >= 0.85, f"Expected >=0.85 for containment, got {score}"
 
     def test_length_dilution_increases_with_words(self):
-        """More extra words → lower score (monotonic decrease)."""
+        """More same-role generic extra words → lower score (monotonic decrease)."""
         score_1, _ = compute_idf_weighted_score(
-            query="NIKE", target="NIKE JOYRIDE", text_sim=0.5,
+            query="NIKE", target="NIKE GROUP", text_sim=0.5,
         )
         score_3, _ = compute_idf_weighted_score(
-            query="NIKE", target="NIKE SPORTS INTERNATIONAL GROUP", text_sim=0.5,
+            query="NIKE", target="NIKE GROUP LTD COMPANY", text_sim=0.5,
         )
         score_5, _ = compute_idf_weighted_score(
-            query="NIKE", target="NIKE SPORTS INTERNATIONAL APPAREL GROUP LTD", text_sim=0.5,
+            query="NIKE", target="NIKE GROUP LTD COMPANY CORP INC", text_sim=0.5,
         )
         assert score_1 > score_3 > score_5, (
             f"Expected monotonic decrease: {score_1} > {score_3} > {score_5}"
@@ -237,7 +440,7 @@ class TestIDFWaterfall:
             query="LTD", target="LTD STI", text_sim=0.5, semantic_sim=0.5,
         )
         assert score <= 0.25, f"Expected <=0.25 for generic-only, got {score}"
-        assert "TIER_6_GENERIC_ONLY" in breakdown["scoring_path"]
+        assert "TEXT_GENERIC_ONLY" in breakdown["scoring_path"]
 
     def test_exact_beats_fuzzy_same_distinctive_pct(self):
         """Core invariant: exact token match MUST score higher than fuzzy match.
@@ -248,12 +451,12 @@ class TestIDFWaterfall:
 
         Target A must score >= Target B because exact trumps fuzzy.
         """
-        q = "DOGAN PATENT VE DANISMANLIK"
+        q = "DOGAN"
         score_a, _ = compute_idf_weighted_score(
-            query=q, target="D.P DOGAN PATENT", text_sim=0.5, semantic_sim=0.3,
+            query=q, target="DOGAN MARKA", text_sim=0.5, semantic_sim=0.3,
         )
         score_b, _ = compute_idf_weighted_score(
-            query=q, target="DOGAM EGITIM VE DANISMANLIK", text_sim=0.5, semantic_sim=0.3,
+            query=q, target="DOGAM MARKA", text_sim=0.5, semantic_sim=0.3,
         )
         assert score_a >= score_b, (
             f"Exact match ({score_a}) must beat fuzzy match ({score_b})"
@@ -265,7 +468,8 @@ class TestIDFWaterfall:
             query="DOGAN", target="DOGAN MARKA", text_sim=0.5, semantic_sim=0.5,
         )
         assert score >= 0.80, f"Expected >=0.80, got {score}"
-        assert "TIER_2_CONTAINMENT" in breakdown["scoring_path"]
+        assert breakdown["containment"] == 1.0
+        assert breakdown["containment_score"] > 0.0
 
     def test_tier_3_partial_distinctive(self):
         """≥50% distinctive matched → Case B (with real DB IDF).
@@ -291,29 +495,38 @@ class TestIDFWaterfall:
         # "nike" fuzzy-matches "nikea" (≥0.75), others don't match
         # IDF-weighted coverage: 1/3 distinctive words matched → ~0.30 (harmonic of 1/3 × 1/3)
         assert score >= 0.25
-        assert "TIER_4" in breakdown["scoring_path"]
+        assert "TEXT_FUZZY" in breakdown["scoring_path"] or "TEXT_CHAR_SUPPORT" in breakdown["scoring_path"]
 
     def test_tier_6_semi_generic_safeguard(self):
         """Only semi-generic words match → low score."""
         # Now goes through unified waterfall — semi-generic only → Case D
+        from idf_lookup import IDFLookup
+
+        IDFLookup._cache["tempo"] = {
+            "idf": 4.0,
+            "is_generic": False,
+            "doc_freq": 2_000,
+            "word_class": "semi_generic",
+        }
+
         score, breakdown = compute_idf_weighted_score(
-            query="PATENT", target="PATENT MARKA", text_sim=0.4, semantic_sim=0.3,
+            query="TEMPO", target="TEMPO MARKA", text_sim=0.4, semantic_sim=0.3,
         )
         # "patent" is semi-generic, no distinctive words → D path
-        if "TIER_6" in breakdown.get("scoring_path", ""):
-            assert score <= 0.35
-        pass  # Also covered by test below
+        assert score <= 0.45
+        assert breakdown["scoring_path"] == "TEXT_SEMI_GENERIC_ONLY"
 
-    def test_tier_6_semi_generic_no_containment(self):
-        """Semi-generic only, no substring containment → ≤0.35."""
+    def test_tier_6_true_generic_no_anchor(self):
+        """True-generic matches without the query anchor stay low."""
+        self._seed_distinctive_tokens("zendra")
+
         score, breakdown = compute_idf_weighted_score(
-            query="PATENT GRUP", target="MARKA GRUP",
+            query="ZENDRA GRUP", target="MARKA GRUP",
             text_sim=0.3, semantic_sim=0.3,
         )
-        # "grup" matches (semi-generic), "patent" doesn't match "marka"
-        # No distinctive words → Case D
-        if "TIER_6" in breakdown.get("scoring_path", ""):
-            assert score <= 0.35
+        # "grup" and "marka" are descriptive/legal terms, while "spor" is the anchor.
+        assert score <= 0.20
+        assert breakdown["scoring_path"] == "TEXT_MISSING_ANCHOR_GENERIC_ONLY"
 
     def test_tier_6_generic_only(self):
         """Only generic words match → ≤0.20."""
@@ -323,8 +536,116 @@ class TestIDFWaterfall:
         )
         # "ve" matches (generic), "ltd" doesn't match "sti"
         # Only generic match → Case E
-        if "TIER_6" in breakdown.get("scoring_path", ""):
-            assert score <= 0.35
+        assert score <= 0.25
+        assert breakdown["scoring_path"] == "TEXT_GENERIC_ONLY"
+
+    def test_high_idf_db_generic_is_common_anchor(self):
+        """A high-IDF mark token must not be treated like a descriptive generic."""
+        from idf_lookup import IDFLookup
+
+        IDFLookup._cache["dogan"] = {
+            "idf": 7.727,
+            "is_generic": True,
+            "doc_freq": 1_000,
+            "word_class": "generic",
+        }
+
+        score, breakdown = compute_idf_weighted_score(
+            query="dogan patent",
+            target="dogan",
+            text_sim=0.3,
+            semantic_sim=0.2,
+        )
+
+        assert score >= 0.80
+        assert breakdown["common_anchor_match"] == 1.0
+        assert "generic_only_cap" not in "|".join(breakdown["caps_applied"])
+        assert any(
+            match["query_word"] == "dogan" and match["token_role"] == "common_anchor"
+            for match in breakdown["matched_words"]
+        )
+
+    def test_non_protectable_high_idf_terms_do_not_become_common_anchors(self):
+        """Category/entity terms stay generic even when corpus IDF is misleading."""
+        self._seed_distinctive_tokens("atlas", "nova")
+        self._seed_descriptor_tokens("kulubu", "spor")
+
+        score, breakdown = compute_idf_weighted_score(
+            query="atlas guzellik kulubu",
+            target="nova spor kulubu",
+            text_sim=0.3,
+            semantic_sim=0.2,
+        )
+
+        assert score <= 0.20
+        assert breakdown["scoring_path"] == "TEXT_MISSING_ANCHOR_GENERIC_ONLY"
+        assert breakdown["common_anchor_match"] == 0.0
+        assert breakdown["descriptor_terms"]["query"] == ["kulubu"]
+        assert "spor" in breakdown["descriptor_terms"]["target"]
+        assert breakdown["non_protectable_terms"]["query"] == ["kulubu"]
+        assert "spor" in breakdown["non_protectable_terms"]["target"]
+        assert any(
+            match["query_word"] == "kulubu" and match["token_role"] == "generic"
+            for match in breakdown["matched_words"]
+        )
+
+    def test_shared_non_protectable_entity_terms_stay_low(self):
+        self._seed_distinctive_tokens("zendra", "omera")
+        self._seed_descriptor_tokens("club")
+
+        score, breakdown = compute_idf_weighted_score(
+            query="zendra club",
+            target="omera club",
+            text_sim=0.3,
+            semantic_sim=0.2,
+        )
+
+        assert score <= 0.20
+        assert "missing_anchor_generic_only_cap:0.18" in breakdown["caps_applied"]
+
+    def test_non_protectable_added_matter_still_scores_copied_anchor_high(self):
+        self._seed_distinctive_tokens("zendra")
+        self._seed_descriptor_tokens("kulubu")
+
+        score, breakdown = compute_idf_weighted_score(
+            query="zendra kulubu",
+            target="zendra kulubu hizmetleri",
+            text_sim=0.5,
+            semantic_sim=0.4,
+        )
+
+        assert 0.88 <= score <= 0.96
+        assert breakdown["dominant_core_score"] >= 0.88
+        assert breakdown["added_matter_breakdown"]["reason"] == (
+            "copied core plus true-generic added matter"
+        )
+
+    def test_true_generic_match_capped_when_common_anchor_missing(self):
+        """Matching only 'patent' must not make an unrelated mark look risky."""
+        from idf_lookup import IDFLookup
+
+        IDFLookup._cache["dogan"] = {
+            "idf": 7.727,
+            "is_generic": True,
+            "doc_freq": 1_000,
+            "word_class": "generic",
+        }
+        IDFLookup._cache["aksa"] = {
+            "idf": 9.343,
+            "is_generic": False,
+            "doc_freq": 100,
+            "word_class": "distinctive",
+        }
+
+        score, breakdown = compute_idf_weighted_score(
+            query="dogan patent",
+            target="aksa patent",
+            text_sim=0.3,
+            semantic_sim=0.2,
+        )
+
+        assert score <= 0.20
+        assert "missing_anchor_generic_only_cap:0.18" in breakdown["caps_applied"]
 
     def test_tier_6_no_match(self):
         """No token overlap → raw sims * 0.7."""
@@ -332,9 +653,287 @@ class TestIDFWaterfall:
             query="NIKE", target="KAPLAN",
             text_sim=0.2, semantic_sim=0.3, phonetic_sim=0.0,
         )
-        expected = max(0.2, 0.3) * 0.30
-        assert abs(score - expected) < 0.01
-        assert "TIER_6_FLOOR_NO_MATCH" in breakdown["scoring_path"]
+        assert score < 0.30
+        assert "semantic_or_phonetic_without_lexical_anchor_cap" in "|".join(breakdown["caps_applied"])
+
+    def test_compact_generic_suffix_matches_spaced_form(self):
+        score, breakdown = compute_idf_weighted_score("nuvapatent", "nuva patent")
+
+        assert score >= 0.96
+        assert breakdown["scoring_path"] == "TEXT_COMPACT_EXACT"
+        assert breakdown["compound_expansions"]["query"] == [
+            {"token": "nuvapatent", "root": "nuva", "suffix": "patent"}
+        ]
+
+    def test_compact_generic_suffix_matches_spaced_form_with_prefix_noise(self):
+        score, breakdown = compute_idf_weighted_score("nuvapatent", "x nuva patent")
+
+        assert score >= 0.90
+        assert any(
+            match["query_word"] == "nuva" and match["match_type"] == "exact"
+            for match in breakdown["matched_words"]
+        )
+
+    def test_short_prefix_compound_does_not_become_suffix_match(self):
+        score, breakdown = compute_idf_weighted_score("nuvapatent", "apatent")
+
+        assert score <= 0.20
+        assert "missing_anchor_containment_only_cap:0.18" in breakdown["caps_applied"]
+
+    def test_different_roots_with_same_generic_suffix_stay_low(self):
+        score, breakdown = compute_idf_weighted_score("nuvapatent", "orionpatent")
+
+        assert score <= 0.20
+        assert "missing_anchor_generic_only_cap:0.18" in breakdown["caps_applied"]
+
+    def test_near_root_typo_compound_scores_on_root_similarity(self):
+        score, breakdown = compute_idf_weighted_score("nuvapatent", "nuvvpatent")
+
+        assert 0.60 <= score <= 0.85
+        assert any(
+            match["query_word"] == "nuva" and match["target_word"] == "nuvv"
+            for match in breakdown["matched_words"]
+        )
+
+    def test_non_patent_generic_suffix_compound_matches_spaced_form(self):
+        score, breakdown = compute_idf_weighted_score("nuvamarka", "nuva marka")
+
+        assert score >= 0.96
+        assert breakdown["compound_expansions"]["query"] == [
+            {"token": "nuvamarka", "root": "nuva", "suffix": "marka"}
+        ]
+
+    def test_non_patent_generic_suffix_different_roots_stay_low(self):
+        score, breakdown = compute_idf_weighted_score("nuvamarka", "orionmarka")
+
+        assert score <= 0.20
+        assert "missing_anchor_generic_only_cap:0.18" in breakdown["caps_applied"]
+
+    def test_long_name_containing_exact_compound_scores_high_with_discount(self):
+        score, breakdown = compute_idf_weighted_score(
+            "nuvapatent",
+            "d r p nuvapatent marka ve patent office",
+        )
+
+        assert 0.88 <= score < 1.0
+        assert breakdown["compound_containment_score"] >= 0.88
+
+    def test_full_copied_core_with_generic_added_matter_high_discounted(self):
+        self._seed_distinctive_tokens("zendra")
+
+        score, breakdown = compute_idf_weighted_score(
+            "zendra patent",
+            "zendra patent group ltd",
+        )
+
+        assert 0.88 <= score <= 0.96
+        assert breakdown["dominant_core_score"] >= 0.88
+        added = breakdown["added_matter_breakdown"]
+        assert added["reason"] == "copied core plus true-generic added matter"
+        assert added["target_extra_roles"]["true_generic"] == ["group", "ltd"]
+
+    def test_shared_anchor_with_changed_generic_matter_capped_medium_high(self):
+        self._seed_distinctive_tokens("zendra")
+
+        score, breakdown = compute_idf_weighted_score(
+            "zendra patent",
+            "zendra group",
+        )
+
+        assert 0.65 <= score <= 0.78
+        assert "added_matter_changed_remaining_matter_cap:0.78" in breakdown["caps_applied"]
+        added = breakdown["added_matter_breakdown"]
+        assert added["query_extra_roles"]["true_generic"] == ["patent"]
+        assert added["target_extra_roles"]["true_generic"] == ["group"]
+
+    def test_single_anchor_plus_generic_added_matter_remains_high_discounted(self):
+        self._seed_distinctive_tokens("zendra")
+
+        score, breakdown = compute_idf_weighted_score("zendra", "zendra group")
+
+        assert 0.88 <= score < 1.0
+        assert breakdown["added_matter_breakdown"]["reason"] == (
+            "copied core plus true-generic added matter"
+        )
+
+    def test_single_anchor_plus_distinctive_extra_capped_below_very_high(self):
+        self._seed_distinctive_tokens("zendra", "borex")
+
+        score, breakdown = compute_idf_weighted_score("zendra", "zendra borex")
+
+        assert score <= 0.78
+        assert "added_matter_single_anchor_distinctive_extra_cap:0.78" in breakdown["caps_applied"]
+        assert breakdown["added_matter_breakdown"]["target_extra_roles"]["distinctive"] == ["borex"]
+
+    def test_changed_distinctive_matter_keeps_partial_anchor_cap(self):
+        self._seed_distinctive_tokens("zendra", "borex", "lumora")
+
+        score, breakdown = compute_idf_weighted_score(
+            "zendra borex",
+            "zendra lumora",
+        )
+
+        assert score <= 0.58
+        assert "partial_distinctive_anchor_cap:0.69" in breakdown["caps_applied"]
+        assert "added_matter_partial_multi_anchor_changed_matter_cap:0.58" in breakdown["caps_applied"]
+        assert breakdown["added_matter_breakdown"]["partial_multi_anchor_changed_matter"] is True
+
+    def test_partial_multi_anchor_changed_matter_caps_one_shared_anchor(self):
+        self._seed_distinctive_tokens("zendra", "borex", "lumora", "omera")
+
+        score, breakdown = compute_idf_weighted_score(
+            "zendra borex lumora",
+            "zendra omera",
+        )
+
+        assert score <= 0.58
+        assert "added_matter_partial_multi_anchor_changed_matter_cap:0.58" in breakdown["caps_applied"]
+        added = breakdown["added_matter_breakdown"]
+        assert added["partial_multi_anchor_changed_matter"] is True
+        assert added["matched_query_anchor_tokens"] == ["zendra"]
+        assert added["matched_target_anchor_tokens"] == ["zendra"]
+        assert added["query_material_extra_count"] == 2
+        assert added["target_material_extra_count"] == 1
+
+    def test_partial_multi_anchor_changed_matter_scores_are_calibrated(self):
+        self._seed_distinctive_tokens("zendra", "borex", "lumora", "omera")
+
+        sparse_score, sparse_breakdown = compute_idf_weighted_score(
+            "zendra borex lumora",
+            "zendra omera",
+        )
+        tighter_score, tighter_breakdown = compute_idf_weighted_score(
+            "zendra borex",
+            "zendra lumora",
+        )
+
+        assert sparse_score < tighter_score < 0.58
+        assert "added_matter_partial_multi_anchor_changed_matter_cap:0.58" in (
+            sparse_breakdown["caps_applied"]
+        )
+        assert "added_matter_partial_multi_anchor_changed_matter_cap:0.58" in (
+            tighter_breakdown["caps_applied"]
+        )
+        sparse_calibration = sparse_breakdown["calibration_breakdown"]
+        tighter_calibration = tighter_breakdown["calibration_breakdown"]
+        assert sparse_calibration["calibrated_score"] == sparse_score
+        assert tighter_calibration["calibrated_score"] == tighter_score
+        assert sparse_calibration["evidence_score"] < tighter_calibration["evidence_score"]
+
+    def test_partial_multi_anchor_changed_matter_cap_is_symmetric(self):
+        self._seed_distinctive_tokens("zendra", "borex", "lumora", "omera")
+
+        forward, _ = compute_idf_weighted_score(
+            "zendra borex lumora",
+            "zendra omera",
+        )
+        reverse, reverse_breakdown = compute_idf_weighted_score(
+            "zendra omera",
+            "zendra borex lumora",
+        )
+
+        assert forward <= 0.58
+        assert reverse <= 0.58
+        assert abs(forward - reverse) <= 0.03
+        assert "added_matter_partial_multi_anchor_changed_matter_cap:0.58" in (
+            reverse_breakdown["caps_applied"]
+        )
+
+    def test_single_anchor_generic_changed_matter_keeps_previous_band(self):
+        self._seed_distinctive_tokens("zendra", "production")
+
+        score, breakdown = compute_idf_weighted_score(
+            "zendra patent",
+            "zendra production",
+        )
+
+        assert 0.65 <= score <= 0.78
+        assert "added_matter_changed_remaining_matter_cap:0.78" in breakdown["caps_applied"]
+        assert breakdown["added_matter_breakdown"]["partial_multi_anchor_changed_matter"] is False
+
+    def test_single_anchor_asymmetric_added_matter_caps_target_house_mark(self):
+        self._seed_distinctive_tokens("zendra", "polat")
+        self._seed_descriptor_tokens("hotel")
+        self._seed_legacy_override_material_tokens("investment")
+
+        score, breakdown = compute_idf_weighted_score(
+            "zendra investment",
+            "polat zendra hotel",
+        )
+
+        assert 0.58 <= score <= 0.68
+        assert "added_matter_single_anchor_asymmetric_added_matter_cap:0.68" in (
+            breakdown["caps_applied"]
+        )
+        added = breakdown["added_matter_breakdown"]
+        assert added["single_anchor_asymmetric_added_matter"] is True
+        assert added["query_legacy_override_material_terms"] == ["investment"]
+        assert added["query_material_extra_terms"] == ["investment"]
+        assert added["target_material_extra_terms"] == ["polat"]
+        assert added["leading_target_material_extra_token"] == "polat"
+
+    def test_single_anchor_asymmetric_added_matter_caps_multiple_target_terms(self):
+        self._seed_distinctive_tokens("zendra", "bcc", "card")
+        self._seed_legacy_override_material_tokens("investment", "clothing")
+
+        score, breakdown = compute_idf_weighted_score(
+            "zendra investment",
+            "bcc zendra card clothing",
+        )
+
+        assert 0.58 <= score <= 0.68
+        assert "added_matter_single_anchor_asymmetric_added_matter_cap:0.68" in (
+            breakdown["caps_applied"]
+        )
+        added = breakdown["added_matter_breakdown"]
+        assert added["single_anchor_asymmetric_added_matter"] is True
+        assert added["target_legacy_override_material_terms"] == ["clothing"]
+        assert added["target_material_extra_count"] == 3
+        assert added["partial_multi_anchor_changed_matter"] is False
+
+    def test_full_copied_core_with_distinctive_extra_below_exact(self):
+        self._seed_distinctive_tokens("zendra", "borex", "lumora")
+
+        score, breakdown = compute_idf_weighted_score(
+            "zendra borex",
+            "zendra borex lumora",
+        )
+
+        assert 0.80 <= score <= 0.84
+        assert "added_matter_distinctive_extra_cap:0.84" in breakdown["caps_applied"]
+        assert breakdown["added_matter_breakdown"]["target_extra_roles"]["distinctive"] == ["lumora"]
+
+    def test_generic_added_matter_discount_is_symmetric(self):
+        self._seed_distinctive_tokens("zendra")
+
+        score_forward, forward_breakdown = compute_idf_weighted_score(
+            "zendra patent",
+            "zendra patent group ltd",
+        )
+        score_reverse, reverse_breakdown = compute_idf_weighted_score(
+            "zendra patent group ltd",
+            "zendra patent",
+        )
+
+        assert 0.88 <= score_forward <= 0.96
+        assert 0.88 <= score_reverse <= 0.96
+        assert abs(score_forward - score_reverse) <= 0.03
+        assert forward_breakdown["added_matter_breakdown"]["target_extra_roles"]["true_generic"] == ["group", "ltd"]
+        assert reverse_breakdown["added_matter_breakdown"]["query_extra_roles"]["true_generic"] == ["group", "ltd"]
+
+    def test_compact_compound_with_generic_added_matter_stays_high(self):
+        self._seed_distinctive_tokens("zendra")
+
+        score, breakdown = compute_idf_weighted_score(
+            "zendrapatent",
+            "zendrapatent group ltd",
+        )
+
+        assert 0.88 <= score < 1.0
+        assert breakdown["compound_expansions"]["query"] == [
+            {"token": "zendrapatent", "root": "zendra", "suffix": "patent"}
+        ]
+        assert breakdown["added_matter_breakdown"]["target_extra_roles"]["true_generic"] == ["group", "ltd"]
 
     def test_bidirectional_length_ratio_discount(self):
         """'dogan' vs 'doga' — target shorter than query gets length discount too."""
@@ -419,8 +1018,16 @@ class TestIDFWaterfall:
             query="NIKE", target="KAPLAN",
             text_sim=0.2, semantic_sim=0.3, phonetic_sim=1.0,
         )
-        # With phonetic=1.0, max(0.2, 0.3, 1.0)*0.7 = 0.7
         assert score_with > score_without
+        assert score_with <= 0.45
+
+    def test_semantic_only_cap(self):
+        """Semantic-only evidence is capped when there is no lexical anchor."""
+        score, breakdown = compute_idf_weighted_score(
+            query="NIKE", target="KAPLAN", text_sim=0.0, semantic_sim=1.0, phonetic_sim=0.0,
+        )
+        assert score <= 0.45
+        assert "semantic_or_phonetic_without_lexical_anchor_cap" in "|".join(breakdown["caps_applied"])
 
 
 # ============================================================
@@ -500,12 +1107,16 @@ class TestDynamicCombine:
         result = _dynamic_combine(0.5, 0.5)
         assert "translation" not in result["dynamic_weights"]
 
-    def test_base_weights_ratio(self):
-        """With equal scores, weights should reflect base ratios 0.70:0.30."""
+    def test_equal_scores_get_equal_explanation_weights(self):
+        """With equal active scores, explanation weights split equally."""
         result = _dynamic_combine(0.50, 0.50)
         w = result["dynamic_weights"]
-        assert abs(w["text"] - 0.70) < 0.01
-        assert abs(w["visual"] - 0.30) < 0.01
+        assert abs(w["text"] - 0.50) < 0.01
+        assert abs(w["visual"] - 0.50) < 0.01
+
+    def test_agreement_boost(self):
+        result = _dynamic_combine(text_idf_score=0.70, visual_sim=0.60)
+        assert result["total"] > 0.70
 
 
 # ============================================================
@@ -549,6 +1160,7 @@ class TestScorePair:
             "total", "text_idf_score", "text_similarity", "semantic_similarity",
             "phonetic_similarity", "visual_similarity", "translation_similarity",
             "dynamic_weights", "exact_match", "matched_words", "scoring_path",
+            "score_version", "textual_breakdown", "visual_breakdown", "decision_reason",
         }
         assert expected_keys.issubset(set(result.keys()))
 
@@ -590,10 +1202,7 @@ class TestScorePair:
             query_name="NIKE", candidate_name="NIKE",
             text_sim=1.0, semantic_sim=1.0,
         )
-        valid_paths = [
-            "EXACT_MATCH", "CONTAINMENT", "A:", "B:", "C:", "D:", "E:", "F:",
-        ]
-        assert any(p in result.get("scoring_path", "") for p in ["TIER_1", "TIER_2", "TIER_3", "TIER_4", "TIER_5", "TIER_6"])
+        assert result.get("scoring_path", "").startswith("TEXT_")
 
     @patch("utils.translation.translate_to_turkish", return_value="elma")
     def test_candidate_translations_cross_language(self, mock_ttt):
@@ -714,8 +1323,8 @@ class TestOCRExtraction:
             ocr_text_a="NIKE", ocr_text_b="NIKE",
         )
         assert vis_with_ocr > vis_no_ocr
-        # OCR weight is 0.20, so boost should be about 0.20
-        assert abs((vis_with_ocr - vis_no_ocr) - 0.20) < 0.01
+        expected_no_ocr = (0.80 * 0.45 + 0.70 * 0.35) / (0.45 + 0.35)
+        assert abs(vis_no_ocr - expected_no_ocr) < 0.01
 
 
 class TestCrossEncoderRemoval:
@@ -734,6 +1343,117 @@ class TestCrossEncoderRemoval:
         import risk_engine
         source = inspect.getsource(risk_engine.RiskEngine.__init__)
         assert "self.cross_encoder" not in source
+
+
+class TestRiskEngineSqlNormalization:
+    """Verify DB pre-screen normalization can retrieve Turkish compact forms."""
+
+    def test_compact_sql_normalizer_uses_ascii_chr_literals(self):
+        from risk_engine import _sql_turkish_compact_expr
+
+        expr = _sql_turkish_compact_expr("name")
+
+        assert "CHR(287)" in expr
+        assert "CHR(305)" in expr
+        assert "REGEXP_REPLACE" in expr
+        assert "REPLACE(" in expr
+        assert "Ä" not in expr
+        assert "Ã" not in expr
+
+    def test_prescreen_includes_compact_compound_query_stage(self):
+        import risk_engine
+
+        source = inspect.getsource(risk_engine.RiskEngine.pre_screen_candidates)
+
+        assert "core_compact" in source
+        assert "_sql_turkish_compact_expr" in source
+        assert "0.88 as lexical_score" in source
+
+    def test_normalized_sql_collapses_punctuation_like_python_normalizer(self):
+        from risk_engine import _sql_turkish_normalized_expr
+
+        expr = _sql_turkish_normalized_expr("name")
+
+        assert "TRIM(" in expr
+        assert "'[^a-z0-9]+'" in expr
+        assert "'[[:space:]]+'" in expr
+
+    def test_prescreen_active_method_has_no_inline_mojibake_normalizer(self):
+        import risk_engine
+
+        source = inspect.getsource(risk_engine.RiskEngine.pre_screen_candidates)
+
+        assert "REPLACE(REPLACE" not in source
+        assert "Ã" not in source
+        assert "Ä" not in source
+
+    def test_prescreen_text_stages_search_name_and_name_tr(self):
+        import risk_engine
+
+        source = inspect.getsource(risk_engine.RiskEngine.pre_screen_candidates)
+
+        assert '_sql_turkish_normalized_expr("name")' in source
+        assert '_sql_turkish_normalized_expr("name_tr")' in source
+        assert '_sql_turkish_compact_expr("name")' in source
+        assert '_sql_turkish_compact_expr("name_tr")' in source
+        assert 'run_token_stage("all-token"' in source
+        assert 'run_token_stage("any-token"' in source
+        assert "COALESCE(similarity({name_tr_norm_expr}" in source
+        assert "name_tr_phonetic" in source
+
+    def test_prescreen_anchor_retrieval_uses_descriptor_flags(self):
+        import risk_engine
+
+        source = inspect.getsource(risk_engine.RiskEngine.pre_screen_candidates)
+
+        assert "get_descriptor_suffixes" in source
+        assert "is_descriptor_like" in source
+        assert "descriptor suffix" in source.lower()
+
+    def test_prescreen_common_filters_are_shared_across_stages(self):
+        import risk_engine
+
+        source = inspect.getsource(risk_engine.RiskEngine.pre_screen_candidates)
+
+        assert "def apply_common_filters" in source
+        assert "attorney_no = %s" in source
+        assert "nice_class_numbers && %s::integer[]" in source
+        assert source.count("apply_common_filters(") >= 8
+
+    def test_retrieval_metadata_merges_sources_for_same_candidate(self):
+        import risk_engine
+
+        engine = object.__new__(risk_engine.RiskEngine)
+        engine._candidate_retrieval_metadata = {}
+
+        engine._record_candidate_retrieval(
+            "tm-1",
+            "compact",
+            ["name"],
+            "normalized_compact:anchorpatent",
+        )
+        engine._record_candidate_retrieval(
+            "tm-1",
+            "fuzzy",
+            ["name_tr"],
+            "translated_fuzzy:anchor patent",
+        )
+
+        metadata = engine._candidate_retrieval_metadata["tm-1"]
+        assert metadata["retrieval_matched_fields"] == ["name", "name_tr"]
+        assert metadata["retrieval_matched_stages"] == ["compact", "fuzzy"]
+        assert metadata["retrieval_query_variants"] == [
+            "normalized_compact:anchorpatent",
+            "translated_fuzzy:anchor patent",
+        ]
+        assert len(metadata["retrieval_sources"]) == 2
+
+    def test_row_text_fields_reports_actual_field_flags(self):
+        import risk_engine
+
+        row = ("id", "app", "name", [], None, 0.8, False, True)
+
+        assert risk_engine.RiskEngine._row_text_fields(row) == ["name_tr"]
 
 
 class TestFeatureFlag:
@@ -900,6 +1620,91 @@ class TestRegressionKnownPairs:
         # Translation should contribute to total via Path B winning
         assert result["total"] > 0.10
 
+    def test_collapsed_translation_does_not_make_compound_exact(self):
+        """A shortened name_tr should not turn extra original matter into an exact match."""
+        from idf_lookup import IDFLookup
+
+        IDFLookup._cache["dogan"] = {
+            "idf": 7.727,
+            "is_generic": True,
+            "doc_freq": 1_000,
+            "word_class": "generic",
+        }
+
+        result = score_pair(
+            "DOGAN",
+            "DOGANNATUREL",
+            text_sim=0.2,
+            semantic_sim=0.1,
+            candidate_translations={"name_tr": "DOGAN"},
+        )
+
+        assert result["path_b_score"] < 1.0
+        assert result["total"] < 1.0
+        assert "collapsed_candidate_translation" in result["textual_breakdown"]["translation_quality_flags"]
+
+    def test_generic_name_tr_containment_does_not_match_anchor_query(self):
+        """A true generic name_tr like 'patent' must not dominate 'dogan patent'."""
+        from idf_lookup import IDFLookup
+
+        IDFLookup._cache["dogan"] = {
+            "idf": 7.727,
+            "is_generic": True,
+            "doc_freq": 1_000,
+            "word_class": "generic",
+        }
+
+        result = score_pair(
+            "DOGAN PATENT",
+            "IZ PATENT",
+            text_sim=0.2,
+            semantic_sim=0.1,
+            candidate_translations={"name_tr": "PATENT"},
+        )
+
+        assert result["total"] <= 0.20
+        assert result["path_b_score"] <= 0.20
+
+    def test_translation_path_b_uses_translated_descriptor_flags(self):
+        """Path B should cap descriptor-only evidence using word_idf_tr flags."""
+        from idf_lookup import IDFLookup
+
+        IDFLookup._loaded_tr = True
+        IDFLookup._descriptor_suffixes_tr = None
+        IDFLookup._cache_tr["atlas"] = {
+            "idf": 8.0,
+            "is_generic": False,
+            "doc_freq": 100,
+            "word_class": "distinctive",
+        }
+        IDFLookup._cache_tr["nova"] = {
+            "idf": 8.0,
+            "is_generic": False,
+            "doc_freq": 100,
+            "word_class": "distinctive",
+        }
+        IDFLookup._cache_tr["kulubu"] = {
+            "idf": 8.2,
+            "is_generic": True,
+            "doc_freq": 1_000,
+            "word_class": "generic",
+            "descriptor_like": True,
+            "descriptor_score": 0.9,
+            "descriptor_stats": {"reason_flags": ["mostly_suffix"]},
+        }
+
+        result = score_pair(
+            "atlas kulubu",
+            "unrelated",
+            text_sim=0.1,
+            semantic_sim=0.1,
+            candidate_translations={"name_tr": "nova kulubu"},
+        )
+
+        assert result["path_b_score"] <= 0.20
+        assert result["translation_similarity"] <= 0.20
+        assert result["textual_breakdown"]["path_b"]["descriptor_terms"]["target"] == ["kulubu"]
+
     def test_unrelated_pair_low_score(self):
         """Unrelated names should score low."""
         result = score_pair("NIKE", "SAMSUNG", text_sim=0.05, semantic_sim=0.10)
@@ -912,6 +1717,474 @@ class TestRegressionKnownPairs:
         # With visual
         r_with_vis = score_pair("BRAND", "LOGO", text_sim=0.2, visual_sim=0.85)
         assert r_with_vis["total"] > r_no_vis["total"]
+
+    def test_weak_generic_text_plus_moderate_visual_is_capped(self):
+        """Shared category/entity wording must not turn moderate visuals high."""
+        TestIDFWaterfall._seed_distinctive_tokens("atlas", "nova")
+        TestIDFWaterfall._seed_descriptor_tokens("kulubu", "spor")
+
+        result = score_pair(
+            "atlas guzellik kulubu",
+            "nova spor kulubu",
+            text_sim=0.3,
+            semantic_sim=0.2,
+            visual_sim=0.65,
+        )
+
+        assert result["total"] <= 0.45
+        assert result["dynamic_weights"] == {"text": 0.0, "visual": 1.0}
+        assert "weak_text_visual_low_cap:0.45" in result["caps_applied"]
+        assert result["textual_breakdown"]["text_visual_guard"]["weak_text_cap_active"] is True
+        calibration = result["textual_breakdown"]["text_visual_guard"][
+            "weak_text_visual_calibration"
+        ]
+        assert calibration["ceiling"] == 0.45
+        assert result["total"] == calibration["calibrated_score"]
+        assert result["total"] < 0.45
+
+    def test_limited_changed_matter_text_suppresses_moderate_visual_boost(self):
+        TestIDFWaterfall._seed_distinctive_tokens("zendra", "borex", "lumora", "omera")
+
+        result = score_pair(
+            "zendra borex lumora",
+            "zendra omera",
+            text_sim=0.65,
+            semantic_sim=0.2,
+            visual_sim=0.55,
+        )
+
+        assert result["text_idf_score"] <= 0.58
+        assert result["total"] <= 0.69
+        assert "added_matter_partial_multi_anchor_changed_matter_cap:0.58" in result["caps_applied"]
+        guard = result["textual_breakdown"]["text_visual_guard"]
+        assert guard["limited_text_cap_active"] is True
+        assert guard["agreement_boost_suppressed"] is True
+        assert result["decision_reason"].endswith("limited text visual agreement suppressed")
+
+    def test_limited_changed_matter_with_ocr_disagreement_stays_below_high(self):
+        TestIDFWaterfall._seed_distinctive_tokens("zendra", "borex", "lumora", "omera")
+        visual_breakdown = {
+            "total": 0.82,
+            "active_components": ["clip", "dinov2", "ocr"],
+            "components": {"clip": 0.82, "dinov2": 0.82, "ocr": 0.2},
+            "ocr_disagreement": True,
+            "ocr_strong_match": False,
+            "very_strong_visual_components": False,
+        }
+
+        result = score_pair(
+            "zendra borex lumora",
+            "zendra omera",
+            text_sim=0.65,
+            semantic_sim=0.2,
+            visual_sim=0.82,
+            visual_breakdown=visual_breakdown,
+        )
+
+        assert result["total"] <= 0.69
+        assert result["visual_breakdown"]["ocr_disagreement"] is True
+        assert "limited_text_visual_moderate_cap:0.69" in result["caps_applied"]
+        assert result["text_visual_guard"]["limited_text_visual_guard_active"] is True
+        calibration = result["text_visual_guard"]["limited_text_visual_calibration"]
+        assert calibration["ceiling"] == 0.69
+        assert result["total"] == calibration["calibrated_score"]
+        assert result["total"] < 0.69
+
+    def test_single_anchor_asymmetric_added_matter_blocks_moderate_visual_boost(self):
+        TestIDFWaterfall._seed_distinctive_tokens("zendra", "polat")
+        TestIDFWaterfall._seed_descriptor_tokens("hotel")
+        TestIDFWaterfall._seed_legacy_override_material_tokens("investment")
+        visual_breakdown = {
+            "total": 0.63,
+            "active_components": ["clip", "dinov2", "ocr"],
+            "components": {"clip": 0.65, "dinov2": 0.65, "ocr": 0.3},
+            "ocr_disagreement": True,
+            "ocr_strong_match": False,
+            "very_strong_visual_components": False,
+        }
+
+        result = score_pair(
+            "zendra investment",
+            "polat zendra hotel",
+            text_sim=0.62,
+            semantic_sim=0.2,
+            visual_sim=0.63,
+            visual_breakdown=visual_breakdown,
+        )
+
+        assert result["text_idf_score"] <= 0.68
+        assert result["total"] < 0.70
+        assert "added_matter_single_anchor_asymmetric_added_matter_cap:0.68" in (
+            result["caps_applied"]
+        )
+        guard = result["text_visual_guard"]
+        assert guard["limited_text_cap_active"] is True
+        assert guard["agreement_boost_suppressed"] is True
+        assert result["textual_breakdown"]["path_a"]["added_matter_breakdown"][
+            "single_anchor_asymmetric_added_matter"
+        ] is True
+
+    def test_duplicate_translation_path_cannot_beat_original_path(self):
+        TestIDFWaterfall._seed_distinctive_tokens("zendra", "sarayi")
+        TestIDFWaterfall._seed_descriptor_tokens("group")
+        TestIDFWaterfall._seed_distinctive_tokens_tr("zendra")
+        TestIDFWaterfall._seed_descriptor_tokens_tr("sarayi", "group")
+
+        result = score_pair(
+            "zendra sarayi",
+            "zendra group",
+            text_sim=0.5,
+            semantic_sim=0.2,
+            candidate_translations={"name_tr": "zendra group"},
+        )
+
+        assert result["path_b_score"] <= result["path_a_score"]
+        assert result["scoring_path_source"] == "ORIGINAL"
+        assert "translation_duplicate_original" in (
+            result["textual_breakdown"]["translation_quality_flags"]
+        )
+        assert result["textual_breakdown"]["translation_duplicate_original"] is True
+        assert result["textual_breakdown"]["path_b"]["raw_total"] > result["path_b_score"]
+        assert any(
+            cap.startswith("translation_duplicate_original_cap")
+            for cap in result["textual_breakdown"]["path_b"]["caps_applied"]
+        )
+
+    def test_full_length_one_edit_fuzzy_anchor_remains_meaningful(self):
+        TestIDFWaterfall._seed_distinctive_tokens("zarpil", "zarpin")
+        TestIDFWaterfall._seed_descriptor_tokens("exclusive")
+
+        result = score_pair(
+            "zarpil exclusive",
+            "zarpin",
+            text_sim=0.75,
+            semantic_sim=0.2,
+        )
+
+        assert result["text_idf_score"] >= 0.70
+        assert not any(
+            cap.startswith("weak_fuzzy_anchor_") for cap in result["caps_applied"]
+        )
+        guard = result["textual_breakdown"]["path_a"]["fuzzy_anchor_guard"]
+        assert guard["applies"] is False
+        assert guard["reason"] == "strong_near_miss"
+
+    def test_short_fragment_fuzzy_anchor_is_capped_below_high(self):
+        TestIDFWaterfall._seed_distinctive_tokens("zarpil", "zapi")
+        TestIDFWaterfall._seed_descriptor_tokens("exclusive", "chemicals")
+
+        score, breakdown = compute_idf_weighted_score(
+            "zarpil exclusive",
+            "zapi chemicals",
+            text_sim=0.72,
+            semantic_sim=0.2,
+        )
+
+        assert score <= 0.62
+        assert "weak_fuzzy_anchor_fragment_cap:0.62" in breakdown["caps_applied"]
+        guard = breakdown["fuzzy_anchor_guard"]
+        assert guard["applies"] is True
+        assert guard["metrics"]["length_ratio"] < 0.78
+
+    def test_fullish_multi_edit_fuzzy_anchor_is_capped_below_high(self):
+        TestIDFWaterfall._seed_distinctive_tokens("zarpil", "zarvily")
+        TestIDFWaterfall._seed_descriptor_tokens("exclusive")
+
+        score, breakdown = compute_idf_weighted_score(
+            "zarpil exclusive",
+            "zarvily",
+            text_sim=0.74,
+            semantic_sim=0.2,
+        )
+
+        assert score <= 0.68
+        assert "weak_fuzzy_anchor_quality_cap:0.68" in breakdown["caps_applied"]
+        guard = breakdown["fuzzy_anchor_guard"]
+        assert guard["applies"] is True
+        assert guard["metrics"]["strong_near_miss"] is False
+
+    def test_weak_fuzzy_anchor_with_moderate_visual_stays_below_high(self):
+        TestIDFWaterfall._seed_distinctive_tokens("zarpil", "zapi")
+        TestIDFWaterfall._seed_descriptor_tokens("exclusive", "chemicals")
+        visual_breakdown = {
+            "total": 0.66,
+            "active_components": ["clip", "dinov2", "ocr"],
+            "components": {"clip": 0.70, "dinov2": 0.68, "ocr": 0.25},
+            "ocr_disagreement": True,
+            "ocr_strong_match": False,
+            "very_strong_visual_components": False,
+        }
+
+        result = score_pair(
+            "zarpil exclusive",
+            "zapi chemicals",
+            text_sim=0.72,
+            semantic_sim=0.2,
+            visual_sim=0.66,
+            visual_breakdown=visual_breakdown,
+        )
+
+        assert result["total"] < 0.70
+        assert "weak_fuzzy_anchor_fragment_cap:0.62" in result["caps_applied"]
+        assert "limited_text_visual_moderate_cap:0.69" in result["caps_applied"]
+        guard = result["text_visual_guard"]
+        assert guard["limited_text_cap_active"] is True
+        assert guard["agreement_boost_suppressed"] is True
+
+    def test_weak_fuzzy_translated_path_cannot_inflate_to_high_risk(self):
+        TestIDFWaterfall._seed_distinctive_tokens("zarpil", "unrelated", "mark")
+        TestIDFWaterfall._seed_distinctive_tokens_tr("zarpil", "zarvily")
+        TestIDFWaterfall._seed_descriptor_tokens("exclusive")
+        TestIDFWaterfall._seed_descriptor_tokens_tr("exclusive")
+
+        result = score_pair(
+            "zarpil exclusive",
+            "unrelated mark",
+            text_sim=0.05,
+            semantic_sim=0.2,
+            visual_sim=0.55,
+            candidate_translations={"name_tr": "zarvily"},
+        )
+
+        assert result["scoring_path_source"] == "TRANSLATED"
+        assert result["total"] < 0.70
+        assert result["translation_similarity"] <= 0.68
+        assert "translation_weak_fuzzy_anchor" in (
+            result["textual_breakdown"]["translation_quality_flags"]
+        )
+        assert "weak_fuzzy_anchor_quality_cap:0.68" in (
+            result["textual_breakdown"]["path_b"]["caps_applied"]
+        )
+
+    def test_uncorroborated_strong_visual_is_capped_when_text_is_weak(self):
+        TestIDFWaterfall._seed_distinctive_tokens("atlas", "nova")
+        TestIDFWaterfall._seed_descriptor_tokens("kulubu", "spor")
+
+        result = score_pair(
+            "atlas guzellik kulubu",
+            "nova spor kulubu",
+            text_sim=0.3,
+            semantic_sim=0.2,
+            visual_sim=0.85,
+        )
+
+        assert result["total"] <= 0.69
+        assert "weak_text_visual_mid_cap:0.69" in result["caps_applied"]
+        assert result["dynamic_weights"] == {"text": 0.0, "visual": 1.0}
+        calibration = result["text_visual_guard"]["weak_text_visual_calibration"]
+        assert calibration["ceiling"] == 0.69
+        assert result["total"] == calibration["calibrated_score"]
+        assert result["total"] < 0.69
+
+    def test_strong_ocr_allows_mid_visual_when_text_is_weak(self):
+        TestIDFWaterfall._seed_distinctive_tokens("atlas", "nova")
+        TestIDFWaterfall._seed_descriptor_tokens("kulubu", "spor")
+
+        result = score_pair(
+            "atlas guzellik kulubu",
+            "nova spor kulubu",
+            text_sim=0.3,
+            semantic_sim=0.2,
+            visual_sim=0.85,
+            visual_breakdown={
+                "total": 0.85,
+                "active_components": ["clip", "dinov2", "ocr"],
+                "components": {"clip": 0.82, "dinov2": 0.84, "ocr": 0.86},
+                "ocr_strong_match": True,
+            },
+        )
+
+        assert result["total"] == 0.85
+        assert not any(cap.startswith("weak_text_visual_") for cap in result["caps_applied"])
+
+    def test_very_strong_clip_dino_allows_high_visual_when_text_is_weak(self):
+        TestIDFWaterfall._seed_distinctive_tokens("atlas", "nova")
+        TestIDFWaterfall._seed_descriptor_tokens("kulubu", "spor")
+
+        result = score_pair(
+            "atlas guzellik kulubu",
+            "nova spor kulubu",
+            text_sim=0.3,
+            semantic_sim=0.2,
+            visual_sim=0.92,
+            visual_breakdown={
+                "total": 0.92,
+                "active_components": ["clip", "dinov2"],
+                "components": {"clip": 0.93, "dinov2": 0.92, "ocr": 0.0},
+                "very_strong_visual_components": True,
+            },
+        )
+
+        assert result["total"] == 0.92
+        assert not any(cap.startswith("weak_text_visual_") for cap in result["caps_applied"])
+
+    def test_distinctive_query_does_not_fuzzy_match_generic_target(self):
+        TestIDFWaterfall._seed_distinctive_tokens("oksipital")
+
+        result = score_pair(
+            "oksipital",
+            "best hospital",
+            text_sim=0.726,
+            semantic_sim=0.2206,
+            visual_sim=0.4714,
+        )
+
+        assert result["total"] <= 0.45
+        assert result["text_idf_score"] <= 0.45
+        assert not any(
+            match["query_word"] == "oksipital" and match["target_word"] == "hospital"
+            for match in result["matched_words"]
+        )
+
+    def test_missing_dominant_anchor_caps_shared_secondary_term(self):
+        TestIDFWaterfall._seed_distinctive_tokens("okur", "gunlugu", "yatirimcinin")
+
+        result = score_pair(
+            "okur günlüğü",
+            "yatırımcının günlüğü",
+            text_sim=0.68,
+            semantic_sim=0.5648,
+            visual_sim=0.7195,
+        )
+
+        assert result["text_idf_score"] <= 0.62
+        assert result["total"] <= 0.45
+        assert "missing_dominant_anchor_cap:0.62" in result["caps_applied"]
+
+    def test_semantic_only_weak_text_blocks_moderate_visual_domination(self):
+        TestIDFWaterfall._seed_distinctive_tokens("oksipital", "okuluko")
+
+        result = score_pair(
+            "oksipital",
+            "okuluko",
+            text_sim=0.1587,
+            semantic_sim=0.7198,
+            visual_sim=0.6876,
+        )
+
+        assert result["total"] <= 0.45
+        assert "semantic_or_phonetic_without_lexical_anchor_cap:0.45" in result["caps_applied"]
+
+    def test_ocr_disagreement_pair_stays_below_high_when_text_is_weak(self):
+        TestIDFWaterfall._seed_distinctive_tokens("oksipital", "qorvital")
+        visual_score, visual_breakdown = _calculate_visual_breakdown(
+            clip_sim=0.7310,
+            dinov2_sim=0.9053,
+            ocr_text_a="Oksipital",
+            ocr_text_b="Qorvital",
+        )
+
+        result = score_pair(
+            "oksipital",
+            "qorvital",
+            text_sim=0.1943,
+            semantic_sim=0.5148,
+            visual_sim=visual_score,
+            visual_breakdown=visual_breakdown,
+        )
+
+        assert result["total"] <= 0.45
+        assert result["visual_breakdown"]["ocr_disagreement"] is True
+
+    def test_short_anchor_non_exact_phonetic_is_blocked(self):
+        TestIDFWaterfall._seed_distinctive_tokens("gk", "gok", "gky")
+
+        for target in ("gok", "gky"):
+            score, breakdown = compute_idf_weighted_score(
+                "gk",
+                target,
+                text_sim=0.8,
+                semantic_sim=0.2,
+                phonetic_sim=1.0,
+            )
+
+            assert score <= 0.45
+            assert breakdown["matched_words"] == []
+            assert breakdown["short_anchor_guard"]
+            assert "short_anchor_non_exact_anchor_cap:0.45" in breakdown["caps_applied"]
+
+    def test_short_anchor_guard_is_symmetric(self):
+        TestIDFWaterfall._seed_distinctive_tokens("gk", "gok")
+
+        score, breakdown = compute_idf_weighted_score(
+            "gok",
+            "gk",
+            text_sim=0.8,
+            semantic_sim=0.2,
+            phonetic_sim=1.0,
+        )
+
+        assert score <= 0.45
+        assert breakdown["matched_words"] == []
+        assert breakdown["short_anchor_guard"][0]["target_word"] == "gk"
+
+    def test_exact_short_anchor_copy_still_scores_meaningfully(self):
+        TestIDFWaterfall._seed_distinctive_tokens("gk", "prime")
+
+        result = score_pair("gk", "gk prime", text_sim=0.4, semantic_sim=0.2)
+
+        assert result["total"] >= 0.70
+        assert any(
+            match["query_word"] == "gk" and match["match_type"] == "exact"
+            for match in result["matched_words"]
+        )
+        assert result["textual_breakdown"]["path_a"]["short_anchor_guard"] == []
+
+    def test_punctuated_short_anchor_exact_compact_match_still_scores_high(self):
+        result = score_pair("G.K.", "GK", text_sim=0.0, semantic_sim=0.0)
+
+        assert result["total"] == 0.96
+        assert result["scoring_path"] == "TEXT_COMPACT_EXACT"
+
+    def test_translated_short_anchor_only_phonetic_match_is_capped(self):
+        TestIDFWaterfall._seed_distinctive_tokens("gk")
+        TestIDFWaterfall._seed_descriptor_tokens("guzellik", "kulubu", "sky", "systems")
+        TestIDFWaterfall._seed_distinctive_tokens_tr("gk", "gok")
+        TestIDFWaterfall._seed_descriptor_tokens_tr("guzellik", "kulubu", "sistemleri")
+
+        result = score_pair(
+            "gk guzellik kulubu",
+            "sky systems",
+            text_sim=0.046,
+            semantic_sim=0.0789,
+            visual_sim=0.3849,
+            candidate_translations={"name_tr": "gok sistemleri"},
+        )
+
+        assert result["total"] <= 0.45
+        assert result["path_b_score"] <= 0.45
+        assert result["textual_breakdown"]["path_b"]["matched_words"] == []
+        assert result["textual_breakdown"]["path_b"]["short_anchor_guard"]
+        assert "short_anchor_non_exact_anchor_cap:0.45" in (
+            result["textual_breakdown"]["path_b"]["caps_applied"]
+        )
+
+    def test_normal_length_phonetic_similarity_still_available(self):
+        TestIDFWaterfall._seed_distinctive_tokens("dogan", "togan")
+
+        score, breakdown = compute_idf_weighted_score(
+            "dogan",
+            "togan",
+            text_sim=0.3,
+            semantic_sim=0.2,
+            phonetic_sim=1.0,
+        )
+
+        assert score >= 0.50
+        assert breakdown["matched_words"]
+        assert breakdown["short_anchor_guard"] == []
+
+    def test_search_and_watchlist_pass_visual_breakdown_to_score_pair(self):
+        import risk_engine
+        import watchlist.scanner as scanner
+
+        search_source = inspect.getsource(risk_engine.RiskEngine.calculate_hybrid_risk)
+        watchlist_source = inspect.getsource(scanner.WatchlistScanner._check_conflict)
+
+        assert "_calculate_visual_breakdown" in search_source
+        assert "visual_breakdown=visual_breakdown" in search_source
+        assert "_compute_visual_breakdown" in watchlist_source
+        assert "visual_breakdown=visual_breakdown" in watchlist_source
 
 
 # ============================================================

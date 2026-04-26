@@ -1,6 +1,6 @@
 # IP Watch AI API Reference
 
-Last updated: 2026-04-19
+Last updated: 2026-04-21
 Status: Current high-level map
 
 ## Purpose
@@ -66,6 +66,15 @@ Public search and portfolio:
 - `GET /api/v1/portfolio/public`
 - `GET /api/v1/portfolio/public/csv`
 
+Public education content:
+- `GET /api/v1/education/catalog`
+- `GET /api/v1/education/flashcards/{deck_id}`
+- `GET /api/v1/education/quizzes/{section_id}`
+- `GET /api/v1/education/assets/{file_name}`
+
+Education catalog note:
+- `GET /api/v1/education/catalog` now returns category summaries that pair the categorized flashcard deck and quiz section for each vekillik study category on the landing page
+
 Nice class helpers:
 - `GET /api/nice-classes`
 - `POST /api/validate-classes`
@@ -92,11 +101,27 @@ Search and trademark:
 - `/api/v1/search/intelligent`
 - `/api/v1/trademark`
 
+Search scoring response note:
+- search routes continue to expose the existing scoring fields such as `total`, `text_similarity`, `semantic_similarity`, `phonetic_similarity`, `visual_similarity`, `translation_similarity`, `path_a_score`, `path_b_score`, `scoring_path_source`, `dynamic_weights`, and `matched_words`
+- the canonical scorer now also returns `score_version: "v2_text_visual"`, `textual_breakdown`, `visual_breakdown`, and `decision_reason`
+- `translation_similarity` is the translated-name textual path score from `name_tr`; it is not an additional overall combiner signal
+- textual diagnostics may include `token_role` for matched words, `descriptor_terms` for corpus-derived descriptor-like terms that cannot become anchors, compatibility alias `non_protectable_terms`, `descriptor_stats` evidence when available, `compound_expansions` for compact generic-suffix compounds, `short_anchor_guard` for blocked non-exact acronym-style phonetic/fuzzy matches, `fuzzy_anchor_guard` for weak dominant-anchor fuzzy matches, `added_matter_breakdown` for dominant-core/additional-word scoring, and `translation_quality_flags` when `name_tr` is capped for dropping material from the original candidate name or for weak translated fuzzy-anchor evidence
+- textual diagnostics may include `calibration_breakdown` when a guarded cap is applied; these diagnostics show the evidence-weighted score under the cap ceiling so similarly capped cases do not all return the same value
+- result diagnostics may include `text_visual_guard` when weak text such as generic-only, missing-anchor, dominant-anchor-missing, semantic/phonetic-only evidence, weak fuzzy-anchor evidence, or limited one-anchor changed-matter/asymmetric-added-matter evidence prevents visual similarity from dominating the final score
+- translated-path diagnostics may include `translation_duplicate_original` when `name_tr` normalizes to the same candidate text and is capped so translated IDF flags cannot inflate Path B over Path A
+- result diagnostics may include internal retrieval context such as `retrieval_sources`, `retrieval_matched_fields`, `retrieval_matched_stages`, and `retrieval_query_variants`; these explain how the candidate entered the scoring pool and do not change scoring math
+- visual scoring uses active CLIP, DINOv2, and OCR components; color similarity is accepted by compatibility callers but ignored by the V2 risk score
+- `visual_breakdown` may include OCR-disagreement and weak-text visual cap diagnostics; moderate neural visual similarity cannot create high risk when wordmark OCR disagrees and textual evidence is weak
+- `dynamic_weights` is a compatibility explanation of active text/visual contribution under the max-plus combiner
+
 Portfolio and monitoring:
 - `/api/v1/watchlist`
 - `/api/v1/alerts`
 - `/api/v1/reports`
 - `/api/v1/dashboard`
+- `/api/v1/education/progress`
+- `/api/v1/education/progress/sync`
+- `/api/v1/education/moderation` (admin and superadmin only)
 
 Commercial and workflow:
 - `/api/v1/leads`
@@ -110,6 +135,9 @@ Admin, tooling, and pipeline:
 - `/api/v1/admin`
 - `/api/v1/tools`
 - `/api/v1/pipeline`
+
+Pipeline note:
+- pipeline trigger endpoints launch `workers.pipeline_worker` as a detached child process after persisting the `pipeline_runs` record, so the run is no longer tied to the request lifecycle of the FastAPI worker that accepted the trigger
 
 ## Common Usage Patterns
 
@@ -156,3 +184,8 @@ curl -X POST http://127.0.0.1:8000/api/v1/reports/generate `
 - authenticated quick search reads the plan daily cap from runtime settings, and startup now realigns the known legacy quick-search overrides to the current product defaults
 - some legacy routes remain for compatibility while newer flows live under `/api/v1`
 - browser and live E2E suites in `tests/` are often the best source for real end-to-end request/response behavior
+- Education moderation notes:
+  - `PUT /api/v1/education/moderation` stores tester-only overrides for flashcards and quiz questions
+  - supported item types are `flashcard` and `quiz_question`
+  - flashcard overrides support category reassignment and soft-delete hiding
+  - quiz-question overrides support category reassignment, explanation text edits, summary text edits, and soft-delete hiding through `education/moderation_overrides.json`

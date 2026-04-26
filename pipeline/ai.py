@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+from datetime import datetime, timezone
 
 # ===================== WINDOWS CONSOLE FIX =====================
 if sys.platform == 'win32':
@@ -44,6 +45,7 @@ from PIL import Image, UnidentifiedImageError, ImageFile
 from torchvision import transforms
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
+from utils.model_cache import find_hf_snapshot_dir, find_hf_snapshot_file, find_torch_hub_repo
 
 # ===================== STRUCTURED LOGGING =====================
 from logging_config import get_logger, setup_logging, log_timing, log_batch_stats
@@ -74,6 +76,7 @@ try:
     TEXT_MODEL = settings.ai.text_model
     USE_FP16 = settings.ai.use_fp16
     USE_TF32 = settings.ai.use_tf32
+    PIPELINE_TRANSLATION_BACKEND = settings.ai.pipeline_translation_backend
 
     # Pipeline settings for batch processing
     SKIP_IF_PROCESSED = settings.pipeline.skip_if_embeddings_exist
@@ -99,6 +102,7 @@ except ImportError:
     TEXT_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     USE_FP16 = True
     USE_TF32 = True
+    PIPELINE_TRANSLATION_BACKEND = "madlad"
     SKIP_IF_PROCESSED = True
 
     logger.warning("Using default configuration", reason="config/settings.py not found")
@@ -120,6 +124,46 @@ if device == 'cuda':
 
 # === MODEL SETUP ===
 logger.info("Initializing GPU pipeline", device=device.upper())
+
+
+def _resolve_clip_pretrained_source(model_name: str, pretrained_tag: str) -> str:
+    try:
+        pretrained_cfg = open_clip.pretrained.get_pretrained_cfg(model_name, pretrained_tag) or {}
+    except Exception:
+        pretrained_cfg = {}
+
+    repo_id = str(pretrained_cfg.get("hf_hub", "")).strip("/")
+    if repo_id:
+        cached_weights = (
+            find_hf_snapshot_file(repo_id, "open_clip_model.safetensors")
+            or find_hf_snapshot_file(repo_id, "open_clip_pytorch_model.bin")
+        )
+        if cached_weights is not None:
+            logger.info("Using cached OpenCLIP weights", repo=repo_id, path=str(cached_weights))
+            return str(cached_weights)
+
+    return pretrained_tag
+
+
+def _resolve_dinov2_repo_source() -> tuple[str, str | None]:
+    cached_repo = find_torch_hub_repo("facebookresearch/dinov2")
+    if cached_repo is not None:
+        logger.info("Using cached DINOv2 repo", path=str(cached_repo))
+        return str(cached_repo), "local"
+    return "facebookresearch/dinov2", None
+
+
+def _resolve_text_model_source(model_name: str) -> str:
+    model_path = Path(model_name).expanduser()
+    if model_path.exists():
+        return str(model_path)
+
+    cached_snapshot = find_hf_snapshot_dir(model_name, required_files=["config.json"])
+    if cached_snapshot is not None:
+        logger.info("Using cached sentence transformer", model=model_name, path=str(cached_snapshot))
+        return str(cached_snapshot)
+
+    return model_name
 
 if SKIP_MODEL_LOAD:
     logger.warning("AI model loading skipped", reason="AI_SKIP_MODEL_LOAD")
@@ -156,9 +200,10 @@ if SKIP_MODEL_LOAD:
     text_model = _DummyTextModel()
 else:
     _model_load_start = time.perf_counter()
+    clip_pretrained_source = _resolve_clip_pretrained_source(CLIP_MODEL, CLIP_PRETRAINED)
     logger.info("Loading OpenCLIP model", model=CLIP_MODEL, pretrained=CLIP_PRETRAINED, fp16=USE_FP16)
     clip_model, _, clip_preprocess = open_clip.create_model_and_transforms(
-        CLIP_MODEL, pretrained=CLIP_PRETRAINED, device=device
+        CLIP_MODEL, pretrained=clip_pretrained_source, device=device
     )
     if USE_FP16 and device == 'cuda':
         clip_model.eval().half()
@@ -168,7 +213,11 @@ else:
 
     _model_load_start = time.perf_counter()
     logger.info("Loading DINOv2 model", model=DINO_MODEL, fp16=USE_FP16)
-    dinov2_model = torch.hub.load('facebookresearch/dinov2', DINO_MODEL)
+    dinov2_repo, dinov2_source = _resolve_dinov2_repo_source()
+    if dinov2_source is None:
+        dinov2_model = torch.hub.load(dinov2_repo, DINO_MODEL)
+    else:
+        dinov2_model = torch.hub.load(dinov2_repo, DINO_MODEL, source=dinov2_source)
     if USE_FP16 and device == 'cuda':
         dinov2_model.to(device).half().eval()
     else:
@@ -195,7 +244,7 @@ else:
 
     _model_load_start = time.perf_counter()
     logger.info("Loading text model", model=TEXT_MODEL.split('/')[-1])
-    text_model = SentenceTransformer(TEXT_MODEL, device=device)
+    text_model = SentenceTransformer(_resolve_text_model_source(TEXT_MODEL), device=device)
     logger.info("Text model loaded", duration_ms=round((time.perf_counter() - _model_load_start) * 1000, 2))
 
 # ===================== OCR SETUP (Optional) =====================
@@ -231,18 +280,20 @@ try:
         translate as translate_text,
         translate_to_turkish,
         batch_translate_to_turkish,
+        get_translation_backend_info,
     )
     _TRANSLATION_IMPORT_OK = True
 except ImportError:
     _TRANSLATION_IMPORT_OK = False
     logger.warning("utils.translation not available - translation disabled")
     def detect_language_fasttext(text): return 'en', 'eng_Latn', 0.0
-    def translate_text(text, src, tgt): return None
-    def _get_translations_raw(text): return {'original': text, 'detected_lang': 'unknown', 'tr': None}
-    def _init_translation(device=None): return False
-    def _translation_ready(): return False
-    def translate_to_turkish(text): return text.lower() if text else ""
-    def batch_translate_to_turkish(texts): return [(t.lower() if t else "", "en") for t in texts]
+    def translate_text(text, src, tgt, backend=None): return None
+    def _get_translations_raw(text, backend=None): return {'original': text, 'detected_lang': 'unknown', 'tr': None}
+    def _init_translation(device=None, backend=None): return False
+    def _translation_ready(backend=None): return False
+    def translate_to_turkish(text, backend=None): return text.lower() if text else ""
+    def batch_translate_to_turkish(texts, backend=None, batch_size=None): return [(t.lower() if t else "", "en") for t in texts]
+    def get_translation_backend_info(backend=None): return {"backend": backend or "nllb", "model_name": "unavailable"}
 
 TRANSLATION_AVAILABLE = _TRANSLATION_IMPORT_OK
 
@@ -264,7 +315,7 @@ def get_translations(text: str) -> dict:
     Returns:
         {'name_original': str, 'name_tr': str|None, 'detected_lang': str}
     """
-    raw = _get_translations_raw(text)
+    raw = _get_translations_raw(text, backend=PIPELINE_TRANSLATION_BACKEND)
     return {
         'name_original': text,
         'detected_lang': raw.get('detected_lang', 'unknown'),
@@ -764,11 +815,16 @@ def process_folder(folder_path):
     if records_needing_translation:
         trans_start = time.perf_counter()
         names = [r.get("TRADEMARK", {}).get("NAME", "") for _, r in records_needing_translation]
-        translations = batch_translate_to_turkish(names)
+        translations = batch_translate_to_turkish(names, backend=PIPELINE_TRANSLATION_BACKEND)
+        provenance = get_translation_backend_info(PIPELINE_TRANSLATION_BACKEND)
+        translation_timestamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         trans_count = 0
         for (orig_idx, r), (name_tr, lang) in zip(records_needing_translation, translations):
             r["name_tr"] = name_tr
             r["detected_lang"] = lang
+            r["name_tr_backend"] = provenance["backend"]
+            r["name_tr_model"] = provenance["model_name"]
+            r["name_tr_updated_at"] = translation_timestamp
             trans_count += 1
         logger.info(
             "Translations processed (batched TR)",

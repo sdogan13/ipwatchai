@@ -15,11 +15,11 @@ function landing() {
         // Mobile menu
         mobileMenu: false,
 
-        // Tab state (home, about, mission)
+        // Tab state (home, about, mission, education)
         activeTab: 'home',
 
         // Auth state
-        isLoggedIn: !!localStorage.getItem('auth_token'),
+        isLoggedIn: !!(localStorage.getItem('auth_token') || localStorage.getItem('access_token')),
 
         // Search state
         searchQuery: '',
@@ -101,6 +101,36 @@ function landing() {
         // Stats
         dbCount: 0,
 
+        // Education state
+        educationLoading: false,
+        educationError: '',
+        educationCatalog: null,
+        educationSelectedCategoryId: '',
+        educationMobileSection: '',
+        educationMobileSectionByCategory: {},
+        educationDeckLoading: false,
+        educationSelectedDeckId: '',
+        educationSelectedDeck: null,
+        educationFlashcardIndex: 0,
+        educationFlashcardFlipped: false,
+        educationQuizLoading: false,
+        educationSelectedQuizId: '',
+        educationSelectedQuiz: null,
+        educationQuizIndex: 0,
+        educationQuizAnswers: {},
+        educationQuizExplanationOpen: false,
+        educationQuizExplanationLoading: false,
+        _educationQuizExplanationTimer: null,
+        educationProgressLoading: false,
+        educationProgressMap: {},
+        educationProgressNotice: '',
+        educationCanModerate: false,
+        educationModerationBusyMap: {},
+        educationQuizExplanationEditorOpen: false,
+        educationQuizExplanationEditorQuestionId: '',
+        educationQuizExplanationDraft: '',
+        educationQuizSummaryDraft: '',
+
         // Reactive t() wrapper
         t: function (key, params) {
             void this.lang_code;
@@ -109,6 +139,9 @@ function landing() {
 
         init: function () {
             var self = this;
+            var urlParams = new URLSearchParams(window.location.search);
+            var requestedTab = urlParams.get('tab');
+            var allowedTabs = { home: true, about: true, mission: true, education: true };
 
             // Listen for locale changes
             window.addEventListener('locale-changed', function (e) {
@@ -124,20 +157,31 @@ function landing() {
                 }
             });
 
-            // If user is already logged in, redirect to dashboard
-            if (this.isLoggedIn) {
+            if (requestedTab && allowedTabs[requestedTab]) {
+                this.activeTab = requestedTab;
+            }
+
+            // If user is already logged in, redirect to dashboard unless an explicit landing tab is requested
+            if (this.isLoggedIn && !requestedTab) {
                 window.location.href = '/dashboard';
                 return;
             }
 
             // Load search history
             this.loadSearchHistory();
+            this.loadLocalEducationProgress();
+            this.loadEducationMobileSectionPreferences();
 
             // Load stats
             this.loadStats();
+            this.loadEducationCatalog();
+
+            if (this.isLoggedIn) {
+                this.loadEducationTesterContext();
+                this.loadEducationProgress();
+            }
 
             // Check URL params for ?login or ?register
-            var urlParams = new URLSearchParams(window.location.search);
             if (urlParams.get('login') !== null) this.showLogin = true;
             if (urlParams.get('register') !== null) this.showRegister = true;
         },
@@ -167,6 +211,1231 @@ function landing() {
                     }
                 })
                 .catch(function () { /* silent */ });
+        },
+
+        // ==================== EDUCATION ====================
+        getAuthToken: function () {
+            return localStorage.getItem('auth_token')
+                || localStorage.getItem('access_token')
+                || sessionStorage.getItem('auth_token')
+                || sessionStorage.getItem('access_token')
+                || '';
+        },
+
+        getAuthHeaders: function () {
+            var token = this.getAuthToken();
+            return token ? { Authorization: 'Bearer ' + token } : {};
+        },
+
+        loadEducationTesterContext: function () {
+            if (!this.isLoggedIn) {
+                this.educationCanModerate = false;
+                return Promise.resolve(false);
+            }
+
+            var self = this;
+            return fetch('/api/v1/auth/me', {
+                headers: this.getAuthHeaders()
+            })
+                .then(function (res) {
+                    if (!res.ok) throw new Error('education_tester_context_failed');
+                    return res.json();
+                })
+                .then(function (profile) {
+                    var role = String((profile && profile.role) || '').toLowerCase();
+                    self.educationCanModerate = !!(profile && (profile.is_superadmin || role === 'admin'));
+                    return self.educationCanModerate;
+                })
+                .catch(function () {
+                    self.educationCanModerate = false;
+                    return false;
+                });
+        },
+
+        queuePostAuthRedirect: function (url) {
+            try {
+                localStorage.setItem('pending_post_auth_redirect', url);
+            } catch (e) { /* ignore */ }
+        },
+
+        consumePostAuthRedirect: function () {
+            var pendingRedirect = '';
+            try {
+                pendingRedirect = localStorage.getItem('pending_post_auth_redirect')
+                    || localStorage.getItem('pending_studio_redirect')
+                    || '';
+                localStorage.removeItem('pending_post_auth_redirect');
+                localStorage.removeItem('pending_studio_redirect');
+            } catch (e) {
+                pendingRedirect = '';
+            }
+            return pendingRedirect;
+        },
+
+        beginEducationSync: function () {
+            this.queuePostAuthRedirect('/?tab=education');
+            this.showLogin = true;
+        },
+
+        getEducationProgressStorageKey: function () {
+            return 'landing_education_progress_v1';
+        },
+
+        getEducationMobileSectionStorageKey: function () {
+            return 'landing_education_mobile_section_v1';
+        },
+
+        getEducationProgressCompositeKey: function (itemType, itemKey) {
+            return String(itemType || '') + '::' + String(itemKey || '');
+        },
+
+        loadLocalEducationProgress: function () {
+            try {
+                var raw = localStorage.getItem(this.getEducationProgressStorageKey());
+                var parsed = raw ? JSON.parse(raw) : {};
+                this.educationProgressMap = parsed && typeof parsed === 'object' ? parsed : {};
+            } catch (e) {
+                this.educationProgressMap = {};
+            }
+        },
+
+        saveLocalEducationProgressStore: function () {
+            try {
+                localStorage.setItem(this.getEducationProgressStorageKey(), JSON.stringify(this.educationProgressMap || {}));
+            } catch (e) { /* ignore */ }
+        },
+
+        loadEducationMobileSectionPreferences: function () {
+            try {
+                var raw = localStorage.getItem(this.getEducationMobileSectionStorageKey());
+                var parsed = raw ? JSON.parse(raw) : {};
+                this.educationMobileSectionByCategory = parsed && typeof parsed === 'object' ? parsed : {};
+            } catch (e) {
+                this.educationMobileSectionByCategory = {};
+            }
+        },
+
+        saveEducationMobileSectionPreferences: function () {
+            try {
+                localStorage.setItem(this.getEducationMobileSectionStorageKey(), JSON.stringify(this.educationMobileSectionByCategory || {}));
+            } catch (e) { /* ignore */ }
+        },
+
+        replaceEducationProgressItems: function (items) {
+            var self = this;
+            var map = {};
+            (items || []).forEach(function (item) {
+                if (!item || !item.item_type || !item.item_key) return;
+                map[self.getEducationProgressCompositeKey(item.item_type, item.item_key)] = item;
+            });
+            this.educationProgressMap = map;
+            this.saveLocalEducationProgressStore();
+        },
+
+        getEducationProgressItem: function (itemType, itemKey) {
+            return this.educationProgressMap[this.getEducationProgressCompositeKey(itemType, itemKey)] || null;
+        },
+
+        getEducationCategories: function () {
+            if (!this.educationCatalog || !Array.isArray(this.educationCatalog.categories)) return [];
+            var normalizeCategoryId = function (value) {
+                var raw = String(value || '');
+                if (raw === 'tasarm') return 'tasarim';
+                return raw;
+            };
+            var order = {
+                genel: 0,
+                patent: 1,
+                marka: 2,
+                'cografi-isaret': 3,
+                tasarim: 4
+            };
+            return this.educationCatalog.categories.slice().sort(function (left, right) {
+                var leftId = normalizeCategoryId(left && left.id);
+                var rightId = normalizeCategoryId(right && right.id);
+                var leftRank = Object.prototype.hasOwnProperty.call(order, leftId) ? order[leftId] : 999;
+                var rightRank = Object.prototype.hasOwnProperty.call(order, rightId) ? order[rightId] : 999;
+                if (leftRank !== rightRank) return leftRank - rightRank;
+                return String((left && left.title) || '').localeCompare(String((right && right.title) || ''));
+            });
+        },
+
+        getEducationCategoryById: function (categoryId) {
+            var categories = this.getEducationCategories();
+            for (var i = 0; i < categories.length; i += 1) {
+                if (categories[i] && categories[i].id === categoryId) {
+                    return categories[i];
+                }
+            }
+            return null;
+        },
+
+        getEducationActiveCategory: function () {
+            var categories = this.getEducationCategories();
+            if (!categories.length) return null;
+            return this.getEducationCategoryById(this.educationSelectedCategoryId) || categories[0];
+        },
+
+        getEducationCategoryTheme: function (categoryOrId) {
+            var category = typeof categoryOrId === 'string'
+                ? this.getEducationCategoryById(categoryOrId)
+                : categoryOrId;
+            var categoryId = category && category.id ? String(category.id) : String(categoryOrId || 'genel');
+            if (categoryId === 'tasarm') categoryId = 'tasarim';
+            var themes = {
+                patent: {
+                    accent: '#06b6d4',
+                    deep: '#0891b2',
+                    strong: '#67e8f9',
+                    rgb: '6,182,212',
+                    shadowRgb: '14,116,144'
+                },
+                marka: {
+                    accent: '#f43f5e',
+                    deep: '#e11d48',
+                    strong: '#fda4af',
+                    rgb: '244,63,94',
+                    shadowRgb: '136,19,55'
+                },
+                'cografi-isaret': {
+                    accent: '#22c55e',
+                    deep: '#16a34a',
+                    strong: '#86efac',
+                    rgb: '34,197,94',
+                    shadowRgb: '21,128,61'
+                },
+                tasarim: {
+                    accent: '#ec4899',
+                    deep: '#db2777',
+                    strong: '#f9a8d4',
+                    rgb: '236,72,153',
+                    shadowRgb: '157,23,77'
+                },
+                genel: {
+                    accent: '#6366f1',
+                    deep: '#4f46e5',
+                    strong: '#a5b4fc',
+                    rgb: '99,102,241',
+                    shadowRgb: '55,48,163'
+                }
+            };
+
+            return themes[categoryId] || themes.genel;
+        },
+
+        getEducationCategoryThemeVars: function (categoryOrId) {
+            var theme = this.getEducationCategoryTheme(categoryOrId);
+            return [
+                '--education-accent:' + theme.accent,
+                '--education-accent-deep:' + theme.deep,
+                '--education-accent-strong:' + theme.strong,
+                '--education-accent-rgb:' + theme.rgb,
+                '--education-shadow-rgb:' + theme.shadowRgb
+            ].join(';');
+        },
+
+        getEducationCategoryDeck: function (categoryOrId) {
+            var category = typeof categoryOrId === 'string'
+                ? this.getEducationCategoryById(categoryOrId)
+                : categoryOrId;
+            if (!category || !category.flashcard_deck_id || !this.educationCatalog) return null;
+            return (this.educationCatalog.flashcard_decks || []).find(function (deck) {
+                return deck.id === category.flashcard_deck_id;
+            }) || null;
+        },
+
+        getEducationCategoryQuiz: function (categoryOrId) {
+            var category = typeof categoryOrId === 'string'
+                ? this.getEducationCategoryById(categoryOrId)
+                : categoryOrId;
+            if (!category || !category.quiz_section_id || !this.educationCatalog) return null;
+            return (this.educationCatalog.quiz_sections || []).find(function (section) {
+                return section.id === category.quiz_section_id;
+            }) || null;
+        },
+
+        getEducationCategoryProgress: function (categoryId) {
+            var category = this.getEducationCategoryById(categoryId);
+            if (!category) {
+                return {
+                    percent_complete: 0,
+                    status: 'not_started',
+                    completed_items: 0,
+                    in_progress_items: 0,
+                    total_items: 0
+                };
+            }
+
+            var items = [];
+            if (category.flashcard_deck_id) {
+                items.push(this.getEducationProgressItem('flashcard', category.flashcard_deck_id) || {
+                    status: 'not_started',
+                    percent_complete: 0
+                });
+            }
+            if (category.quiz_section_id) {
+                items.push(this.getEducationProgressItem('quiz', category.quiz_section_id) || {
+                    status: 'not_started',
+                    percent_complete: 0
+                });
+            }
+
+            if (!items.length) {
+                return {
+                    percent_complete: 0,
+                    status: 'not_started',
+                    completed_items: 0,
+                    in_progress_items: 0,
+                    total_items: 0
+                };
+            }
+
+            var percentSum = 0;
+            var completedItems = 0;
+            var inProgressItems = 0;
+            items.forEach(function (item) {
+                var percent = Math.max(0, Math.min(100, parseInt(item.percent_complete || 0, 10) || 0));
+                percentSum += percent;
+                if (item.status === 'completed' || percent >= 100) {
+                    completedItems += 1;
+                } else if (item.status === 'in_progress' || percent > 0) {
+                    inProgressItems += 1;
+                }
+            });
+
+            var status = 'not_started';
+            if (completedItems === items.length) {
+                status = 'completed';
+            } else if (completedItems > 0 || inProgressItems > 0 || percentSum > 0) {
+                status = 'in_progress';
+            }
+
+            return {
+                percent_complete: Math.round(percentSum / items.length),
+                status: status,
+                completed_items: completedItems,
+                in_progress_items: inProgressItems,
+                total_items: items.length
+            };
+        },
+
+        getEducationCategoryPercentLabel: function (categoryId) {
+            return String(this.getEducationCategoryProgress(categoryId).percent_complete || 0) + '%';
+        },
+
+        getEducationCategoryStatusLabel: function (categoryId) {
+            var progress = this.getEducationCategoryProgress(categoryId);
+            if (progress.status === 'completed') return this.t('landing.education_status_completed');
+            if (progress.status === 'in_progress') return this.t('landing.education_status_in_progress');
+            return this.t('landing.education_status_not_started');
+        },
+
+        educationStartedCategoryCount: function () {
+            var self = this;
+            return this.getEducationCategories().filter(function (category) {
+                return self.getEducationCategoryProgress(category.id).status !== 'not_started';
+            }).length;
+        },
+
+        hasEducationQuickAction: function (sectionType) {
+            var category = this.getEducationActiveCategory();
+            if (!category) return false;
+            if (sectionType === 'quiz') return !!category.quiz_section_id;
+            if (sectionType === 'flashcards') return !!category.flashcard_deck_id;
+            if (sectionType === 'pdfs') return !!(this.educationCatalog && (this.educationCatalog.pdfs || []).length);
+            if (sectionType === 'progress') return true;
+            return false;
+        },
+
+        getEducationQuickActionLabel: function (sectionType) {
+            var category = this.getEducationActiveCategory();
+            if (!category) return '';
+
+            if (sectionType === 'quiz') {
+                if (!category.quiz_section_id) return '';
+                var quizProgress = this.getEducationProgressItem('quiz', category.quiz_section_id);
+                return quizProgress && quizProgress.status !== 'not_started'
+                    ? this.t('landing.education_continue_quiz')
+                    : this.t('landing.education_start_quiz');
+            }
+
+            if (sectionType === 'flashcards') {
+                if (!category.flashcard_deck_id) return '';
+                var flashcardProgress = this.getEducationProgressItem('flashcard', category.flashcard_deck_id);
+                return flashcardProgress && flashcardProgress.status !== 'not_started'
+                    ? this.t('landing.education_continue_deck')
+                    : this.t('landing.education_view_deck');
+            }
+
+            if (sectionType === 'pdfs') {
+                return this.t('landing.education_pdf_library');
+            }
+
+            if (sectionType === 'progress') {
+                return this.t('landing.education_progress_title');
+            }
+
+            return '';
+        },
+
+        resolveEducationMobileSection: function (sectionType) {
+            var category = this.getEducationActiveCategory();
+            var hasQuiz = !!(category && category.quiz_section_id);
+            var hasFlashcards = !!(category && category.flashcard_deck_id);
+            var hasPdfs = !!(this.educationCatalog && (this.educationCatalog.pdfs || []).length);
+
+            if (sectionType === 'quiz' && hasQuiz) return 'quiz';
+            if (sectionType === 'flashcards' && hasFlashcards) return 'flashcards';
+            if (sectionType === 'pdfs' && hasPdfs) return 'pdfs';
+            if (hasQuiz) return 'quiz';
+            if (hasFlashcards) return 'flashcards';
+            if (hasPdfs) return 'pdfs';
+            return 'quiz';
+        },
+
+        setEducationMobileSection: function (sectionType, options) {
+            var nextSection = this.resolveEducationMobileSection(sectionType);
+            var force = !!(options && options.force);
+            var activeCategory = this.getEducationActiveCategory();
+
+            if (!force && this.educationMobileSection === nextSection) {
+                if (
+                    activeCategory &&
+                    activeCategory.id &&
+                    this.educationMobileSectionByCategory[activeCategory.id] !== nextSection
+                ) {
+                    this.educationMobileSectionByCategory[activeCategory.id] = nextSection;
+                    this.saveEducationMobileSectionPreferences();
+                }
+                return;
+            }
+
+            this.educationMobileSection = nextSection;
+            if (activeCategory && activeCategory.id) {
+                this.educationMobileSectionByCategory[activeCategory.id] = nextSection;
+                this.saveEducationMobileSectionPreferences();
+            }
+        },
+
+        isEducationMobileSectionActive: function (sectionType) {
+            return this.educationMobileSection === this.resolveEducationMobileSection(sectionType);
+        },
+
+        getEducationSectionAnchorId: function (sectionType) {
+            if (sectionType === 'quiz') return 'education-quiz-panel';
+            if (sectionType === 'flashcards') return 'education-flashcards-panel';
+            if (sectionType === 'pdfs') return 'education-pdf-library-panel';
+            return 'education-progress-overview';
+        },
+
+        openEducationMobileSection: function (sectionType) {
+            var nextSection = this.resolveEducationMobileSection(sectionType);
+            this.setEducationMobileSection(nextSection, { force: true });
+
+            var self = this;
+            window.setTimeout(function () {
+                self.scrollEducationSection(self.getEducationSectionAnchorId(nextSection));
+            }, 0);
+        },
+
+        scrollEducationSection: function (sectionId) {
+            if (!sectionId) return;
+            var section = document.getElementById(sectionId);
+            if (!section) return;
+            section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        },
+
+        setEducationCategory: function (categoryId, options) {
+            var categories = this.getEducationCategories();
+            if (!categories.length) return;
+
+            var category = this.getEducationCategoryById(categoryId) || categories[0];
+            if (!category) return;
+
+            var force = !!(options && options.force);
+            var syncPanels = !options || options.syncPanels !== false;
+            if (!force && this.educationSelectedCategoryId === category.id && !syncPanels) {
+                return;
+            }
+
+            this.educationSelectedCategoryId = category.id;
+            this.setEducationMobileSection(
+                this.educationMobileSectionByCategory[category.id] || this.educationMobileSection || '',
+                { force: force }
+            );
+            if (!syncPanels) return;
+
+            if (category.flashcard_deck_id) {
+                if (force || this.educationSelectedDeckId !== category.flashcard_deck_id) {
+                    this.selectEducationDeck(category.flashcard_deck_id);
+                }
+            } else {
+                this.educationSelectedDeckId = '';
+                this.educationSelectedDeck = null;
+                this.educationFlashcardIndex = 0;
+                this.educationFlashcardFlipped = false;
+            }
+
+            if (category.quiz_section_id) {
+                if (force || this.educationSelectedQuizId !== category.quiz_section_id) {
+                    this.selectEducationQuiz(category.quiz_section_id);
+                }
+            } else {
+                this.educationSelectedQuizId = '';
+                this.educationSelectedQuiz = null;
+                this.educationQuizIndex = 0;
+                this.educationQuizAnswers = {};
+                this.resetEducationQuizExplanationState();
+                this.resetEducationQuizExplanationEditorState();
+            }
+        },
+
+        educationCompletedCount: function () {
+            return Object.values(this.educationProgressMap || {}).filter(function (item) {
+                return item && item.status === 'completed';
+            }).length;
+        },
+
+        educationInProgressCount: function () {
+            return Object.values(this.educationProgressMap || {}).filter(function (item) {
+                return item && item.status === 'in_progress';
+            }).length;
+        },
+
+        getEducationStatusLabel: function (itemType, itemKey) {
+            var progress = this.getEducationProgressItem(itemType, itemKey);
+            if (!progress || progress.status === 'not_started') return this.t('landing.education_status_not_started');
+            if (progress.status === 'completed') return this.t('landing.education_status_completed');
+            return this.t('landing.education_status_in_progress');
+        },
+
+        getEducationPercentLabel: function (itemType, itemKey) {
+            var progress = this.getEducationProgressItem(itemType, itemKey);
+            return progress ? String(progress.percent_complete || 0) + '%' : '0%';
+        },
+
+        getEducationModeratorCategories: function () {
+            var preferredOrder = ['Genel', 'Patent', 'Marka', 'Co\u011frafi \u0130\u015faret', 'Tasar\u0131m'];
+            var seen = {};
+            var titles = [];
+
+            preferredOrder.forEach(function (title) {
+                if (seen[title]) return;
+                seen[title] = true;
+                titles.push(title);
+            });
+
+            (this.educationCatalog && this.educationCatalog.categories || []).forEach(function (category) {
+                var title = String((category && category.title) || '').trim();
+                if (!title || seen[title]) return;
+                seen[title] = true;
+                titles.push(title);
+            });
+
+            return titles;
+        },
+
+        getEducationModerationCompositeKey: function (itemType, itemId) {
+            return String(itemType || '') + '::' + String(itemId || '');
+        },
+
+        isEducationModerationBusy: function (itemType, itemId) {
+            return !!this.educationModerationBusyMap[this.getEducationModerationCompositeKey(itemType, itemId)];
+        },
+
+        normalizeEducationQuizAnswers: function (section, storedAnswers) {
+            if (!section || !Array.isArray(section.questions)) return {};
+            var incomingAnswers = storedAnswers && typeof storedAnswers === 'object' ? storedAnswers : {};
+            var normalizedAnswers = {};
+
+            section.questions.forEach(function (question) {
+                if (!question || !question.id) return;
+                if (incomingAnswers[question.id]) {
+                    normalizedAnswers[question.id] = incomingAnswers[question.id];
+                    return;
+                }
+                if (question.legacy_id && incomingAnswers[question.legacy_id]) {
+                    normalizedAnswers[question.id] = incomingAnswers[question.legacy_id];
+                }
+            });
+
+            return normalizedAnswers;
+        },
+
+        refreshEducationAfterModeration: function () {
+            var activeCategory = this.getEducationActiveCategory();
+            var activeCategoryId = activeCategory && activeCategory.id ? activeCategory.id : this.educationSelectedCategoryId;
+            this.resetEducationQuizExplanationEditorState();
+            var self = this;
+            return this.loadEducationCatalog({ force: true })
+                .then(function () {
+                    self.setEducationCategory(activeCategoryId, { force: true });
+                });
+        },
+
+        applyEducationModeration: function (payload, options) {
+            if (!this.educationCanModerate || !payload || !payload.item_type || !payload.item_id) {
+                return Promise.resolve(null);
+            }
+
+            var self = this;
+            var moderationKey = this.getEducationModerationCompositeKey(payload.item_type, payload.item_id);
+            this.educationModerationBusyMap[moderationKey] = true;
+            this.educationError = '';
+
+            return fetch('/api/v1/education/moderation', {
+                method: 'PUT',
+                headers: Object.assign({ 'Content-Type': 'application/json' }, this.getAuthHeaders()),
+                body: JSON.stringify(payload)
+            })
+                .then(function (res) {
+                    if (!res.ok) throw new Error('education_moderation_failed');
+                    return res.json();
+                })
+                .then(function (item) {
+                    var shouldRefresh = !!(options && options.refresh);
+                    if (!shouldRefresh && item && item.item_type === 'flashcard') {
+                        var currentCard = self.currentEducationFlashcard();
+                        if (currentCard && currentCard.id === item.item_id) {
+                            currentCard.category_title = item.category_title || currentCard.category_title;
+                        }
+                    }
+                    if (!shouldRefresh && item && item.item_type === 'quiz_question') {
+                        var currentQuestion = self.currentEducationQuizQuestion();
+                        if (currentQuestion && currentQuestion.id === item.item_id) {
+                            currentQuestion.category_title = item.category_title || currentQuestion.category_title;
+                            if (Object.prototype.hasOwnProperty.call(item, 'explanation')) {
+                                currentQuestion.explanation = item.explanation || '';
+                            }
+                            if (Object.prototype.hasOwnProperty.call(item, 'summary')) {
+                                currentQuestion.summary = item.summary || '';
+                            }
+                            if (!self.shouldShowEducationQuizExplainButton(currentQuestion)) {
+                                self.resetEducationQuizExplanationState();
+                            }
+                        }
+                    }
+                    if (shouldRefresh) {
+                        return self.refreshEducationAfterModeration();
+                    }
+                    return item;
+                })
+                .catch(function () {
+                    self.educationError = self.t('landing.education_tester_save_failed');
+                    return null;
+                })
+                .finally(function () {
+                    delete self.educationModerationBusyMap[moderationKey];
+                });
+        },
+
+        setEducationFlashcardTesterCategory: function (categoryTitle) {
+            var card = this.currentEducationFlashcard();
+            if (!card || !categoryTitle || card.category_title === categoryTitle) return;
+            return this.applyEducationModeration(
+                {
+                    item_type: 'flashcard',
+                    item_id: card.id,
+                    category_title: categoryTitle
+                },
+                { refresh: true }
+            );
+        },
+
+        deleteEducationFlashcard: function () {
+            var card = this.currentEducationFlashcard();
+            if (!card) return;
+            if (!window.confirm(this.t('landing.education_tester_delete_confirm'))) return;
+            return this.applyEducationModeration(
+                {
+                    item_type: 'flashcard',
+                    item_id: card.id,
+                    deleted: true
+                },
+                { refresh: true }
+            );
+        },
+
+        setEducationQuizTesterCategory: function (categoryTitle) {
+            var question = this.currentEducationQuizQuestion();
+            if (!question || !categoryTitle || question.category_title === categoryTitle) return;
+            return this.applyEducationModeration(
+                {
+                    item_type: 'quiz_question',
+                    item_id: question.id,
+                    category_title: categoryTitle
+                },
+                { refresh: true }
+            );
+        },
+
+        openEducationQuizExplanationEditor: function () {
+            var question = this.currentEducationQuizQuestion();
+            if (!question) return;
+            this.educationQuizExplanationEditorQuestionId = question.id;
+            this.educationQuizExplanationDraft = question.explanation || '';
+            this.educationQuizSummaryDraft = question.summary || '';
+            this.educationQuizExplanationEditorOpen = true;
+        },
+
+        resetEducationQuizExplanationEditorState: function () {
+            this.educationQuizExplanationEditorOpen = false;
+            this.educationQuizExplanationEditorQuestionId = '';
+            this.educationQuizExplanationDraft = '';
+            this.educationQuizSummaryDraft = '';
+        },
+
+        cancelEducationQuizExplanationEdit: function () {
+            this.resetEducationQuizExplanationEditorState();
+        },
+
+        isEducationQuizExplanationEditorOpen: function (question) {
+            return !!(
+                question &&
+                this.educationQuizExplanationEditorOpen &&
+                this.educationQuizExplanationEditorQuestionId === question.id
+            );
+        },
+
+        saveEducationQuizExplanationEdit: function () {
+            var question = this.currentEducationQuizQuestion();
+            if (!question) return Promise.resolve(null);
+
+            var self = this;
+            return this.applyEducationModeration(
+                {
+                    item_type: 'quiz_question',
+                    item_id: question.id,
+                    explanation: this.educationQuizExplanationDraft,
+                    summary: this.educationQuizSummaryDraft
+                },
+                { refresh: false }
+            ).then(function (item) {
+                if (item) {
+                    self.resetEducationQuizExplanationEditorState();
+                }
+                return item;
+            });
+        },
+
+        deleteEducationQuizQuestion: function () {
+            var question = this.currentEducationQuizQuestion();
+            if (!question) return;
+            if (!window.confirm(this.t('landing.education_tester_delete_confirm'))) return;
+            return this.applyEducationModeration(
+                {
+                    item_type: 'quiz_question',
+                    item_id: question.id,
+                    deleted: true
+                },
+                { refresh: true }
+            );
+        },
+
+        loadEducationCatalog: function (options) {
+            var forceReload = !!(options && options.force);
+            if (this.educationLoading) {
+                return Promise.resolve(this.educationCatalog);
+            }
+            if (this.educationCatalog && !forceReload) {
+                return Promise.resolve(this.educationCatalog);
+            }
+            this.educationLoading = true;
+            this.educationError = '';
+
+            var self = this;
+            if (forceReload) {
+                this.educationCatalog = null;
+            }
+
+            return fetch('/api/v1/education/catalog')
+                .then(function (res) {
+                    if (!res.ok) throw new Error('education_catalog_failed');
+                    return res.json();
+                })
+                .then(function (data) {
+                    self.educationCatalog = data;
+                    self.setEducationCategory(self.educationSelectedCategoryId, { force: true });
+                    return data;
+                })
+                .catch(function () {
+                    self.educationError = self.t('landing.education_load_failed');
+                    return null;
+                })
+                .finally(function () {
+                    self.educationLoading = false;
+                });
+        },
+
+        loadEducationProgress: function () {
+            if (!this.isLoggedIn) return;
+            this.educationProgressLoading = true;
+
+            var self = this;
+            fetch('/api/v1/education/progress', {
+                headers: this.getAuthHeaders()
+            })
+                .then(function (res) {
+                    if (!res.ok) throw new Error('education_progress_failed');
+                    return res.json();
+                })
+                .then(function (data) {
+                    var localItems = Object.values(self.educationProgressMap || {});
+                    if (localItems.length > 0) {
+                        self.syncEducationProgress(false);
+                        return;
+                    }
+                    self.replaceEducationProgressItems((data && data.items) || []);
+                })
+                .catch(function () {
+                    self.educationProgressNotice = self.t('landing.education_progress_local_only');
+                })
+                .finally(function () {
+                    self.educationProgressLoading = false;
+                });
+        },
+
+        syncEducationProgress: function (showNotice) {
+            if (!this.isLoggedIn) return;
+
+            var payloadItems = Object.values(this.educationProgressMap || {}).map(function (item) {
+                return {
+                    item_type: item.item_type,
+                    item_key: item.item_key,
+                    status: item.status,
+                    percent_complete: item.percent_complete || 0,
+                    progress_data: item.progress_data || {}
+                };
+            });
+            if (!payloadItems.length) return;
+
+            var self = this;
+            fetch('/api/v1/education/progress/sync', {
+                method: 'POST',
+                headers: Object.assign({ 'Content-Type': 'application/json' }, this.getAuthHeaders()),
+                body: JSON.stringify({ items: payloadItems })
+            })
+                .then(function (res) {
+                    if (!res.ok) throw new Error('education_progress_sync_failed');
+                    return res.json();
+                })
+                .then(function (data) {
+                    self.replaceEducationProgressItems((data && data.items) || []);
+                    if (showNotice !== false) {
+                        self.educationProgressNotice = self.t('landing.education_progress_synced');
+                    }
+                })
+                .catch(function () {
+                    self.educationProgressNotice = self.t('landing.education_progress_local_only');
+                });
+        },
+
+        persistEducationProgress: function (payload) {
+            if (!payload || !payload.item_type || !payload.item_key) return;
+
+            var percentComplete = Math.max(0, Math.min(100, parseInt(payload.percent_complete || 0, 10) || 0));
+            var status = payload.status || 'not_started';
+            if (percentComplete >= 100) status = 'completed';
+            else if (percentComplete > 0 && status === 'not_started') status = 'in_progress';
+
+            var item = {
+                item_type: payload.item_type,
+                item_key: payload.item_key,
+                status: status,
+                percent_complete: percentComplete,
+                progress_data: payload.progress_data || {}
+            };
+            this.educationProgressMap[this.getEducationProgressCompositeKey(item.item_type, item.item_key)] = item;
+            this.saveLocalEducationProgressStore();
+
+            if (!this.isLoggedIn) {
+                this.educationProgressNotice = this.t('landing.education_progress_local_only');
+                return;
+            }
+
+            var self = this;
+            fetch('/api/v1/education/progress', {
+                method: 'PUT',
+                headers: Object.assign({ 'Content-Type': 'application/json' }, this.getAuthHeaders()),
+                body: JSON.stringify(item)
+            })
+                .then(function (res) {
+                    if (!res.ok) throw new Error('education_progress_save_failed');
+                    return res.json();
+                })
+                .then(function (savedItem) {
+                    if (savedItem && savedItem.item_type && savedItem.item_key) {
+                        self.educationProgressMap[self.getEducationProgressCompositeKey(savedItem.item_type, savedItem.item_key)] = savedItem;
+                        self.saveLocalEducationProgressStore();
+                    }
+                    self.educationProgressNotice = self.t('landing.education_progress_synced');
+                })
+                .catch(function () {
+                    self.educationProgressNotice = self.t('landing.education_progress_local_only');
+                });
+        },
+
+        selectEducationDeck: function (deckId) {
+            if (!deckId) return;
+            this.educationDeckLoading = true;
+            this.educationSelectedDeckId = deckId;
+            this.educationSelectedDeck = null;
+            this.educationFlashcardIndex = 0;
+            this.educationFlashcardFlipped = false;
+
+            var self = this;
+            fetch('/api/v1/education/flashcards/' + encodeURIComponent(deckId))
+                .then(function (res) {
+                    if (!res.ok) throw new Error('education_deck_failed');
+                    return res.json();
+                })
+                .then(function (deck) {
+                    self.educationSelectedDeck = deck;
+                    var progress = self.getEducationProgressItem('flashcard', deck.id);
+                    var lastIndex = progress && progress.progress_data ? parseInt(progress.progress_data.last_index || 0, 10) || 0 : 0;
+                    self.educationFlashcardIndex = Math.max(0, Math.min(lastIndex, Math.max((deck.cards || []).length - 1, 0)));
+                    self.educationFlashcardFlipped = false;
+                })
+                .catch(function () {
+                    self.educationError = self.t('landing.education_load_failed');
+                })
+                .finally(function () {
+                    self.educationDeckLoading = false;
+                });
+        },
+
+        currentEducationFlashcard: function () {
+            if (!this.educationSelectedDeck || !this.educationSelectedDeck.cards || !this.educationSelectedDeck.cards.length) return null;
+            return this.educationSelectedDeck.cards[this.educationFlashcardIndex] || this.educationSelectedDeck.cards[0];
+        },
+
+        toggleEducationFlashcard: function () {
+            this.educationFlashcardFlipped = !this.educationFlashcardFlipped;
+            if (this.educationFlashcardFlipped) {
+                this.recordEducationFlashcardProgress(false);
+            }
+        },
+
+        recordEducationFlashcardProgress: function (markCompleted) {
+            var deck = this.educationSelectedDeck;
+            if (!deck || !deck.cards || !deck.cards.length) return;
+
+            var progress = this.getEducationProgressItem('flashcard', deck.id);
+            var seenIds = [];
+            if (progress && progress.progress_data && Array.isArray(progress.progress_data.seen_card_ids)) {
+                seenIds = progress.progress_data.seen_card_ids.slice();
+            }
+
+            var currentCard = this.currentEducationFlashcard();
+            if (currentCard && seenIds.indexOf(currentCard.id) === -1) {
+                seenIds.push(currentCard.id);
+            }
+
+            var total = deck.cards.length || 1;
+            var percentComplete = Math.round((seenIds.length / total) * 100);
+            if (markCompleted) percentComplete = 100;
+
+            this.persistEducationProgress({
+                item_type: 'flashcard',
+                item_key: deck.id,
+                status: markCompleted ? 'completed' : (percentComplete > 0 ? 'in_progress' : 'not_started'),
+                percent_complete: percentComplete,
+                progress_data: {
+                    last_index: this.educationFlashcardIndex,
+                    seen_card_ids: seenIds
+                }
+            });
+        },
+
+        previousEducationFlashcard: function () {
+            if (!this.educationSelectedDeck || this.educationFlashcardIndex <= 0) return;
+            this.recordEducationFlashcardProgress(false);
+            this.educationFlashcardIndex -= 1;
+            this.educationFlashcardFlipped = false;
+        },
+
+        nextEducationFlashcard: function () {
+            if (!this.educationSelectedDeck || !this.educationSelectedDeck.cards || !this.educationSelectedDeck.cards.length) return;
+            if (this.educationFlashcardIndex >= this.educationSelectedDeck.cards.length - 1) {
+                this.recordEducationFlashcardProgress(true);
+                return;
+            }
+            this.recordEducationFlashcardProgress(false);
+            this.educationFlashcardIndex += 1;
+            this.educationFlashcardFlipped = false;
+        },
+
+        selectEducationQuiz: function (sectionId) {
+            if (!sectionId) return;
+            this.educationQuizLoading = true;
+            this.educationSelectedQuizId = sectionId;
+            this.educationSelectedQuiz = null;
+            this.educationQuizIndex = 0;
+            this.educationQuizAnswers = {};
+            this.resetEducationQuizExplanationState();
+            this.resetEducationQuizExplanationEditorState();
+
+            var self = this;
+            fetch('/api/v1/education/quizzes/' + encodeURIComponent(sectionId))
+                .then(function (res) {
+                    if (!res.ok) throw new Error('education_quiz_failed');
+                    return res.json();
+                })
+                .then(function (section) {
+                    self.educationSelectedQuiz = section;
+                    var progress = self.getEducationProgressItem('quiz', section.id);
+                    var answers = progress && progress.progress_data && progress.progress_data.answers
+                        ? progress.progress_data.answers
+                        : {};
+                    var lastIndex = progress && progress.progress_data ? parseInt(progress.progress_data.last_index || 0, 10) || 0 : 0;
+                    self.educationQuizAnswers = self.normalizeEducationQuizAnswers(section, answers);
+                    self.educationQuizIndex = Math.max(0, Math.min(lastIndex, Math.max((section.questions || []).length - 1, 0)));
+                })
+                .catch(function () {
+                    self.educationError = self.t('landing.education_load_failed');
+                })
+                .finally(function () {
+                    self.educationQuizLoading = false;
+                });
+        },
+
+        currentEducationQuizQuestion: function () {
+            if (!this.educationSelectedQuiz || !this.educationSelectedQuiz.questions || !this.educationSelectedQuiz.questions.length) return null;
+            return this.educationSelectedQuiz.questions[this.educationQuizIndex] || this.educationSelectedQuiz.questions[0];
+        },
+
+        getEducationQuizAnswer: function (questionId) {
+            return this.educationQuizAnswers[questionId] || '';
+        },
+
+        isEducationQuizQuestionAnswered: function (question) {
+            return !!(question && this.getEducationQuizAnswer(question.id));
+        },
+
+        isEducationQuizAnswerCorrect: function (question) {
+            var selectedAnswer = question ? this.getEducationQuizAnswer(question.id) : '';
+            return !!selectedAnswer && selectedAnswer === question.correct_option_id;
+        },
+
+        isEducationQuizAnswerIncorrect: function (question) {
+            var selectedAnswer = question ? this.getEducationQuizAnswer(question.id) : '';
+            return !!selectedAnswer && selectedAnswer !== question.correct_option_id;
+        },
+
+        shouldShowEducationQuizExplainButton: function (question) {
+            return this.isEducationQuizAnswerIncorrect(question) && !!((question && question.summary) || (question && question.explanation));
+        },
+
+        getEducationQuizExplanationText: function (question) {
+            if (!question) return '';
+            return question.explanation || '';
+        },
+
+        getEducationQuizSummaryText: function (question) {
+            if (!question) return '';
+            return question.summary || '';
+        },
+
+        clearEducationQuizExplanationTimer: function () {
+            if (this._educationQuizExplanationTimer) {
+                window.clearTimeout(this._educationQuizExplanationTimer);
+                this._educationQuizExplanationTimer = null;
+            }
+        },
+
+        resetEducationQuizExplanationState: function () {
+            this.clearEducationQuizExplanationTimer();
+            this.educationQuizExplanationLoading = false;
+            this.educationQuizExplanationOpen = false;
+        },
+
+        toggleEducationQuizExplanation: function () {
+            var question = this.currentEducationQuizQuestion();
+            if (!this.shouldShowEducationQuizExplainButton(question)) return;
+            if (this.educationQuizExplanationOpen) {
+                this.resetEducationQuizExplanationState();
+                return;
+            }
+            if (this.educationQuizExplanationLoading) return;
+
+            var self = this;
+            var questionId = question.id;
+            this.clearEducationQuizExplanationTimer();
+            this.educationQuizExplanationLoading = true;
+            this.educationQuizExplanationOpen = false;
+            this._educationQuizExplanationTimer = window.setTimeout(function () {
+                self._educationQuizExplanationTimer = null;
+                var currentQuestion = self.currentEducationQuizQuestion();
+                if (!currentQuestion || currentQuestion.id !== questionId || !self.shouldShowEducationQuizExplainButton(currentQuestion)) {
+                    self.educationQuizExplanationLoading = false;
+                    self.educationQuizExplanationOpen = false;
+                    return;
+                }
+                self.educationQuizExplanationLoading = false;
+                self.educationQuizExplanationOpen = true;
+            }, 1400);
+        },
+
+        educationQuizCorrectCount: function () {
+            var section = this.educationSelectedQuiz;
+            if (!section || !section.questions) return 0;
+            var self = this;
+            return section.questions.filter(function (question) {
+                return self.educationQuizAnswers[question.id] && self.educationQuizAnswers[question.id] === question.correct_option_id;
+            }).length;
+        },
+
+        educationQuizAnsweredCount: function () {
+            return Object.keys(this.educationQuizAnswers || {}).length;
+        },
+
+        isEducationQuizComplete: function () {
+            if (!this.educationSelectedQuiz || !this.educationSelectedQuiz.questions) return false;
+            return this.educationQuizAnsweredCount() >= this.educationSelectedQuiz.questions.length;
+        },
+
+        getEducationQuizOptionClasses: function (question, option) {
+            var base = 'w-full rounded-[22px] border px-4 py-4 text-left transition-all';
+            var selectedAnswer = this.getEducationQuizAnswer(question.id);
+
+            if (!selectedAnswer) {
+                return base + ' hover:-translate-y-[1px]';
+            }
+            if (option.id === question.correct_option_id) {
+                return base + ' shadow-[0_0_0_1px_rgba(16,185,129,0.08)]';
+            }
+            if (option.id === selectedAnswer) {
+                return base + ' shadow-[0_0_0_1px_rgba(239,68,68,0.08)]';
+            }
+            return base;
+        },
+
+        getEducationQuizOptionStyle: function (question, option) {
+            var selectedAnswer = this.getEducationQuizAnswer(question.id);
+
+            if (!selectedAnswer) {
+                return 'background:rgba(15,23,42,0.28);border-color:var(--color-border);color:var(--color-text-primary)';
+            }
+            if (option.id === question.correct_option_id) {
+                return 'background:rgba(16,185,129,0.08);border-color:rgba(16,185,129,0.48);color:var(--color-text-primary)';
+            }
+            if (option.id === selectedAnswer) {
+                return 'background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.48);color:var(--color-text-primary)';
+            }
+            return 'background:rgba(15,23,42,0.18);border-color:var(--color-border);color:var(--color-text-muted)';
+        },
+
+        shouldShowEducationQuizOptionFeedback: function (question, option) {
+            if (!question || !option || !this.isEducationQuizQuestionAnswered(question)) return false;
+            return !!option.short_feedback || !!this.getEducationQuizOptionFeedbackKey(question, option);
+        },
+
+        getEducationQuizOptionFeedbackKey: function (question, option) {
+            if (!this.shouldShowEducationQuizOptionFeedback(question, option)) return '';
+            var selectedAnswer = this.getEducationQuizAnswer(question.id);
+            if (option.id === question.correct_option_id) {
+                return selectedAnswer === option.id ? 'landing.education_thats_right' : 'landing.education_right_answer';
+            }
+            if (option.id === selectedAnswer) {
+                return 'landing.education_not_quite';
+            }
+            return '';
+        },
+
+        getEducationQuizOptionFeedbackStyle: function (question, option) {
+            var feedbackKey = this.getEducationQuizOptionFeedbackKey(question, option);
+            if (!feedbackKey) return 'color:var(--color-text-muted)';
+            if (feedbackKey === 'landing.education_not_quite') {
+                return 'color:rgb(248 113 113)';
+            }
+            return 'color:rgb(52 211 153)';
+        },
+
+        persistEducationQuizProgress: function () {
+            var section = this.educationSelectedQuiz;
+            if (!section || !section.questions || !section.questions.length) return;
+
+            var answeredIds = Object.keys(this.educationQuizAnswers || {});
+            var total = section.questions.length || 1;
+            var percentComplete = Math.round((answeredIds.length / total) * 100);
+            var correctCount = this.educationQuizCorrectCount();
+
+            this.persistEducationProgress({
+                item_type: 'quiz',
+                item_key: section.id,
+                status: answeredIds.length >= total ? 'completed' : (answeredIds.length > 0 ? 'in_progress' : 'not_started'),
+                percent_complete: answeredIds.length >= total ? 100 : percentComplete,
+                progress_data: {
+                    answers: this.educationQuizAnswers,
+                    answered_question_ids: answeredIds,
+                    correct_count: correctCount,
+                    last_index: this.educationQuizIndex
+                }
+            });
+        },
+
+        answerEducationQuestion: function (optionId) {
+            var question = this.currentEducationQuizQuestion();
+            if (!question) return;
+
+            var answers = Object.assign({}, this.educationQuizAnswers || {});
+            answers[question.id] = optionId;
+            this.educationQuizAnswers = answers;
+            this.resetEducationQuizExplanationState();
+            this.resetEducationQuizExplanationEditorState();
+            this.persistEducationQuizProgress();
+        },
+
+        previousEducationQuizQuestion: function () {
+            if (!this.educationSelectedQuiz || this.educationQuizIndex <= 0) return;
+            this.educationQuizIndex -= 1;
+            this.resetEducationQuizExplanationState();
+            this.resetEducationQuizExplanationEditorState();
+            this.persistEducationQuizProgress();
+        },
+
+        nextEducationQuizQuestion: function () {
+            if (!this.educationSelectedQuiz || !this.educationSelectedQuiz.questions || !this.educationSelectedQuiz.questions.length) return;
+            if (this.educationQuizIndex >= this.educationSelectedQuiz.questions.length - 1) {
+                this.resetEducationQuizExplanationState();
+                this.resetEducationQuizExplanationEditorState();
+                this.persistEducationQuizProgress();
+                return;
+            }
+            this.educationQuizIndex += 1;
+            this.resetEducationQuizExplanationState();
+            this.resetEducationQuizExplanationEditorState();
+            this.persistEducationQuizProgress();
+        },
+
+        openEducationPdf: function (pdf) {
+            if (!pdf || !pdf.download_url) return;
+            this.persistEducationProgress({
+                item_type: 'pdf',
+                item_key: pdf.id,
+                status: 'in_progress',
+                percent_complete: 25,
+                progress_data: {
+                    opened: true,
+                    last_opened_at: new Date().toISOString()
+                }
+            });
+            window.open(pdf.download_url, '_blank', 'noopener');
+        },
+
+        markEducationPdfReviewed: function (pdf) {
+            if (!pdf) return;
+            this.persistEducationProgress({
+                item_type: 'pdf',
+                item_key: pdf.id,
+                status: 'completed',
+                percent_complete: 100,
+                progress_data: {
+                    opened: true,
+                    reviewed: true,
+                    reviewed_at: new Date().toISOString()
+                }
+            });
         },
 
         // ==================== IMAGE UPLOAD ====================
@@ -646,11 +1915,11 @@ function landing() {
                 })
                 .then(function (data) {
                     if (data.access_token) {
+                        self.isLoggedIn = true;
                         localStorage.setItem('auth_token', data.access_token);
                         if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token);
-                        var pendingRedirect = localStorage.getItem('pending_studio_redirect');
+                        var pendingRedirect = self.consumePostAuthRedirect();
                         if (pendingRedirect) {
-                            localStorage.removeItem('pending_studio_redirect');
                             window.location.href = pendingRedirect;
                         } else {
                             window.location.href = '/dashboard';
@@ -779,11 +2048,11 @@ function landing() {
                 })
                 .then(function (data) {
                     if (data.access_token) {
+                        self.isLoggedIn = true;
                         localStorage.setItem('auth_token', data.access_token);
                         if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token);
-                        var pendingRedirect = localStorage.getItem('pending_studio_redirect');
+                        var pendingRedirect = self.consumePostAuthRedirect();
                         if (pendingRedirect) {
-                            localStorage.removeItem('pending_studio_redirect');
                             window.location.href = pendingRedirect;
                         } else {
                             window.location.href = '/dashboard';

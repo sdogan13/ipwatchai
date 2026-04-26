@@ -8,6 +8,10 @@ folder structure that ai.py (embeddings) and ingest.py (DB load) expect:
         metadata.json   — array of trademark records
         images/         — extracted logo JPEGs named {year}_{seqno}.jpg
 
+    bulletins/Marka/GZ_{num}_{date}/
+        metadata.json   — array of registered-mark records
+        images/         — extracted logo JPEGs named {year}_{seqno}.jpg
+
 WIPO standard codes used in the bulletin:
     (210) Application number        (220) Filing date
     (731) Holder / applicant        (740) Attorney
@@ -21,6 +25,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -43,9 +48,33 @@ WIPO_CODE_RE = re.compile(r"\((\d{3})\)")
 
 # Application number pattern: YYYY/NNNNNN
 APP_NO_RE = re.compile(r"(\d{4}/\d{3,6})")
+ADDRESS_HINT_RE = re.compile(
+    r"\b("
+    r"mah|mahallesi|sk|sok|sokak|cad|caddesi|bulvar|blv|no|apt|kat|daire|"
+    r"street|st\.?|road|rd\.?|ave|avenue|boulevard|blvd|suite|unit|floor|"
+    r"ut|utca|u\.|ul\.|rue|platz|strasse|straße|via|viale|piazza|"
+    r"park|business\s+park|zone|posta|posta\s+kodu"
+    r")\b",
+    re.IGNORECASE,
+)
 
-# PDF filename pattern: {bulletin_no}_{date}.pdf
-PDF_NAME_RE = re.compile(r"^(\d+)_(\d{4}-\d{2}-\d{2})\.pdf$")
+# PDF filename patterns:
+#   canonical bulletin: BLT_{bulletin_no}_{date}.pdf
+#   canonical gazette:  GZ_{gazette_no}_{date}.pdf
+#   legacy bulletin:    {bulletin_no}_{date}.pdf
+#   legacy gazette:     {gazette_no}_Gazete_{date}.pdf
+CANONICAL_PDF_NAME_RE = re.compile(
+    r"^(?P<prefix>BLT|GZ)_(?P<number>\d+)_(?P<date>\d{4}-\d{2}-\d{2})\.pdf$",
+    re.IGNORECASE,
+)
+LEGACY_PDF_NAME_RE = re.compile(
+    r"^(?P<number>\d+)(?:_(?P<gazette>Gazete))?_(?P<date>\d{4}-\d{2}-\d{2})\.pdf$",
+    re.IGNORECASE,
+)
+OUTPUT_DIR_RE = re.compile(
+    r"^(?P<prefix>BLT|GZ)_(?P<number>\d+)(?:_(?P<date>\d{4}-\d{2}-\d{2}))?$",
+    re.IGNORECASE,
+)
 
 # Sections we want to parse (domestic + Madrid + re-examination)
 # We detect these via the TOC page or by looking for (210) markers
@@ -60,16 +89,37 @@ SKIP_SECTION_HEADERS = {
 MIN_EXPECTED_RECORDS = 100
 
 
+_TURKISH_ASCII_MAP = str.maketrans({
+    "ı": "i",
+    "İ": "i",
+    "ğ": "g",
+    "Ğ": "g",
+    "ü": "u",
+    "Ü": "u",
+    "ş": "s",
+    "Ş": "s",
+    "ö": "o",
+    "Ö": "o",
+    "ç": "c",
+    "Ç": "c",
+})
+
+
+def _normalize_section_name(text: str) -> str:
+    """Normalize Turkish TOC text for tolerant section matching."""
+    return re.sub(r"\s+", " ", (text or "").translate(_TURKISH_ASCII_MAP).lower()).strip()
+
+
 # ---------------------------------------------------------------------------
 # TOC parser — extract section page ranges from table of contents
 # ---------------------------------------------------------------------------
 def _parse_toc(doc) -> Dict[str, int]:
     """Parse the İçindekiler (TOC) page to get section start pages."""
     sections = {}
-    # TOC is typically on page 3 (index 2)
-    for page_idx in range(min(5, doc.page_count)):
+    # Gazette PDFs can place the TOC a few pages later than bulletins.
+    for page_idx in range(min(8, doc.page_count)):
         text = doc[page_idx].get_text()
-        if "İçindekiler" not in text:
+        if "icindekiler" not in _normalize_section_name(text):
             continue
         # Extract section names and page numbers
         for line in text.split("\n"):
@@ -80,7 +130,7 @@ def _parse_toc(doc) -> Dict[str, int]:
             match = re.search(r"(\d+)\s*$", line)
             if match:
                 page_no = int(match.group(1))
-                name = line[:match.start()].strip().rstrip(".")
+                name = line[:match.start()].strip().rstrip(".").strip()
                 if name:
                     sections[name] = page_no
         break
@@ -102,12 +152,16 @@ def _get_application_page_ranges(doc) -> List[Tuple[int, int]]:
     sorted_entries = sorted(toc.items(), key=lambda x: x[1])
     ranges = []
 
-    # Strategy: find sections whose names contain "Başvurularının İlan" or
-    # "Mahkeme Karar" (court decision published applications — these also
-    # contain full WIPO-coded trademark records), and use the NEXT
-    # TOC entry as the end boundary.
+    # Strategy: find sections that contain real trademark records and use the
+    # NEXT TOC entry as the end boundary. BLT issues use application sections,
+    # while GZ issues use registration sections such as "MARKA TESCİLLERİ".
     for i, (name, page) in enumerate(sorted_entries):
-        if "Başvurularının İlan" in name or "Mahkeme Karar" in name:
+        normalized_name = _normalize_section_name(name)
+        if (
+            "basvurularinin ilan" in normalized_name
+            or "mahkeme karar" in normalized_name
+            or "marka tescilleri" in normalized_name
+        ):
             start = page - 1  # 0-indexed
             # End = next TOC entry's page (or document end)
             end = sorted_entries[i + 1][1] - 1 if i + 1 < len(sorted_entries) else doc.page_count
@@ -129,8 +183,8 @@ def _get_application_page_ranges(doc) -> List[Tuple[int, int]]:
 #   Footer: "_____ 2026/488 Resmi Marka Bülteni ... Yayın Tarihi : 12.03.2026  3209"
 #   Header: "_____ 3212    Yayın Tarihi : 12.03.2026  Türk Patent ... 2026/488 Resmi Marka Bülteni"
 _PAGE_ARTIFACT_RE = re.compile(
-    r"_+\s*(?:\d{4}/\d+\s+Resmi Marka Bülteni.*?Yayın Tarihi\s*:\s*[\d.]+\s*\d*"
-    r"|\d{1,4}\s+Yayın Tarihi\s*:\s*[\d.]+.*?Resmi Marka Bülteni)",
+    r"_+\s*(?:\d{4}/\d+\s+Resmi Marka (?:Bülteni|Gazetesi).*?Yayın Tarihi\s*:\s*[\d.]+\s*\d*"
+    r"|\d{1,5}\s+Yayın Tarihi\s*:\s*[\d.]+.*?Resmi Marka (?:Bülteni|Gazetesi))",
     re.DOTALL,
 )
 
@@ -198,6 +252,45 @@ def _parse_date(raw: str) -> str:
     return raw
 
 
+def _looks_like_address_line(text: str) -> bool:
+    if not text:
+        return False
+    return bool(re.search(r"\d", text) or "," in text or ADDRESS_HINT_RE.search(text))
+
+
+def _repair_holder_title(text: str) -> str:
+    if not text or "?" not in text:
+        return text
+
+    repaired = text.strip()
+
+    exact_repairs = {
+        "SENSUM, SISTEMI Z RA?UNALNI?KIM": "SENSUM, SISTEMI Z RAČUNALNIŠKIM",
+        "RETURMATIC SOLUTIONS ZÁRTKÖR?EN": "RETURMATIC SOLUTIONS ZÁRTKÖRŰEN",
+        "P&C TECHNOLOGIE ZÁRTKÖR?EN M?KÖD? RÉSZVÉNYTÁRSASÁG": "P&C TECHNOLOGIE ZÁRTKÖRŰEN MŰKÖDŐ RÉSZVÉNYTÁRSASÁG",
+        "NT ELECTRIC ELEKTRI?NI SISTEMI PO MERI": "NT ELECTRIC ELEKTRIČNI SISTEMI PO MERI",
+        "ANELA HUJDUROVI?": "ANELA HUJDUROVIĆ",
+        "VANJA KATI?": "VANJA KATIĆ",
+        "POSTAL STEEL GROUP POLSKA SPÓ?KA Z": "POSTAL STEEL GROUP POLSKA SPÓŁKA Z",
+        "DANPOL KIECZMERSCY SPÓ?KA": "DANPOL KIECZMERSCY SPÓŁKA",
+        "LIGHTWARE VETÍTÉSTECHNIKAI ZÁRTKÖR?EN": "LIGHTWARE VETÍTÉSTECHNIKAI ZÁRTKÖRŰEN",
+    }
+    repaired = exact_repairs.get(repaired, repaired)
+
+    repaired = repaired.replace("ZÁRTKÖR?EN", "ZÁRTKÖRŰEN")
+    repaired = repaired.replace("M?KÖD?", "MŰKÖDŐ")
+    repaired = repaired.replace("RA?UNALNI?KIM", "RAČUNALNIŠKIM")
+    repaired = repaired.replace("ELEKTRI?NI", "ELEKTRIČNI")
+    repaired = repaired.replace("SPÓ?KA", "SPÓŁKA")
+
+    # Drop placeholder quote marks or separators that PyMuPDF could not decode.
+    repaired = re.sub(r"(?<!\w)\?(?=\w)", "", repaired)
+    repaired = re.sub(r"(?<=\w)\?(?!\w)", "", repaired)
+    repaired = re.sub(r"(?<=[A-Za-z])\?(?=[A-Z]{2,})", " ", repaired)
+
+    return " ".join(repaired.split())
+
+
 def _parse_holder(raw: str) -> Tuple[List[Dict], List[Dict]]:
     """Parse (731) holder block into HOLDERS and ATTORNEYS lists.
 
@@ -241,16 +334,34 @@ def _parse_holder(raw: str) -> Tuple[List[Dict], List[Dict]]:
             client_id = id_match.group(1)
             title = id_match.group(2).strip()
 
-        # Extract country from last parentheses
+        # Long corporate names often wrap onto a second line; keep consuming
+        # non-address lines before switching to the address payload.
+        title_lines = [title]
+        address_start = 1
+        for idx, line in enumerate(lines[1:], start=1):
+            if _looks_like_address_line(line):
+                address_start = idx
+                break
+            title_lines.append(line)
+            address_start = idx + 1
+
+        title = " ".join(title_lines).strip()
+
+        # Extract country from last parentheses; bulletins sometimes use full
+        # Turkish country names instead of ISO two-letter codes.
         country = "TÜRKİYE"
-        country_match = re.search(r"\(([A-Z]{2})\)\s*$", title)
+        country_match = re.search(r"\(([^()]+)\)\s*$", title)
         if country_match:
-            country_code = country_match.group(1)
+            country_token = country_match.group(1).strip()
             title = title[:country_match.start()].strip()
-            country = _country_code_to_name(country_code)
+            if re.fullmatch(r"[A-Z]{2}", country_token):
+                country = _country_code_to_name(country_token)
+            elif country_token:
+                country = country_token
 
         # Remaining lines are address
-        address_lines = lines[1:]
+        title = _repair_holder_title(title)
+        address_lines = lines[address_start:]
         address = " ".join(address_lines).strip()
 
         # Try to extract city from address (last word before postal code or end)
@@ -359,14 +470,135 @@ def _make_image_key(app_no: str) -> str:
     return app_no.replace("/", "_")
 
 
+def _build_output_dir_name(number: str, issue_date: Optional[str], is_gazette: bool) -> str:
+    """Build the canonical BLT_/GZ_ output folder name for a PDF issue."""
+    prefix = "GZ" if is_gazette else "BLT"
+    if issue_date:
+        return f"{prefix}_{number}_{issue_date}"
+    return f"{prefix}_{number}"
+
+
+def _parse_pdf_issue_filename(filename: str) -> Optional[Tuple[str, str, bool]]:
+    """Parse canonical or legacy top-level PDF filenames into issue metadata."""
+    canonical_match = CANONICAL_PDF_NAME_RE.match(filename)
+    if canonical_match:
+        return (
+            canonical_match.group("number"),
+            canonical_match.group("date"),
+            canonical_match.group("prefix").upper() == "GZ",
+        )
+
+    legacy_match = LEGACY_PDF_NAME_RE.match(filename)
+    if legacy_match:
+        return (
+            legacy_match.group("number"),
+            legacy_match.group("date"),
+            bool(legacy_match.group("gazette")),
+        )
+
+    return None
+
+
+def _infer_pdf_target(
+    pdf_path: Path,
+    *,
+    output_dir: Optional[Path] = None,
+) -> Optional[Dict[str, Any]]:
+    """Infer the canonical extraction target for a PDF file or issue folder."""
+    if output_dir is not None:
+        folder_match = OUTPUT_DIR_RE.match(output_dir.name)
+        if not folder_match:
+            return None
+        issue_number = folder_match.group("number")
+        issue_date = folder_match.group("date")
+        is_gazette = folder_match.group("prefix").upper() == "GZ"
+    else:
+        parsed = _parse_pdf_issue_filename(pdf_path.name)
+        if not parsed:
+            return None
+        issue_number, issue_date, is_gazette = parsed
+        output_dir = pdf_path.parent / _build_output_dir_name(issue_number, issue_date, is_gazette)
+
+    return {
+        "pdf_path": pdf_path,
+        "issue_number": issue_number,
+        "issue_date": issue_date,
+        "is_gazette": is_gazette,
+        "output_dir": output_dir,
+    }
+
+
+def _pick_folder_pdf(folder_path: Path) -> Optional[Path]:
+    """Choose the best PDF source inside an issue folder missing metadata."""
+    preferred = folder_path / "bulletin.pdf"
+    if preferred.exists():
+        return preferred
+
+    pdf_candidates = [p for p in folder_path.glob("*.pdf") if p.is_file()]
+    if not pdf_candidates:
+        return None
+    return max(pdf_candidates, key=lambda p: p.stat().st_size)
+
+
+def _move_pdf_into_issue_folder(pdf_path: Path, output_dir: Path) -> Path:
+    """Relocate a top-level raw PDF into its canonical issue folder.
+
+    Top-level collector downloads live at the bulletins root. After a successful
+    PDF extraction, move them into the created issue folder as bulletin.pdf so
+    later repair/event jobs can operate on a consistent folder layout.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        if pdf_path.resolve().parent == output_dir.resolve():
+            return pdf_path
+    except OSError:
+        if pdf_path.parent == output_dir:
+            return pdf_path
+
+    preferred_target = output_dir / "bulletin.pdf"
+    fallback_target = output_dir / pdf_path.name
+
+    for candidate in (preferred_target, fallback_target):
+        if not candidate.exists():
+            continue
+        try:
+            if candidate.resolve() == pdf_path.resolve():
+                return candidate
+        except OSError:
+            pass
+        try:
+            if candidate.stat().st_size == pdf_path.stat().st_size:
+                pdf_path.unlink()
+                return candidate
+        except OSError:
+            pass
+
+    if not preferred_target.exists():
+        target = preferred_target
+    elif not fallback_target.exists():
+        target = fallback_target
+    else:
+        suffix = 1
+        while True:
+            target = output_dir / f"{fallback_target.stem}_{suffix}{fallback_target.suffix}"
+            if not target.exists():
+                break
+            suffix += 1
+
+    shutil.move(str(pdf_path), str(target))
+    return target
+
+
 # ---------------------------------------------------------------------------
 # Core PDF parsing
 # ---------------------------------------------------------------------------
 def _build_metadata_record(
     fields: Dict[str, str],
     bulletin_no: str,
-    bulletin_date: str,
+    bulletin_date: Optional[str],
     has_image: bool = False,
+    is_gazette: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Convert WIPO field dict to a metadata.json record."""
     app_no = _parse_app_no(fields.get("210", ""))
@@ -412,26 +644,30 @@ def _build_metadata_record(
 
     image_key = _make_image_key(app_no) if has_image else ""
 
+    trademark = {
+        "APPLICATIONDATE": app_date,
+        "REGISTERNO": reg_no,
+        "REGISTERDATE": reg_date,
+        "INTREGNO": int_reg_no,
+        "NAME": name,
+        "NICECLASSES_RAW": nice_raw,
+        "NICECLASSES_LIST": nice_list,
+        "TM_TYPE_CODE": "",
+        "VIENNACLASSES_RAW": vienna_raw,
+        "VIENNACLASSES_LIST": vienna_list,
+        "BULLETIN_NO": bulletin_no if not is_gazette else None,
+        "BULLETIN_DATE": bulletin_date if not is_gazette else None,
+        "GAZETTE_NO": bulletin_no if is_gazette else None,
+        "GAZETTE_DATE": bulletin_date if is_gazette else None,
+        "EXTRA_COL_11": "",
+        "EXTRA_COL_12": "",
+    }
+
     return {
         "APPLICATIONNO": app_no,
-        "STATUS": "Application/Published",
+        "STATUS": "Registered" if is_gazette else "Application/Published",
         "IMAGE": image_key,
-        "TRADEMARK": {
-            "APPLICATIONDATE": app_date,
-            "REGISTERNO": reg_no,
-            "REGISTERDATE": reg_date,
-            "INTREGNO": int_reg_no,
-            "NAME": name,
-            "NICECLASSES_RAW": nice_raw,
-            "NICECLASSES_LIST": nice_list,
-            "TM_TYPE_CODE": "",
-            "VIENNACLASSES_RAW": vienna_raw,
-            "VIENNACLASSES_LIST": vienna_list,
-            "BULLETIN_NO": bulletin_no,
-            "BULLETIN_DATE": bulletin_date,
-            "EXTRA_COL_11": "",
-            "EXTRA_COL_12": "",
-        },
+        "TRADEMARK": trademark,
         "HOLDERS": holders,
         "ATTORNEYS": attorneys,
         "GOODS": goods,
@@ -439,12 +675,18 @@ def _build_metadata_record(
     }
 
 
-def parse_bulletin_pdf(pdf_path: Path, output_dir: Path, bulletin_no: str, bulletin_date: str) -> Dict[str, Any]:
+def parse_bulletin_pdf(
+    pdf_path: Path,
+    output_dir: Path,
+    bulletin_no: str,
+    bulletin_date: Optional[str],
+    is_gazette: bool = False,
+) -> Dict[str, Any]:
     """Parse a bulletin PDF and produce metadata.json + images/.
 
     Delegates to parse_bulletin_pdf_v2 which uses sequential image assignment.
     """
-    return parse_bulletin_pdf_v2(pdf_path, output_dir, bulletin_no, bulletin_date)
+    return parse_bulletin_pdf_v2(pdf_path, output_dir, bulletin_no, bulletin_date, is_gazette=is_gazette)
 
 
 def _parse_bulletin_pdf_v1(pdf_path: Path, output_dir: Path, bulletin_no: str, bulletin_date: str) -> Dict[str, Any]:
@@ -579,6 +821,8 @@ def _parse_bulletin_pdf_v1(pdf_path: Path, output_dir: Path, bulletin_no: str, b
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(all_records, f, ensure_ascii=False, indent=2)
 
+    _move_pdf_into_issue_folder(pdf_path, output_dir)
+
     duration = time.time() - t0
     logger.info(
         f"PDF extraction complete: {len(all_records)} records, "
@@ -596,7 +840,13 @@ def _parse_bulletin_pdf_v1(pdf_path: Path, output_dir: Path, bulletin_no: str, b
 # ---------------------------------------------------------------------------
 # Better image-record association (v2)
 # ---------------------------------------------------------------------------
-def parse_bulletin_pdf_v2(pdf_path: Path, output_dir: Path, bulletin_no: str, bulletin_date: str) -> Dict[str, Any]:
+def parse_bulletin_pdf_v2(
+    pdf_path: Path,
+    output_dir: Path,
+    bulletin_no: str,
+    bulletin_date: Optional[str],
+    is_gazette: bool = False,
+) -> Dict[str, Any]:
     """Improved parser that associates images with records using page position.
 
     This version processes page-by-page, tracking both text positions and
@@ -694,7 +944,13 @@ def parse_bulletin_pdf_v2(pdf_path: Path, output_dir: Path, bulletin_no: str, bu
                 except Exception as e:
                     logger.warning(f"Image extract failed for {app_no}: {e}")
 
-            record = _build_metadata_record(fields, bulletin_no, bulletin_date, has_image)
+            record = _build_metadata_record(
+                fields,
+                bulletin_no,
+                bulletin_date,
+                has_image,
+                is_gazette=is_gazette,
+            )
             if record:
                 all_records.append(record)
 
@@ -714,6 +970,8 @@ def parse_bulletin_pdf_v2(pdf_path: Path, output_dir: Path, bulletin_no: str, bu
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(all_records, f, ensure_ascii=False, indent=2)
 
+    _move_pdf_into_issue_folder(pdf_path, output_dir)
+
     duration = time.time() - t0
     logger.info(
         f"PDF extraction: {len(all_records)} records, {image_count} images, {duration:.1f}s"
@@ -729,34 +987,51 @@ def parse_bulletin_pdf_v2(pdf_path: Path, output_dir: Path, bulletin_no: str, bu
 # ---------------------------------------------------------------------------
 # Pipeline entry point
 # ---------------------------------------------------------------------------
-def find_unprocessed_pdfs(root_dir: Path) -> List[Tuple[Path, str, str]]:
-    """Find PDF files in root_dir that haven't been extracted yet.
-
-    Returns list of (pdf_path, bulletin_no, bulletin_date).
-    """
-    results = []
+def find_unprocessed_pdfs(root_dir: Path) -> List[Dict[str, Any]]:
+    """Find PDF issues that still need metadata extraction."""
+    results: Dict[str, Dict[str, Any]] = {}
     if not root_dir.exists():
-        return results
+        return []
+
+    # Prefer existing issue folders missing metadata so we repair real mounted state first.
+    for folder in sorted(root_dir.iterdir()):
+        if not folder.is_dir():
+            continue
+        if (folder / "metadata.json").exists():
+            continue
+
+        folder_pdf = _pick_folder_pdf(folder)
+        if not folder_pdf:
+            continue
+
+        target = _infer_pdf_target(folder_pdf, output_dir=folder)
+        if target:
+            results[folder.name] = target
 
     for f in sorted(root_dir.iterdir()):
         if not f.is_file():
             continue
-        m = PDF_NAME_RE.match(f.name)
-        if not m:
+        target = _infer_pdf_target(f)
+        if not target:
             continue
-        bulletin_no = m.group(1)
-        bulletin_date = m.group(2)
 
-        # Check if already extracted
-        output_dir = root_dir / f"BLT_{bulletin_no}_{bulletin_date}"
+        output_dir = target["output_dir"]
         meta_file = output_dir / "metadata.json"
         if meta_file.exists():
             logger.info(f"Skipping {f.name} — already extracted to {output_dir.name}")
             continue
 
-        results.append((f, bulletin_no, bulletin_date))
+        results.setdefault(output_dir.name, target)
 
-    return results
+    def _sort_key(item: Dict[str, Any]) -> Tuple[int, int, str]:
+        prefix_rank = 1 if item["is_gazette"] else 0
+        try:
+            issue_no = int(item["issue_number"])
+        except ValueError:
+            issue_no = 0
+        return prefix_rank, issue_no, item["output_dir"].name
+
+    return sorted(results.values(), key=_sort_key)
 
 
 def run_pdf_extraction(root_dir: Path = None, settings=None) -> Dict[str, Any]:
@@ -787,12 +1062,22 @@ def run_pdf_extraction(root_dir: Path = None, settings=None) -> Dict[str, Any]:
     failed = 0
     total_records = 0
 
-    for pdf_path, bulletin_no, bulletin_date in pdfs:
-        output_dir = root_dir / f"BLT_{bulletin_no}_{bulletin_date}"
+    for target in pdfs:
+        pdf_path = target["pdf_path"]
+        bulletin_no = target["issue_number"]
+        bulletin_date = target["issue_date"]
+        is_gazette = target["is_gazette"]
+        output_dir = target["output_dir"]
         logger.info(f"Extracting {pdf_path.name} -> {output_dir.name}")
 
         try:
-            result = parse_bulletin_pdf_v2(pdf_path, output_dir, bulletin_no, bulletin_date)
+            result = parse_bulletin_pdf_v2(
+                pdf_path,
+                output_dir,
+                bulletin_no,
+                bulletin_date,
+                is_gazette=is_gazette,
+            )
             if result["status"] == "success":
                 processed += 1
                 total_records += result["records"]
@@ -831,12 +1116,25 @@ if __name__ == "__main__":
 
     if args.pdf:
         pdf = Path(args.pdf)
-        m = PDF_NAME_RE.match(pdf.name)
-        if not m:
-            print(f"PDF filename must match pattern: {{num}}_{{YYYY-MM-DD}}.pdf")
+        target = _infer_pdf_target(
+            pdf,
+            output_dir=pdf.parent if OUTPUT_DIR_RE.match(pdf.parent.name) else None,
+        )
+        if not target:
+            print(
+                "PDF source must be either "
+                "BLT_{num}_{YYYY-MM-DD}.pdf, GZ_{num}_{YYYY-MM-DD}.pdf, "
+                "{num}_{YYYY-MM-DD}.pdf, {num}_Gazete_{YYYY-MM-DD}.pdf, "
+                "or a bulletin.pdf inside a BLT_/GZ_ folder."
+            )
             exit(1)
-        out = pdf.parent / f"BLT_{m.group(1)}_{m.group(2)}"
-        result = parse_bulletin_pdf_v2(pdf, out, m.group(1), m.group(2))
+        result = parse_bulletin_pdf_v2(
+            target["pdf_path"],
+            target["output_dir"],
+            target["issue_number"],
+            target["issue_date"],
+            is_gazette=target["is_gazette"],
+        )
         print(json.dumps(result, indent=2))
     else:
         result = run_pdf_extraction(Path(args.root))

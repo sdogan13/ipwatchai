@@ -1,5 +1,5 @@
 /**
- * Service Worker — IP WATⒸH AI v6
+ * Service Worker — IPWatchAI v6
  * Minimal: only cache static assets (JS, CSS, images).
  * Never cache HTML or API responses.
  */

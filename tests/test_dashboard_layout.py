@@ -225,6 +225,12 @@ class TestOverviewPanel:
         ]:
             assert f'id="{element_id}"' in self.html
 
+    def test_pipeline_panel_includes_event_ingest_step_card(self):
+        assert 'id="pipeline-step-event_ingest"' in self.html
+        assert 'id="pipeline-count-event_ingest"' in self.html
+        assert 'id="pipeline-status-event_ingest"' in self.html
+        assert "grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-4" in self.html
+
 
 class TestOtherPanels:
     """Tests for other tab panels — all should start hidden."""
@@ -284,6 +290,13 @@ class TestAppJS:
         assert "search-input" in self.js
         assert "focus()" in self.js
 
+    def test_pipeline_status_tracks_event_ingest_step_card(self):
+        assert "var stepNames = ['download', 'extract', 'metadata', 'embeddings', 'ingest', 'event_ingest'];" in self.js
+
+    def test_pipeline_running_indicator_has_readable_event_and_conflict_names(self):
+        assert "'event_ingest': t('pipeline.event_ingest_name')" in self.js
+        assert "'conflict_scan': t('pipeline.conflict_scan_name')" in self.js
+
 
 class TestLocaleFiles:
     """Tests for i18n locale files — tabs.search key."""
@@ -309,6 +322,15 @@ class TestLocaleFiles:
         tr = json.loads((STATIC / "locales" / "tr.json").read_text(encoding="utf-8"))
         ar = json.loads((STATIC / "locales" / "ar.json").read_text(encoding="utf-8"))
         assert set(en["tabs"].keys()) == set(tr["tabs"].keys()) == set(ar["tabs"].keys())
+
+    def test_all_locales_have_pipeline_event_ingest_keys(self):
+        import json
+
+        for locale in ("en", "tr", "ar"):
+            data = json.loads((STATIC / "locales" / f"{locale}.json").read_text(encoding="utf-8"))
+            assert data["pipeline"]["step_event_ingest"]
+            assert data["pipeline"]["event_ingest_name"]
+            assert data["pipeline"]["conflict_scan_name"]
 
 
 class TestNoSearchLeakage:

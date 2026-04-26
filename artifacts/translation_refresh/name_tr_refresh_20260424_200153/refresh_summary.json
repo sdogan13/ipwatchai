@@ -1,0 +1,16 @@
+{
+  "restored": 2685532,
+  "snapshot_path": "artifacts\\translation_refresh\\name_tr_refresh_20260424_190436\\snapshot.jsonl.gz",
+  "duration_seconds": 1652.6,
+  "dry_run": false,
+  "metadata_sync": {
+    "metadata_root": "C:\\Users\\701693\\turk_patent\\bulletins\\Marka",
+    "files_scanned": 674,
+    "files_updated": 670,
+    "files_failed": 0,
+    "files_skipped_from_progress": 0,
+    "records_scanned": 4713505,
+    "records_updated": 2488715,
+    "records_missing_db": 1
+  }
+}

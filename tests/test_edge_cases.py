@@ -207,13 +207,13 @@ class TestIDFWaterfallCases:
     def test_case_exact_match(self):
         from services.scoring_service import compute_idf_weighted_score
         score, details = compute_idf_weighted_score("NIKE", "NIKE")
-        assert "TIER_1" in details["scoring_path"]
+        assert details["scoring_path"] == "TEXT_EXACT"
         assert score == 1.0
 
     def test_case_containment(self):
         from services.scoring_service import compute_idf_weighted_score
         score, details = compute_idf_weighted_score("NIKE", "NIKE SPORTS")
-        assert "CONTAINMENT" in details["scoring_path"] or "TIER_2" in details["scoring_path"]
+        assert details["scoring_path"] in {"TEXT_CONTAINMENT", "TEXT_TOKEN_EXACT"}
         assert score >= 0.80
 
     def test_case_generic_only(self):

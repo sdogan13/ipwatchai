@@ -26,6 +26,7 @@ def register_application_routers(app, logger):
         watchlist_router,
         alerts_router,
         dashboard_router,
+        education_router,
         usage_router,
     )
 
@@ -51,6 +52,7 @@ def register_application_routers(app, logger):
     app.include_router(alerts_router, prefix="/api/v1")
     app.include_router(reports_router, prefix="/api/v1")
     app.include_router(dashboard_router, prefix="/api/v1")
+    app.include_router(education_router, prefix="/api/v1")
     app.include_router(leads_router, prefix="/api/v1")
     app.include_router(holders_router, prefix="/api/v1")
     if attorneys_router:

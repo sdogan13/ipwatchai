@@ -767,6 +767,39 @@ def _run_free_persona_flows(playwright, session: PersonaSession) -> None:
             if usage_counts[:2] != ["0", "2"]:
                 raise AssertionError(f"unexpected upload usage counts: {usage_counts}")
 
+            page.locator("#upload-wl-upgrade-offer").wait_for(state="visible", timeout=browser_config.timeout_ms)
+            upload_gate_state = page.evaluate(
+                """() => {
+                    const offer = document.getElementById('upload-wl-upgrade-offer');
+                    const modalCard = document.getElementById('watchlist-upload-modal-card');
+                    const sharedUpgrade = document.getElementById('upgrade-modal');
+                    const cta = document.getElementById('upload-wl-upgrade-cta');
+                    return {
+                        recommendedPlan: offer ? (offer.dataset.recommendedPlan || '') : '',
+                        upgradeContext: offer ? (offer.dataset.upgradeContext || '') : '',
+                        checkoutUrl: cta ? (cta.getAttribute('href') || '') : '',
+                        wideCard: !!(modalCard && modalCard.classList.contains('max-w-5xl')),
+                        sharedUpgradeVisible: !!(sharedUpgrade && !sharedUpgrade.classList.contains('hidden')),
+                    };
+                }"""
+            )
+            if upload_gate_state["recommendedPlan"] != "starter":
+                raise AssertionError(
+                    f"expected starter inline recommendation for upload watchlist gate, got {upload_gate_state['recommendedPlan']!r}"
+                )
+            if upload_gate_state["upgradeContext"] != "watchlist_items":
+                raise AssertionError(
+                    f"expected watchlist_items upload context, got {upload_gate_state['upgradeContext']!r}"
+                )
+            if "plan=starter" not in upload_gate_state["checkoutUrl"]:
+                raise AssertionError(
+                    f"expected upload inline upgrade CTA to target starter checkout, got {upload_gate_state['checkoutUrl']!r}"
+                )
+            if not upload_gate_state["wideCard"]:
+                raise AssertionError("expected upload modal to expand for the inline upgrade panel")
+            if upload_gate_state["sharedUpgradeVisible"]:
+                raise AssertionError("shared upgrade modal should stay hidden for the upload inline upgrade flow")
+
             with page.expect_response(
                 lambda response: response.request.method == "POST"
                 and "/api/v1/watchlist/upload/with-mapping" in response.url,
@@ -785,6 +818,15 @@ def _run_free_persona_flows(playwright, session: PersonaSession) -> None:
                 raise AssertionError(f"expected two upload limit errors, got {payload.get('error_items')!r}")
 
             page.locator("#upload-wl-result").wait_for(state="visible")
+            result_text = (page.locator("#upload-wl-result").text_content() or "").strip()
+            if "paket limitiniz" not in result_text and "plan limit" not in result_text:
+                raise AssertionError(
+                    f"expected plan-limit upload result wording, got {result_text!r}"
+                )
+            if "hata oluştu" in result_text or "errors occurred" in result_text:
+                raise AssertionError(
+                    f"generic upload error wording should not be shown for plan-limit-only upload results: {result_text!r}"
+                )
             page.evaluate(
                 """() => {
                     if (typeof closeBulkUploadModal === 'function') {

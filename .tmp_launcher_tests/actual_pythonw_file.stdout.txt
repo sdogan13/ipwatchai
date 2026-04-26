@@ -1,0 +1,35 @@
+usage: regenerate_name_tr.py [-h] [--backend BACKEND]
+                             [--baseline-backend BASELINE_BACKEND]
+                             [--benchmark-fixture BENCHMARK_FIXTURE]
+                             [--benchmark-only] [--skip-benchmark] [--dry-run]
+                             [--null-only] [--batch-size BATCH_SIZE]
+                             [--limit LIMIT] [--resume-from-id RESUME_FROM_ID]
+                             [--output-root OUTPUT_ROOT]
+                             [--metadata-root METADATA_ROOT]
+                             [--restore-from RESTORE_FROM]
+
+Refresh trademark name_tr translations
+
+options:
+  -h, --help            show this help message and exit
+  --backend BACKEND     Candidate backend for refresh
+  --baseline-backend BASELINE_BACKEND
+                        Baseline backend for benchmark
+  --benchmark-fixture BENCHMARK_FIXTURE
+                        Curated benchmark fixture JSON
+  --benchmark-only      Run benchmark and stop
+  --skip-benchmark      Skip the benchmark gate and run refresh directly
+  --dry-run             Run benchmark/refresh without DB updates
+  --null-only           Only process rows missing name_tr or detected_lang
+  --batch-size BATCH_SIZE
+                        Number of rows per translation batch
+  --limit LIMIT         Optional limit for bounded runs
+  --resume-from-id RESUME_FROM_ID
+                        Resume processing after this UUID
+  --output-root OUTPUT_ROOT
+                        Directory for benchmark/snapshot/summary artifacts
+  --metadata-root METADATA_ROOT
+                        Optional bulletins root for metadata.json sync
+  --restore-from RESTORE_FROM
+                        Restore from a snapshot .jsonl.gz file instead of
+                        refreshing

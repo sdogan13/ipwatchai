@@ -62,6 +62,14 @@ SKIP_EXTS = {".part", ".crdownload", ".tmp"}
 # e.g. "484_Gazete_CD" -> stem "484_Gazete"
 # Updated to optionally match date suffix like _2026-01-12
 DIRECT_CD_RE = re.compile(r"^(?P<stem>.*)_CD(?:_\d{4}-\d{2}-\d{2})?$", re.IGNORECASE)
+CANONICAL_ISSUE_STEM_RE = re.compile(
+    r"^(?P<prefix>BLT|GZ)_(?P<number>\d+)(?:_(?P<date>\d{4}-\d{2}-\d{2}))?(?:_(?P<cd>CD))?$",
+    re.IGNORECASE,
+)
+LEGACY_BULLETIN_STEM_RE = re.compile(
+    r"^(?P<number>\d+)(?:_(?P<date>\d{4}-\d{2}-\d{2}))?(?:_(?P<cd>CD))?$",
+    re.IGNORECASE,
+)
 
 # RANGE_RE: Detects "316-323"
 RANGE_RE = re.compile(r"\b(\d+)\s*-\s*(\d+)\b")
@@ -88,6 +96,13 @@ def doc_prefix_from_text(s: str) -> str:
       - Marka Gazetesi       -> MG_
       - Sınai Mülkiyet ...   -> SMG_
     """
+    canonical_match = CANONICAL_ISSUE_STEM_RE.match(s)
+    if canonical_match:
+        return f"{canonical_match.group('prefix').upper()}_"
+
+    if LEGACY_BULLETIN_STEM_RE.match(s):
+        return "BLT_"
+
     t = s.lower()
     t = t.replace("_", " ")
 
@@ -105,7 +120,7 @@ def doc_prefix_from_text(s: str) -> str:
     if "gazete" in t or "gazetesi" in t:
         return "GZ_"
 
-    if "bülten" in t or "bulten" or "bülteni" in t or "bulteni" in t:
+    if "bülten" in t or "bulten" in t or "bülteni" in t or "bulteni" in t:
         return "BLT_"
 
     return "UNK_"
@@ -460,8 +475,17 @@ def extract_number_from_text(text: str) -> Optional[int]:
     Tries to find a standalone number in the text.
     Prioritizes numbers that are distinct tokens.
     """
+    canonical_match = CANONICAL_ISSUE_STEM_RE.match(text)
+    if canonical_match:
+        return int(canonical_match.group("number"))
+
     # Remove date suffixes first to avoid false positives at the end of string
     text_clean = DATE_RE.sub("", text)
+
+    # 0. Try canonical prefixes without the date once it has been removed: "BLT_490_" -> 490
+    m = re.match(r"^(?:BLT|GZ|MB|MG|SMG|SM)_(\d+)", text_clean, re.IGNORECASE)
+    if m:
+        return int(m.group(1))
 
     # 1. Try finding a number at the start: "484_Gazete" -> 484
     m = re.match(r"^(\d+)", text_clean)
@@ -494,6 +518,22 @@ def find_archives(
                 continue
 
             stem = p.stem
+            canonical_issue = CANONICAL_ISSUE_STEM_RE.match(stem)
+
+            if canonical_issue:
+                num = int(canonical_issue.group("number"))
+                prefix = f"{canonical_issue.group('prefix').upper()}_"
+                date_str = canonical_issue.group("date")
+                prev = best_cd_by_num.get(num)
+                if prev is None:
+                    best_cd_by_num[num] = (p, prefix, date_str)
+                else:
+                    try:
+                        if p.stat().st_size > prev[0].stat().st_size:
+                            best_cd_by_num[num] = (p, prefix, date_str)
+                    except OSError:
+                        pass
+                continue
 
             # 1) Direct CD archives (ending in _CD)
             m = DIRECT_CD_RE.match(stem)

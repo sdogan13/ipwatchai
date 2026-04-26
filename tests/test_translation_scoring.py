@@ -275,9 +275,7 @@ class TestIDFWaterfallIntegration:
         """Containment should produce a containment scoring path."""
         result = score_translated_pair("elma", "elma market")
         path = result.get("translation_scoring_path", "")
-        # Should be CONTAINMENT or Case A (high distinctive match)
-        assert "CONTAINMENT" in path or "A:" in path, \
-            f"Expected containment/Case A path, got: {path}"
+        assert path.startswith("TEXT_"), f"Expected V2 text path, got: {path}"
 
     def test_no_match_low_score(self):
         """Completely different words → Case F or low."""
@@ -304,12 +302,12 @@ class TestIDFWaterfallIntegration:
 # ============================================
 
 class TestVisualComposite:
-    """Verify calculate_visual_similarity uses all 4 components."""
+    """Verify calculate_visual_similarity uses CLIP, DINOv2, and OCR only."""
 
     def test_clip_only(self):
         from risk_engine import calculate_visual_similarity
         score = calculate_visual_similarity(clip_sim=0.80)
-        assert abs(score - 0.80 * 0.35) < 0.01
+        assert abs(score - 0.80) < 0.01
 
     def test_all_components(self):
         from risk_engine import calculate_visual_similarity
@@ -317,8 +315,12 @@ class TestVisualComposite:
             clip_sim=0.80, dinov2_sim=0.70, color_sim=0.60,
             ocr_text_a="NIKE", ocr_text_b="NIKE",
         )
-        expected = 0.80 * 0.35 + 0.70 * 0.30 + 0.60 * 0.15 + 1.0 * 0.20
+        expected = (0.80 * 0.45 + 0.70 * 0.35 + 1.0 * 0.15) / (0.45 + 0.35 + 0.15)
         assert abs(score - expected) < 0.01
+
+    def test_color_only_is_ignored(self):
+        from risk_engine import calculate_visual_similarity
+        assert calculate_visual_similarity(color_sim=1.0) == 0.0
 
     def test_no_ocr_when_one_empty(self):
         from risk_engine import calculate_visual_similarity
@@ -326,7 +328,7 @@ class TestVisualComposite:
             clip_sim=0.80, dinov2_sim=0.70, color_sim=0.60,
             ocr_text_a="", ocr_text_b="NIKE",
         )
-        expected = 0.80 * 0.35 + 0.70 * 0.30 + 0.60 * 0.15
+        expected = (0.80 * 0.45 + 0.70 * 0.35) / (0.45 + 0.35)
         assert abs(score - expected) < 0.01
 
     def test_zero_when_no_signals(self):

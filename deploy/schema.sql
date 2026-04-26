@@ -130,7 +130,13 @@ CREATE TABLE IF NOT EXISTS word_idf (
     doc_frequency INTEGER DEFAULT 0,
     word_class VARCHAR(50) DEFAULT 'common',
     is_generic BOOLEAN DEFAULT FALSE,
-    document_frequency INTEGER DEFAULT 0
+    document_frequency INTEGER DEFAULT 0,
+    total_documents INTEGER DEFAULT 0,
+    weight_multiplier FLOAT DEFAULT 1.0,
+    updated_at TIMESTAMP,
+    descriptor_like BOOLEAN DEFAULT FALSE,
+    descriptor_score DOUBLE PRECISION DEFAULT 0,
+    descriptor_stats JSONB DEFAULT '{}'::jsonb
 );
 
 -- Word IDF table for TRANSLATED names (computed from trademarks.name_tr, populated by compute_idf.py)
@@ -144,7 +150,10 @@ CREATE TABLE IF NOT EXISTS word_idf_tr (
     document_frequency INTEGER DEFAULT 0,
     total_documents INTEGER DEFAULT 0,
     weight_multiplier FLOAT DEFAULT 1.0,
-    updated_at TIMESTAMP
+    updated_at TIMESTAMP,
+    descriptor_like BOOLEAN DEFAULT FALSE,
+    descriptor_score DOUBLE PRECISION DEFAULT 0,
+    descriptor_stats JSONB DEFAULT '{}'::jsonb
 );
 
 -- ==========================================
@@ -177,6 +186,9 @@ CREATE TABLE IF NOT EXISTS trademarks (
     name_ku VARCHAR(500),
     name_fa VARCHAR(500),
     detected_lang VARCHAR(10),
+    name_tr_backend VARCHAR(32),
+    name_tr_model VARCHAR(255),
+    name_tr_updated_at TIMESTAMP,
     -- Dates
     application_date DATE,
     registration_date DATE,
@@ -204,6 +216,9 @@ CREATE TABLE IF NOT EXISTS trademarks (
 
 -- Trademark indexes
 CREATE INDEX IF NOT EXISTS idx_tm_app_no ON trademarks(application_no);
+CREATE INDEX IF NOT EXISTS idx_tm_application_date_id_desc
+    ON trademarks(application_date DESC, id DESC)
+    WHERE name IS NOT NULL AND name != '';
 CREATE INDEX IF NOT EXISTS idx_tm_status ON trademarks(current_status);
 CREATE INDEX IF NOT EXISTS idx_tm_name_trgm ON trademarks USING GIST (name gist_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_tm_phonetic ON trademarks (dmetaphone(name));
@@ -641,6 +656,24 @@ CREATE TABLE IF NOT EXISTS public_search_usage (
 );
 CREATE INDEX IF NOT EXISTS idx_public_search_usage_client_date ON public_search_usage(client_id, usage_date);
 
+CREATE TABLE IF NOT EXISTS education_progress (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    item_type VARCHAR(20) NOT NULL CHECK (item_type IN ('pdf', 'flashcard', 'quiz')),
+    item_key VARCHAR(255) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'not_started' CHECK (status IN ('not_started', 'in_progress', 'completed')),
+    percent_complete INTEGER NOT NULL DEFAULT 0 CHECK (percent_complete >= 0 AND percent_complete <= 100),
+    progress_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+    completed_at TIMESTAMP,
+    last_interacted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, item_type, item_key)
+);
+CREATE INDEX IF NOT EXISTS idx_education_progress_user ON education_progress(user_id);
+CREATE INDEX IF NOT EXISTS idx_education_progress_user_status ON education_progress(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_education_progress_updated ON education_progress(updated_at DESC);
+
 -- ==========================================
 -- 10. NOTIFICATION QUEUE
 -- ==========================================
@@ -837,13 +870,19 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     step_metadata JSONB,
     step_embeddings JSONB,
     step_ingest JSONB,
+    step_event_ingest JSONB,
+    step_final_status_repair JSONB,
     total_downloaded INTEGER DEFAULT 0,
     total_extracted INTEGER DEFAULT 0,
     total_parsed INTEGER DEFAULT 0,
     total_embedded INTEGER DEFAULT 0,
     total_ingested INTEGER DEFAULT 0,
+    total_event_scopes_ingested INTEGER DEFAULT 0,
+    total_final_status_repaired INTEGER DEFAULT 0,
     started_at TIMESTAMP DEFAULT NOW(),
     completed_at TIMESTAMP,
+    heartbeat_at TIMESTAMP DEFAULT NOW(),
+    current_step VARCHAR(50),
     duration_seconds FLOAT,
     error_message TEXT,
     created_at TIMESTAMP DEFAULT NOW()
@@ -905,6 +944,10 @@ CREATE TRIGGER update_watchlist_mt_updated_at BEFORE UPDATE ON watchlist_mt
 
 DROP TRIGGER IF EXISTS update_alerts_mt_updated_at ON alerts_mt;
 CREATE TRIGGER update_alerts_mt_updated_at BEFORE UPDATE ON alerts_mt
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_education_progress_updated_at ON education_progress;
+CREATE TRIGGER update_education_progress_updated_at BEFORE UPDATE ON education_progress
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- Normalize brand name

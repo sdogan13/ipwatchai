@@ -16,7 +16,11 @@ from config.settings import settings
 from database.crud import (
     Database, WatchlistCRUD, AlertCRUD, ScanLogCRUD, get_db_connection
 )
-from services.scoring_service import calculate_comprehensive_score, extract_ocr_text
+from services.scoring_service import (
+    _calculate_visual_breakdown,
+    calculate_comprehensive_score,
+    extract_ocr_text,
+)
 from utils.idf_scoring import (
     normalize_turkish,
     MAX_ALERTS_PER_ITEM
@@ -26,7 +30,7 @@ from utils.class_utils import (
     get_overlapping_classes,
 )
 from pipeline import ai  # Shared AI models (loaded once at app startup)
-from risk_engine import score_pair, calculate_visual_similarity  # Centralized scoring
+from risk_engine import score_pair  # Centralized scoring
 from utils.phonetic import calculate_phonetic_similarity  # Graduated phonetic scoring
 
 logger = logging.getLogger(__name__)
@@ -404,8 +408,11 @@ class WatchlistScanner:
         if tm_emb and wl_emb:
             semantic_sim = self._cosine_sim(tm_emb, wl_emb)
 
-        # 2c. Visual similarity (combined CLIP/DINOv2/Color/OCR — logo text vs logo text)
-        visual_sim = self._compute_visual_sim(trademark, watchlist_item)
+        # 2c. Visual similarity (combined CLIP/DINOv2/OCR — logo text vs logo text)
+        visual_sim, visual_breakdown = self._compute_visual_breakdown(
+            trademark,
+            watchlist_item,
+        )
 
         # 2d. Phonetic similarity (graduated 0.0-1.0)
         phonetic_sim = self._phonetic_sim(tm_name, wl_name)
@@ -420,7 +427,8 @@ class WatchlistScanner:
             phonetic_sim=phonetic_sim,
             candidate_translations={
                 'name_tr': trademark.get('name_tr'),
-            }
+            },
+            visual_breakdown=visual_breakdown,
         )
 
         # 4. Map to watchlist output format (compatible with AlertCRUD.create)
@@ -463,8 +471,16 @@ class WatchlistScanner:
 
     @staticmethod
     def _compute_visual_sim(trademark, watchlist_item) -> float:
+        score, _ = WatchlistScanner._compute_visual_breakdown(
+            trademark,
+            watchlist_item,
+        )
+        return score
+
+    @staticmethod
+    def _compute_visual_breakdown(trademark, watchlist_item) -> Tuple[float, Dict]:
         """Combine visual sub-components into single similarity value.
-        Delegates to risk_engine.calculate_visual_similarity().
+        Delegates to services.scoring_service._calculate_visual_breakdown().
         OCR compares logo text vs logo text ONLY — never brand name vs OCR.
 
         Note: visual scoring runs whenever embeddings exist on both sides.
@@ -489,19 +505,26 @@ class WatchlistScanner:
 
         # If no embedding overlap exists on either side, skip — nothing to compare
         if clip_sim == 0.0 and dino_sim == 0.0 and color_sim == 0.0:
-            return 0.0
+            return 0.0, {
+                "total": 0.0,
+                "active_components": [],
+                "components": {"clip": 0.0, "dinov2": 0.0, "ocr": 0.0},
+                "source": "watchlist_visual_components",
+            }
 
         # OCR text from BOTH logos — never use brand name here
         tm_ocr = trademark.get('logo_ocr_text') or ''
         wl_ocr = watchlist_item.get('logo_ocr_text') or ''
 
-        return calculate_visual_similarity(
+        score, breakdown = _calculate_visual_breakdown(
             clip_sim=clip_sim,
             dinov2_sim=dino_sim,
             color_sim=color_sim,
             ocr_text_a=wl_ocr,
             ocr_text_b=tm_ocr,
         )
+        breakdown["source"] = "watchlist_visual_components"
+        return score, breakdown
 
     @staticmethod
     def _phonetic_sim(s1: str, s2: str) -> float:

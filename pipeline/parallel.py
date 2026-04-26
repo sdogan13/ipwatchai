@@ -122,14 +122,12 @@ def db_worker(ready_queue: queue.Queue, stats: dict, force: bool = False):
     """Ingest folders as they become ready."""
     from db.pool import get_connection, release_connection
     from pipeline.ingest import (
-        check_and_migrate_schema,
-        load_nice_classes,
+        assert_ingest_runtime_ready,
         process_file_batch,
     )
 
     conn = get_connection()
-    check_and_migrate_schema(conn)
-    load_nice_classes(conn)
+    assert_ingest_runtime_ready(conn)
 
     ingested = 0
     while True:

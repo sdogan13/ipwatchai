@@ -132,7 +132,88 @@ def test_billing_locale_files_include_required_keys_for_all_supported_languages(
         "upgrade.eyebrow",
         "upgrade.generic_title",
         "upgrade.generic_description",
+        "upgrade.search_limit_title",
+        "upgrade.search_limit_description",
+        "upgrade.watchlist_title",
+        "upgrade.watchlist_description",
+        "upgrade.live_search_title",
+        "upgrade.live_search_description",
+        "upgrade.leads_title",
+        "upgrade.leads_description",
         "upgrade.recommended_badge",
+        "watchlist.upload_upgrade_title",
+        "watchlist.upload_upgrade_desc",
+        "watchlist.upload_limit_result",
+        "landing.nav_education",
+        "landing.education_title",
+        "landing.education_subtitle",
+        "landing.education_materials_note",
+        "landing.education_pdf_library",
+        "landing.education_flashcards",
+        "landing.education_quizzes",
+        "landing.education_categories",
+        "landing.education_categories_started",
+        "landing.education_choose_category",
+        "landing.education_active_category",
+        "landing.education_category_progress",
+        "landing.education_progress_title",
+        "landing.education_completed_modules",
+        "landing.education_progress_synced",
+        "landing.education_progress_local",
+        "landing.education_in_progress_label",
+        "landing.education_sync_hint",
+        "landing.education_sign_in_to_sync",
+        "landing.education_sync_now",
+        "landing.education_loading",
+        "landing.education_pdf_hint",
+        "landing.education_open_pdf",
+        "landing.education_mark_reviewed",
+        "landing.education_decks_label",
+        "landing.education_cards",
+        "landing.education_continue_deck",
+        "landing.education_view_deck",
+        "landing.education_select_deck",
+        "landing.education_front_label",
+        "landing.education_back_label",
+        "landing.education_tap_to_flip",
+        "landing.education_previous",
+        "landing.education_next",
+        "landing.education_finish_deck",
+        "landing.education_sections_label",
+        "landing.education_questions",
+        "landing.education_continue_quiz",
+        "landing.education_start_quiz",
+        "landing.education_select_quiz",
+        "landing.education_answered_label",
+        "landing.education_score",
+        "landing.education_question_label",
+        "landing.education_explain",
+        "landing.education_hide_explanation",
+        "landing.education_explanation_title",
+        "landing.education_preparing_explanation",
+        "landing.education_thats_right",
+        "landing.education_right_answer",
+        "landing.education_not_quite",
+        "landing.education_correct_answer",
+        "landing.education_review_answer",
+        "landing.education_finish_quiz",
+        "landing.education_status_not_started",
+        "landing.education_status_in_progress",
+        "landing.education_status_completed",
+        "landing.education_no_flashcards",
+        "landing.education_no_quiz",
+        "landing.education_progress_local_only",
+        "landing.education_load_failed",
+        "landing.education_tester_tools",
+        "landing.education_tester_category",
+        "landing.education_tester_edit_explanation",
+        "landing.education_tester_explanation_label",
+        "landing.education_tester_summary_label",
+        "landing.education_tester_save",
+        "landing.education_tester_cancel",
+        "landing.education_tester_delete",
+        "landing.education_tester_delete_confirm",
+        "landing.education_tester_save_failed",
     ]
 
     for locale in ("en", "tr", "ar"):
@@ -150,6 +231,12 @@ def test_billing_locale_files_localize_paid_plan_names_for_turkish_and_arabic():
     assert _nested_get(_read_locale("ar"), "pricing.starter_name") == "أساسي"
     assert _nested_get(_read_locale("ar"), "pricing.professional_name") == "احترافي"
     assert _nested_get(_read_locale("ar"), "pricing.enterprise_name") == "مؤسسات"
+
+
+def test_landing_education_nav_label_is_localized_for_supported_languages():
+    assert _nested_get(_read_locale("en"), "landing.nav_education") == "Education"
+    assert _nested_get(_read_locale("tr"), "landing.nav_education") == "Eğitim"
+    assert _nested_get(_read_locale("ar"), "landing.nav_education") == "التعليم"
 
 
 def test_pricing_feature_page_omits_plan_micro_badges():
@@ -174,15 +261,33 @@ def test_pricing_annual_bill_strings_stay_readable_in_turkish_and_arabic():
     assert _nested_get(_read_locale("ar"), "pricing.billed_annually") == "الفاتورة السنوية: {total}"
 
 
-def test_i18n_loader_bypasses_stale_locale_cache():
+def test_i18n_loader_uses_versioned_locale_bundle_cache():
     script = (STATIC / "js" / "utils" / "i18n.js").read_text(encoding="utf-8")
-    assert "cache: 'no-store'" in script
+    assert "window.AppI18n._localeBundleCachePrefix" in script
+    assert "window.AppI18n._getLocaleCacheKey" in script
+    assert "window.AppI18n._hydrateLocaleFromCache(window.AppI18n._locale, false);" in script
+    assert "window.AppI18n._writeCachedLocaleData(locale, data);" in script
+    assert "cache: 'no-store'" not in script
     assert "window.AppI18n._localeAssetVersion" in script
+    assert "window.AppI18n.setLocale(window.AppI18n._locale, { skipCacheHydrate: true });" in script
+
+
+def test_i18n_feature_pages_load_current_bundle_version():
+    expected_script = '<script src="/static/js/utils/i18n.js?v=38"></script>'
+    for relative_path in (
+        TEMPLATES / "marketing" / "landing.html",
+        TEMPLATES / "dashboard" / "page.html",
+        TEMPLATES / "billing" / "pricing.html",
+        TEMPLATES / "billing" / "checkout.html",
+    ):
+        html = relative_path.read_text(encoding="utf-8")
+        assert expected_script in html
 
 
 def test_dashboard_feature_page_loads_canonical_dashboard_script_url():
     html = (TEMPLATES / "dashboard" / "page.html").read_text(encoding="utf-8")
     modals_html = (TEMPLATES / "dashboard" / "partials" / "_modals.html").read_text(encoding="utf-8")
+    watchlist_panel_html = (TEMPLATES / "dashboard" / "partials" / "_watchlist_panel.html").read_text(encoding="utf-8")
     assert "{% include 'dashboard/partials/_navbar.html' %}" in html
     assert "window.SERVER_PLANS = {{ plans | default({}, true) | tojson }};" in html
     assert "{% include 'shared/_upgrade_modal.html' %}" in modals_html
@@ -190,8 +295,12 @@ def test_dashboard_feature_page_loads_canonical_dashboard_script_url():
     assert 'id="bulk-upgrade-offer"' in modals_html
     assert "watchlist.bulk_upgrade_title" in modals_html
     assert "required_feature_value = requiredCapacity" in modals_html
-    assert '<script src="/static/js/utils/upgrade-modal.js?v=3"></script>' in html
-    assert '<script src="/static/js/dashboard/app.js?v=57"></script>' in html
+    assert '<script src="/static/js/utils/upgrade-modal.js?v=4"></script>' in html
+    assert '<script src="/static/js/dashboard/app.js?v=59"></script>' in html
+    assert 'id="watchlist-upload-modal-card"' in watchlist_panel_html
+    assert 'id="upload-wl-upgrade-offer"' in watchlist_panel_html
+    assert "watchlist.upload_upgrade_title" in watchlist_panel_html
+    assert 'onclick="showBulkUploadStepOne()"' in watchlist_panel_html
 
 
 def test_dashboard_feature_bundle_contains_dashboard_bootstrap():
@@ -204,18 +313,57 @@ def test_dashboard_feature_bundle_contains_dashboard_bootstrap():
     assert "this.t('search.rate_limited')" in script
     assert "this.t('watchlist.added_toast')" in script
     assert "this.t('watchlist.added_success')" not in script
+    assert "renderUploadUpgradeOffer(totalRows)" in script
+    assert "showBulkUploadStepOne()" in script
+    assert "isUploadLimitOnlyResult(data)" in script
+    assert "'watchlist.upload_limit_result'" in script
 
 
 def test_landing_feature_page_loads_canonical_landing_script_url():
     html = (TEMPLATES / "marketing" / "landing.html").read_text(encoding="utf-8")
     assert "window.SERVER_PLANS = {{ plans | default({}, true) | tojson }};" in html
     assert "{% include 'shared/_upgrade_modal.html' %}" in html
-    assert '<script src="/static/js/utils/upgrade-modal.js?v=3"></script>' in html
-    assert '<script src="/static/js/marketing/landing.js?v=36"></script>' in html
+    assert '<script src="/static/js/utils/i18n.js?v=38"></script>' in html
+    assert '<script src="/static/js/utils/upgrade-modal.js?v=4"></script>' in html
+    assert '<script src="/static/js/marketing/landing.js?v=50"></script>' in html
     assert 'x-text="t(\'landing.nav_pricing\')"' in html
+    assert 'x-text="t(\'landing.nav_education\')"' in html
+    assert "activeTab === 'education'" in html
+    assert 'x-text="t(\'landing.education_categories\')"' in html
+    assert 'x-text="t(\'landing.education_active_category\')"' in html
+    assert "education-theme-shell" in html
+    assert "education-theme-panel" in html
+    assert "education-theme-chip-active" in html
+    assert 'id="education-progress-overview"' in html
+    assert 'id="education-mobile-workspace-nav"' in html
+    assert 'id="education-flashcards-panel"' in html
+    assert 'id="education-quiz-panel"' in html
+    assert 'id="education-pdf-library-panel"' in html
+    assert 'data-testid="education-mobile-quick-quiz"' in html
+    assert 'data-testid="education-mobile-nav-quiz"' in html
+    assert 'data-testid="education-quiz-explain-button"' in html
+    assert 'data-testid="education-quiz-explanation-loading"' in html
+    assert 'data-testid="education-quiz-explanation-panel"' in html
+    assert 'data-testid="education-flashcard-tester-tools"' in html
+    assert 'data-testid="education-flashcard-category-select"' in html
+    assert 'data-testid="education-flashcard-delete-button"' in html
+    assert 'data-testid="education-quiz-tester-tools"' in html
+    assert 'data-testid="education-quiz-category-select"' in html
+    assert 'data-testid="education-quiz-edit-explanation-button"' in html
+    assert 'data-testid="education-quiz-explanation-editor"' in html
+    assert 'data-testid="education-quiz-explanation-input"' in html
+    assert 'data-testid="education-quiz-summary-input"' in html
+    assert 'data-testid="education-quiz-explanation-save-button"' in html
+    assert 'data-testid="education-quiz-explanation-cancel-button"' in html
+    assert 'data-testid="education-quiz-delete-button"' in html
     assert 'href="/checkout?plan=enterprise&billing=monthly"' in html
     assert 'x-text="t(\'landing.cta_start\')"' in html
     assert 'x-text="t(\'landing.cta_contact\')"' not in html
+    assert "pricing.includes_free" not in html
+    assert "pricing.includes_starter" not in html
+    assert "pricing.includes_professional" not in html
+    assert "hover:-translate-y-2" in html
+    assert "hover:shadow-2xl" in html
     assert 'class="block w-full py-2.5 rounded-lg text-sm font-medium text-white text-center no-underline" style="background:var(--color-primary)" x-text="t(\'landing.cta_start\')"' in html
 
 
@@ -224,6 +372,38 @@ def test_landing_feature_bundle_contains_landing_bootstrap():
     assert "function landing()" in script
     assert "window.AppUpgradeModal.maybeHandle(detail, 'public_search')" in script
     assert "self.t('search.rate_limited')" in script
+    assert "loadEducationCatalog" in script
+    assert "syncEducationProgress" in script
+    assert "getEducationCategoryProgress" in script
+    assert "setEducationCategory" in script
+    assert "setEducationMobileSection" in script
+    assert "openEducationMobileSection" in script
+    assert "isEducationMobileSectionActive" in script
+    assert "loadEducationMobileSectionPreferences" in script
+    assert "saveEducationMobileSectionPreferences" in script
+    assert "scrollEducationSection" in script
+    assert "getEducationQuickActionLabel" in script
+    assert "getEducationCategoryTheme" in script
+    assert "getEducationCategoryThemeVars" in script
+    assert "normalizeCategoryId" in script
+    assert "shouldShowEducationQuizExplainButton" in script
+    assert "toggleEducationQuizExplanation" in script
+    assert "educationQuizExplanationLoading" in script
+    assert "resetEducationQuizExplanationState" in script
+    assert "clearEducationQuizExplanationTimer" in script
+    assert "loadEducationTesterContext" in script
+    assert "educationCanModerate" in script
+    assert "normalizeEducationQuizAnswers" in script
+    assert "applyEducationModeration" in script
+    assert "refreshEducationAfterModeration" in script
+    assert "deleteEducationFlashcard" in script
+    assert "setEducationFlashcardTesterCategory" in script
+    assert "openEducationQuizExplanationEditor" in script
+    assert "saveEducationQuizExplanationEdit" in script
+    assert "resetEducationQuizExplanationEditorState" in script
+    assert "isEducationQuizExplanationEditorOpen" in script
+    assert "deleteEducationQuizQuestion" in script
+    assert "setEducationQuizTesterCategory" in script
 
 
 def test_shared_upgrade_modal_bundle_keeps_plan_handoff_logic():
@@ -235,10 +415,16 @@ def test_shared_upgrade_modal_bundle_keeps_plan_handoff_logic():
     assert "allowedPlans: ['enterprise']" in script
     assert "public_search: { feature: 'max_daily_quick_searches', kind: 'numeric' }" in script
     assert "leads: { feature: 'daily_lead_views', kind: 'numeric' }" in script
+    assert "function copyForContext(context)" in script
+    assert "upgrade.search_limit_title" in script
+    assert "upgrade.watchlist_title" in script
+    assert "upgrade.live_search_title" in script
+    assert "upgrade.leads_title" in script
     assert "Object.assign({}, FALLBACK_PLANS[planName] || {}, sourcePlan || {})" in script
     assert "FALLBACK_PLANS[planName] || FALLBACK_PLANS.free" in script
     assert "required_feature_value != null" in script
     assert "toNumber(candidateValue) >= requiredValue" in script
     assert "monthly_limit_exceeded" in script
+    assert 'id="upgrade-modal-eyebrow"' in template
     assert 'id="upgrade-plan-code"' in template
     assert 'id="upgrade-feature-list"' in template

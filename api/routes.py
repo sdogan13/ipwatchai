@@ -119,3 +119,4 @@ from api.watchlist_routes import (
 # NOTE: Admin routes -> api/admin_routes.py
 # NOTE: Trademark routes -> api/trademark_routes.py
 # NOTE: Usage routes -> api/usage_routes.py
+from api.education_routes import education_router

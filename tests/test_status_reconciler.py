@@ -1,7 +1,12 @@
 """Tests for utils/status_reconciler.py — final_status reconciliation logic."""
 import pytest
 from datetime import date
-from utils.status_reconciler import reconcile_status, compute_ingest_status_date
+import utils.status_reconciler as status_reconciler
+from utils.status_reconciler import (
+    compute_ingest_status_date,
+    reconcile_status,
+    repair_final_statuses,
+)
 
 
 class TestReconcileStatus:
@@ -112,3 +117,44 @@ class TestComputeIngestStatusDate:
     def test_all_none(self):
         result = compute_ingest_status_date(None, None, None, None)
         assert result is None
+
+
+class TestRepairFinalStatuses:
+    def test_repairs_in_chunked_scoped_batches(self, monkeypatch):
+        seen_batches = []
+
+        monkeypatch.setattr(
+            status_reconciler,
+            "iter_application_no_batches",
+            lambda conn, batch_size: iter([["2024/001", "2024/002"], ["2024/003"]]),
+        )
+
+        def fake_update(conn, app_nos=None):
+            seen_batches.append(list(app_nos or []))
+            return len(app_nos or [])
+
+        monkeypatch.setattr(status_reconciler, "update_final_status_batch", fake_update)
+
+        stats = repair_final_statuses(object(), batch_size=2)
+
+        assert seen_batches == [["2024/001", "2024/002"], ["2024/003"]]
+        assert stats == {
+            "batches": 2,
+            "processed": 3,
+            "updated": 3,
+        }
+
+    def test_empty_repair_run_returns_zeroes(self, monkeypatch):
+        monkeypatch.setattr(
+            status_reconciler,
+            "iter_application_no_batches",
+            lambda conn, batch_size: iter([]),
+        )
+
+        stats = repair_final_statuses(object(), batch_size=5)
+
+        assert stats == {
+            "batches": 0,
+            "processed": 0,
+            "updated": 0,
+        }

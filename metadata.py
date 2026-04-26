@@ -40,7 +40,10 @@ except Exception:
     CANARY_FAILURE_THRESHOLD = 0.05
 
 OUTPUT_NAME = "metadata.json"
+SCRAPED_OUTPUT_NAME = "scraped_metadata.json"
 DEBUG_LIMIT = 0                  # Set to > 0 (e.g. 1000) to test on small data chunks
+_SCRAPED_MOJIBAKE_TOKENS = ("Ã", "Ä", "Å", "\ufffd")
+_SCRAPED_EMBEDDED_QUESTION_MARK_RE = re.compile(r"(?<=\w)\?(?=\w)")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -104,6 +107,51 @@ def clean_appno(s: str) -> str:
     """Standardizes Application Number for use as a dictionary key."""
     s = clean_text(s)
     return re.sub(r"\s+", "", s)
+
+
+def is_meaningful_scraped_value(value) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value.strip().lower() not in {"", "null", "none", "n/a"}
+    if isinstance(value, (list, tuple, set, dict)):
+        return bool(value)
+    return True
+
+
+def should_apply_scraped_text_override(
+    canonical_value,
+    scraped_value,
+    *,
+    reject_any_question_mark: bool = False,
+) -> bool:
+    if not is_meaningful_scraped_value(scraped_value):
+        return False
+    if canonical_value == scraped_value:
+        return False
+
+    canonical_text = str(canonical_value or "")
+    scraped_text = str(scraped_value or "")
+    if not canonical_text:
+        return True
+
+    if any(token in scraped_text for token in _SCRAPED_MOJIBAKE_TOKENS) and not any(
+        token in canonical_text for token in _SCRAPED_MOJIBAKE_TOKENS
+    ):
+        return False
+
+    if reject_any_question_mark:
+        if "?" in scraped_text and "?" not in canonical_text:
+            return False
+        return True
+
+    if (
+        _SCRAPED_EMBEDDED_QUESTION_MARK_RE.search(scraped_text)
+        and not _SCRAPED_EMBEDDED_QUESTION_MARK_RE.search(canonical_text)
+    ):
+        return False
+
+    return True
 
 def parse_sql_values(values_block: str) -> list[str]:
     """Robustly parses SQL value list, handling commas inside quoted strings."""
@@ -426,6 +474,7 @@ def process_single_folder(folder_path: Path, skip_existing: bool = True) -> dict
     Args:
         folder_path: Path to the folder containing HSQLDB files
         skip_existing: If True, skip folders that already have metadata.json
+                       only when no archive DB/text source files are present
 
     Returns:
         dict with keys: 'status', 'records', 'error'
@@ -442,12 +491,18 @@ def process_single_folder(folder_path: Path, skip_existing: bool = True) -> dict
 
     out_path = folder_path / OUTPUT_NAME
 
-    # Check skip BEFORE expensive find_db_files (rglob is slow on large folders)
-    if skip_existing and out_path.exists():
-        result["status"] = "skipped"
-        return result
+    db_files = None
 
-    db_files = find_db_files(folder_path)
+    # Prefer archive DB/text data over an existing metadata.json. This lets
+    # Step 3 overwrite PDF-derived metadata when both sources are present.
+    if skip_existing and out_path.exists():
+        db_files = find_db_files(folder_path)
+        if not db_files:
+            result["status"] = "skipped"
+            return result
+
+    if db_files is None:
+        db_files = find_db_files(folder_path)
 
     if not db_files:
         result["status"] = "no_db_files"
@@ -484,6 +539,141 @@ def process_single_folder(folder_path: Path, skip_existing: bool = True) -> dict
         result["status"] = "error"
         result["error"] = str(e)
         return result
+
+
+def merge_scraped_record_into_canonical(canonical: dict, scraped: dict) -> bool:
+    changed = False
+
+    for field in ("STATUS", "IMAGE"):
+        scraped_value = scraped.get(field)
+        if is_meaningful_scraped_value(scraped_value) and canonical.get(field) != scraped_value:
+            canonical[field] = scraped_value
+            changed = True
+
+    canonical_tm = canonical.setdefault("TRADEMARK", {})
+    scraped_tm = scraped.get("TRADEMARK") or {}
+    for field in ("APPLICATIONDATE", "REGISTERNO", "NAME"):
+        scraped_value = scraped_tm.get(field)
+        if field == "NAME":
+            should_apply = should_apply_scraped_text_override(
+                canonical_tm.get(field),
+                scraped_value,
+            )
+        else:
+            should_apply = is_meaningful_scraped_value(scraped_value) and canonical_tm.get(field) != scraped_value
+        if should_apply:
+            canonical_tm[field] = scraped_value
+            changed = True
+
+    canonical_holders = canonical.get("HOLDERS") or []
+    scraped_holders = scraped.get("HOLDERS") or []
+    for idx, scraped_holder in enumerate(scraped_holders):
+        if idx >= len(canonical_holders):
+            continue
+        title = (scraped_holder or {}).get("TITLE")
+        if should_apply_scraped_text_override(
+            canonical_holders[idx].get("TITLE"),
+            title,
+            reject_any_question_mark=True,
+        ):
+            canonical_holders[idx]["TITLE"] = title
+            changed = True
+
+    return changed
+
+
+def merge_scraped_records(canonical_records: list[dict], scraped_records: list[dict]) -> dict:
+    scraped_by_appno = {}
+    unmatched = 0
+    changed_records = 0
+
+    for rec in scraped_records:
+        appno = clean_appno(rec.get("APPLICATIONNO", ""))
+        if appno:
+            scraped_by_appno[appno] = rec
+
+    for rec in canonical_records:
+        appno = clean_appno(rec.get("APPLICATIONNO", ""))
+        if not appno:
+            continue
+        scraped_rec = scraped_by_appno.pop(appno, None)
+        if scraped_rec and merge_scraped_record_into_canonical(rec, scraped_rec):
+            changed_records += 1
+
+    unmatched = len(scraped_by_appno)
+    return {
+        "records": canonical_records,
+        "changed_records": changed_records,
+        "unmatched": unmatched,
+    }
+
+
+def merge_scraped_sidecars(root_dir: Path = None, *, target_folder: str | None = None, verbose: bool = True) -> dict:
+    root_dir = root_dir or ROOT
+    stats = {
+        "folders_merged": 0,
+        "records_merged": 0,
+        "pending": 0,
+        "skipped": 0,
+        "failed": 0,
+        "unmatched": 0,
+        "errors": [],
+    }
+
+    if target_folder:
+        folders = [root_dir / target_folder]
+    else:
+        folders = sorted([p for p in root_dir.iterdir() if p.is_dir()], key=get_folder_number)
+
+    for folder in folders:
+        if not folder.exists() or not folder.is_dir():
+            continue
+
+        metadata_path = folder / OUTPUT_NAME
+        scraped_path = folder / SCRAPED_OUTPUT_NAME
+
+        if not scraped_path.exists():
+            continue
+        if not metadata_path.exists():
+            stats["pending"] += 1
+            if verbose:
+                logger.info("[SCRAPE MERGE] %s pending canonical metadata", folder.name)
+            continue
+
+        try:
+            with open(metadata_path, "r", encoding="utf-8") as handle:
+                canonical_records = json.load(handle)
+            with open(scraped_path, "r", encoding="utf-8") as handle:
+                scraped_records = json.load(handle)
+
+            if not isinstance(canonical_records, list) or not isinstance(scraped_records, list):
+                raise ValueError("metadata roots must be JSON arrays")
+
+            merge_result = merge_scraped_records(canonical_records, scraped_records)
+            stats["records_merged"] += merge_result["changed_records"]
+            stats["unmatched"] += merge_result["unmatched"]
+
+            if merge_result["changed_records"] > 0:
+                with open(metadata_path, "w", encoding="utf-8") as handle:
+                    json.dump(merge_result["records"], handle, ensure_ascii=False, indent=2)
+                stats["folders_merged"] += 1
+                if verbose:
+                    logger.info(
+                        "[SCRAPE MERGE] %s merged %d record(s)",
+                        folder.name,
+                        merge_result["changed_records"],
+                    )
+            else:
+                stats["skipped"] += 1
+                if verbose:
+                    logger.info("[SCRAPE MERGE] %s had no applicable scrape overlays", folder.name)
+        except Exception as exc:
+            stats["failed"] += 1
+            stats["errors"].append({"folder": folder.name, "error": str(exc)})
+            if verbose:
+                logger.error("[SCRAPE MERGE] %s failed: %s", folder.name, exc)
+
+    return stats
 
 
 def run_metadata_extraction(

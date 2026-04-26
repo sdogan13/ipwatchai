@@ -153,6 +153,9 @@ services:
       - ./database:/app/database:ro
       - ./auth:/app/auth:ro
       - ./config:/app/config:ro
+      - ./education:/app/education:ro
+      - ./education/moderation_overrides.json:/app/education/moderation_overrides.json
+      - ./migrations:/app/migrations:ro
       - ./utils:/app/utils:ro
       - ./services:/app/services:ro
       - ./reports:/app/reports:ro

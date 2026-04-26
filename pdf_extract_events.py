@@ -8,16 +8,38 @@ Parses supplementary sections from trademark bulletin PDFs:
 Usage:
     python pdf_extract_events.py --pdf bulletins/Marka/GZ_499_2026-01-30/bulletin.pdf --source GZ
     python pdf_extract_events.py --pdf bulletins/Marka/BLT_488_2026-03-12/bulletin.pdf --source BLT
+    python pdf_extract_events.py --root-dir bulletins/Marka --force
 """
 
 import json
 import logging
+import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
+import time
+import zipfile
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+_LOCAL_PROJECT_ROOT = Path(__file__).resolve().parent
+_LOCAL_DEFAULT_BULLETINS_ROOT = _LOCAL_PROJECT_ROOT / "bulletins" / "Marka"
+ISSUE_FOLDER_RE = re.compile(r"^(?:GZ|BLT)_(\d+)(?:_(\d{4}-\d{2}-\d{2}))?$", re.IGNORECASE)
+
+
+def _resolve_local_events_root(value: str | None, default: Path) -> Path:
+    if not value:
+        return default.resolve()
+
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = _LOCAL_PROJECT_ROOT / path
+    return path.resolve()
 
 # ---------------------------------------------------------------------------
 # Lazy import for PyMuPDF
@@ -307,8 +329,11 @@ def _pages_to_text(pages: List[Tuple[int, str]]) -> str:
     return "\n".join(parts)
 
 
-def _get_page_for_position(text: str, pos: int) -> int:
+def _get_page_for_position(text: str, pos: int, default_page_no: int = 0) -> int:
     """Given a position in the joined text, find the page number."""
+    if pos < 0:
+        return default_page_no
+
     # Find the last <<PAGE:N>> marker before (or at) this position
     last_page = 0
     for m in re.finditer(r"<<PAGE:(\d+)>>", text):
@@ -318,10 +343,124 @@ def _get_page_for_position(text: str, pos: int) -> int:
             break
     # If no marker found before pos, search entire text for the first marker
     if last_page == 0:
-        m = re.search(r"<<PAGE:(\d+)>>", text)
-        if m:
-            last_page = int(m.group(1))
+        if default_page_no:
+            last_page = default_page_no
+        else:
+            m = re.search(r"<<PAGE:(\d+)>>", text)
+            if m:
+                last_page = int(m.group(1))
     return last_page
+
+
+def _iter_page_aware_lines(text: str, default_page_no: int = 0) -> List[Tuple[int, str]]:
+    """Split joined page text into (page_number, line) tuples."""
+    lines: List[Tuple[int, str]] = []
+    current_page = default_page_no
+    cursor = 0
+
+    for marker in re.finditer(r"<<PAGE:(\d+)>>", text):
+        segment = text[cursor:marker.start()]
+        for raw_line in segment.split("\n"):
+            lines.append((current_page, raw_line))
+        current_page = int(marker.group(1))
+        cursor = marker.end()
+
+    tail = text[cursor:]
+    for raw_line in tail.split("\n"):
+        lines.append((current_page, raw_line))
+
+    return lines
+
+
+def _get_seven_zip_executable() -> Optional[str]:
+    """Resolve a usable 7-Zip executable for archive-wrapped bulletin payloads."""
+    candidates: List[Optional[str]] = []
+
+    try:
+        from config.settings import DEFAULT_SEVEN_ZIP_PATH
+
+        candidates.append(DEFAULT_SEVEN_ZIP_PATH)
+    except Exception:
+        pass
+
+    candidates.extend(
+        [
+            shutil.which("7zz"),
+            shutil.which("7z"),
+            r"C:\Program Files\7-Zip\7z.exe",
+        ]
+    )
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = Path(candidate)
+        if path.exists():
+            return str(path)
+        resolved = shutil.which(str(candidate))
+        if resolved:
+            return resolved
+
+    return None
+
+
+def _sniff_bulletin_file_type(path: Path) -> str:
+    try:
+        with open(path, "rb") as fh:
+            header = fh.read(8)
+    except OSError:
+        return "missing"
+
+    if header.startswith(b"%PDF"):
+        return "pdf"
+    if header.startswith(b"PK\x03\x04"):
+        return "zip"
+    if header.startswith(b"Rar!"):
+        return "rar"
+    return "unknown"
+
+
+@contextmanager
+def _materialize_pdf_source(pdf_path: Path):
+    """Yield a readable PDF path, unwrapping archive-wrapped payloads when needed."""
+    file_type = _sniff_bulletin_file_type(pdf_path)
+    if file_type == "pdf":
+        yield pdf_path
+        return
+
+    with tempfile.TemporaryDirectory(prefix="pdf_extract_events_") as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        extracted_pdf: Optional[Path] = None
+
+        if file_type == "zip":
+            with zipfile.ZipFile(pdf_path) as archive:
+                members = [name for name in archive.namelist() if name.lower().endswith(".pdf")]
+                if not members:
+                    raise RuntimeError(f"Archive does not contain a PDF: {pdf_path}")
+                member = members[0]
+                archive.extract(member, path=tmpdir_path)
+                extracted_pdf = tmpdir_path / member
+        elif file_type == "rar":
+            seven_zip = _get_seven_zip_executable()
+            if not seven_zip:
+                raise RuntimeError(f"Cannot extract archive-wrapped PDF without 7-Zip: {pdf_path}")
+
+            command = [seven_zip, "e", "-y", str(pdf_path), "*.pdf", f"-o{tmpdir_path}"]
+            completed = subprocess.run(command, capture_output=True, text=True, check=False)
+            if completed.returncode != 0:
+                stderr = (completed.stderr or completed.stdout or "").strip()
+                raise RuntimeError(f"7-Zip failed extracting {pdf_path}: {stderr}")
+            pdf_members = sorted(tmpdir_path.rglob("*.pdf"), key=lambda p: p.stat().st_size, reverse=True)
+            if pdf_members:
+                extracted_pdf = pdf_members[0]
+        else:
+            raise RuntimeError(f"Cannot open PDF: Unsupported file header for '{pdf_path}'.")
+
+        if extracted_pdf is None or not extracted_pdf.exists():
+            raise RuntimeError(f"Cannot open PDF: Archive payload does not contain a PDF for '{pdf_path}'.")
+
+        logger.warning("Using extracted embedded PDF for %s", pdf_path)
+        yield extracted_pdf
 
 
 # ---------------------------------------------------------------------------
@@ -395,7 +534,7 @@ def _clean_raw_text(text: str, limit: int = 2000) -> str:
 # ---------------------------------------------------------------------------
 # Record-level splitting — split section text into per-trademark blocks
 # ---------------------------------------------------------------------------
-def _split_210_blocks(text: str) -> List[Tuple[str, int]]:
+def _split_210_blocks(text: str, default_page_no: int = 0) -> List[Tuple[str, int]]:
     """Split text into blocks starting with (210), return [(block_text, page_no), ...]."""
     # Find all (210) positions
     markers = list(re.finditer(r"\(210\)", text))
@@ -407,7 +546,7 @@ def _split_210_blocks(text: str) -> List[Tuple[str, int]]:
         start = m.start()
         end = markers[i + 1].start() if i + 1 < len(markers) else len(text)
         block = text[start:end].strip()
-        page_no = _get_page_for_position(text, start)
+        page_no = _get_page_for_position(text, start, default_page_no=default_page_no)
         blocks.append((block, page_no))
 
     return blocks
@@ -507,14 +646,19 @@ def _extract_transfer_parties(block: str) -> Tuple[Optional[str], Optional[str]]
 # Parser functions — one per format type
 # ---------------------------------------------------------------------------
 def parse_transfer_records(
-    text: str, event_type: str, source_type: str, bulletin_no: str, bulletin_date: str,
+    text: str,
+    event_type: str,
+    source_type: str,
+    bulletin_no: str,
+    bulletin_date: str,
+    default_page_no: int = 0,
 ) -> List[Dict[str, Any]]:
     """Parse Format A — transfers/mergers with Devreden/Devralan fields.
 
     Used for: BİRLEŞME, DEVİR, KISMİ DEVİR (GZ only)
     """
     events = []
-    blocks = _split_210_blocks(text)
+    blocks = _split_210_blocks(text, default_page_no=default_page_no)
 
     for block, page_no in blocks:
         app_no = _extract_app_no(block)
@@ -558,14 +702,19 @@ def parse_transfer_records(
 
 
 def parse_court_records(
-    text: str, event_type: str, source_type: str, bulletin_no: str, bulletin_date: str,
+    text: str,
+    event_type: str,
+    source_type: str,
+    bulletin_no: str,
+    bulletin_date: str,
+    default_page_no: int = 0,
 ) -> List[Dict[str, Any]]:
     """Parse Format B — records with court/case info (Esas No).
 
     Used for: HACİZ, TEDBİR, İHTİYATİ HACİZ, İHTİYATİ TEDBİR, LİSANS, İPTAL, etc.
     """
     events = []
-    blocks = _split_210_blocks(text)
+    blocks = _split_210_blocks(text, default_page_no=default_page_no)
 
     for block, page_no in blocks:
         app_no = _extract_app_no(block)
@@ -598,14 +747,19 @@ def parse_court_records(
 
 
 def parse_simple_records(
-    text: str, event_type: str, source_type: str, bulletin_no: str, bulletin_date: str,
+    text: str,
+    event_type: str,
+    source_type: str,
+    bulletin_no: str,
+    bulletin_date: str,
+    default_page_no: int = 0,
 ) -> List[Dict[str, Any]]:
     """Parse Format C — minimal (210)+(566) records.
 
     Used for: BOLUNMELER, MAL HİZMET SINIRLANDIRMA, İŞLEMDEN ÇEKİLEN, İFLAS, etc.
     """
     events = []
-    blocks = _split_210_blocks(text)
+    blocks = _split_210_blocks(text, default_page_no=default_page_no)
 
     for block, page_no in blocks:
         app_no = _extract_app_no(block)
@@ -641,7 +795,11 @@ def parse_simple_records(
 
 
 def parse_correction_prose(
-    text: str, source_type: str, bulletin_no: str, bulletin_date: str,
+    text: str,
+    source_type: str,
+    bulletin_no: str,
+    bulletin_date: str,
+    default_page_no: int = 0,
 ) -> List[Dict[str, Any]]:
     """Parse Format D — free-text correction paragraphs.
 
@@ -662,7 +820,7 @@ def parse_correction_prose(
 
         # Try to extract application number(s)
         app_nos = APP_NO_RE.findall(clean)
-        page_no = _get_page_for_position(text, text.find(para[:50]))
+        page_no = _get_page_for_position(text, text.find(para[:50]), default_page_no=default_page_no)
 
         if app_nos:
             # One event per mentioned app_no
@@ -702,7 +860,11 @@ def parse_correction_prose(
 
 
 def parse_madrid_records(
-    text: str, source_type: str, bulletin_no: str, bulletin_date: str,
+    text: str,
+    source_type: str,
+    bulletin_no: str,
+    bulletin_date: str,
+    default_page_no: int = 0,
 ) -> List[Dict[str, Any]]:
     """Parse Format E — English WIPO Madrid notifications (BLT only).
 
@@ -719,7 +881,7 @@ def parse_madrid_records(
             continue
 
         clean = re.sub(r"<<PAGE:\d+>>", "", block).strip()
-        page_no = _get_page_for_position(text, text.find(block[:50]))
+        page_no = _get_page_for_position(text, text.find(block[:50]), default_page_no=default_page_no)
 
         # Extract notification code (e.g. LIN/2025/45)
         notif_match = re.search(r"NOTIFICATION\s+(\w+/\d{4}/\d+)", clean)
@@ -770,7 +932,11 @@ def parse_madrid_records(
 
 
 def parse_renewal_list(
-    text: str, source_type: str, bulletin_no: str, bulletin_date: str,
+    text: str,
+    source_type: str,
+    bulletin_no: str,
+    bulletin_date: str,
+    default_page_no: int = 0,
 ) -> List[Dict[str, Any]]:
     """Parse Format F — GZ section 5 renewal list.
 
@@ -778,18 +944,20 @@ def parse_renewal_list(
     """
     events = []
 
-    # Remove page markers
-    clean = re.sub(r"<<PAGE:\d+>>", "\n", text)
-    # Remove the header line
-    clean = re.sub(r"Yenilenen Markalar Listesi", "", clean)
-
     # Pattern: registration number (like "2005 42226" or "84963"),
     # then date (like "30/09/2015"), then name
-    lines = [l.strip() for l in clean.split("\n") if l.strip()]
+    lines = []
+    for page_no, raw_line in _iter_page_aware_lines(text, default_page_no=default_page_no):
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line == "Yenilenen Markalar Listesi":
+            continue
+        lines.append((page_no, line))
 
     i = 0
     while i < len(lines):
-        line = lines[i]
+        page_no, line = lines[i]
         # Try to match as a registration number (digits and spaces)
         if re.match(r"^[\d\s]+$", line) and len(line) >= 4:
             reg_no = line.strip()
@@ -798,12 +966,13 @@ def parse_renewal_list(
 
             # Next line should be a date
             if i + 1 < len(lines):
-                date_match = re.match(r"(\d{2}/\d{2}/\d{4})", lines[i + 1])
+                _, date_line = lines[i + 1]
+                date_match = re.match(r"(\d{2}/\d{2}/\d{4})", date_line)
                 if date_match:
                     renewal_date = date_match.group(1)
                     # Next line should be the name
                     if i + 2 < len(lines):
-                        tm_name = lines[i + 2]
+                        _, tm_name = lines[i + 2]
                         i += 3
                     else:
                         i += 2
@@ -822,7 +991,7 @@ def parse_renewal_list(
                 "source_type": source_type,
                 "bulletin_no": bulletin_no,
                 "bulletin_date": bulletin_date,
-                "page_number": 0,
+                "page_number": page_no,
                 "old_value": None,
                 "new_value": renewal_date,
                 "details": {
@@ -838,7 +1007,11 @@ def parse_renewal_list(
 
 
 def parse_bare_app_number_list(
-    text: str, source_type: str, bulletin_no: str, bulletin_date: str,
+    text: str,
+    source_type: str,
+    bulletin_no: str,
+    bulletin_date: str,
+    default_page_no: int = 0,
 ) -> List[Dict[str, Any]]:
     """Parse pages of bare application numbers (no sub-section headers, no (210) prefix).
 
@@ -846,12 +1019,8 @@ def parse_bare_app_number_list(
     list of YYYY/NNNNN numbers — these are withdrawal entries without explicit headers.
     """
     events = []
-    # Remove page markers and noise
-    clean = re.sub(r"<<PAGE:\d+>>", "\n", text)
-    clean = PAGE_NOISE_RE.sub("", clean)
-
-    for line in clean.split("\n"):
-        line = line.strip()
+    for page_no, raw_line in _iter_page_aware_lines(text, default_page_no=default_page_no):
+        line = PAGE_NOISE_RE.sub("", raw_line).strip()
         if not line:
             continue
         # Match bare app numbers: YYYY/NNNNN (5-6 digits)
@@ -865,7 +1034,7 @@ def parse_bare_app_number_list(
                 "source_type": source_type,
                 "bulletin_no": bulletin_no,
                 "bulletin_date": bulletin_date,
-                "page_number": 0,
+                "page_number": page_no,
                 "old_value": None,
                 "new_value": None,
                 "details": {},
@@ -914,9 +1083,12 @@ def extract_events_from_pdf(
     if fitz is None:
         return {"status": "failed", "error": "PyMuPDF not installed"}
 
+    stack = ExitStack()
     try:
-        doc = fitz.open(str(pdf_path))
+        readable_pdf_path = stack.enter_context(_materialize_pdf_source(pdf_path))
+        doc = fitz.open(str(readable_pdf_path))
     except Exception as e:
+        stack.close()
         return {"status": "failed", "error": f"Cannot open PDF: {e}"}
 
     logger.info(f"Opened {pdf_path.name} ({doc.page_count} pages, source={source_type})")
@@ -943,10 +1115,21 @@ def extract_events_from_pdf(
                 continue
 
             if parser_type == "correction":
-                records = parser_fn(section_text, source_type, bulletin_no, bulletin_date)
+                records = parser_fn(
+                    section_text,
+                    source_type,
+                    bulletin_no,
+                    bulletin_date,
+                    default_page_no=page_no,
+                )
             else:
                 records = parser_fn(
-                    section_text, event_type, source_type, bulletin_no, bulletin_date,
+                    section_text,
+                    event_type,
+                    source_type,
+                    bulletin_no,
+                    bulletin_date,
+                    default_page_no=page_no,
                 )
             all_events.extend(records)
             logger.info(f"    {header}: {len(records)} events extracted")
@@ -964,7 +1147,11 @@ def extract_events_from_pdf(
     if not subsections and events_range_is_targeted and events_start < doc.page_count:
         try:
             bare_events = parse_bare_app_number_list(
-                full_text, source_type, bulletin_no, bulletin_date,
+                full_text,
+                source_type,
+                bulletin_no,
+                bulletin_date,
+                default_page_no=events_start + 1,
             )
             if bare_events:
                 all_events.extend(bare_events)
@@ -979,7 +1166,13 @@ def extract_events_from_pdf(
         corr_pages = _extract_pages_text(doc, corrections_range[0], corrections_range[1])
         corr_text = _pages_to_text(corr_pages)
         try:
-            corr_events = parse_correction_prose(corr_text, source_type, bulletin_no, bulletin_date)
+            corr_events = parse_correction_prose(
+                corr_text,
+                source_type,
+                bulletin_no,
+                bulletin_date,
+                default_page_no=corrections_range[0] + 1,
+            )
             all_events.extend(corr_events)
             logger.info(f"  Corrections: {len(corr_events)} events")
         except Exception as e:
@@ -994,7 +1187,11 @@ def extract_events_from_pdf(
             madrid_text = _pages_to_text(madrid_pages)
             try:
                 madrid_events = parse_madrid_records(
-                    madrid_text, source_type, bulletin_no, bulletin_date,
+                    madrid_text,
+                    source_type,
+                    bulletin_no,
+                    bulletin_date,
+                    default_page_no=madrid_range[0] + 1,
                 )
                 all_events.extend(madrid_events)
                 logger.info(f"  Madrid: {len(madrid_events)} events")
@@ -1010,7 +1207,11 @@ def extract_events_from_pdf(
             ren_text = _pages_to_text(ren_pages)
             try:
                 ren_events = parse_renewal_list(
-                    ren_text, source_type, bulletin_no, bulletin_date,
+                    ren_text,
+                    source_type,
+                    bulletin_no,
+                    bulletin_date,
+                    default_page_no=renewals_range[0] + 1,
                 )
                 all_events.extend(ren_events)
                 logger.info(f"  Renewals: {len(ren_events)} events")
@@ -1018,6 +1219,7 @@ def extract_events_from_pdf(
                 errors.append(f"Error parsing renewals: {e}")
 
     doc.close()
+    stack.close()
 
     # --- Rename fields for GZ sources ---
     if source_type == "GZ":
@@ -1129,6 +1331,169 @@ def _parse_folder_info(folder_name: str) -> Tuple[str, str, str]:
     return source_type, "", ""
 
 
+def _resolve_default_root(root_dir: Optional[Path], settings=None) -> Path:
+    if settings is not None:
+        configured = getattr(settings, "bulletins_root", None)
+        if configured:
+            return Path(configured)
+
+    if root_dir is not None:
+        return Path(root_dir)
+
+    try:
+        from config.settings import settings as app_settings
+
+        return Path(app_settings.pipeline.bulletins_root)
+    except Exception:
+        return _resolve_local_events_root(
+            os.environ.get("PIPELINE_BULLETINS_ROOT") or os.environ.get("DATA_ROOT"),
+            _LOCAL_DEFAULT_BULLETINS_ROOT,
+        )
+
+
+def _write_events_output(output_dir: Path, result: Dict[str, Any]) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out_path = output_dir / "events.json"
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False, indent=2, default=str)
+
+
+def find_unprocessed_event_targets(root_dir: Path, *, force: bool = False) -> List[Dict[str, Any]]:
+    """Find issue folders that need events.json extraction.
+
+    When force=True, include all matching folders/PDF repairs even if events.json
+    already exists so the corpus can be refreshed without deleting artifacts.
+    """
+    results: Dict[str, Dict[str, Any]] = {}
+    if not root_dir.exists():
+        return []
+
+    for folder in sorted(root_dir.iterdir()):
+        if not folder.is_dir():
+            continue
+        if not ISSUE_FOLDER_RE.match(folder.name):
+            continue
+        if not force and (folder / "events.json").exists():
+            continue
+        if not any(p.is_file() and p.suffix.lower() == ".pdf" for p in folder.glob("*.pdf")):
+            continue
+
+        source_type, bulletin_no, bulletin_date = _parse_folder_info(folder.name)
+        if not bulletin_no:
+            continue
+
+        results[folder.name] = {
+            "kind": "folder",
+            "folder": folder,
+            "source_type": source_type,
+            "bulletin_no": bulletin_no,
+            "bulletin_date": bulletin_date,
+        }
+
+    try:
+        from pdf_extract import _infer_pdf_target
+    except Exception:
+        _infer_pdf_target = None
+
+    if _infer_pdf_target is not None:
+        for pdf in sorted(root_dir.iterdir()):
+            if not pdf.is_file() or pdf.suffix.lower() != ".pdf":
+                continue
+
+            target = _infer_pdf_target(pdf)
+            if not target:
+                continue
+
+            output_dir = target["output_dir"]
+            if not force and (output_dir / "events.json").exists():
+                continue
+            if output_dir.name in results:
+                continue
+            if not output_dir.exists():
+                continue
+
+            results[output_dir.name] = {
+                "kind": "top_level_pdf",
+                "folder": output_dir,
+                "pdf_path": pdf,
+                "source_type": "GZ" if target["is_gazette"] else "BLT",
+                "bulletin_no": target["issue_number"],
+                "bulletin_date": target["issue_date"] or "",
+            }
+
+    def _sort_key(item: Dict[str, Any]) -> Tuple[int, int, str]:
+        prefix_rank = 1 if item["source_type"] == "GZ" else 0
+        try:
+            issue_no = int(item["bulletin_no"])
+        except ValueError:
+            issue_no = 0
+        return prefix_rank, issue_no, item["folder"].name
+
+    return sorted(results.values(), key=_sort_key)
+
+
+def run_event_extraction(root_dir: Path = None, settings=None, force: bool = False) -> Dict[str, Any]:
+    """Run PDF event extraction across issue folders.
+
+    Default behavior only processes folders missing events.json. With force=True,
+    existing events.json files are regenerated in place.
+    """
+    root = _resolve_default_root(root_dir, settings=settings)
+    targets = find_unprocessed_event_targets(root, force=force)
+    if not targets:
+        if force:
+            logger.info("No bulletin folders available for forced PDF event extraction")
+        else:
+            logger.info("No bulletin folders need PDF event extraction")
+        return {"processed": 0, "skipped": 0, "failed": 0, "total_events": 0}
+
+    processed = 0
+    failed = 0
+    total_events = 0
+    t0 = time.time()
+
+    for target in targets:
+        folder = target["folder"]
+        source_type = target["source_type"]
+        bulletin_no = target["bulletin_no"]
+        bulletin_date = target["bulletin_date"]
+
+        try:
+            if target["kind"] == "top_level_pdf":
+                from pdf_extract import _move_pdf_into_issue_folder
+
+                _move_pdf_into_issue_folder(target["pdf_path"], folder)
+
+            logger.info(
+                "Extracting events for %s (%s %s %s)",
+                folder.name,
+                source_type,
+                bulletin_no,
+                bulletin_date or "no-date",
+            )
+            result = extract_events_from_folder(folder, source_type, bulletin_no, bulletin_date)
+            if result.get("status") != "success":
+                failed += 1
+                logger.error("Event extraction failed for %s: %s", folder.name, result.get("error", "unknown"))
+                continue
+
+            _write_events_output(folder, result)
+            processed += 1
+            total_events += result.get("total", 0)
+            logger.info("  OK: %s events", result.get("total", 0))
+        except Exception as e:
+            failed += 1
+            logger.exception("Event extraction error for %s: %s", folder.name, e)
+
+    return {
+        "processed": processed,
+        "skipped": 0,
+        "failed": failed,
+        "total_events": total_events,
+        "duration_seconds": round(time.time() - t0, 1),
+    }
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -1144,15 +1509,27 @@ if __name__ == "__main__":
     )
 
     parser = argparse.ArgumentParser(description="Extract events from trademark bulletin PDFs")
-    parser.add_argument("--pdf", type=str, required=True, help="Path to bulletin PDF")
+    parser.add_argument("--pdf", type=str, default=None, help="Path to a single bulletin PDF")
+    parser.add_argument("--root-dir", type=str, default=None,
+                        help="Batch mode root directory containing bulletin folders")
     parser.add_argument("--source", type=str, choices=["GZ", "BLT"], default=None,
                         help="Source type (auto-detected from folder name if omitted)")
     parser.add_argument("--bulletin-no", type=str, default=None, help="Bulletin number")
     parser.add_argument("--bulletin-date", type=str, default=None, help="Bulletin date YYYY-MM-DD")
     parser.add_argument("--output", type=str, default=None, help="Output JSON file path")
+    parser.add_argument("--force", action="store_true",
+                        help="In batch mode, rebuild events.json even if it already exists")
     parser.add_argument("--sample", type=int, default=0,
                         help="Print N sample events per type instead of full output")
     args = parser.parse_args()
+
+    if not args.pdf:
+        summary = run_event_extraction(
+            root_dir=Path(args.root_dir) if args.root_dir else None,
+            force=args.force,
+        )
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        sys.exit(0 if summary.get("failed", 0) == 0 else 1)
 
     pdf_path = Path(args.pdf)
     if not pdf_path.exists():

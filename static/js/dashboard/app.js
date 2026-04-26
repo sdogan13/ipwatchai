@@ -2105,7 +2105,7 @@ function showDashboardTab(tabId) {
 
     // Update page title
     var tabTitles = { 'overview': 'Dashboard', 'watchlist': 'Watchlist', 'search': 'Search', 'opposition-radar': 'Opposition Radar', 'ai-studio': 'AI Studio', 'reports': 'Reports', 'applications': 'Applications' };
-    document.title = 'IP WATⒸH AI' + (tabTitles[tabId] ? ' \u2014 ' + tabTitles[tabId] : '');
+    document.title = 'IPWatchAI' + (tabTitles[tabId] ? ' \u2014 ' + tabTitles[tabId] : '');
 
     // Only clear search results when leaving the search tab
     if (tabId !== 'search') {
@@ -3546,7 +3546,7 @@ function updatePipelineUI(data) {
     pipelineNextScheduled = data.next_scheduled;
     pipelineLastRun = (data.recent_runs && data.recent_runs.length > 0) ? data.recent_runs[0] : null;
 
-    var stepNames = ['download', 'extract', 'metadata', 'embeddings', 'ingest'];
+    var stepNames = ['download', 'extract', 'metadata', 'embeddings', 'ingest', 'event_ingest'];
 
     // Update step cards from last run
     stepNames.forEach(function (name) {
@@ -3608,7 +3608,10 @@ function stepDisplayName(step) {
         'extract': t('pipeline.extract_name'),
         'metadata': t('pipeline.metadata_name'),
         'embeddings': t('pipeline.embeddings_name'),
-        'ingest': t('pipeline.ingest_name')
+        'ingest': t('pipeline.ingest_name'),
+        'event_ingest': t('pipeline.event_ingest_name'),
+        'conflict_scan': t('pipeline.conflict_scan_name'),
+        'final_status_repair': t('pipeline.final_status_repair_name')
     };
     return names[step] || step;
 }
@@ -5140,9 +5143,15 @@ function openBulkUploadModal() {
     var modal = document.getElementById('watchlist-upload-modal');
     if (!modal) return;
     document.getElementById('upload-wl-file').value = '';
-    document.getElementById('upload-wl-step-1').classList.remove('hidden');
-    document.getElementById('upload-wl-step-2').classList.add('hidden');
+    showBulkUploadStepOne();
     document.getElementById('upload-wl-result').classList.add('hidden');
+    document.getElementById('upload-wl-filename').textContent = '';
+    document.getElementById('upload-wl-filename').classList.add('hidden');
+    document.getElementById('upload-wl-usage').innerHTML = '';
+    document.getElementById('upload-wl-mapping').innerHTML = '';
+    _uploadDetectedColumns = null;
+    _uploadSelectedFile = null;
+    _uploadUsage = { used: 0, limit: 0 };
     modal.classList.remove('hidden');
     lockBodyScroll();
 }
@@ -5150,6 +5159,7 @@ function openBulkUploadModal() {
 function closeBulkUploadModal() {
     var modal = document.getElementById('watchlist-upload-modal');
     if (modal) modal.classList.add('hidden');
+    clearUploadUpgradeOffer();
     unlockBodyScroll();
 }
 
@@ -5179,6 +5189,116 @@ function downloadWatchlistTemplate() {
 var _uploadDetectedColumns = null;
 var _uploadSelectedFile = null;
 var _uploadUsage = { used: 0, limit: 0 };
+var _uploadUpgradeOffer = null;
+
+function clearUploadUpgradeOffer() {
+    _uploadUpgradeOffer = null;
+
+    var modalCard = document.getElementById('watchlist-upload-modal-card');
+    if (modalCard) {
+        modalCard.classList.remove('max-w-5xl');
+        modalCard.classList.add('max-w-lg');
+    }
+
+    var layout = document.getElementById('upload-wl-step-2-layout');
+    if (layout) layout.classList.remove('lg:grid-cols-[minmax(0,1fr)_340px]');
+
+    var offerEl = document.getElementById('upload-wl-upgrade-offer');
+    if (offerEl) {
+        offerEl.classList.add('hidden');
+        delete offerEl.dataset.recommendedPlan;
+        delete offerEl.dataset.upgradeContext;
+    }
+}
+
+function showBulkUploadStepOne() {
+    document.getElementById('upload-wl-step-1').classList.remove('hidden');
+    document.getElementById('upload-wl-step-2').classList.add('hidden');
+    clearUploadUpgradeOffer();
+}
+
+function resolveUploadUpgradeOffer(totalRows, detail) {
+    if (!(window.AppUpgradeModal && typeof window.AppUpgradeModal.resolveOffer === 'function')) return null;
+
+    var used = Number(_uploadUsage.used || 0);
+    var limit = Number(_uploadUsage.limit || 0);
+    var remaining = limit >= 999999 ? totalRows : Math.max(0, limit - used);
+    var cannotAdd = Math.max(0, totalRows - Math.min(totalRows, remaining));
+    if (cannotAdd <= 0) return null;
+
+    var normalized = detail && typeof detail === 'object' ? Object.assign({}, detail) : {};
+    if (!normalized.upgrade_context) normalized.upgrade_context = 'watchlist_items';
+    normalized.required_feature = 'max_watchlist_items';
+    normalized.required_feature_value = used + totalRows;
+
+    return window.AppUpgradeModal.resolveOffer(normalized, 'watchlist_items');
+}
+
+function renderUploadUpgradeOffer(totalRows, detail) {
+    var offerEl = document.getElementById('upload-wl-upgrade-offer');
+    if (!offerEl) return;
+
+    var used = Number(_uploadUsage.used || 0);
+    var limit = Number(_uploadUsage.limit || 0);
+    var remaining = limit >= 999999 ? totalRows : Math.max(0, limit - used);
+    var cannotAdd = Math.max(0, totalRows - Math.min(totalRows, remaining));
+    var offer = resolveUploadUpgradeOffer(totalRows, detail);
+    if (!offer) {
+        clearUploadUpgradeOffer();
+        return;
+    }
+
+    _uploadUpgradeOffer = offer;
+
+    var modalCard = document.getElementById('watchlist-upload-modal-card');
+    if (modalCard) {
+        modalCard.classList.remove('max-w-lg');
+        modalCard.classList.add('max-w-5xl');
+    }
+
+    var layout = document.getElementById('upload-wl-step-2-layout');
+    if (layout) layout.classList.add('lg:grid-cols-[minmax(0,1fr)_340px]');
+
+    offerEl.classList.remove('hidden');
+    offerEl.dataset.recommendedPlan = offer.recommendedPlan || '';
+    offerEl.dataset.upgradeContext = offer.context || '';
+
+    var titleEl = document.getElementById('upload-wl-upgrade-title');
+    if (titleEl) titleEl.textContent = t('watchlist.upload_upgrade_title');
+
+    var descEl = document.getElementById('upload-wl-upgrade-desc');
+    if (descEl) descEl.textContent = t('watchlist.upload_upgrade_desc', { count: cannotAdd, total: totalRows });
+
+    var planNameEl = document.getElementById('upload-wl-upgrade-plan-name');
+    if (planNameEl) planNameEl.textContent = offer.planName || '';
+
+    var badgeEl = document.getElementById('upload-wl-upgrade-badge');
+    if (badgeEl) badgeEl.textContent = offer.recommendedBadge || t('upgrade.recommended_badge');
+
+    var priceEl = document.getElementById('upload-wl-upgrade-price');
+    if (priceEl) priceEl.textContent = offer.priceLabel || '';
+
+    var periodEl = document.getElementById('upload-wl-upgrade-period');
+    if (periodEl) periodEl.textContent = offer.perMonthLabel || '';
+
+    var includesLabelEl = document.getElementById('upload-wl-upgrade-includes-label');
+    if (includesLabelEl) includesLabelEl.textContent = offer.includesLabel || t('checkout.includes');
+
+    var featureListEl = document.getElementById('upload-wl-upgrade-features');
+    if (featureListEl) {
+        featureListEl.innerHTML = '';
+        (offer.features || []).forEach(function (feature) {
+            var li = document.createElement('li');
+            li.className = 'flex items-start gap-2';
+            li.innerHTML = '<span class="mt-0.5" style="color:#4ade80">&#10003;</span><span></span>';
+            li.lastChild.textContent = feature;
+            featureListEl.appendChild(li);
+        });
+    }
+
+    var ctaEl = document.getElementById('upload-wl-upgrade-cta');
+    if (ctaEl) ctaEl.setAttribute('href', offer.checkoutUrl || '/pricing');
+}
 
 function detectUploadColumns() {
     var fileInput = document.getElementById('upload-wl-file');
@@ -5273,6 +5393,7 @@ function renderUploadUsageInfo(totalRows) {
 
     html += '</div>';
     container.innerHTML = html;
+    renderUploadUpgradeOffer(totalRows);
 }
 
 function renderColumnMapping(data) {
@@ -5307,6 +5428,21 @@ function renderColumnMapping(data) {
     container.innerHTML = html;
 }
 
+function isUploadLimitOnlyResult(data) {
+    var summary = data && data.summary ? data.summary : {};
+    var errors = Number(summary.errors || 0);
+    if (errors <= 0) return false;
+
+    var errorItems = Array.isArray(data && data.error_items) ? data.error_items : [];
+    if (!errorItems.length) return false;
+
+    return errorItems.every(function (item) {
+        var message = item && item.error ? String(item.error).toLowerCase() : '';
+        return message.indexOf('izleme listesi limiti asildi') >= 0
+            || message.indexOf('watchlist limit') >= 0;
+    });
+}
+
 function submitBulkUpload() {
     if (!_uploadSelectedFile) return;
 
@@ -5327,18 +5463,26 @@ function submitBulkUpload() {
 
     AppAPI.uploadWatchlistFile(_uploadSelectedFile, mapping).then(function (data) {
         var s = data.summary || {};
+        var limitOnlyResult = isUploadLimitOnlyResult(data);
         var resultEl = document.getElementById('upload-wl-result');
         resultEl.innerHTML = '<div class="text-center py-3">'
             + '<svg class="w-8 h-8 mx-auto mb-2 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>'
             + '<p class="font-medium" style="color:var(--color-text-primary)">' + t('watchlist.upload_success', { created: s.added || 0, total: s.total_rows || 0 }) + '</p>'
             + (s.skipped > 0 ? '<p class="text-xs mt-1" style="color:var(--color-text-faint)">' + s.skipped + ' ' + t('watchlist.upload_skipped') + '</p>' : '')
-            + (s.errors > 0 ? '<p class="text-xs mt-1" style="color:var(--color-risk-high-text)">' + s.errors + ' ' + t('watchlist.upload_errors') + '</p>' : '')
+            + (s.errors > 0 ? '<p class="text-xs mt-1" style="color:var(--color-risk-high-text)">' + s.errors + ' ' + t(limitOnlyResult ? 'watchlist.upload_limit_result' : 'watchlist.upload_errors') + '</p>' : '')
             + '</div>';
         document.getElementById('upload-wl-step-2').classList.add('hidden');
         resultEl.classList.remove('hidden');
         refreshWatchlistAndStats();
     }).catch(function (e) {
         if (e && e.status === 403) {
+            var stepTwoVisible = !document.getElementById('upload-wl-step-2').classList.contains('hidden');
+            var totalRows = _uploadDetectedColumns && _uploadDetectedColumns.total_rows ? _uploadDetectedColumns.total_rows : 0;
+            if (stepTwoVisible && totalRows > 0) {
+                renderUploadUpgradeOffer(totalRows, e);
+                showToast((e && e.message) || t('watchlist.plan_limit'), 'error');
+                return;
+            }
             showUpgradeModal(e, 'watchlist_items');
             return;
         }

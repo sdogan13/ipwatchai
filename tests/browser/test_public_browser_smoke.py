@@ -8,6 +8,7 @@ Run directly:
 from __future__ import annotations
 
 import io
+import json
 import os
 import sys
 import time
@@ -46,6 +47,7 @@ REGISTRATION_EMAIL = os.environ.get(
     "TEST_BROWSER_REGISTER_EMAIL",
     "managed-browser-register@example.com",
 )
+I18N_ASSET_VERSION = "38"
 pytestmark = pytest.mark.skip(reason="Browser E2E script; run directly with python tests/browser/test_public_browser_smoke.py")
 
 
@@ -173,6 +175,35 @@ def _build_valid_public_search_png() -> bytes:
     return buffer.getvalue()
 
 
+def _read_locale_bundle(locale: str) -> dict:
+    return json.loads((ROOT / "static" / "locales" / f"{locale}.json").read_text(encoding="utf-8"))
+
+
+def _seed_locale_bundle_cache(page, locale: str) -> None:
+    page.evaluate(
+        """({ locale, bundle, version }) => {
+            localStorage.setItem('app_locale', locale);
+            localStorage.setItem('app_locale_bundle::' + locale + '::v' + version, JSON.stringify(bundle));
+        }""",
+        {"locale": locale, "bundle": _read_locale_bundle(locale), "version": I18N_ASSET_VERSION},
+    )
+
+
+def _read_i18n_render_state(page, pattern: str, selector: str) -> dict:
+    return page.evaluate(
+        """({ pattern, selector }) => {
+            const regex = new RegExp(pattern, 'g');
+            return {
+                ready: !!(window.AppI18n && window.AppI18n._ready),
+                dir: document.documentElement.getAttribute('dir') || '',
+                sample: (document.querySelector(selector)?.textContent || '').trim(),
+                rawKeys: document.body.innerText.match(regex) || []
+            };
+        }""",
+        {"pattern": pattern, "selector": selector},
+    )
+
+
 def main() -> None:
     REPORTER.print_heading("PUBLIC BROWSER SMOKE", server=CONFIG.base_url)
 
@@ -188,8 +219,489 @@ def main() -> None:
                 lambda: (
                     open_url(page, CONFIG, "/"),
                     page.locator("#search-input").wait_for(state="visible"),
-                    "IP WAT" in page.title() or (_ for _ in ()).throw(AssertionError(f"unexpected title: {page.title()}")),
+                    "IPWatchAI" in page.title() or (_ for _ in ()).throw(AssertionError(f"unexpected title: {page.title()}")),
                 ),
+            )
+
+            def landing_cached_locale_bootstrap() -> None:
+                locale = "en"
+                route_pattern = f"**/static/locales/{locale}.json?v=*"
+
+                def delay_locale_request(route) -> None:
+                    time.sleep(1.5)
+                    route.continue_()
+
+                open_url(page, CONFIG, "/")
+                _seed_locale_bundle_cache(page, locale)
+                page.route(route_pattern, delay_locale_request)
+                try:
+                    with page.expect_response(
+                        lambda candidate: f"/static/locales/{locale}.json" in candidate.url,
+                        timeout=CONFIG.timeout_ms,
+                    ) as locale_response_info:
+                        page.goto(f"{CONFIG.base_url}/", wait_until="domcontentloaded", timeout=CONFIG.timeout_ms)
+                        page.wait_for_timeout(250)
+                        landing_state = _read_i18n_render_state(
+                            page,
+                            r"(?:landing|auth|search)\.[\w_]+",
+                            'nav button[x-text="t(\'auth.login_button\')"]',
+                        )
+                        if landing_state["dir"] != "ltr":
+                            raise AssertionError(f"expected cached landing dir=ltr during delayed locale fetch, got {landing_state!r}")
+                        if not landing_state["ready"]:
+                            raise AssertionError(f"expected cached landing locale to be ready during delayed fetch, got {landing_state!r}")
+                        if not landing_state["sample"] or landing_state["sample"].startswith("auth."):
+                            raise AssertionError(f"unexpected cached landing text during delayed locale fetch: {landing_state!r}")
+                        if landing_state["rawKeys"]:
+                            raise AssertionError(f"unexpected raw landing keys during delayed locale fetch: {landing_state['rawKeys']}")
+
+                    if locale_response_info.value.status != 200:
+                        raise AssertionError(f"unexpected delayed landing locale response status: {locale_response_info.value.status}")
+                finally:
+                    page.unroute(route_pattern, delay_locale_request)
+
+            run_browser_step(
+                "landing cached locale bootstrap",
+                REPORTER,
+                page,
+                monitor,
+                CONFIG,
+                landing_cached_locale_bootstrap,
+            )
+
+            def education_tab_bootstrap() -> None:
+                open_url(page, CONFIG, "/?tab=education")
+                page.wait_for_function(
+                    """() => {
+                        const state = document.body._x_dataStack && document.body._x_dataStack[0];
+                        return !!(
+                            state &&
+                            state.activeTab === 'education' &&
+                            state.educationCatalog &&
+                            Array.isArray(state.educationCatalog.categories) &&
+                            state.educationCatalog.categories.length > 0 &&
+                            Array.isArray(state.educationCatalog.pdfs) &&
+                            state.educationCatalog.pdfs.length > 0 &&
+                            Array.isArray(state.educationCatalog.flashcard_decks) &&
+                            state.educationCatalog.flashcard_decks.length > 0 &&
+                            Array.isArray(state.educationCatalog.quiz_sections) &&
+                            state.educationCatalog.quiz_sections.length > 0 &&
+                            !!state.educationSelectedCategoryId
+                        );
+                    }""",
+                    timeout=max(CONFIG.timeout_ms, 60000),
+                )
+                counts = page.evaluate(
+                    """() => {
+                        const state = document.body._x_dataStack && document.body._x_dataStack[0];
+                        const orderedCategories = state && typeof state.getEducationCategories === 'function'
+                            ? state.getEducationCategories()
+                            : (state.educationCatalog && Array.isArray(state.educationCatalog.categories)
+                                ? state.educationCatalog.categories
+                                : []);
+                        return {
+                            categories: state.educationCatalog.categories.length,
+                            pdfs: state.educationCatalog.pdfs.length,
+                            flashcardDecks: state.educationCatalog.flashcard_decks.length,
+                            quizSections: state.educationCatalog.quiz_sections.length,
+                            selectedCategoryId: state.educationSelectedCategoryId || '',
+                            firstOrderedCategoryId: orderedCategories.length ? String(orderedCategories[0].id || '') : '',
+                            testerToolsVisible: !!(
+                                document.querySelector('[data-testid="education-flashcard-tester-tools"]') ||
+                                document.querySelector('[data-testid="education-quiz-tester-tools"]')
+                            )
+                        };
+                    }"""
+                )
+                if counts["categories"] <= 0 or counts["pdfs"] <= 0 or counts["flashcardDecks"] <= 0 or counts["quizSections"] <= 0 or not counts["selectedCategoryId"]:
+                    raise AssertionError(f"expected education catalog counts > 0, got {counts}")
+                if counts["firstOrderedCategoryId"] != "genel" or counts["selectedCategoryId"] != "genel":
+                    raise AssertionError(f"expected Genel to be the first and default education category, got {counts}")
+                if counts["testerToolsVisible"]:
+                    raise AssertionError(f"tester moderation controls should stay hidden for public visitors, got {counts}")
+                first_mobile_category = page.locator('[data-testid^="education-mobile-category-"]').first.inner_text().strip()
+                if first_mobile_category != "Genel":
+                    raise AssertionError(f"expected Genel to be the first rendered mobile education category, got {first_mobile_category!r}")
+
+            run_browser_step(
+                "education tab bootstrap",
+                REPORTER,
+                page,
+                monitor,
+                CONFIG,
+                education_tab_bootstrap,
+            )
+
+            def education_mobile_quick_access() -> None:
+                page.set_viewport_size({"width": 390, "height": 844})
+                try:
+                    open_url(page, CONFIG, "/?tab=education")
+                    page.locator('[data-testid="education-mobile-quick-quiz"]').wait_for(state="visible", timeout=CONFIG.timeout_ms)
+                    page.locator('[data-testid="education-mobile-quick-pdfs"]').wait_for(state="visible", timeout=CONFIG.timeout_ms)
+                    page.wait_for_function(
+                        """() => {
+                            const state = document.body._x_dataStack && document.body._x_dataStack[0];
+                            return !!(state && state.educationMobileSection === 'quiz');
+                        }""",
+                        timeout=CONFIG.timeout_ms,
+                    )
+
+                    initial_visibility = page.evaluate(
+                        """() => {
+                            const isVisible = (id) => {
+                                const node = document.getElementById(id);
+                                if (!node) return false;
+                                const style = window.getComputedStyle(node);
+                                return style.display !== 'none' && style.visibility !== 'hidden' && node.offsetParent !== null;
+                            };
+                            return {
+                                quiz: isVisible('education-quiz-panel'),
+                                flashcards: isVisible('education-flashcards-panel'),
+                                pdfs: isVisible('education-pdf-library-panel')
+                            };
+                        }"""
+                    )
+                    if initial_visibility != {"quiz": True, "flashcards": False, "pdfs": False}:
+                        raise AssertionError(f"expected quiz-only mobile workspace by default, got {initial_visibility}")
+
+                    page.locator('[data-testid="education-mobile-quick-pdfs"]').click()
+                    page.wait_for_function(
+                        """() => {
+                            const state = document.body._x_dataStack && document.body._x_dataStack[0];
+                            const isVisible = (id) => {
+                                const node = document.getElementById(id);
+                                if (!node) return false;
+                                const style = window.getComputedStyle(node);
+                                return style.display !== 'none' && style.visibility !== 'hidden' && node.offsetParent !== null;
+                            };
+                            return !!(
+                                state &&
+                                state.educationMobileSection === 'pdfs' &&
+                                isVisible('education-pdf-library-panel') &&
+                                !isVisible('education-quiz-panel') &&
+                                !isVisible('education-flashcards-panel')
+                            );
+                        }""",
+                        timeout=CONFIG.timeout_ms,
+                    )
+
+                    page.locator('[data-testid="education-mobile-nav-flashcards"]').click()
+                    page.wait_for_function(
+                        """() => {
+                            const state = document.body._x_dataStack && document.body._x_dataStack[0];
+                            const isVisible = (id) => {
+                                const node = document.getElementById(id);
+                                if (!node) return false;
+                                const style = window.getComputedStyle(node);
+                                return style.display !== 'none' && style.visibility !== 'hidden' && node.offsetParent !== null;
+                            };
+                            return !!(
+                                state &&
+                                state.educationMobileSection === 'flashcards' &&
+                                isVisible('education-flashcards-panel') &&
+                                !isVisible('education-quiz-panel') &&
+                                !isVisible('education-pdf-library-panel')
+                            );
+                        }""",
+                        timeout=CONFIG.timeout_ms,
+                    )
+
+                    category_targets = page.evaluate(
+                        """() => {
+                            const state = document.body._x_dataStack && document.body._x_dataStack[0];
+                            const categories = state && state.educationCatalog && Array.isArray(state.educationCatalog.categories)
+                                ? state.educationCatalog.categories
+                                : [];
+                            const first = state ? String(state.educationSelectedCategoryId || '') : '';
+                            const secondCategory = categories.find((category) => String(category.id || '') !== first);
+                            return {
+                                first,
+                                second: secondCategory ? String(secondCategory.id || '') : ''
+                            };
+                        }"""
+                    )
+                    if not category_targets["first"] or not category_targets["second"]:
+                        raise AssertionError(f"expected at least two education categories for mobile mode memory, got {category_targets}")
+
+                    page.evaluate("window.scrollTo(0, 0)")
+                    page.locator(f'[data-testid="education-mobile-category-{category_targets["second"]}"]').click()
+                    page.wait_for_function(
+                        """(secondId) => {
+                            const state = document.body._x_dataStack && document.body._x_dataStack[0];
+                            return !!(
+                                state &&
+                                state.educationSelectedCategoryId === secondId &&
+                                state.educationMobileSection === 'flashcards'
+                            );
+                        }""",
+                        arg=category_targets["second"],
+                        timeout=CONFIG.timeout_ms,
+                    )
+
+                    page.locator('[data-testid="education-mobile-nav-pdfs"]').click()
+                    page.wait_for_function(
+                        """() => {
+                            const state = document.body._x_dataStack && document.body._x_dataStack[0];
+                            return !!(state && state.educationMobileSection === 'pdfs');
+                        }""",
+                        timeout=CONFIG.timeout_ms,
+                    )
+
+                    page.evaluate("window.scrollTo(0, 0)")
+                    page.locator(f'[data-testid="education-mobile-category-{category_targets["first"]}"]').click()
+                    page.wait_for_function(
+                        """(firstId) => {
+                            const state = document.body._x_dataStack && document.body._x_dataStack[0];
+                            const isVisible = (id) => {
+                                const node = document.getElementById(id);
+                                if (!node) return false;
+                                const style = window.getComputedStyle(node);
+                                return style.display !== 'none' && style.visibility !== 'hidden' && node.offsetParent !== null;
+                            };
+                            return !!(
+                                state &&
+                                state.educationSelectedCategoryId === firstId &&
+                                state.educationMobileSection === 'flashcards' &&
+                                isVisible('education-flashcards-panel') &&
+                                !isVisible('education-quiz-panel') &&
+                                !isVisible('education-pdf-library-panel')
+                            );
+                        }""",
+                        arg=category_targets["first"],
+                        timeout=CONFIG.timeout_ms,
+                    )
+
+                    page.evaluate("window.scrollTo(0, 0)")
+                    page.locator(f'[data-testid="education-mobile-category-{category_targets["second"]}"]').click()
+                    page.wait_for_function(
+                        """(secondId) => {
+                            const state = document.body._x_dataStack && document.body._x_dataStack[0];
+                            const isVisible = (id) => {
+                                const node = document.getElementById(id);
+                                if (!node) return false;
+                                const style = window.getComputedStyle(node);
+                                return style.display !== 'none' && style.visibility !== 'hidden' && node.offsetParent !== null;
+                            };
+                            return !!(
+                                state &&
+                                state.educationSelectedCategoryId === secondId &&
+                                state.educationMobileSection === 'pdfs' &&
+                                isVisible('education-pdf-library-panel') &&
+                                !isVisible('education-quiz-panel') &&
+                                !isVisible('education-flashcards-panel')
+                            );
+                        }""",
+                        arg=category_targets["second"],
+                        timeout=CONFIG.timeout_ms,
+                    )
+                finally:
+                    page.set_viewport_size({"width": 1280, "height": 900})
+
+            run_browser_step(
+                "education mobile quick access",
+                REPORTER,
+                page,
+                monitor,
+                CONFIG,
+                education_mobile_quick_access,
+            )
+
+            def education_quiz_explain_behavior() -> None:
+                open_url(page, CONFIG, "/?tab=education")
+                page.wait_for_function(
+                    """() => {
+                        const state = document.body._x_dataStack && document.body._x_dataStack[0];
+                        return !!(
+                            state &&
+                            state.activeTab === 'education' &&
+                            state.educationSelectedQuiz &&
+                            typeof state.currentEducationQuizQuestion === 'function' &&
+                            state.currentEducationQuizQuestion()
+                        );
+                    }""",
+                    timeout=max(CONFIG.timeout_ms, 60000),
+                )
+
+                wrong_answer = page.evaluate(
+                    """() => {
+                        const state = document.body._x_dataStack && document.body._x_dataStack[0];
+                        const question = state && typeof state.currentEducationQuizQuestion === 'function'
+                            ? state.currentEducationQuizQuestion()
+                            : null;
+                        if (!question) return null;
+                        const wrongOption = (question.options || []).find((option) => option.id !== question.correct_option_id);
+                        return {
+                            wrongOptionId: wrongOption ? String(wrongOption.id).toLowerCase() : '',
+                            hasExplanation: !!(question.summary || question.explanation)
+                        };
+                    }"""
+                )
+                if not wrong_answer or not wrong_answer["wrongOptionId"] or not wrong_answer["hasExplanation"]:
+                    raise AssertionError(f"expected an answerable quiz question with explanation content, got {wrong_answer}")
+
+                page.locator(f'[data-testid="education-quiz-option-{wrong_answer["wrongOptionId"]}"]').click()
+
+                explain_button = page.locator('[data-testid="education-quiz-explain-button"]')
+                explain_button.wait_for(state="visible", timeout=CONFIG.timeout_ms)
+
+                feedback_visibility = page.evaluate(
+                    """() => {
+                        const state = document.body._x_dataStack && document.body._x_dataStack[0];
+                        const question = state && typeof state.currentEducationQuizQuestion === 'function'
+                            ? state.currentEducationQuizQuestion()
+                            : null;
+                        if (!question) return [];
+                        return (question.options || []).map((option) => {
+                            const testId = `education-quiz-option-${String(option.id || '').toLowerCase()}`;
+                            const root = document.querySelector(`[data-testid="${testId}"]`);
+                            const feedbackText = String(option.short_feedback || '');
+                            const feedbackVisible = !feedbackText || !!(
+                                root &&
+                                Array.from(root.querySelectorAll('*')).some((node) => {
+                                    const text = (node.textContent || '').trim();
+                                    return text.includes(feedbackText)
+                                        && window.getComputedStyle(node).display !== 'none'
+                                        && node.offsetParent !== null;
+                                })
+                            );
+                            return {
+                                id: option.id,
+                                shortFeedback: feedbackText,
+                                feedbackVisible
+                            };
+                        });
+                    }"""
+                )
+                missing_feedback = [
+                    item["id"]
+                    for item in feedback_visibility
+                    if item["shortFeedback"] and not item["feedbackVisible"]
+                ]
+                if missing_feedback:
+                    raise AssertionError(f"expected short feedback to be visible for all options, missing {missing_feedback}")
+
+                explanation_loading = page.locator('[data-testid="education-quiz-explanation-loading"]')
+                explanation_panel = page.locator('[data-testid="education-quiz-explanation-panel"]')
+                if explanation_panel.count() and explanation_panel.first.is_visible():
+                    raise AssertionError("explanation panel should stay hidden until the explain button is clicked")
+                if explanation_loading.count() and explanation_loading.first.is_visible():
+                    raise AssertionError("explanation loading state should stay hidden until the explain button is clicked")
+
+                explain_button.click()
+                explanation_loading.wait_for(state="visible", timeout=CONFIG.timeout_ms)
+                loading_state = page.evaluate(
+                    """() => {
+                        const state = document.body._x_dataStack && document.body._x_dataStack[0];
+                        return {
+                            loading: !!(state && state.educationQuizExplanationLoading),
+                            open: !!(state && state.educationQuizExplanationOpen)
+                        };
+                    }"""
+                )
+                if loading_state != {"loading": True, "open": False}:
+                    raise AssertionError(f"expected quiz explanation to enter a loading state first, got {loading_state}")
+                if explanation_panel.count() and explanation_panel.first.is_visible():
+                    raise AssertionError("explanation panel should stay hidden while the thinking state is visible")
+
+                page.wait_for_function(
+                    """() => {
+                        const state = document.body._x_dataStack && document.body._x_dataStack[0];
+                        return !!(state && !state.educationQuizExplanationLoading && state.educationQuizExplanationOpen);
+                    }""",
+                    timeout=CONFIG.timeout_ms,
+                )
+                explanation_panel.wait_for(state="visible", timeout=CONFIG.timeout_ms)
+                if len(explanation_panel.inner_text().strip()) < 20:
+                    raise AssertionError("expected detailed quiz explanation text after clicking explain")
+
+                explanation_order = page.evaluate(
+                    """() => {
+                        const state = document.body._x_dataStack && document.body._x_dataStack[0];
+                        const question = state && typeof state.currentEducationQuizQuestion === 'function'
+                            ? state.currentEducationQuizQuestion()
+                            : null;
+                        const panel = document.querySelector('[data-testid="education-quiz-explanation-panel"]');
+                        const panelText = panel ? (panel.innerText || '') : '';
+                        const explanation = question ? String(question.explanation || '') : '';
+                        const summary = question ? String(question.summary || '') : '';
+                        const explanationNeedle = explanation ? explanation.slice(0, Math.min(80, explanation.length)) : '';
+                        const summaryNeedle = summary ? summary.slice(0, Math.min(80, summary.length)) : '';
+                        return {
+                            explanationIndex: explanationNeedle ? panelText.indexOf(explanationNeedle) : -1,
+                            summaryIndex: summaryNeedle ? panelText.indexOf(summaryNeedle) : -1,
+                            hasExplanation: !!explanation,
+                            hasSummary: !!summary
+                        };
+                    }"""
+                )
+                if explanation_order["hasExplanation"] and explanation_order["explanationIndex"] < 0:
+                    raise AssertionError(f"expected core explanation text in panel, got {explanation_order}")
+                if explanation_order["hasSummary"] and explanation_order["summaryIndex"] < 0:
+                    raise AssertionError(f"expected summary text in panel, got {explanation_order}")
+                if (
+                    explanation_order["hasExplanation"]
+                    and explanation_order["hasSummary"]
+                    and explanation_order["summaryIndex"] <= explanation_order["explanationIndex"]
+                ):
+                    raise AssertionError(f"expected summary to appear after explanation, got {explanation_order}")
+
+                page.locator('[data-testid="education-quiz-next-button"]').click()
+                page.wait_for_function(
+                    """() => {
+                        const state = document.body._x_dataStack && document.body._x_dataStack[0];
+                        const question = state && typeof state.currentEducationQuizQuestion === 'function'
+                            ? state.currentEducationQuizQuestion()
+                            : null;
+                        return !!(
+                            state &&
+                            question &&
+                            state.educationQuizIndex === 1 &&
+                            !state.educationQuizExplanationLoading &&
+                            !state.educationQuizExplanationOpen
+                        );
+                    }""",
+                    timeout=CONFIG.timeout_ms,
+                )
+
+                correct_answer = page.evaluate(
+                    """() => {
+                        const state = document.body._x_dataStack && document.body._x_dataStack[0];
+                        const question = state && typeof state.currentEducationQuizQuestion === 'function'
+                            ? state.currentEducationQuizQuestion()
+                            : null;
+                        return question ? String(question.correct_option_id || '').toLowerCase() : '';
+                    }"""
+                )
+                if not correct_answer:
+                    raise AssertionError("expected a correct option id on the next quiz question")
+
+                page.locator(f'[data-testid="education-quiz-option-{correct_answer}"]').click()
+                page.wait_for_function(
+                    """() => {
+                        const state = document.body._x_dataStack && document.body._x_dataStack[0];
+                        const question = state && typeof state.currentEducationQuizQuestion === 'function'
+                            ? state.currentEducationQuizQuestion()
+                            : null;
+                        return !!(
+                            state &&
+                            question &&
+                            typeof state.getEducationQuizAnswer === 'function' &&
+                            state.getEducationQuizAnswer(question.id) === question.correct_option_id
+                        );
+                    }""",
+                    timeout=CONFIG.timeout_ms,
+                )
+
+                if explain_button.is_visible():
+                    raise AssertionError("explain button should stay hidden after a correct answer")
+
+            run_browser_step(
+                "education quiz explain behavior",
+                REPORTER,
+                page,
+                monitor,
+                CONFIG,
+                education_quiz_explain_behavior,
             )
 
             def public_search() -> None:
@@ -303,6 +815,26 @@ def main() -> None:
                         freeLeads: window.AppUpgradeModal.resolveOffer({ current_plan: 'free' }, 'leads').recommendedPlan,
                         starterApi: window.AppUpgradeModal.resolveOffer({ current_plan: 'starter' }, 'api_access').recommendedPlan,
                         freeWatchlistLogo: window.AppUpgradeModal.resolveOffer({ current_plan: 'free' }, 'watchlist_logo').recommendedPlan,
+                        quickCopyMatches: (() => {
+                            const offer = window.AppUpgradeModal.resolveOffer({ current_plan: 'free' }, 'quick_search');
+                            return offer.title === window.AppI18n.t('upgrade.search_limit_title')
+                                && offer.description === window.AppI18n.t('upgrade.search_limit_description');
+                        })(),
+                        watchlistCopyMatches: (() => {
+                            const offer = window.AppUpgradeModal.resolveOffer({ current_plan: 'free' }, 'watchlist_items');
+                            return offer.title === window.AppI18n.t('upgrade.watchlist_title')
+                                && offer.description === window.AppI18n.t('upgrade.watchlist_description');
+                        })(),
+                        liveCopyMatches: (() => {
+                            const offer = window.AppUpgradeModal.resolveOffer({ current_plan: 'free' }, 'live_search');
+                            return offer.title === window.AppI18n.t('upgrade.live_search_title')
+                                && offer.description === window.AppI18n.t('upgrade.live_search_description');
+                        })(),
+                        leadsCopyMatches: (() => {
+                            const offer = window.AppUpgradeModal.resolveOffer({ current_plan: 'free' }, 'leads');
+                            return offer.title === window.AppI18n.t('upgrade.leads_title')
+                                && offer.description === window.AppI18n.t('upgrade.leads_description');
+                        })(),
                         dailyLimitHandled: window.AppUpgradeModal.maybeHandle({ error: 'daily_limit_exceeded', current_plan: 'free' }, 'quick_search'),
                         dailyLimitPlan: (document.getElementById('upgrade-plan-code')?.textContent || '').trim().toLowerCase(),
                         genericRateHandled: (() => {
@@ -318,6 +850,8 @@ def main() -> None:
                     raise AssertionError(f"expected starter api gate to recommend enterprise, got {resolved}")
                 if resolved["freeWatchlistLogo"] != "starter":
                     raise AssertionError(f"expected free watchlist-logo gate to recommend starter, got {resolved}")
+                if not resolved["quickCopyMatches"] or not resolved["watchlistCopyMatches"] or not resolved["liveCopyMatches"] or not resolved["leadsCopyMatches"]:
+                    raise AssertionError(f"expected context-specific upgrade copy, got {resolved}")
                 if resolved["dailyLimitHandled"] is not True or resolved["dailyLimitPlan"] != "starter":
                     raise AssertionError(f"expected daily quick-search limit to open starter upgrade modal, got {resolved}")
                 if resolved["genericRateHandled"] is not False or resolved["modalVisibleAfterGenericRate"]:

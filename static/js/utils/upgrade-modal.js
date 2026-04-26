@@ -118,6 +118,83 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
         portfolio_download: ['can_download_portfolio', 'daily_lead_views', 'can_export_csv_leads'],
         api_access: ['api_access', 'priority_support', 'dedicated_account_manager']
     };
+    var CONTEXT_COPY = {
+        public_search: {
+            eyebrow: 'upgrade.search_limit_eyebrow',
+            title: 'upgrade.search_limit_title',
+            description: 'upgrade.search_limit_description'
+        },
+        quick_search: {
+            eyebrow: 'upgrade.search_limit_eyebrow',
+            title: 'upgrade.search_limit_title',
+            description: 'upgrade.search_limit_description'
+        },
+        live_search: {
+            eyebrow: 'upgrade.live_search_eyebrow',
+            title: 'upgrade.live_search_title',
+            description: 'upgrade.live_search_description'
+        },
+        watchlist_items: {
+            eyebrow: 'upgrade.watchlist_eyebrow',
+            title: 'upgrade.watchlist_title',
+            description: 'upgrade.watchlist_description'
+        },
+        watchlist_logo: {
+            eyebrow: 'upgrade.watchlist_logo_eyebrow',
+            title: 'upgrade.watchlist_logo_title',
+            description: 'upgrade.watchlist_logo_description'
+        },
+        reports: {
+            eyebrow: 'upgrade.reports_eyebrow',
+            title: 'upgrade.reports_title',
+            description: 'upgrade.reports_description'
+        },
+        report_export: {
+            eyebrow: 'upgrade.report_export_eyebrow',
+            title: 'upgrade.report_export_title',
+            description: 'upgrade.report_export_description'
+        },
+        applications: {
+            eyebrow: 'upgrade.applications_eyebrow',
+            title: 'upgrade.applications_title',
+            description: 'upgrade.applications_description'
+        },
+        ai_credits: {
+            eyebrow: 'upgrade.ai_credits_eyebrow',
+            title: 'upgrade.ai_credits_title',
+            description: 'upgrade.ai_credits_description'
+        },
+        name_suggestions: {
+            eyebrow: 'upgrade.ai_credits_eyebrow',
+            title: 'upgrade.ai_credits_title',
+            description: 'upgrade.ai_credits_description'
+        },
+        leads: {
+            eyebrow: 'upgrade.leads_eyebrow',
+            title: 'upgrade.leads_title',
+            description: 'upgrade.leads_description'
+        },
+        csv_export: {
+            eyebrow: 'upgrade.csv_export_eyebrow',
+            title: 'upgrade.csv_export_title',
+            description: 'upgrade.csv_export_description'
+        },
+        auto_scan: {
+            eyebrow: 'upgrade.auto_scan_eyebrow',
+            title: 'upgrade.auto_scan_title',
+            description: 'upgrade.auto_scan_description'
+        },
+        portfolio_download: {
+            eyebrow: 'upgrade.portfolio_download_eyebrow',
+            title: 'upgrade.portfolio_download_title',
+            description: 'upgrade.portfolio_download_description'
+        },
+        api_access: {
+            eyebrow: 'upgrade.api_access_eyebrow',
+            title: 'upgrade.api_access_title',
+            description: 'upgrade.api_access_description'
+        }
+    };
     var FALLBACK_CONTEXT = 'quick_search';
 
     function canonicalPlanName(plan) {
@@ -360,10 +437,20 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
         return unique;
     }
 
+    function copyForContext(context) {
+        var copy = CONTEXT_COPY[context] || {};
+        return {
+            eyebrow: t(copy.eyebrow || 'upgrade.eyebrow'),
+            title: t(copy.title || 'upgrade.generic_title'),
+            description: t(copy.description || 'upgrade.generic_description')
+        };
+    }
+
     function resolveOffer(detail, fallbackContext) {
         var normalized = mergeDetail(detail, fallbackContext);
         var recommendedPlan = recommendedPlanFor(normalized, fallbackContext);
         var context = normalized.upgrade_context || fallbackContext || FALLBACK_CONTEXT;
+        var copy = copyForContext(context);
         return {
             detail: normalized,
             context: context,
@@ -376,8 +463,9 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
             perMonthLabel: '/' + t('pricing.per_month'),
             features: highlightsFor(recommendedPlan, context),
             checkoutUrl: '/checkout?plan=' + encodeURIComponent(recommendedPlan) + '&billing=monthly',
-            title: t('upgrade.generic_title'),
-            description: t('upgrade.generic_description'),
+            eyebrow: copy.eyebrow,
+            title: copy.title,
+            description: copy.description,
             recommendedBadge: t('upgrade.recommended_badge'),
             includesLabel: t('checkout.includes')
         };
@@ -392,6 +480,7 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
         modal.dataset.recommendedPlan = offer.recommendedPlan;
         modal.dataset.upgradeContext = offer.context;
 
+        var eyebrowEl = document.getElementById('upgrade-modal-eyebrow');
         var titleEl = document.getElementById('upgrade-modal-title');
         var descEl = document.getElementById('upgrade-modal-description');
         var nameEl = document.getElementById('upgrade-plan-name');
@@ -401,6 +490,7 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
         var codeEl = document.getElementById('upgrade-plan-code');
         var featureListEl = document.getElementById('upgrade-feature-list');
 
+        if (eyebrowEl) eyebrowEl.textContent = offer.eyebrow;
         if (titleEl) titleEl.textContent = offer.title;
         if (descEl) descEl.textContent = offer.description;
         if (nameEl) nameEl.textContent = offer.planName;

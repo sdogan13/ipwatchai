@@ -1,5 +1,5 @@
 # ==========================================
-# IP WATCH AI - Development Dependencies
+# IPWatchAI - Development Dependencies
 # ==========================================
 # Install with: pip install -r requirements-dev.txt
 

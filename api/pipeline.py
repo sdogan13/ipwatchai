@@ -35,7 +35,7 @@ async def trigger_pipeline(
     background_tasks: BackgroundTasks = None,
     current_user: CurrentUser = Depends(require_superadmin()),
 ):
-    """Trigger a full pipeline run in the background."""
+    """Trigger a full pipeline run in a detached worker process."""
     return await trigger_pipeline_run_data(
         skip_download=skip_download,
         background_tasks=background_tasks,
@@ -49,7 +49,7 @@ async def trigger_pipeline_step(
     background_tasks: BackgroundTasks = None,
     current_user: CurrentUser = Depends(require_superadmin()),
 ):
-    """Trigger a single pipeline step in the background."""
+    """Trigger a single pipeline step in a detached worker process."""
     return await trigger_pipeline_step_data(
         step=step,
         background_tasks=background_tasks,

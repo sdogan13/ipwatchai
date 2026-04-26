@@ -73,6 +73,8 @@ Useful endpoints:
 Notes:
 - `cloudflared` is optional and not needed for local development
 - Docker bootstraps the database from `deploy/schema.sql`
+- the local Docker backend bind-mounts `education/` and `migrations/`, so landing-page study materials and Education progress startup checks use the workspace files directly
+- `education/moderation_overrides.json` is mounted writable into the backend container so admin/superadmin tester curation in the Education tab persists locally
 
 ### Option B: Local Python App Against Local Or Docker Services
 
@@ -136,6 +138,60 @@ Core API regression:
 python -m pytest tests/test_api_endpoints.py -s
 ```
 
+## Scoring Engine
+
+Canonical similarity scoring lives behind `score_pair()` in `services/scoring_service.py` and is re-exported through `risk_engine.py`.
+
+Current version: `v2_text_visual`.
+- text scoring compares the query against the original candidate name and, when present, `trademarks.name_tr`
+- `translation_similarity` is the translated-name textual path score, not a separate overall signal
+- text token weighting separates true descriptive generics such as `patent` and `ltd` from common trademark anchors such as `dogan`
+- descriptor-like category/service/entity terms are now classified from local corpus behavior in `word_idf` and `word_idf_tr`; high-IDF descriptor terms stay generic and cannot become common anchors on their own
+- short acronym-style anchors require exact normalized copying; non-exact fuzzy/phonetic matches such as a two-character acronym against a longer translated word are capped as weak evidence
+- compact compounds with true-generic suffixes, such as `doganpatent`, are scored through their anchor plus generic components
+- Retrieval V2 pre-screening searches normalized, compact, containment, token, fuzzy, OCR, semantic, visual, and phonetic candidate paths before V2 scoring
+- textual retrieval runs symmetrically across `trademarks.name` and `trademarks.name_tr`, so translated-name candidates enter the same scoring flow as original-name candidates
+- retrieval diagnostics record which internal stage and field found a candidate; scoring still decides Path A (`name`) versus Path B (`name_tr`)
+- dominant-core scoring keeps fully copied marks high with generic additions, while capping changed extra matter such as a different second brand term
+- collapsed `name_tr` values are capped so translated-name scoring cannot turn a longer original mark into an exact match
+- visual scoring normalizes across active CLIP, DINOv2, and OCR components only; color vectors may still be present in retrieval data but do not contribute to visual risk
+- weak textual evidence, including generic-only, missing-anchor, dominant-anchor-missing, or semantic/phonetic-only support, prevents moderate visual similarity from creating a high conflict score
+- partial multi-anchor matches with changed matter on both sides are capped as limited text evidence, so one shared token cannot be boosted into high risk by moderate visual similarity
+- single-anchor matches with generic/service query matter and different target identity matter are treated as limited text evidence unless the full core is copied
+- weak fuzzy dominant-anchor matches are calibrated by length ratio, edit distance, and anchor coverage; full-length one-edit variants can remain meaningful while fragment-like or weak translated fuzzy matches are capped as limited text evidence
+- guarded caps are calibrated continuously from coverage, match quality, and added-matter evidence; cap values remain policy ceilings rather than automatic final scores
+- OCR disagreement between wordmark logos caps moderate CLIP/DINO visual evidence; weak-text cases require strong OCR agreement or very strong CLIP+DINO evidence before visual similarity can drive high risk
+- `name_tr` values that normalize to the original candidate name cannot beat Path A solely because translated IDF flags classify tokens differently
+- final text/visual combining is max-plus, so a strong text or logo match is not diluted when the other signal is missing
+- the score remains a `0.0-1.0` similarity-risk score; legal factors such as status, class relatedness, seniority, and enforceability are handled outside this scoring slice
+
+## Translation Refresh
+
+- Live query translation continues to use the default NLLB backend from `utils/translation.py`.
+- Offline `name_tr` regeneration is now driven by `scripts/regenerate_name_tr.py`, which:
+  - benchmarks the candidate backend against the current NLLB baseline
+  - exports a rollback snapshot before refresh
+  - refreshes `trademarks.name_tr` and `detected_lang`
+  - syncs matching on-disk `metadata.json` records back from the refreshed DB state
+  - records `name_tr_backend`, `name_tr_model`, and `name_tr_updated_at`
+  - persists resumable progress in `artifacts/translation_refresh/name_tr_refresh_progress.json`, including the active ordering mode, campaign watermark, and metadata sync state
+  - processes historical backfills newest-first by `application_date DESC NULLS LAST, id DESC`, while using the MADLAD provenance watermark to skip rows already handled by the same refresh campaign
+  - sends every trademark name through MADLAD on the MADLAD refresh path instead of using language detection to decide whether a row should be translated
+  - cleans generic leading prompt/meta leakage structurally (for example language-prefixed `... çeviri:` / `... translation:` forms) instead of storing that leaked prefix in `name_tr`
+  - preserves the original trademark when a MADLAD candidate changes, drops, adds, or reorders digits
+  - uses a separate MADLAD generation microbatch size, default `16`, so DB page size and GPU generation batch size can be tuned independently without changing translation behavior
+- Compatibility wrappers:
+  - `scripts/backfill_translations.py`
+  - `scripts/regen_null.py`
+- Useful commands:
+  - `python scripts/regenerate_name_tr.py --benchmark-only`
+  - `python scripts/regenerate_name_tr.py --dry-run --limit 5000`
+  - `python scripts/regenerate_name_tr.py`
+  - `python scripts/regenerate_name_tr.py --skip-benchmark --ordering-mode application_date_desc --campaign-watermark 2026-04-24T21:34:29Z --translate-batch-size 16`
+- Background launch for long-running refreshes:
+  - `python scripts/launch_name_tr_refresh_background.py --backend madlad --skip-benchmark --ordering-mode application_date_desc --campaign-watermark 2026-04-24T21:34:29Z --translate-batch-size 16`
+  - the launcher writes a manifest plus stdout/stderr logs under `artifacts/translation_refresh/`
+
 Full mocked regression suite:
 
 ```powershell
@@ -193,6 +249,29 @@ Pipeline and data-collection code lives in:
 - `pipeline/`
 
 Operational helpers and maintenance scripts live in `scripts/`.
+
+Pipeline runtime notes:
+- `/api/v1/pipeline/trigger` and `/api/v1/pipeline/trigger-step` create a `pipeline_runs` row and then launch `python -m workers.pipeline_worker` as a detached child process
+- `workers/pipeline_scheduler.py` now launches the same detached worker path for scheduled full and daily processing runs instead of executing the pipeline inline inside the scheduler process
+- this decouples an active run from the parent web or scheduler process lifetime, but a full host or container restart still terminates the worker process
+- incremental collection now compares recent site issues against local issue folders and only treats an issue as complete when its `BLT_...` or `GZ_...` folder contains both `metadata.json` and `events.json`
+- raw collector downloads are named with the canonical issue stem, for example `BLT_490_2026-04-13.pdf` or `GZ_500_2026-03-31.zip`
+- extraction now accepts those canonical raw BLT/GZ filenames as well as legacy raw names when scanning PDFs and archives
+- successful PDF extraction now relocates a top-level raw PDF into its canonical issue folder as `bulletin.pdf`
+- Step 2 now also runs `pdf_extract_events.py` across BLT/GZ issue folders missing `events.json`, including repair of older top-level raw-PDF cases when the issue folder already exists
+- Step 3 now prefers archive DB/text inputs over an existing `metadata.json`, so mixed PDF + archive folders are re-parsed from the archive source and `metadata.json` is overwritten
+- `pipeline/ingest.py` is now a thin compatibility wrapper; canonical ingest status rules live in `pipeline/ingest_rules.py`, runtime orchestration lives in `pipeline/ingest_runtime.py`, and explicit ingest-runtime setup/readiness checks live in `pipeline/ingest_bootstrap.py`
+- ingest no longer self-patches schema/reference tables on every run; apply `python migrations/run_ingest_runtime_migration.py` once per environment and normal ingest will then fail fast if runtime prerequisites are missing
+- pipeline translation for future folders now defaults to the MADLAD backend, so `pipeline/ai.py` writes `name_tr`, `detected_lang`, and translation provenance into `metadata.json` using MADLAD unless `PIPELINE_TRANSLATION_BACKEND` is overridden
+- MADLAD translation runtime tuning is shared between refresh and pipeline paths through `MADLAD_TRANSLATE_BATCH_SIZE` (default `16`), so future folder translation uses the same safer generation microbatch unless explicitly overridden
+- when FastText is unavailable, language detection now reports `unknown` instead of heuristic guesses; the MADLAD refresh path still evaluates every trademark name, preserves an existing `detected_lang` when fresh detection is `unknown`, cleans generic prompt/meta leakage, and falls back to the original trademark when translated digits drift, while live/default NLLB translation keeps its existing fallback-to-English source behavior
+- the normal worker path now runs `event_ingest` automatically after trademark ingest and before conflict scan, so `trademark_events`, event-derived trademark state, `final_status*`, and event-based watchlist alerts stay in sync with the latest pipeline run
+- `ingest_events.py` now reconciles `trademark_events` per local BLT/GZ issue scope instead of append-only inserts, so reruns replace a scope with the current `events.json` payload
+- event-row uniqueness is now enforced by a full-payload `event_fingerprint`, which preserves distinct same-type events while removing exact duplicates
+- `final_status`, `final_status_source`, and `final_status_at` are reconciler-owned fields derived from ingest-owned `current_status` and event-owned `effective_status`; `pipeline/ingest.py` and `ingest_events.py` now update their own source fields and then call the shared reconciler for touched application numbers
+- `/api/v1/pipeline/trigger-step` now also supports `event_ingest` as a first-class worker step for manual reruns of event reconciliation/materialization
+- `/api/v1/pipeline/trigger-step` now also supports a manual `final_status_repair` maintenance step for chunked full-table reconciliation when legacy drift needs repair
+- collector tuning knobs: `PIPELINE_INCREMENTAL_LOOKBACK`, `PIPELINE_RECENT_WINDOW_DAYS`, and `PIPELINE_MIN_GAZETTE_ISSUE_NUMBER`
 
 If you run archive extraction locally on Windows, make sure `PIPELINE_SEVEN_ZIP_PATH` points to a working 7-Zip executable.
 

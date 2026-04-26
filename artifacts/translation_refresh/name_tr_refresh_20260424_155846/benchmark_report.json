@@ -1,0 +1,356 @@
+{
+  "fixture_path": "C:\\Users\\701693\\turk_patent\\scripts\\fixtures\\madlad_translation_benchmark.json",
+  "baseline_backend": "nllb",
+  "candidate_backend": "madlad",
+  "baseline_passes": 9,
+  "candidate_passes": 10,
+  "baseline_pass_rate": 0.6923076923076923,
+  "candidate_pass_rate": 0.7692307692307693,
+  "candidate_meets_gate": true,
+  "details": [
+    {
+      "case": {
+        "id": "en_apple",
+        "name": "APPLE",
+        "expected_lang": "en",
+        "mode": "exact",
+        "acceptable_tr": [
+          "elma"
+        ]
+      },
+      "baseline": {
+        "original": "APPLE",
+        "detected_lang": "en",
+        "tr": "elma"
+      },
+      "candidate": {
+        "original": "APPLE",
+        "detected_lang": "en",
+        "tr": "elma"
+      },
+      "baseline_pass": true,
+      "candidate_pass": true,
+      "baseline_reasons": [],
+      "candidate_reasons": []
+    },
+    {
+      "case": {
+        "id": "en_water",
+        "name": "WATER",
+        "expected_lang": "en",
+        "mode": "exact",
+        "acceptable_tr": [
+          "su"
+        ]
+      },
+      "baseline": {
+        "original": "WATER",
+        "detected_lang": "en",
+        "tr": "su"
+      },
+      "candidate": {
+        "original": "WATER",
+        "detected_lang": "en",
+        "tr": "su"
+      },
+      "baseline_pass": true,
+      "candidate_pass": true,
+      "baseline_reasons": [],
+      "candidate_reasons": []
+    },
+    {
+      "case": {
+        "id": "en_gold",
+        "name": "GOLD",
+        "expected_lang": "en",
+        "mode": "exact",
+        "acceptable_tr": [
+          "altın"
+        ]
+      },
+      "baseline": {
+        "original": "GOLD",
+        "detected_lang": "en",
+        "tr": "altın"
+      },
+      "candidate": {
+        "original": "GOLD",
+        "detected_lang": "en",
+        "tr": "altın"
+      },
+      "baseline_pass": true,
+      "candidate_pass": true,
+      "baseline_reasons": [],
+      "candidate_reasons": []
+    },
+    {
+      "case": {
+        "id": "en_red",
+        "name": "RED",
+        "expected_lang": "en",
+        "mode": "exact",
+        "acceptable_tr": [
+          "kırmızı"
+        ]
+      },
+      "baseline": {
+        "original": "RED",
+        "detected_lang": "en",
+        "tr": "kırmızı"
+      },
+      "candidate": {
+        "original": "RED",
+        "detected_lang": "en",
+        "tr": "kırmızı"
+      },
+      "baseline_pass": true,
+      "candidate_pass": true,
+      "baseline_reasons": [],
+      "candidate_reasons": []
+    },
+    {
+      "case": {
+        "id": "en_star",
+        "name": "STAR",
+        "expected_lang": "en",
+        "mode": "exact",
+        "acceptable_tr": [
+          "yıldız"
+        ]
+      },
+      "baseline": {
+        "original": "STAR",
+        "detected_lang": "en",
+        "tr": "yıldız"
+      },
+      "candidate": {
+        "original": "STAR",
+        "detected_lang": "en",
+        "tr": "yıldız"
+      },
+      "baseline_pass": true,
+      "candidate_pass": true,
+      "baseline_reasons": [],
+      "candidate_reasons": []
+    },
+    {
+      "case": {
+        "id": "fr_pomme",
+        "name": "pomme",
+        "expected_lang": "fr",
+        "mode": "exact",
+        "acceptable_tr": [
+          "elma"
+        ]
+      },
+      "baseline": {
+        "original": "pomme",
+        "detected_lang": "en",
+        "tr": null
+      },
+      "candidate": {
+        "original": "pomme",
+        "detected_lang": "en",
+        "tr": "elma"
+      },
+      "baseline_pass": false,
+      "candidate_pass": false,
+      "baseline_reasons": [
+        "lang:en!=fr",
+        "translation:"
+      ],
+      "candidate_reasons": [
+        "lang:en!=fr"
+      ]
+    },
+    {
+      "case": {
+        "id": "fa_apple",
+        "name": "سیب",
+        "expected_lang": "fa",
+        "mode": "exact",
+        "acceptable_tr": [
+          "elma"
+        ]
+      },
+      "baseline": {
+        "original": "سیب",
+        "detected_lang": "fa",
+        "tr": "elma"
+      },
+      "candidate": {
+        "original": "سیب",
+        "detected_lang": "fa",
+        "tr": "elma"
+      },
+      "baseline_pass": true,
+      "candidate_pass": true,
+      "baseline_reasons": [],
+      "candidate_reasons": []
+    },
+    {
+      "case": {
+        "id": "ar_apple",
+        "name": "تفاح",
+        "expected_lang": "ar",
+        "mode": "exact",
+        "acceptable_tr": [
+          "elma"
+        ]
+      },
+      "baseline": {
+        "original": "تفاح",
+        "detected_lang": "ar",
+        "tr": "eğlence"
+      },
+      "candidate": {
+        "original": "تفاح",
+        "detected_lang": "ar",
+        "tr": "elma"
+      },
+      "baseline_pass": false,
+      "candidate_pass": true,
+      "baseline_reasons": [
+        "translation:eğlence"
+      ],
+      "candidate_reasons": []
+    },
+    {
+      "case": {
+        "id": "tr_seker",
+        "name": "ŞEKER",
+        "expected_lang": "tr",
+        "mode": "preserve",
+        "acceptable_tr": [
+          "şeker"
+        ]
+      },
+      "baseline": {
+        "original": "ŞEKER",
+        "detected_lang": "tr",
+        "tr": "şeker"
+      },
+      "candidate": {
+        "original": "ŞEKER",
+        "detected_lang": "tr",
+        "tr": "şeker"
+      },
+      "baseline_pass": true,
+      "candidate_pass": true,
+      "baseline_reasons": [],
+      "candidate_reasons": []
+    },
+    {
+      "case": {
+        "id": "tr_dogan",
+        "name": "DOĞAN",
+        "expected_lang": "tr",
+        "mode": "preserve",
+        "acceptable_tr": [
+          "doğan"
+        ]
+      },
+      "baseline": {
+        "original": "DOĞAN",
+        "detected_lang": "tr",
+        "tr": "doğan"
+      },
+      "candidate": {
+        "original": "DOĞAN",
+        "detected_lang": "tr",
+        "tr": "doğan"
+      },
+      "baseline_pass": true,
+      "candidate_pass": true,
+      "baseline_reasons": [],
+      "candidate_reasons": []
+    },
+    {
+      "case": {
+        "id": "tr_istanbul",
+        "name": "İSTANBUL",
+        "expected_lang": "tr",
+        "mode": "preserve",
+        "acceptable_tr": [
+          "istanbul"
+        ]
+      },
+      "baseline": {
+        "original": "İSTANBUL",
+        "detected_lang": "en",
+        "tr": null
+      },
+      "candidate": {
+        "original": "İSTANBUL",
+        "detected_lang": "en",
+        "tr": null
+      },
+      "baseline_pass": false,
+      "candidate_pass": false,
+      "baseline_reasons": [
+        "lang:en!=tr",
+        "preserve:"
+      ],
+      "candidate_reasons": [
+        "lang:en!=tr",
+        "preserve:"
+      ]
+    },
+    {
+      "case": {
+        "id": "brand_like",
+        "name": "NAIK",
+        "expected_lang": "en",
+        "mode": "preserve",
+        "acceptable_tr": [
+          "naik"
+        ]
+      },
+      "baseline": {
+        "original": "NAIK",
+        "detected_lang": "tr",
+        "tr": "naık"
+      },
+      "candidate": {
+        "original": "NAIK",
+        "detected_lang": "tr",
+        "tr": "naık"
+      },
+      "baseline_pass": false,
+      "candidate_pass": false,
+      "baseline_reasons": [
+        "lang:tr!=en",
+        "preserve:naık"
+      ],
+      "candidate_reasons": [
+        "lang:tr!=en",
+        "preserve:naık"
+      ]
+    },
+    {
+      "case": {
+        "id": "mixed_dogan_electronics",
+        "name": "DOĞAN electronics",
+        "expected_lang": "en",
+        "mode": "exact",
+        "acceptable_tr": [
+          "doğan elektronik"
+        ]
+      },
+      "baseline": {
+        "original": "DOĞAN electronics",
+        "detected_lang": "en",
+        "tr": "doğan elektronik"
+      },
+      "candidate": {
+        "original": "DOĞAN electronics",
+        "detected_lang": "en",
+        "tr": "doğan elektronik"
+      },
+      "baseline_pass": true,
+      "candidate_pass": true,
+      "baseline_reasons": [],
+      "candidate_reasons": []
+    }
+  ]
+}

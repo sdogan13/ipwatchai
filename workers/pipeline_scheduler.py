@@ -7,7 +7,8 @@ Runs as a standalone daemon process. Schedules the full data pipeline:
 - Daily (5 AM):          Processing pipeline (extract + metadata + embeddings + ingest)
 
 The daily run catches manually downloaded archives and processes any
-new bulletins without triggering a full download.
+new bulletins without triggering a full download. Scheduled runs launch
+the actual pipeline work in detached `workers.pipeline_worker` processes.
 
 Usage:
     # Run as daemon
@@ -32,6 +33,8 @@ from datetime import datetime
 
 import schedule
 
+from workers.pipeline_launcher import launch_pipeline_process
+
 # Logging setup
 logging.basicConfig(
     level=logging.INFO,
@@ -41,37 +44,31 @@ logger = logging.getLogger(__name__)
 
 
 def _run_full_pipeline():
-    """Run the full 5-step pipeline (weekly)."""
-    logger.info("Scheduled full pipeline starting...")
+    """Launch the full pipeline in a detached worker process."""
+    logger.info("Scheduled full pipeline launch starting...")
     try:
-        from workers.pipeline_worker import PipelineWorker
-        worker = PipelineWorker()
-        result = asyncio.run(
-            worker.run_full_pipeline(
-                skip_download=False,
-                triggered_by="schedule",
-            )
+        process = launch_pipeline_process(
+            triggered_by="schedule",
+            skip_download=False,
+            service_logger=logger,
         )
-        logger.info(f"Full pipeline completed: {result.status}")
+        logger.info("Scheduled full pipeline launched (pid=%s)", getattr(process, "pid", None))
     except Exception as e:
-        logger.error(f"Full pipeline failed: {e}")
+        logger.error(f"Full pipeline launch failed: {e}")
 
 
 def _run_daily_pipeline():
-    """Run processing-only pipeline (daily, skip download)."""
-    logger.info("Scheduled daily pipeline starting (skip download)...")
+    """Launch the daily processing pipeline in a detached worker process."""
+    logger.info("Scheduled daily pipeline launch starting (skip download)...")
     try:
-        from workers.pipeline_worker import PipelineWorker
-        worker = PipelineWorker()
-        result = asyncio.run(
-            worker.run_full_pipeline(
-                skip_download=True,
-                triggered_by="schedule",
-            )
+        process = launch_pipeline_process(
+            triggered_by="schedule",
+            skip_download=True,
+            service_logger=logger,
         )
-        logger.info(f"Daily pipeline completed: {result.status}")
+        logger.info("Scheduled daily pipeline launched (pid=%s)", getattr(process, "pid", None))
     except Exception as e:
-        logger.error(f"Daily pipeline failed: {e}")
+        logger.error(f"Daily pipeline launch failed: {e}")
 
 
 def start_scheduler(

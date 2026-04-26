@@ -182,7 +182,12 @@ class AISettings(BaseSettings):
     dino_model: str = Field(default="dinov2_vitb14", alias="DINO_MODEL")
 
     # Translation
+    translation_backend: str = Field(default="nllb", alias="TRANSLATION_BACKEND")
+    pipeline_translation_backend: str = Field(default="madlad", alias="PIPELINE_TRANSLATION_BACKEND")
+    offline_translation_backend: str = Field(default="madlad", alias="OFFLINE_TRANSLATION_BACKEND")
     translation_model: str = Field(default="facebook/nllb-200-distilled-600M", alias="TRANSLATION_MODEL")
+    madlad_translation_model: str = Field(default="google/madlad400-3b-mt", alias="MADLAD_TRANSLATION_MODEL")
+    madlad_translate_batch_size: int = Field(default=16, alias="MADLAD_TRANSLATE_BATCH_SIZE")
     translation_device: str = Field(default="auto", alias="TRANSLATION_DEVICE")  # "auto", "cuda", "cpu"
 
     # OCR
@@ -311,6 +316,12 @@ class PipelineSettings(BaseSettings):
     categories: List[str] = Field(default=["Marka"], alias="PIPELINE_CATEGORIES")
     headless_browser: bool = Field(default=True, alias="PIPELINE_HEADLESS_BROWSER")
     download_timeout: int = Field(default=300, alias="PIPELINE_DOWNLOAD_TIMEOUT")
+    incremental_lookback: int = Field(default=5, alias="PIPELINE_INCREMENTAL_LOOKBACK")
+    recent_window_days: int = Field(default=60, alias="PIPELINE_RECENT_WINDOW_DAYS")
+    min_gazette_issue_number: int = Field(default=300, alias="PIPELINE_MIN_GAZETTE_ISSUE_NUMBER")
+    enable_ui_scrape: bool = Field(default=True, alias="PIPELINE_ENABLE_UI_SCRAPE")
+    scrape_max_scroll_seconds: int = Field(default=0, alias="PIPELINE_SCRAPE_MAX_SCROLL_SECONDS")
+    scrape_limit: int = Field(default=0, alias="PIPELINE_SCRAPE_LIMIT")
 
     # zip.py
     seven_zip_path: str = Field(

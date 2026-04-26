@@ -164,7 +164,9 @@ def _upgrade_modal_state(page) -> dict:
     return page.evaluate(
         """() => ({
             visible: !!(document.getElementById('upgrade-modal') && !document.getElementById('upgrade-modal').classList.contains('hidden')),
-            recommendedPlan: (document.getElementById('upgrade-plan-code')?.textContent || '').trim().toLowerCase()
+            recommendedPlan: (document.getElementById('upgrade-plan-code')?.textContent || '').trim().toLowerCase(),
+            title: (document.getElementById('upgrade-modal-title')?.textContent || '').trim(),
+            description: (document.getElementById('upgrade-modal-description')?.textContent || '').trim()
         })"""
     )
 
@@ -460,6 +462,14 @@ def main() -> None:
                 state = _upgrade_modal_state(page)
                 if not state["visible"] or state["recommendedPlan"] != "starter":
                     raise AssertionError(f"expected starter upgrade modal after free quick-search limit, got {state}")
+                expected_copy = page.evaluate(
+                    """() => ({
+                        title: window.AppI18n.t('upgrade.search_limit_title'),
+                        description: window.AppI18n.t('upgrade.search_limit_description')
+                    })"""
+                )
+                if state["title"] != expected_copy["title"] or state["description"] != expected_copy["description"]:
+                    raise AssertionError(f"expected search-limit upgrade copy, got {state}, expected {expected_copy}")
 
         reset_daily_quick_search_usage(
             REPORTER,
@@ -510,6 +520,14 @@ def main() -> None:
                 state = _upgrade_modal_state(page)
                 if not state["visible"] or state["recommendedPlan"] != "starter":
                     raise AssertionError(f"expected starter upgrade modal after single-result watchlist limit, got {state}")
+                expected_copy = page.evaluate(
+                    """() => ({
+                        title: window.AppI18n.t('upgrade.watchlist_title'),
+                        description: window.AppI18n.t('upgrade.watchlist_description')
+                    })"""
+                )
+                if state["title"] != expected_copy["title"] or state["description"] != expected_copy["description"]:
+                    raise AssertionError(f"expected watchlist upgrade copy, got {state}, expected {expected_copy}")
             finally:
                 if filler_ids:
                     _delete_watchlist_ids(free_session, filler_ids)

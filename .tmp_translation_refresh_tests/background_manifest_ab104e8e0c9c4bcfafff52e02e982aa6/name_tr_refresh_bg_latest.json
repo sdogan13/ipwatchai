@@ -1,0 +1,18 @@
+{
+  "pid": 4242,
+  "created_at": "2026-04-24T19:00:21Z",
+  "cwd": "C:\\Users\\701693\\turk_patent",
+  "stdout_path": "C:\\Users\\701693\\turk_patent\\.tmp_translation_refresh_tests\\background_manifest_ab104e8e0c9c4bcfafff52e02e982aa6\\name_tr_refresh_bg_20260424_190021.stdout.log",
+  "stderr_path": "C:\\Users\\701693\\turk_patent\\.tmp_translation_refresh_tests\\background_manifest_ab104e8e0c9c4bcfafff52e02e982aa6\\name_tr_refresh_bg_20260424_190021.stderr.log",
+  "command": [
+    "C:\\Program Files\\Python313\\pythonw.exe",
+    "-u",
+    "C:\\Users\\701693\\turk_patent\\scripts\\regenerate_name_tr.py",
+    "--backend",
+    "madlad",
+    "--skip-benchmark",
+    "--output-root",
+    "C:\\Users\\701693\\turk_patent\\.tmp_translation_refresh_tests\\background_manifest_ab104e8e0c9c4bcfafff52e02e982aa6"
+  ],
+  "creationflags": 134218240
+}

@@ -22,8 +22,8 @@
                 </div>
             </div>
 
-            <!-- 5-step progress indicator -->
-            <div class="grid grid-cols-5 gap-3 mb-4">
+            <!-- 6-step progress indicator -->
+            <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-4">
                 <!-- Step 1: Download -->
                 <div id="pipeline-step-download" class="text-center p-3 rounded-lg" style="background:var(--color-bg-muted)">
                     <div class="text-xs text-gray-500 mb-1" x-text="t('pipeline.step_download')">1. Indirme</div>
@@ -53,6 +53,12 @@
                     <div class="text-xs text-gray-500 mb-1" x-text="t('pipeline.step_ingest')">5. Yukleme</div>
                     <div class="font-bold text-lg" id="pipeline-count-ingest">-</div>
                     <div class="text-xs text-gray-400" id="pipeline-status-ingest"></div>
+                </div>
+                <!-- Step 6: Event Ingest -->
+                <div id="pipeline-step-event_ingest" class="text-center p-3 rounded-lg" style="background:var(--color-bg-muted)">
+                    <div class="text-xs text-gray-500 mb-1" x-text="t('pipeline.step_event_ingest')">6. Event Yükleme</div>
+                    <div class="font-bold text-lg" id="pipeline-count-event_ingest">-</div>
+                    <div class="text-xs text-gray-400" id="pipeline-status-event_ingest"></div>
                 </div>
             </div>
 

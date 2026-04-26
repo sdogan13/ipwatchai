@@ -1,6 +1,6 @@
 # Test Plan
 
-Last updated: 2026-04-18
+Last updated: 2026-04-22
 Status: In progress
 
 ## Purpose
@@ -66,12 +66,16 @@ Purpose:
 
 Existing suites:
 - `tests/test_auth.py`
+- `tests/test_data_collection.py`
 - `tests/test_class_utils.py`
 - `tests/test_deadline.py`
 - `tests/test_edge_cases.py`
 - `tests/test_ingest.py`
+- `tests/test_metadata.py`
 - `tests/test_phonetic.py`
 - `tests/test_plan_features.py`
+- `tests/test_pdf_extract.py`
+- `tests/test_pdf_extract_events.py`
 - `tests/test_scoring_engine.py`
 - `tests/test_settings_manager.py`
 - `tests/test_status_reconciler.py`
@@ -81,6 +85,10 @@ Existing suites:
 - `tests/test_translation_scoring.py`
 - `tests/test_turkish_similarity.py`
 - `tests/test_validation.py`
+- `tests/test_zip.py`
+
+Scoring coverage note:
+- `tests/test_scoring_engine.py` covers the V2 text/visual scorer, including descriptor-like token caps, compact compounds, short-anchor phonetic guards, dominant-anchor fuzzy quality guards, dominant-core added matter, bidirectional and single-anchor asymmetric changed-matter caps, continuous guardrail calibration, weak/limited-text visual guards, OCR disagreement, and search/watchlist wiring into `score_pair()`.
 
 ### Layer 2: App API Integration
 
@@ -191,7 +199,7 @@ Current environment note:
 | Paid user | Covered | dedicated paid persona live suite with superadmin-backed provisioning, explicit paid quick-search text/image live/browser coverage, paid watchlist-logo browser happy path, paid application browser CRUD, and aggregate live/browser coverage | deeper paid report/application browser journeys beyond the current starter-plan surface |
 | Business user | Covered | dedicated business persona live suite with superadmin-backed provisioning across lead credits, live search, holders, attorneys, and portfolio endpoints, plus browser live-search, holder, and attorney portfolio journeys | broader business destructive flows only if product workflow requires them |
 | Admin user | Covered | dedicated admin live suite on mounted admin/org routes plus aggregate live smoke delegation | destructive admin-action coverage only if product workflow requires it |
-| Superadmin user | Covered | dedicated superadmin live suite plus a real exercised admin browser suite for the `/admin` panel using configured superadmin creds | deeper destructive platform-admin actions only if needed |
+| Superadmin user | Covered | dedicated superadmin live suite plus a real exercised admin-capable browser suite for the `/admin` panel and landing-page Education tester controls | deeper destructive platform-admin actions only if needed |
 
 ## Feature Coverage Matrix
 
@@ -230,12 +238,13 @@ Current environment note:
 ### Domain and Utility
 
 - `tests/test_auth.py`: password hashing, JWTs, auth model validation
+- `tests/test_data_collection.py`: collector recency-window logic, Gazette validation, issue completeness checks, and download planning
 - `tests/test_subscription.py`: plan eligibility and credit logic
 - `tests/test_subscription_limits.py`: subscription limit behavior
-- `tests/test_scoring_engine.py`: scoring behavior
+- `tests/test_scoring_engine.py`: V2 text/visual scoring behavior, common-anchor/generic/descriptor caps, descriptor-stat classifier tests, short-anchor phonetic guardrails, continuous cap calibration, single-anchor asymmetric added-matter caps, weak/limited-text visual guardrails, OCR-disagreement caps, Retrieval V2 normalization/source diagnostics, compact compound retrieval/scoring, added-matter scoring, duplicate/collapsed translation caps, compatibility fields, and combiner behavior
 - `tests/test_edge_cases.py`: scoring/search edge cases
 - `tests/test_translation.py`: translation behavior
-- `tests/test_translation_scoring.py`: translation scoring behavior
+- `tests/test_translation_scoring.py`: translated-name Path B scoring behavior and CLIP/DINOv2/OCR visual composite coverage
 - `tests/test_turkish_similarity.py`: Turkish similarity helpers
 - `tests/test_phonetic.py`: phonetic helpers
 - `tests/test_ingest.py`: ingest and pipeline behavior
@@ -259,13 +268,13 @@ Current environment note:
 - `tests/browser/test_member_browser_smoke.py`: login, dashboard overview KPI and usage-badge contract, dashboard quick search, tab navigation, and logout browser journey coverage
 - `tests/browser/test_search_browser.py`: dedicated free quick-search text, localized single-result watchlist add success toast coverage, free quick-search daily-limit and single-result watchlist-limit upgrade-gate coverage, and paid quick-search text/image browser coverage with plan-limit assertions
 - `tests/browser/test_live_search_browser.py`: free-plan live-search upgrade-gate with starter recommendation assertions plus business live-search happy-path browser coverage
-- `tests/browser/test_member_feature_browser.py`: deeper member watchlist CRUD, quick-add limit gate, capacity-aware inline bulk-watchlist upgrade guidance from the entity portfolio modal, bulk-upload limit gate, report generation, free application gate with upgrade-modal recommendation, profile/avatar, and paid-application browser flows
+- `tests/browser/test_member_feature_browser.py`: deeper member watchlist CRUD, quick-add limit gate, capacity-aware inline bulk-watchlist upgrade guidance from the entity portfolio modal, inline bulk-upload upgrade guidance at watchlist capacity, report generation, free application gate with upgrade-modal recommendation, profile/avatar, and paid-application browser flows
 - `tests/browser/test_business_browser.py`: business holder/attorney portfolio modal journeys, in-modal entity search, and CSV export trigger coverage
 - `tests/browser/test_watchlist_assets_browser.py`: free-plan watchlist logo gate coverage with upgrade-modal recommendation plus env-gated paid watchlist logo upload/delete asset coverage
 - `tests/browser/test_alerts_browser.py`: member alert detail acknowledge, inline resolve/dismiss, and appeals filter/sort browser journeys on seeded alerts
 - `tests/browser/test_opposition_browser.py`: opposition guidance modal plus inline alert-to-appeal handoff coverage on seeded alert data
 - `tests/browser/test_billing_browser.py`: pricing/checkout locale render coverage for Turkish and Arabic RTL, mobile viewport billing coverage, checkout registration, checkout login, checkout forgot-password reset/login recovery, and paid-checkout initialization browser coverage
-- `tests/browser/test_admin_browser.py`: env-gated superadmin admin-panel browser navigation coverage
+- `tests/browser/test_admin_browser.py`: admin-capable browser coverage for `/admin` navigation plus landing-page Education tester moderation controls
 - `tests/test_browser_e2e.py`: aggregate browser smoke runner
 
 ## Planned Suite Structure

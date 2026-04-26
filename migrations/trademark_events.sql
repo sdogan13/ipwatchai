@@ -4,6 +4,8 @@
 --   transfers, seizures, injunctions, cancellations, renewals, licenses, etc.
 -- ============================================
 
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
 -- 1. Add missing enum values for event-driven statuses
 DO $$ BEGIN
     ALTER TYPE tm_status ADD VALUE IF NOT EXISTS 'İptal Edildi';
@@ -42,9 +44,13 @@ CREATE TABLE IF NOT EXISTS trademark_events (
     new_value TEXT,
     details JSONB DEFAULT '{}',
     raw_text TEXT,
+    event_fingerprint VARCHAR(64),
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE trademark_events
+    ADD COLUMN IF NOT EXISTS event_fingerprint VARCHAR(64);
 
 -- 4. Indexes
 CREATE INDEX IF NOT EXISTS idx_te_app_no       ON trademark_events(application_no);
@@ -55,7 +61,51 @@ CREATE INDEX IF NOT EXISTS idx_te_trademark_id ON trademark_events(trademark_id)
 CREATE INDEX IF NOT EXISTS idx_te_date         ON trademark_events(bulletin_date);
 CREATE INDEX IF NOT EXISTS idx_te_app_type     ON trademark_events(application_no, event_type);
 
--- Dedup index: same event from same bulletin inserted only once
+-- Backfill deterministic full-payload fingerprint for old rows.
+UPDATE trademark_events
+SET event_fingerprint = encode(
+    digest(
+        concat_ws(
+            E'\x1f',
+            COALESCE(application_no, ''),
+            COALESCE(registration_no, ''),
+            COALESCE(event_type, ''),
+            COALESCE(event_subtype, ''),
+            COALESCE(source_type, ''),
+            COALESCE(bulletin_no, ''),
+            COALESCE(to_char(bulletin_date, 'YYYY-MM-DD'), ''),
+            COALESCE(page_number::text, ''),
+            COALESCE(old_value, ''),
+            COALESCE(new_value, ''),
+            COALESCE(details::text, '{}'),
+            COALESCE(raw_text, '')
+        ),
+        'sha256'
+    ),
+    'hex'
+)
+WHERE event_fingerprint IS NULL;
+
+-- Remove exact duplicates before creating the stronger unique index.
+WITH ranked AS (
+    SELECT
+        ctid,
+        ROW_NUMBER() OVER (
+            PARTITION BY event_fingerprint
+            ORDER BY created_at ASC, id ASC
+        ) AS rn
+    FROM trademark_events
+)
+DELETE FROM trademark_events te
+USING ranked
+WHERE te.ctid = ranked.ctid
+  AND ranked.rn > 1;
+
+ALTER TABLE trademark_events
+    ALTER COLUMN event_fingerprint SET NOT NULL;
+
+DROP INDEX IF EXISTS uq_trademark_event;
+
+-- Dedup guard: unique full event payload, not the old weak subset.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_trademark_event
-    ON trademark_events(application_no, event_type, source_type, bulletin_no,
-                        COALESCE(old_value, ''), COALESCE(new_value, ''));
+    ON trademark_events(event_fingerprint);

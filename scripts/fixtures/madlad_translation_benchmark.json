@@ -1,0 +1,93 @@
+[
+  {
+    "id": "en_apple",
+    "name": "APPLE",
+    "expected_lang": "en",
+    "mode": "exact",
+    "acceptable_tr": ["elma"]
+  },
+  {
+    "id": "en_water",
+    "name": "WATER",
+    "expected_lang": "en",
+    "mode": "exact",
+    "acceptable_tr": ["su"]
+  },
+  {
+    "id": "en_gold",
+    "name": "GOLD",
+    "expected_lang": "en",
+    "mode": "exact",
+    "acceptable_tr": ["altın"]
+  },
+  {
+    "id": "en_red",
+    "name": "RED",
+    "expected_lang": "en",
+    "mode": "exact",
+    "acceptable_tr": ["kırmızı"]
+  },
+  {
+    "id": "en_star",
+    "name": "STAR",
+    "expected_lang": "en",
+    "mode": "exact",
+    "acceptable_tr": ["yıldız"]
+  },
+  {
+    "id": "fr_pomme",
+    "name": "pomme",
+    "expected_lang": "fr",
+    "mode": "exact",
+    "acceptable_tr": ["elma"]
+  },
+  {
+    "id": "fa_apple",
+    "name": "سیب",
+    "expected_lang": "fa",
+    "mode": "exact",
+    "acceptable_tr": ["elma"]
+  },
+  {
+    "id": "ar_apple",
+    "name": "تفاح",
+    "expected_lang": "ar",
+    "mode": "exact",
+    "acceptable_tr": ["elma"]
+  },
+  {
+    "id": "tr_seker",
+    "name": "ŞEKER",
+    "expected_lang": "tr",
+    "mode": "preserve",
+    "acceptable_tr": ["şeker"]
+  },
+  {
+    "id": "tr_dogan",
+    "name": "DOĞAN",
+    "expected_lang": "tr",
+    "mode": "preserve",
+    "acceptable_tr": ["doğan"]
+  },
+  {
+    "id": "tr_istanbul",
+    "name": "İSTANBUL",
+    "expected_lang": "tr",
+    "mode": "preserve",
+    "acceptable_tr": ["istanbul"]
+  },
+  {
+    "id": "brand_like",
+    "name": "NAIK",
+    "expected_lang": "en",
+    "mode": "preserve",
+    "acceptable_tr": ["naik"]
+  },
+  {
+    "id": "mixed_dogan_electronics",
+    "name": "DOĞAN electronics",
+    "expected_lang": "en",
+    "mode": "exact",
+    "acceptable_tr": ["doğan elektronik"]
+  }
+]

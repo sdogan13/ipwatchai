@@ -1,17 +1,18 @@
 """
 Trademark Data Pipeline Worker
 ================================
-Orchestrates the full 6-step data pipeline:
+Orchestrates the full 7-step data pipeline:
 
 1. data_collection.py - Download bulletin archives from TURKPATENT
 2. zip.py            - Extract archives to structured folders
 3. metadata.py       - Parse HSQLDB SQL files -> metadata.json
 4. pipeline.ai       - Generate embeddings -> enrich metadata.json in-place
 5. pipeline.ingest   - Load enriched metadata.json into PostgreSQL
-6. universal_scanner - Scan within-deadline bulletins for opposition conflicts
+6. ingest_events.py  - Reconcile event timelines + materialize event state
+7. universal_scanner - Scan within-deadline bulletins for opposition conflicts
 
 Usage:
-    # Run full pipeline (all 5 steps)
+    # Run full pipeline (all scheduled steps)
     python -m workers.pipeline_worker
 
     # Skip download step (process existing archives)
@@ -20,8 +21,8 @@ Usage:
     # Run a single step
     python -m workers.pipeline_worker --step embeddings
 
-    # Dry run (show what would happen)
-    python -m workers.pipeline_worker --dry-run
+    # Reuse an existing pipeline_runs row created by the API trigger
+    python -m workers.pipeline_worker --triggered-by api --run-id <run-id>
 """
 
 import os
@@ -31,6 +32,7 @@ import json
 import logging
 import asyncio
 import argparse
+import threading
 from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass, field, asdict
@@ -50,12 +52,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+PIPELINE_HEARTBEAT_INTERVAL_SECONDS = 60
+
 
 # ===================== Data Models =====================
 
 @dataclass
 class StepResult:
-    step_name: str              # download, extract, metadata, embeddings, ingest
+    step_name: str              # download, extract, metadata, embeddings, ingest, event_ingest
     status: str = "pending"     # success, partial, failed, skipped
     processed: int = 0
     skipped: int = 0
@@ -114,18 +118,66 @@ def _ensure_pipeline_runs_table(conn):
                 step_metadata JSONB,
                 step_embeddings JSONB,
                 step_ingest JSONB,
+                step_event_ingest JSONB,
+                step_final_status_repair JSONB,
                 total_downloaded INTEGER DEFAULT 0,
                 total_extracted INTEGER DEFAULT 0,
                 total_parsed INTEGER DEFAULT 0,
                 total_embedded INTEGER DEFAULT 0,
                 total_ingested INTEGER DEFAULT 0,
+                total_event_scopes_ingested INTEGER DEFAULT 0,
+                total_final_status_repaired INTEGER DEFAULT 0,
                 started_at TIMESTAMP DEFAULT NOW(),
                 completed_at TIMESTAMP,
+                heartbeat_at TIMESTAMP DEFAULT NOW(),
+                current_step VARCHAR(50),
                 duration_seconds FLOAT,
                 error_message TEXT,
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)
+        cur.execute(
+            """
+            ALTER TABLE pipeline_runs
+            ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMP
+        """
+        )
+        cur.execute(
+            """
+            ALTER TABLE pipeline_runs
+            ALTER COLUMN heartbeat_at SET DEFAULT NOW()
+        """
+        )
+        cur.execute(
+            """
+            ALTER TABLE pipeline_runs
+            ADD COLUMN IF NOT EXISTS current_step VARCHAR(50)
+        """
+        )
+        cur.execute(
+            """
+            ALTER TABLE pipeline_runs
+            ADD COLUMN IF NOT EXISTS step_event_ingest JSONB
+        """
+        )
+        cur.execute(
+            """
+            ALTER TABLE pipeline_runs
+            ADD COLUMN IF NOT EXISTS total_event_scopes_ingested INTEGER DEFAULT 0
+        """
+        )
+        cur.execute(
+            """
+            ALTER TABLE pipeline_runs
+            ADD COLUMN IF NOT EXISTS step_final_status_repair JSONB
+        """
+        )
+        cur.execute(
+            """
+            ALTER TABLE pipeline_runs
+            ADD COLUMN IF NOT EXISTS total_final_status_repaired INTEGER DEFAULT 0
+        """
+        )
         conn.commit()
     except Exception:
         conn.rollback()
@@ -137,8 +189,16 @@ def _create_pipeline_run(conn, triggered_by: str, skip_download: bool) -> str:
     try:
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO pipeline_runs (id, status, triggered_by, skip_download, started_at)
-            VALUES (%s, 'running', %s, %s, NOW())
+            INSERT INTO pipeline_runs (
+                id,
+                status,
+                triggered_by,
+                skip_download,
+                started_at,
+                heartbeat_at,
+                current_step
+            )
+            VALUES (%s, 'running', %s, %s, NOW(), NOW(), 'starting')
         """, (run_id, triggered_by, skip_download))
         conn.commit()
         return run_id
@@ -146,6 +206,48 @@ def _create_pipeline_run(conn, triggered_by: str, skip_download: bool) -> str:
         conn.rollback()
         logger.warning(f"Failed to create pipeline run record: {e}")
         return run_id
+
+
+def _touch_pipeline_run(conn, run_id: str, current_step: Optional[str]):
+    """Refresh pipeline liveness for the active run."""
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE pipeline_runs
+            SET heartbeat_at = NOW(),
+                current_step = %s,
+                duration_seconds = EXTRACT(EPOCH FROM (NOW() - started_at))
+            WHERE id = %s AND status = 'running'
+        """,
+            (current_step, run_id),
+        )
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.warning(f"Failed to refresh pipeline liveness: {e}")
+
+
+def _heartbeat_pipeline_run(
+    run_id: str,
+    stop_event: threading.Event,
+    current_step_ref: dict,
+):
+    """Keep the run row fresh while long-running pipeline work is executing."""
+    while not stop_event.wait(PIPELINE_HEARTBEAT_INTERVAL_SECONDS):
+        conn = None
+        try:
+            conn = _get_db_connection()
+            _ensure_pipeline_runs_table(conn)
+            _touch_pipeline_run(conn, run_id, current_step_ref.get("value"))
+        except Exception as e:
+            logger.warning(f"Pipeline heartbeat update failed: {e}")
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
 
 def _update_pipeline_run(conn, run_id: str, result: PipelineResult):
@@ -158,6 +260,8 @@ def _update_pipeline_run(conn, run_id: str, result: PipelineResult):
         totals = {
             "downloaded": 0, "extracted": 0,
             "parsed": 0, "embedded": 0, "ingested": 0,
+            "event_scopes_ingested": 0,
+            "final_status_repaired": 0,
         }
         step_column_map = {
             "download": ("step_download", "downloaded"),
@@ -165,6 +269,8 @@ def _update_pipeline_run(conn, run_id: str, result: PipelineResult):
             "metadata": ("step_metadata", "parsed"),
             "embeddings": ("step_embeddings", "embedded"),
             "ingest": ("step_ingest", "ingested"),
+            "event_ingest": ("step_event_ingest", "event_scopes_ingested"),
+            "final_status_repair": ("step_final_status_repair", "final_status_repaired"),
         }
 
         for step in result.steps:
@@ -188,12 +294,18 @@ def _update_pipeline_run(conn, run_id: str, result: PipelineResult):
                 step_metadata = %s,
                 step_embeddings = %s,
                 step_ingest = %s,
+                step_event_ingest = %s,
+                step_final_status_repair = %s,
                 total_downloaded = %s,
                 total_extracted = %s,
                 total_parsed = %s,
                 total_embedded = %s,
                 total_ingested = %s,
+                total_event_scopes_ingested = %s,
+                total_final_status_repaired = %s,
                 completed_at = NOW(),
+                heartbeat_at = NOW(),
+                current_step = NULL,
                 duration_seconds = %s,
                 error_message = %s
             WHERE id = %s
@@ -204,11 +316,15 @@ def _update_pipeline_run(conn, run_id: str, result: PipelineResult):
             step_data.get("step_metadata"),
             step_data.get("step_embeddings"),
             step_data.get("step_ingest"),
+            step_data.get("step_event_ingest"),
+            step_data.get("step_final_status_repair"),
             totals["downloaded"],
             totals["extracted"],
             totals["parsed"],
             totals["embedded"],
             totals["ingested"],
+            totals["event_scopes_ingested"],
+            totals["final_status_repaired"],
             result.total_duration_seconds,
             error_message,
             run_id,
@@ -306,23 +422,37 @@ class PipelineWorker:
         t0 = time.time()
 
         try:
-            logger.info("[Step 1/5] Starting bulletin download...")
+            logger.info("[Step 1/7] Starting bulletin download...")
             from data_collection import run_collection
             summary = await run_collection(settings=self.pipeline_settings)
 
-            result.processed = summary.get("downloaded", 0)
+            result.processed = summary.get("downloaded_raw", summary.get("downloaded", 0))
             result.skipped = summary.get("skipped", 0)
-            result.failed = summary.get("failed", 0)
-            result.status = "success"
+            result.failed = summary.get("download_failed", 0) + summary.get("scrape_failed", 0)
+            partial_issues = summary.get("partial_issues", 0)
+
+            if result.failed > 0 and result.processed == 0 and summary.get("scraped", 0) == 0:
+                result.status = "failed"
+                result.error = "All collection sources failed"
+            elif result.failed > 0 or partial_issues > 0:
+                result.status = "partial"
+                result.error = (
+                    f"download_failed={summary.get('download_failed', 0)}, "
+                    f"scrape_failed={summary.get('scrape_failed', 0)}, "
+                    f"partial_issues={partial_issues}"
+                )
+            else:
+                result.status = "success"
             logger.info(
-                f"[Step 1/5] Download complete: "
-                f"{result.processed} downloaded, {result.skipped} skipped"
+                f"[Step 1/7] Download complete: "
+                f"raw={summary.get('downloaded_raw', 0)}, scraped={summary.get('scraped', 0)}, "
+                f"partial_issues={partial_issues}, skipped={result.skipped}"
             )
 
         except Exception as e:
             result.status = "failed"
             result.error = str(e)
-            logger.error(f"[Step 1/5] Download failed: {e}")
+            logger.error(f"[Step 1/7] Download failed: {e}")
 
         result.duration_seconds = round(time.time() - t0, 1)
         return result
@@ -330,13 +460,13 @@ class PipelineWorker:
     # ---- Step 2: Extract ----
 
     def run_step_extract(self) -> StepResult:
-        """Step 2: Extract archives (ZIP) + parse PDF bulletins."""
+        """Step 2: Extract archives, parse PDFs, and write events.json."""
         result = StepResult(step_name="extract")
         t0 = time.time()
 
         try:
             # --- 2a: ZIP archive extraction (legacy) ---
-            logger.info("[Step 2/5] Starting archive extraction...")
+            logger.info("[Step 2/7] Starting archive extraction...")
             from zip import run_extraction
             summary = run_extraction(settings=self.pipeline_settings)
 
@@ -345,20 +475,18 @@ class PipelineWorker:
             result.failed = summary.get("failed", 0)
 
             logger.info(
-                f"[Step 2/5] ZIP extraction: "
+                f"[Step 2/7] ZIP extraction: "
                 f"{result.processed} extracted, {result.skipped} skipped, "
                 f"{result.failed} failed"
             )
 
             # --- 2b: PDF bulletin extraction (new format) ---
-            logger.info("[Step 2/5] Starting PDF bulletin extraction...")
+            logger.info("[Step 2/7] Starting PDF bulletin extraction...")
+            root_dir = None
+            if self.pipeline_settings:
+                root_dir = Path(getattr(self.pipeline_settings, "bulletins_root", "bulletins/Marka"))
             try:
                 from pdf_extract import run_pdf_extraction
-                from pathlib import Path
-
-                root_dir = None
-                if self.pipeline_settings:
-                    root_dir = Path(getattr(self.pipeline_settings, "bulletins_root", "bulletins/Marka"))
 
                 pdf_summary = run_pdf_extraction(root_dir=root_dir)
                 pdf_processed = pdf_summary.get("processed", 0)
@@ -370,17 +498,45 @@ class PipelineWorker:
 
                 if pdf_processed > 0:
                     logger.info(
-                        f"[Step 2/5] PDF extraction: "
+                        f"[Step 2/7] PDF extraction: "
                         f"{pdf_processed} bulletin(s), {pdf_records} records"
                     )
                 elif pdf_failed > 0:
-                    logger.warning(f"[Step 2/5] PDF extraction: {pdf_failed} failed")
+                    logger.warning(f"[Step 2/7] PDF extraction: {pdf_failed} failed")
                 else:
-                    logger.info("[Step 2/5] No new PDF bulletins to extract")
+                    logger.info("[Step 2/7] No new PDF bulletins to extract")
             except ImportError:
-                logger.warning("[Step 2/5] pdf_extract module not available (PyMuPDF not installed)")
+                logger.warning("[Step 2/7] pdf_extract module not available (PyMuPDF not installed)")
             except Exception as e:
-                logger.error(f"[Step 2/5] PDF extraction error: {e}")
+                logger.error(f"[Step 2/7] PDF extraction error: {e}")
+                result.failed += 1
+
+            # --- 2c: PDF event extraction (BLT/GZ supplementary sections) ---
+            logger.info("[Step 2/7] Starting PDF event extraction...")
+            try:
+                from pdf_extract_events import run_event_extraction
+
+                event_summary = run_event_extraction(root_dir=root_dir, settings=self.pipeline_settings)
+                event_processed = event_summary.get("processed", 0)
+                event_failed = event_summary.get("failed", 0)
+                event_total = event_summary.get("total_events", 0)
+
+                result.processed += event_processed
+                result.failed += event_failed
+
+                if event_processed > 0:
+                    logger.info(
+                        f"[Step 2/7] PDF event extraction: "
+                        f"{event_processed} folder(s), {event_total} events"
+                    )
+                elif event_failed > 0:
+                    logger.warning(f"[Step 2/7] PDF event extraction: {event_failed} failed")
+                else:
+                    logger.info("[Step 2/7] No new PDF events to extract")
+            except ImportError:
+                logger.warning("[Step 2/7] pdf_extract_events module not available")
+            except Exception as e:
+                logger.error(f"[Step 2/7] PDF event extraction error: {e}")
                 result.failed += 1
 
             # --- Final status ---
@@ -394,7 +550,7 @@ class PipelineWorker:
                 result.status = "success"
 
             logger.info(
-                f"[Step 2/5] Extraction complete: "
+                f"[Step 2/7] Extraction complete: "
                 f"{result.processed} total, {result.skipped} skipped, "
                 f"{result.failed} failed"
             )
@@ -403,15 +559,15 @@ class PipelineWorker:
             if "CRITICAL" in str(e):
                 result.status = "failed"
                 result.error = str(e)
-                logger.error(f"[Step 2/5] Critical extraction failure: {e}")
+                logger.error(f"[Step 2/7] Critical extraction failure: {e}")
             else:
                 result.status = "failed"
                 result.error = str(e)
-                logger.error(f"[Step 2/5] Extraction failed: {e}")
+                logger.error(f"[Step 2/7] Extraction failed: {e}")
         except Exception as e:
             result.status = "failed"
             result.error = str(e)
-            logger.error(f"[Step 2/5] Extraction failed: {e}")
+            logger.error(f"[Step 2/7] Extraction failed: {e}")
 
         result.duration_seconds = round(time.time() - t0, 1)
         return result
@@ -424,13 +580,22 @@ class PipelineWorker:
         t0 = time.time()
 
         try:
-            logger.info("[Step 3/5] Starting metadata extraction...")
-            from metadata import run_metadata
-            summary = run_metadata(settings=self.pipeline_settings)
+            logger.info("[Step 3/7] Starting metadata extraction...")
+            from metadata import merge_scraped_sidecars, run_metadata
+
+            root_dir = None
+            if self.pipeline_settings:
+                root_dir = Path(getattr(self.pipeline_settings, "bulletins_root", "bulletins/Marka"))
+
+            summary = run_metadata(root_dir=root_dir, settings=self.pipeline_settings)
+            merge_summary = merge_scraped_sidecars(root_dir=root_dir, verbose=True)
 
             result.processed = summary.get("processed", 0)
             result.skipped = summary.get("skipped", 0)
             result.failed = summary.get("failed", 0)
+            result.processed += merge_summary.get("folders_merged", 0)
+            result.skipped += merge_summary.get("skipped", 0) + merge_summary.get("pending", 0)
+            result.failed += merge_summary.get("failed", 0)
 
             if result.failed > 0 and result.processed == 0:
                 result.status = "failed"
@@ -442,8 +607,10 @@ class PipelineWorker:
                 result.status = "success"
 
             logger.info(
-                f"[Step 3/5] Metadata complete: "
-                f"{result.processed} parsed, {result.skipped} skipped, "
+                f"[Step 3/7] Metadata complete: "
+                f"parsed={summary.get('processed', 0)}, "
+                f"merged={merge_summary.get('folders_merged', 0)}, "
+                f"pending_scrape_only={merge_summary.get('pending', 0)}, "
                 f"{result.failed} failed"
             )
 
@@ -451,15 +618,15 @@ class PipelineWorker:
             if "CANARY" in str(e).upper():
                 result.status = "failed"
                 result.error = f"Canary failure: {e}"
-                logger.error(f"[Step 3/5] Canary failure (aborting): {e}")
+                logger.error(f"[Step 3/7] Canary failure (aborting): {e}")
             else:
                 result.status = "failed"
                 result.error = str(e)
-                logger.error(f"[Step 3/5] Metadata failed: {e}")
+                logger.error(f"[Step 3/7] Metadata failed: {e}")
         except Exception as e:
             result.status = "failed"
             result.error = str(e)
-            logger.error(f"[Step 3/5] Metadata failed: {e}")
+            logger.error(f"[Step 3/7] Metadata failed: {e}")
 
         result.duration_seconds = round(time.time() - t0, 1)
         return result
@@ -485,8 +652,8 @@ class PipelineWorker:
         t0 = time.time()
 
         try:
-            logger.info("[Step 4/5] Starting embedding generation (GPU)...")
-            logger.info("[Step 4/5] Loading AI models (CLIP, DINOv2, MiniLM)...")
+            logger.info("[Step 4/7] Starting embedding generation (GPU)...")
+            logger.info("[Step 4/7] Loading AI models (CLIP, DINOv2, MiniLM)...")
 
             # Deferred import - pipeline.ai loads CUDA models at import time
             from pipeline.ai import run_embedding_generation
@@ -506,7 +673,7 @@ class PipelineWorker:
                 result.status = "success"
 
             logger.info(
-                f"[Step 4/5] Embeddings complete: "
+                f"[Step 4/7] Embeddings complete: "
                 f"{result.processed} folders processed, {result.skipped} skipped, "
                 f"{result.failed} failed | Duration: {time.time() - t0:.0f}s"
             )
@@ -514,7 +681,7 @@ class PipelineWorker:
         except Exception as e:
             result.status = "failed"
             result.error = str(e)
-            logger.error(f"[Step 4/5] Embedding generation failed: {e}")
+            logger.error(f"[Step 4/7] Embedding generation failed: {e}")
 
         result.duration_seconds = round(time.time() - t0, 1)
         return result
@@ -532,7 +699,7 @@ class PipelineWorker:
         t0 = time.time()
 
         try:
-            logger.info("[Step 5/5] Starting database ingestion...")
+            logger.info("[Step 5/7] Starting database ingestion...")
             from pipeline.ingest import run_ingest
             summary = run_ingest(settings=self.pipeline_settings)
 
@@ -541,7 +708,7 @@ class PipelineWorker:
             result.status = "success"
 
             logger.info(
-                f"[Step 5/5] Ingestion complete: "
+                f"[Step 5/7] Ingestion complete: "
                 f"{summary.get('inserted', 0)} inserted, "
                 f"{summary.get('updated', 0)} updated, "
                 f"{result.skipped} skipped"
@@ -550,16 +717,117 @@ class PipelineWorker:
         except Exception as e:
             result.status = "failed"
             result.error = str(e)
-            logger.error(f"[Step 5/5] Ingestion failed: {e}")
+            logger.error(f"[Step 5/7] Ingestion failed: {e}")
 
         result.duration_seconds = round(time.time() - t0, 1)
         return result
 
-    # ---- Step 6: Conflict Scan (Opposition Radar) ----
+    def run_step_event_ingest(self) -> StepResult:
+        """
+        Step 6: Reconcile events.json into trademark_events and event-derived trademark state.
+
+        This preserves the full ingest_events.py behavior:
+          - scope reconciliation into trademark_events
+          - chronological materialization onto trademarks
+          - final_status recomputation
+          - event-based watchlist alerts
+        """
+        result = StepResult(step_name="event_ingest")
+        t0 = time.time()
+
+        root_dir = None
+        if self.pipeline_settings:
+            root_dir = Path(getattr(self.pipeline_settings, "bulletins_root", "bulletins/Marka"))
+
+        from ingest_events import run_event_ingest
+
+        summary = None
+        for attempt in range(2):
+            try:
+                if attempt == 0:
+                    logger.info("[Step 6/7] Starting event ingestion...")
+                else:
+                    logger.warning("[Step 6/7] Retrying event ingestion after hard failure...")
+
+                summary = run_event_ingest(root_dir=root_dir)
+                result.processed = summary.get("processed", 0)
+                result.skipped = summary.get("skipped", 0)
+                result.failed = summary.get("failed", 0)
+
+                if summary.get("status") == "failed":
+                    raise RuntimeError(summary.get("error") or "Event ingest failed")
+                if summary.get("status") == "partial":
+                    result.status = "partial"
+                    result.error = summary.get("error") or "Event ingest completed with folder or alert failures"
+                else:
+                    result.status = "success"
+
+                logger.info(
+                    "[Step 6/7] Event ingestion complete: scopes=%s, skipped=%s, failed=%s, alerts=%s",
+                    result.processed,
+                    result.skipped,
+                    result.failed,
+                    summary.get("alerts_generated"),
+                )
+                break
+            except Exception as e:
+                if attempt == 0:
+                    logger.error(f"[Step 6/7] Event ingestion hard-failed: {e}")
+                    continue
+                result.status = "failed"
+                result.failed = max(result.failed, 1)
+                result.error = str(e)
+                logger.error(f"[Step 6/7] Event ingestion failed after retry: {e}")
+
+        result.duration_seconds = round(time.time() - t0, 1)
+        return result
+
+    def run_step_final_status_repair(self) -> StepResult:
+        """
+        Maintenance step: reconcile final_status* across the full trademarks table.
+
+        This is intentionally manual-only and does not run as part of normal full pipelines.
+        """
+        result = StepResult(step_name="final_status_repair")
+        t0 = time.time()
+
+        conn = None
+        try:
+            logger.info("[Maintenance] Starting final status repair...")
+            conn = _get_db_connection()
+
+            from utils.status_reconciler import repair_final_statuses
+
+            summary = repair_final_statuses(conn)
+            result.processed = summary.get("processed", 0)
+            result.skipped = 0
+            result.failed = 0
+            result.status = "success"
+
+            logger.info(
+                "[Maintenance] Final status repair complete: %s processed across %s batches",
+                summary.get("processed", 0),
+                summary.get("batches", 0),
+            )
+        except Exception as e:
+            result.status = "failed"
+            result.error = str(e)
+            logger.error(f"[Maintenance] Final status repair failed: {e}")
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+        result.duration_seconds = round(time.time() - t0, 1)
+        return result
+
+    # ---- Step 7: Conflict Scan (Opposition Radar) ----
 
     def run_step_conflict_scan(self) -> StepResult:
         """
-        Step 6: Scan within-deadline bulletins for opposition conflicts.
+        Step 7: Scan within-deadline bulletins for opposition conflicts.
 
         Uses the UniversalScanner to find conflicts between new trademark
         applications (within appeal deadline) and existing registered marks.
@@ -569,7 +837,7 @@ class PipelineWorker:
         t0 = time.time()
 
         try:
-            logger.info("[Step 6/6] Starting conflict scan (Opposition Radar)...")
+            logger.info("[Step 7/7] Starting conflict scan (Opposition Radar)...")
 
             conn = _get_db_connection()
             try:
@@ -590,12 +858,12 @@ class PipelineWorker:
                     bulletins = [r['bulletin_no'] for r in cur.fetchall()]
 
                 if not bulletins:
-                    logger.info("[Step 6/6] No bulletins with active appeal deadlines")
+                    logger.info("[Step 7/7] No bulletins with active appeal deadlines")
                     result.status = "success"
                     result.duration_seconds = round(time.time() - t0, 1)
                     return result
 
-                logger.info(f"[Step 6/6] Scanning {len(bulletins)} bulletin(s): {bulletins}")
+                logger.info(f"[Step 7/7] Scanning {len(bulletins)} bulletin(s): {bulletins}")
 
                 total_conflicts = 0
                 total_scanned = 0
@@ -608,7 +876,7 @@ class PipelineWorker:
                         total_conflicts += summary['total_conflicts']
                         errors += summary['errors']
                     except Exception as e:
-                        logger.error(f"[Step 6/6] Bulletin {bno} scan failed: {e}")
+                        logger.error(f"[Step 7/7] Bulletin {bno} scan failed: {e}")
                         errors += 1
                         try:
                             conn.rollback()
@@ -629,7 +897,7 @@ class PipelineWorker:
                     result.status = "success"
 
                 logger.info(
-                    f"[Step 6/6] Conflict scan complete: "
+                    f"[Step 7/7] Conflict scan complete: "
                     f"{total_scanned} trademarks scanned, "
                     f"{total_conflicts} conflicts found, {errors} errors"
                 )
@@ -642,7 +910,7 @@ class PipelineWorker:
         except Exception as e:
             result.status = "failed"
             result.error = str(e)
-            logger.error(f"[Step 6/6] Conflict scan failed: {e}")
+            logger.error(f"[Step 7/7] Conflict scan failed: {e}")
 
         result.duration_seconds = round(time.time() - t0, 1)
         return result
@@ -657,7 +925,7 @@ class PipelineWorker:
         run_id: Optional[str] = None,
     ) -> PipelineResult:
         """
-        Run the complete 6-step pipeline end-to-end.
+        Run the complete 7-step pipeline end-to-end.
 
         Args:
             skip_download: If True, skip step 1 (download).
@@ -671,6 +939,23 @@ class PipelineWorker:
         """
         pipeline_result = PipelineResult(started_at=datetime.utcnow())
         t0 = time.time()
+        current_step_ref = {"value": single_step if single_step in {
+            "download",
+            "extract",
+            "metadata",
+            "embeddings",
+            "ingest",
+            "event_ingest",
+            "conflict_scan",
+            "final_status_repair",
+        } else "starting"}
+        heartbeat_stop = None
+        heartbeat_thread = None
+
+        def mark_active_step(step_name: str):
+            current_step_ref["value"] = step_name
+            if conn:
+                _touch_pipeline_run(conn, run_id, step_name)
 
         # Track in database
         conn = None
@@ -682,6 +967,15 @@ class PipelineWorker:
             if triggered_by != "api":
                 # API caller already created the record; don't duplicate
                 run_id = _create_pipeline_run(conn, triggered_by, skip_download)
+            _touch_pipeline_run(conn, run_id, current_step_ref["value"])
+            heartbeat_stop = threading.Event()
+            heartbeat_thread = threading.Thread(
+                target=_heartbeat_pipeline_run,
+                args=(run_id, heartbeat_stop, current_step_ref),
+                daemon=True,
+                name=f"pipeline-heartbeat-{run_id[:8]}",
+            )
+            heartbeat_thread.start()
         except Exception as e:
             logger.warning(f"DB tracking unavailable: {e}")
 
@@ -694,142 +988,193 @@ class PipelineWorker:
             logger.info(f"  Single step: {single_step}")
         logger.info("=" * 60)
 
-        abort = False
+        try:
+            abort = False
 
-        # --- Step 1: Download ---
-        if single_step and single_step != "download":
-            pass  # skip
-        elif skip_download:
-            step = StepResult(step_name="download", status="skipped")
-            pipeline_result.steps.append(step)
-            logger.info("[Step 1/5] Skipped (--skip-download)")
-        else:
-            step = await self.run_step_download()
-            pipeline_result.steps.append(step)
-            if step.status == "failed":
-                logger.warning(
-                    "[Step 1/5] Download failed but continuing "
-                    "(archives may already exist)"
-                )
-
-        if single_step == "download":
-            abort = True  # Only wanted this step
-
-        # --- Step 2: Extract ---
-        if not abort:
-            if single_step and single_step != "extract":
-                pass
-            else:
-                step = self.run_step_extract()
+            # --- Step 1: Download ---
+            if single_step and single_step != "download":
+                pass  # skip
+            elif skip_download:
+                step = StepResult(step_name="download", status="skipped")
                 pipeline_result.steps.append(step)
-                if step.status == "failed":
-                    logger.error("[Step 2/5] Extract failed critically, aborting pipeline")
-                    abort = True
-
-        if single_step == "extract":
-            abort = True
-
-        # --- Step 3: Metadata ---
-        if not abort:
-            if single_step and single_step != "metadata":
-                pass
+                logger.info("[Step 1/7] Skipped (--skip-download)")
             else:
-                step = self.run_step_metadata()
-                pipeline_result.steps.append(step)
-                if step.status == "failed" and step.error and "CANARY" in step.error.upper():
-                    logger.error("[Step 3/5] Canary failure, aborting pipeline")
-                    abort = True
-                elif step.status == "failed":
-                    logger.error("[Step 3/5] Metadata failed critically, aborting pipeline")
-                    abort = True
-
-        if single_step == "metadata":
-            abort = True
-
-        # --- Step 4: Embeddings ---
-        if not abort:
-            if single_step and single_step != "embeddings":
-                pass
-            else:
-                step = self.run_step_embeddings()
+                mark_active_step("download")
+                step = await self.run_step_download()
                 pipeline_result.steps.append(step)
                 if step.status == "failed":
                     logger.warning(
-                        "[Step 4/5] Embeddings failed but continuing "
-                        "(ingest can load records without embeddings)"
+                        "[Step 1/7] Download failed but continuing "
+                        "(archives may already exist)"
                     )
 
-        if single_step == "embeddings":
-            abort = True
+            if single_step == "download":
+                abort = True  # Only wanted this step
 
-        # --- Step 5: Ingest ---
-        if not abort:
-            if single_step and single_step != "ingest":
-                pass
+            # --- Step 2: Extract ---
+            if not abort:
+                if single_step and single_step != "extract":
+                    pass
+                else:
+                    mark_active_step("extract")
+                    step = self.run_step_extract()
+                    pipeline_result.steps.append(step)
+                    if step.status == "failed":
+                        logger.error("[Step 2/7] Extract failed critically, aborting pipeline")
+                        abort = True
+
+            if single_step == "extract":
+                abort = True
+
+            # --- Step 3: Metadata ---
+            if not abort:
+                if single_step and single_step != "metadata":
+                    pass
+                else:
+                    mark_active_step("metadata")
+                    step = self.run_step_metadata()
+                    pipeline_result.steps.append(step)
+                    if step.status == "failed" and step.error and "CANARY" in step.error.upper():
+                        logger.error("[Step 3/7] Canary failure, aborting pipeline")
+                        abort = True
+                    elif step.status == "failed":
+                        logger.error("[Step 3/7] Metadata failed critically, aborting pipeline")
+                        abort = True
+
+            if single_step == "metadata":
+                abort = True
+
+            # --- Step 4: Embeddings ---
+            if not abort:
+                if single_step and single_step != "embeddings":
+                    pass
+                else:
+                    mark_active_step("embeddings")
+                    step = self.run_step_embeddings()
+                    pipeline_result.steps.append(step)
+                    if step.status == "failed":
+                        logger.warning(
+                            "[Step 4/7] Embeddings failed but continuing "
+                            "(ingest can load records without embeddings)"
+                        )
+
+            if single_step == "embeddings":
+                abort = True
+
+            # --- Step 5: Ingest ---
+            if not abort:
+                if single_step and single_step != "ingest":
+                    pass
+                else:
+                    mark_active_step("ingest")
+                    step = self.run_step_ingest()
+                    pipeline_result.steps.append(step)
+
+            if single_step == "ingest":
+                abort = True
+
+            # --- Step 6: Event Ingest ---
+            if not abort:
+                if single_step and single_step != "event_ingest":
+                    pass
+                else:
+                    mark_active_step("event_ingest")
+                    step = self.run_step_event_ingest()
+                    pipeline_result.steps.append(step)
+                    if step.status == "failed":
+                        logger.warning(
+                            "[Step 6/7] Event ingest failed after retry but pipeline continues"
+                        )
+
+            if single_step == "event_ingest":
+                abort = True
+
+            # --- Manual maintenance: Final Status Repair ---
+            if not abort:
+                if single_step and single_step != "final_status_repair":
+                    pass
+                elif single_step == "final_status_repair":
+                    mark_active_step("final_status_repair")
+                    step = self.run_step_final_status_repair()
+                    pipeline_result.steps.append(step)
+                    if step.status == "failed":
+                        logger.error("[Maintenance] Final status repair failed")
+                        abort = True
+
+            if single_step == "final_status_repair":
+                abort = True
+
+            # --- Step 7: Conflict Scan (Opposition Radar) ---
+            if not abort:
+                if single_step and single_step != "conflict_scan":
+                    pass
+                else:
+                    mark_active_step("conflict_scan")
+                    step = self.run_step_conflict_scan()
+                    pipeline_result.steps.append(step)
+                    if step.status == "failed":
+                        logger.warning(
+                            "[Step 7/7] Conflict scan failed but pipeline continues"
+                        )
+
+            # --- Finalize ---
+            pipeline_result.completed_at = datetime.utcnow()
+            pipeline_result.total_duration_seconds = round(time.time() - t0, 1)
+
+            # Determine overall status
+            statuses = [s.status for s in pipeline_result.steps]
+            if all(s in ("success", "skipped") for s in statuses):
+                pipeline_result.status = "success"
+            elif any(s == "failed" for s in statuses):
+                if any(s == "success" for s in statuses):
+                    pipeline_result.status = "partial"
+                else:
+                    pipeline_result.status = "failed"
             else:
-                step = self.run_step_ingest()
-                pipeline_result.steps.append(step)
-
-        if single_step == "ingest":
-            abort = True
-
-        # --- Step 6: Conflict Scan (Opposition Radar) ---
-        if not abort:
-            if single_step and single_step != "conflict_scan":
-                pass
-            else:
-                step = self.run_step_conflict_scan()
-                pipeline_result.steps.append(step)
-                if step.status == "failed":
-                    logger.warning(
-                        "[Step 6/6] Conflict scan failed but pipeline continues"
-                    )
-
-        # --- Finalize ---
-        pipeline_result.completed_at = datetime.utcnow()
-        pipeline_result.total_duration_seconds = round(time.time() - t0, 1)
-
-        # Determine overall status
-        statuses = [s.status for s in pipeline_result.steps]
-        if all(s in ("success", "skipped") for s in statuses):
-            pipeline_result.status = "success"
-        elif any(s == "failed" for s in statuses):
-            if any(s == "success" for s in statuses):
                 pipeline_result.status = "partial"
-            else:
-                pipeline_result.status = "failed"
-        else:
-            pipeline_result.status = "partial"
 
-        # Update DB record
-        if conn:
-            try:
-                _update_pipeline_run(conn, run_id, pipeline_result)
-            except Exception as e:
-                logger.warning(f"Failed to update pipeline run: {e}")
-            finally:
-                conn.close()
+            if heartbeat_stop:
+                heartbeat_stop.set()
+            if heartbeat_thread:
+                heartbeat_thread.join(timeout=2)
 
-        # Send notification on failure
-        if pipeline_result.status in ("failed", "partial"):
-            _send_failure_notification(pipeline_result, run_id)
+            # Update DB record
+            if conn:
+                try:
+                    _update_pipeline_run(conn, run_id, pipeline_result)
+                except Exception as e:
+                    logger.warning(f"Failed to update pipeline run: {e}")
 
-        # Log summary
-        logger.info("=" * 60)
-        logger.info(f"PIPELINE {pipeline_result.status.upper()}")
-        logger.info(f"  Duration: {pipeline_result.total_duration_seconds:.0f}s")
-        for step in pipeline_result.steps:
-            icon = {
-                "success": "+", "partial": "~",
-                "failed": "X", "skipped": "-",
-            }.get(step.status, "?")
-            logger.info(
-                f"  [{icon}] {step.step_name}: {step.status} "
-                f"(processed={step.processed}, duration={step.duration_seconds:.0f}s)"
-            )
-        logger.info("=" * 60)
+            # Send notification on failure
+            if pipeline_result.status in ("failed", "partial"):
+                _send_failure_notification(pipeline_result, run_id)
 
-        return pipeline_result
+            # Log summary
+            logger.info("=" * 60)
+            logger.info(f"PIPELINE {pipeline_result.status.upper()}")
+            logger.info(f"  Duration: {pipeline_result.total_duration_seconds:.0f}s")
+            for step in pipeline_result.steps:
+                icon = {
+                    "success": "+", "partial": "~",
+                    "failed": "X", "skipped": "-",
+                }.get(step.status, "?")
+                logger.info(
+                    f"  [{icon}] {step.step_name}: {step.status} "
+                    f"(processed={step.processed}, duration={step.duration_seconds:.0f}s)"
+                )
+            logger.info("=" * 60)
+
+            return pipeline_result
+        finally:
+            if heartbeat_stop:
+                heartbeat_stop.set()
+            if heartbeat_thread:
+                heartbeat_thread.join(timeout=2)
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
 
 # ===================== CLI Entry Point =====================
@@ -845,7 +1190,9 @@ Steps:
   3. metadata      - Parse HSQLDB SQL files to metadata.json
   4. embeddings    - Generate CLIP/DINOv2/MiniLM embeddings (GPU)
   5. ingest        - Load enriched metadata.json into PostgreSQL
-  6. conflict_scan - Scan within-deadline bulletins for opposition conflicts
+  6. event_ingest  - Reconcile events.json into trademark_events/state
+  7. final_status_repair - Manual full-table final_status reconciliation
+  8. conflict_scan - Scan within-deadline bulletins for opposition conflicts
 
 Examples:
     # Run full pipeline
@@ -856,6 +1203,12 @@ Examples:
 
     # Run only embedding generation
     python -m workers.pipeline_worker --step embeddings
+
+    # Run only event ingestion
+    python -m workers.pipeline_worker --step event_ingest
+
+    # Run only final status repair
+    python -m workers.pipeline_worker --step final_status_repair
 
     # Run only conflict scan (Opposition Radar)
     python -m workers.pipeline_worker --step conflict_scan
@@ -868,12 +1221,16 @@ Examples:
     )
     parser.add_argument(
         "--step", type=str, default=None,
-        choices=["download", "extract", "metadata", "embeddings", "ingest", "conflict_scan"],
+        choices=["download", "extract", "metadata", "embeddings", "ingest", "event_ingest", "final_status_repair", "conflict_scan"],
         help="Run only a single step.",
     )
     parser.add_argument(
         "--triggered-by", type=str, default="manual",
         help="Who triggered this run (manual, schedule, api).",
+    )
+    parser.add_argument(
+        "--run-id", type=str, default=None,
+        help="Reuse an existing pipeline_runs row instead of creating a new one.",
     )
 
     args = parser.parse_args()
@@ -884,6 +1241,7 @@ Examples:
             skip_download=args.skip_download,
             triggered_by=args.triggered_by,
             single_step=args.step,
+            run_id=args.run_id,
         )
     )
 

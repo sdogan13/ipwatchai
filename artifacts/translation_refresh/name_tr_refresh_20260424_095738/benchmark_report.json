@@ -1,0 +1,379 @@
+{
+  "fixture_path": "C:\\Users\\701693\\turk_patent\\scripts\\fixtures\\madlad_translation_benchmark.json",
+  "baseline_backend": "nllb",
+  "candidate_backend": "madlad",
+  "baseline_passes": 6,
+  "candidate_passes": 4,
+  "baseline_pass_rate": 0.46153846153846156,
+  "candidate_pass_rate": 0.3076923076923077,
+  "candidate_meets_gate": false,
+  "details": [
+    {
+      "case": {
+        "id": "en_apple",
+        "name": "APPLE",
+        "expected_lang": "en",
+        "mode": "exact",
+        "acceptable_tr": [
+          "elma"
+        ]
+      },
+      "baseline": {
+        "original": "APPLE",
+        "detected_lang": "en",
+        "tr": "elma"
+      },
+      "candidate": {
+        "original": "APPLE",
+        "detected_lang": "en",
+        "tr": "elma"
+      },
+      "baseline_pass": true,
+      "candidate_pass": true,
+      "baseline_reasons": [],
+      "candidate_reasons": []
+    },
+    {
+      "case": {
+        "id": "en_water",
+        "name": "WATER",
+        "expected_lang": "en",
+        "mode": "exact",
+        "acceptable_tr": [
+          "su"
+        ]
+      },
+      "baseline": {
+        "original": "WATER",
+        "detected_lang": "en",
+        "tr": "su"
+      },
+      "candidate": {
+        "original": "WATER",
+        "detected_lang": "en",
+        "tr": "su"
+      },
+      "baseline_pass": true,
+      "candidate_pass": true,
+      "baseline_reasons": [],
+      "candidate_reasons": []
+    },
+    {
+      "case": {
+        "id": "en_gold",
+        "name": "GOLD",
+        "expected_lang": "en",
+        "mode": "exact",
+        "acceptable_tr": [
+          "altın"
+        ]
+      },
+      "baseline": {
+        "original": "GOLD",
+        "detected_lang": "en",
+        "tr": "altın"
+      },
+      "candidate": {
+        "original": "GOLD",
+        "detected_lang": "en",
+        "tr": "altıncolor"
+      },
+      "baseline_pass": true,
+      "candidate_pass": false,
+      "baseline_reasons": [],
+      "candidate_reasons": [
+        "translation:altıncolor"
+      ]
+    },
+    {
+      "case": {
+        "id": "en_red",
+        "name": "RED",
+        "expected_lang": "en",
+        "mode": "exact",
+        "acceptable_tr": [
+          "kırmızı"
+        ]
+      },
+      "baseline": {
+        "original": "RED",
+        "detected_lang": "en",
+        "tr": "kırmızı"
+      },
+      "candidate": {
+        "original": "RED",
+        "detected_lang": "en",
+        "tr": "kırmızıcolor"
+      },
+      "baseline_pass": true,
+      "candidate_pass": false,
+      "baseline_reasons": [],
+      "candidate_reasons": [
+        "translation:kırmızıcolor"
+      ]
+    },
+    {
+      "case": {
+        "id": "en_star",
+        "name": "STAR",
+        "expected_lang": "en",
+        "mode": "exact",
+        "acceptable_tr": [
+          "yıldız"
+        ]
+      },
+      "baseline": {
+        "original": "STAR",
+        "detected_lang": "en",
+        "tr": "yıldız"
+      },
+      "candidate": {
+        "original": "STAR",
+        "detected_lang": "en",
+        "tr": "yıldız"
+      },
+      "baseline_pass": true,
+      "candidate_pass": true,
+      "baseline_reasons": [],
+      "candidate_reasons": []
+    },
+    {
+      "case": {
+        "id": "fr_pomme",
+        "name": "pomme",
+        "expected_lang": "fr",
+        "mode": "exact",
+        "acceptable_tr": [
+          "elma"
+        ]
+      },
+      "baseline": {
+        "original": "pomme",
+        "detected_lang": "en",
+        "tr": null
+      },
+      "candidate": {
+        "original": "pomme",
+        "detected_lang": "en",
+        "tr": "elma"
+      },
+      "baseline_pass": false,
+      "candidate_pass": false,
+      "baseline_reasons": [
+        "lang:en!=fr",
+        "translation:"
+      ],
+      "candidate_reasons": [
+        "lang:en!=fr"
+      ]
+    },
+    {
+      "case": {
+        "id": "fa_apple",
+        "name": "سیب",
+        "expected_lang": "fa",
+        "mode": "exact",
+        "acceptable_tr": [
+          "elma"
+        ]
+      },
+      "baseline": {
+        "original": "سیب",
+        "detected_lang": "en",
+        "tr": "elma"
+      },
+      "candidate": {
+        "original": "سیب",
+        "detected_lang": "en",
+        "tr": "elma."
+      },
+      "baseline_pass": false,
+      "candidate_pass": false,
+      "baseline_reasons": [
+        "lang:en!=fa"
+      ],
+      "candidate_reasons": [
+        "lang:en!=fa",
+        "translation:elma."
+      ]
+    },
+    {
+      "case": {
+        "id": "ar_apple",
+        "name": "تفاح",
+        "expected_lang": "ar",
+        "mode": "exact",
+        "acceptable_tr": [
+          "elma"
+        ]
+      },
+      "baseline": {
+        "original": "تفاح",
+        "detected_lang": "en",
+        "tr": "eğlence"
+      },
+      "candidate": {
+        "original": "تفاح",
+        "detected_lang": "en",
+        "tr": "elma."
+      },
+      "baseline_pass": false,
+      "candidate_pass": false,
+      "baseline_reasons": [
+        "lang:en!=ar",
+        "translation:eğlence"
+      ],
+      "candidate_reasons": [
+        "lang:en!=ar",
+        "translation:elma."
+      ]
+    },
+    {
+      "case": {
+        "id": "tr_seker",
+        "name": "ŞEKER",
+        "expected_lang": "tr",
+        "mode": "preserve",
+        "acceptable_tr": [
+          "şeker"
+        ]
+      },
+      "baseline": {
+        "original": "ŞEKER",
+        "detected_lang": "en",
+        "tr": null
+      },
+      "candidate": {
+        "original": "ŞEKER",
+        "detected_lang": "en",
+        "tr": "şeker."
+      },
+      "baseline_pass": false,
+      "candidate_pass": false,
+      "baseline_reasons": [
+        "lang:en!=tr",
+        "preserve:"
+      ],
+      "candidate_reasons": [
+        "lang:en!=tr",
+        "preserve:şeker."
+      ]
+    },
+    {
+      "case": {
+        "id": "tr_dogan",
+        "name": "DOĞAN",
+        "expected_lang": "tr",
+        "mode": "preserve",
+        "acceptable_tr": [
+          "doğan"
+        ]
+      },
+      "baseline": {
+        "original": "DOĞAN",
+        "detected_lang": "en",
+        "tr": null
+      },
+      "candidate": {
+        "original": "DOĞAN",
+        "detected_lang": "en",
+        "tr": null
+      },
+      "baseline_pass": false,
+      "candidate_pass": false,
+      "baseline_reasons": [
+        "lang:en!=tr",
+        "preserve:"
+      ],
+      "candidate_reasons": [
+        "lang:en!=tr",
+        "preserve:"
+      ]
+    },
+    {
+      "case": {
+        "id": "tr_istanbul",
+        "name": "İSTANBUL",
+        "expected_lang": "tr",
+        "mode": "preserve",
+        "acceptable_tr": [
+          "istanbul"
+        ]
+      },
+      "baseline": {
+        "original": "İSTANBUL",
+        "detected_lang": "en",
+        "tr": null
+      },
+      "candidate": {
+        "original": "İSTANBUL",
+        "detected_lang": "en",
+        "tr": null
+      },
+      "baseline_pass": false,
+      "candidate_pass": false,
+      "baseline_reasons": [
+        "lang:en!=tr",
+        "preserve:"
+      ],
+      "candidate_reasons": [
+        "lang:en!=tr",
+        "preserve:"
+      ]
+    },
+    {
+      "case": {
+        "id": "brand_like",
+        "name": "NAIK",
+        "expected_lang": "en",
+        "mode": "preserve",
+        "acceptable_tr": [
+          "naik"
+        ]
+      },
+      "baseline": {
+        "original": "NAIK",
+        "detected_lang": "en",
+        "tr": null
+      },
+      "candidate": {
+        "original": "NAIK",
+        "detected_lang": "en",
+        "tr": "yükselt"
+      },
+      "baseline_pass": false,
+      "candidate_pass": false,
+      "baseline_reasons": [
+        "preserve:"
+      ],
+      "candidate_reasons": [
+        "preserve:yükselt"
+      ]
+    },
+    {
+      "case": {
+        "id": "mixed_dogan_electronics",
+        "name": "DOĞAN electronics",
+        "expected_lang": "en",
+        "mode": "exact",
+        "acceptable_tr": [
+          "doğan elektronik"
+        ]
+      },
+      "baseline": {
+        "original": "DOĞAN electronics",
+        "detected_lang": "en",
+        "tr": "doğan elektronik"
+      },
+      "candidate": {
+        "original": "DOĞAN electronics",
+        "detected_lang": "en",
+        "tr": "doğan elektronik"
+      },
+      "baseline_pass": true,
+      "candidate_pass": true,
+      "baseline_reasons": [],
+      "candidate_reasons": []
+    }
+  ]
+}

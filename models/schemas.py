@@ -740,6 +740,150 @@ class WatchlistStatusSummary(BaseModel):
 
 
 # ==========================================
+# Education Models
+# ==========================================
+
+class EducationStats(BaseModel):
+    """Aggregate counts for the education landing tab."""
+    pdf_count: int
+    flashcard_deck_count: int
+    flashcard_card_count: int
+    quiz_section_count: int
+    question_count: int
+
+
+class EducationPdfItem(BaseModel):
+    """A downloadable PDF resource."""
+    id: str
+    title: str
+    file_name: str
+    file_size_bytes: int
+    language: Optional[str] = None
+    download_url: str
+
+
+class EducationFlashcardDeckSummary(BaseModel):
+    """Flashcard deck metadata."""
+    id: str
+    title: str
+    card_count: int
+
+
+class EducationFlashcardCard(BaseModel):
+    """Single flashcard."""
+    id: str
+    front: str
+    back: str
+    category_title: Optional[str] = None
+
+
+class EducationFlashcardDeckDetail(EducationFlashcardDeckSummary):
+    """Full flashcard deck payload."""
+    cards: List[EducationFlashcardCard]
+
+
+class EducationQuizSectionSummary(BaseModel):
+    """Quiz section metadata."""
+    id: str
+    title: str
+    question_count: int
+
+
+class EducationQuizOption(BaseModel):
+    """Answer option for a quiz question."""
+    id: str
+    text: str
+    short_feedback: Optional[str] = None
+
+
+class EducationQuizQuestion(BaseModel):
+    """Single quiz question."""
+    id: str
+    legacy_id: Optional[str] = None
+    prompt: str
+    options: List[EducationQuizOption]
+    correct_option_id: Optional[str] = None
+    explanation: Optional[str] = None
+    summary: Optional[str] = None
+    category_title: Optional[str] = None
+
+
+class EducationQuizSectionDetail(EducationQuizSectionSummary):
+    """Full quiz section payload."""
+    questions: List[EducationQuizQuestion]
+
+
+class EducationCategorySummary(BaseModel):
+    """Category summary that ties together flashcards and quizzes."""
+    id: str
+    title: str
+    flashcard_deck_id: Optional[str] = None
+    flashcard_card_count: int = 0
+    quiz_section_id: Optional[str] = None
+    question_count: int = 0
+
+
+class EducationCatalogResponse(BaseModel):
+    """Public education landing data."""
+    stats: EducationStats
+    categories: List[EducationCategorySummary] = Field(default_factory=list)
+    pdfs: List[EducationPdfItem]
+    flashcard_decks: List[EducationFlashcardDeckSummary]
+    quiz_sections: List[EducationQuizSectionSummary]
+
+
+class EducationProgressItem(BaseModel):
+    """Stored per-user progress for one education item."""
+    item_type: str = Field(..., pattern=r"^(pdf|flashcard|quiz)$")
+    item_key: str = Field(..., min_length=1, max_length=255)
+    status: str = Field(default="not_started", pattern=r"^(not_started|in_progress|completed)$")
+    percent_complete: int = Field(default=0, ge=0, le=100)
+    progress_data: Dict[str, Any] = Field(default_factory=dict)
+    completed_at: Optional[datetime] = None
+    last_interacted_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class EducationProgressResponse(BaseModel):
+    """Progress payload returned to the landing page."""
+    items: List[EducationProgressItem]
+
+
+class EducationProgressUpdate(BaseModel):
+    """Upsert request for one education progress entry."""
+    item_type: str = Field(..., pattern=r"^(pdf|flashcard|quiz)$")
+    item_key: str = Field(..., min_length=1, max_length=255)
+    status: str = Field(default="in_progress", pattern=r"^(not_started|in_progress|completed)$")
+    percent_complete: int = Field(default=0, ge=0, le=100)
+    progress_data: Dict[str, Any] = Field(default_factory=dict)
+
+
+class EducationProgressSyncRequest(BaseModel):
+    """Batch sync request used to merge local browser progress into the account."""
+    items: List[EducationProgressUpdate] = Field(default_factory=list)
+
+
+class EducationModerationUpdate(BaseModel):
+    """Tester moderation update for one flashcard or quiz question."""
+    item_type: str = Field(..., pattern=r"^(flashcard|quiz_question)$")
+    item_id: str = Field(..., min_length=1, max_length=255)
+    category_title: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    explanation: Optional[str] = None
+    summary: Optional[str] = None
+    deleted: Optional[bool] = None
+
+
+class EducationModerationItem(BaseModel):
+    """Stored tester moderation state for one education item."""
+    item_type: str = Field(..., pattern=r"^(flashcard|quiz_question)$")
+    item_id: str = Field(..., min_length=1, max_length=255)
+    category_title: Optional[str] = None
+    explanation: Optional[str] = None
+    summary: Optional[str] = None
+    deleted: bool = False
+
+
+# ==========================================
 # Creative Suite - Name Generator
 # ==========================================
 

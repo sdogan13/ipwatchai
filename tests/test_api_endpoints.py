@@ -221,7 +221,7 @@ def _make_payment_row(payment_id=None, organization_id=None, user_id=None, **ove
 
 def _make_pipeline_run_row(run_id=None, **overrides):
     """Build a representative pipeline run row for service tests."""
-    started_at = datetime(2026, 4, 12, 12, 0, tzinfo=timezone.utc)
+    started_at = datetime.now(timezone.utc) - timedelta(minutes=12)
     row = {
         "id": run_id or uuid.uuid4(),
         "status": "completed",
@@ -232,13 +232,19 @@ def _make_pipeline_run_row(run_id=None, **overrides):
         "step_metadata": {"status": "success"},
         "step_embeddings": {"status": "success"},
         "step_ingest": {"status": "success"},
+        "step_event_ingest": {"status": "success"},
+        "step_final_status_repair": {"status": "success"},
         "total_downloaded": 12,
         "total_extracted": 11,
         "total_parsed": 10,
         "total_embedded": 9,
         "total_ingested": 8,
+        "total_event_scopes_ingested": 7,
+        "total_final_status_repaired": 7,
         "started_at": started_at,
         "completed_at": started_at + timedelta(minutes=12),
+        "heartbeat_at": started_at + timedelta(minutes=11),
+        "current_step": None,
         "duration_seconds": 720,
         "error_message": None,
         "created_at": started_at,
@@ -866,6 +872,343 @@ class TestPublicEndpoints:
         assert mock_portfolio_csv.await_count == 1
         assert mock_portfolio_csv.await_args.kwargs["holder_id"] is None
         assert mock_portfolio_csv.await_args.kwargs["attorney_no"] == "A-1"
+
+    def test_education_catalog_route_delegates_to_service(self, client):
+        payload = {
+            "stats": {
+                "pdf_count": 1,
+                "flashcard_deck_count": 1,
+                "flashcard_card_count": 2,
+                "quiz_section_count": 1,
+                "question_count": 1,
+            },
+            "categories": [
+                {
+                    "id": "marka",
+                    "title": "Marka",
+                    "flashcard_deck_id": "flashcards_vekill.csv",
+                    "flashcard_card_count": 2,
+                    "quiz_section_id": "vekillik-testi",
+                    "question_count": 1,
+                }
+            ],
+            "pdfs": [
+                {
+                    "id": "doc.pdf",
+                    "title": "Doc",
+                    "file_name": "doc.pdf",
+                    "file_size_bytes": 1024,
+                    "language": "tr",
+                    "download_url": "/api/v1/education/assets/doc.pdf",
+                }
+            ],
+            "flashcard_decks": [
+                {
+                    "id": "flashcards_vekill.csv",
+                    "title": "Vekillik",
+                    "card_count": 2,
+                }
+            ],
+            "quiz_sections": [
+                {
+                    "id": "vekillik-testi",
+                    "title": "Vekillik Testi",
+                    "question_count": 1,
+                }
+            ],
+        }
+
+        with patch(
+            "services.education_service.get_education_catalog_data",
+            new=AsyncMock(return_value=payload),
+        ) as mock_catalog:
+            resp = client.get("/api/v1/education/catalog")
+
+        assert resp.status_code == 200
+        assert resp.json()["stats"]["pdf_count"] == 1
+        assert resp.json()["categories"][0]["id"] == "marka"
+        assert resp.json()["flashcard_decks"][0]["id"] == "flashcards_vekill.csv"
+        assert mock_catalog.await_count == 1
+
+    def test_education_flashcard_route_delegates_to_service(self, client):
+        payload = {
+            "id": "flashcards_vekill.csv",
+            "title": "Vekillik",
+            "card_count": 2,
+            "cards": [
+                {"id": "vekillik-1", "front": "Q1", "back": "A1"},
+                {"id": "vekillik-2", "front": "Q2", "back": "A2"},
+            ],
+        }
+
+        with patch(
+            "services.education_service.get_flashcard_deck_data",
+            new=AsyncMock(return_value=payload),
+        ) as mock_deck:
+            resp = client.get("/api/v1/education/flashcards/flashcards_vekill.csv")
+
+        assert resp.status_code == 200
+        assert resp.json()["card_count"] == 2
+        assert mock_deck.await_count == 1
+        assert mock_deck.await_args.kwargs["deck_id"] == "flashcards_vekill.csv"
+
+    def test_education_quiz_route_delegates_to_service(self, client):
+        payload = {
+            "id": "vekillik-testi",
+            "title": "Vekillik Testi",
+            "question_count": 1,
+            "questions": [
+                {
+                    "id": "vekillik-testi-1",
+                    "prompt": "Question?",
+                    "options": [
+                        {"id": "A", "text": "Option A", "short_feedback": None},
+                        {"id": "B", "text": "Option B", "short_feedback": "Correct"},
+                    ],
+                    "correct_option_id": "B",
+                    "summary": "Summary",
+                    "explanation": "Explanation",
+                }
+            ],
+        }
+
+        with patch(
+            "services.education_service.get_quiz_section_data",
+            new=AsyncMock(return_value=payload),
+        ) as mock_quiz:
+            resp = client.get("/api/v1/education/quizzes/vekillik-testi")
+
+        assert resp.status_code == 200
+        assert resp.json()["questions"][0]["correct_option_id"] == "B"
+        assert mock_quiz.await_count == 1
+        assert mock_quiz.await_args.kwargs["section_id"] == "vekillik-testi"
+
+    def test_education_progress_get_route_delegates_to_service(self, client):
+        payload = {
+            "items": [
+                {
+                    "item_type": "quiz",
+                    "item_key": "vekillik-testi",
+                    "status": "in_progress",
+                    "percent_complete": 40,
+                    "progress_data": {"last_index": 3},
+                    "completed_at": None,
+                    "last_interacted_at": None,
+                    "updated_at": None,
+                }
+            ]
+        }
+
+        with patch(
+            "services.education_service.get_education_progress_data",
+            new=AsyncMock(return_value=payload),
+        ) as mock_progress:
+            resp = client.get("/api/v1/education/progress")
+
+        assert resp.status_code == 200
+        assert resp.json()["items"][0]["item_key"] == "vekillik-testi"
+        assert mock_progress.await_count == 1
+
+    def test_education_progress_sync_route_delegates_to_service(self, client):
+        payload = {
+            "items": [
+                {
+                    "item_type": "flashcard",
+                    "item_key": "flashcards_vekill.csv",
+                    "status": "completed",
+                    "percent_complete": 100,
+                    "progress_data": {"seen_card_ids": ["vekillik-1", "vekillik-2"]},
+                    "completed_at": None,
+                    "last_interacted_at": None,
+                    "updated_at": None,
+                }
+            ]
+        }
+
+        with patch(
+            "services.education_service.sync_education_progress_data",
+            new=AsyncMock(return_value=payload),
+        ) as mock_sync:
+            resp = client.post(
+                "/api/v1/education/progress/sync",
+                json={
+                    "items": [
+                        {
+                            "item_type": "flashcard",
+                            "item_key": "flashcards_vekill.csv",
+                            "status": "completed",
+                            "percent_complete": 100,
+                            "progress_data": {"seen_card_ids": ["vekillik-1", "vekillik-2"]},
+                        }
+                    ]
+                },
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["items"][0]["status"] == "completed"
+        assert mock_sync.await_count == 1
+        assert mock_sync.await_args.kwargs["data"].items[0].item_key == "flashcards_vekill.csv"
+
+    def test_education_quiz_route_exposes_stable_question_ids_and_explanation_fields(self, client, tmp_path, monkeypatch):
+        from services import education_service
+
+        overrides_path = tmp_path / "education_moderation_overrides.json"
+        overrides_path.write_text('{"flashcards": {}, "quiz_questions": {}}\n', encoding="utf-8")
+        monkeypatch.setattr(education_service, "MODERATION_OVERRIDES_PATH", overrides_path)
+        education_service._build_education_cache.cache_clear()
+
+        resp = client.get("/api/v1/education/quizzes/marka")
+
+        education_service._build_education_cache.cache_clear()
+
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["id"] == "marka"
+        assert payload["questions"]
+        question = payload["questions"][0]
+        assert question["id"].startswith("quiz-question-")
+        assert question["legacy_id"]
+        assert question["category_title"] == "Marka"
+        assert "liked" not in question
+        assert "explanation" in question
+        assert "summary" in question
+
+    def test_education_moderation_route_persists_flashcard_category_overrides(self, client, tmp_path, monkeypatch):
+        from services import education_service
+
+        overrides_path = tmp_path / "education_moderation_overrides.json"
+        overrides_path.write_text('{"flashcards": {}, "quiz_questions": {}}\n', encoding="utf-8")
+        monkeypatch.setattr(education_service, "MODERATION_OVERRIDES_PATH", overrides_path)
+        education_service._build_education_cache.cache_clear()
+
+        resp = client.put(
+            "/api/v1/education/moderation",
+            json={
+                "item_type": "flashcard",
+                "item_id": "6769-9",
+                "category_title": "Genel",
+            },
+        )
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "item_type": "flashcard",
+            "item_id": "6769-9",
+            "category_title": "Genel",
+            "explanation": None,
+            "summary": None,
+            "deleted": False,
+        }
+
+        stored = json.loads(overrides_path.read_text(encoding="utf-8"))
+        assert stored["flashcards"]["6769-9"]["category_title"] == "Genel"
+
+        patent_resp = client.get("/api/v1/education/flashcards/patent")
+        genel_resp = client.get("/api/v1/education/flashcards/genel")
+
+        education_service._build_education_cache.cache_clear()
+
+        assert patent_resp.status_code == 200
+        assert genel_resp.status_code == 200
+        assert all(card["id"] != "6769-9" for card in patent_resp.json()["cards"])
+        assert any(card["id"] == "6769-9" for card in genel_resp.json()["cards"])
+
+    def test_education_moderation_route_persists_quiz_question_explanation_overrides(self, client, tmp_path, monkeypatch):
+        from services import education_service
+
+        overrides_path = tmp_path / "education_moderation_overrides.json"
+        overrides_path.write_text('{"flashcards": {}, "quiz_questions": {}}\n', encoding="utf-8")
+        monkeypatch.setattr(education_service, "MODERATION_OVERRIDES_PATH", overrides_path)
+        education_service._build_education_cache.cache_clear()
+
+        marka_resp = client.get("/api/v1/education/quizzes/marka")
+        assert marka_resp.status_code == 200
+        first_question = marka_resp.json()["questions"][0]
+        updated_explanation = "Tester override explanation"
+        updated_summary = "Tester override summary"
+
+        resp = client.put(
+            "/api/v1/education/moderation",
+            json={
+                "item_type": "quiz_question",
+                "item_id": first_question["id"],
+                "category_title": "Genel",
+                "explanation": updated_explanation,
+                "summary": updated_summary,
+            },
+        )
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "item_type": "quiz_question",
+            "item_id": first_question["id"],
+            "category_title": "Genel",
+            "explanation": updated_explanation,
+            "summary": updated_summary,
+            "deleted": False,
+        }
+
+        stored = json.loads(overrides_path.read_text(encoding="utf-8"))
+        assert stored["quiz_questions"][first_question["id"]]["category_title"] == "Genel"
+        assert stored["quiz_questions"][first_question["id"]]["explanation"] == updated_explanation
+        assert stored["quiz_questions"][first_question["id"]]["summary"] == updated_summary
+
+        updated_marka_resp = client.get("/api/v1/education/quizzes/marka")
+        updated_genel_resp = client.get("/api/v1/education/quizzes/genel")
+
+        education_service._build_education_cache.cache_clear()
+
+        assert updated_marka_resp.status_code == 200
+        assert updated_genel_resp.status_code == 200
+        assert all(question["id"] != first_question["id"] for question in updated_marka_resp.json()["questions"])
+        moved_question = next(
+            question
+            for question in updated_genel_resp.json()["questions"]
+            if question["id"] == first_question["id"]
+        )
+        assert moved_question["explanation"] == updated_explanation
+        assert moved_question["summary"] == updated_summary
+        assert "liked" not in moved_question
+
+    def test_education_moderation_route_rejects_flashcard_explanation_edits(self, client):
+        resp = client.put(
+            "/api/v1/education/moderation",
+            json={
+                "item_type": "flashcard",
+                "item_id": "6769-9",
+                "explanation": "Not allowed",
+            },
+        )
+
+        assert resp.status_code == 400
+        assert resp.json()["detail"] == "Only quiz questions support explanation editing"
+
+    def test_education_moderation_route_rejects_non_admin(self, client):
+        from auth.authentication import CurrentUser, get_current_user
+        from main import app
+
+        app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+            id=uuid.uuid4(),
+            organization_id=uuid.uuid4(),
+            email="member@example.com",
+            first_name="Member",
+            last_name="User",
+            role="user",
+            is_superadmin=False,
+            permissions=[],
+        )
+
+        resp = client.put(
+            "/api/v1/education/moderation",
+            json={
+                "item_type": "flashcard",
+                "item_id": "6769-9",
+                "category_title": "Genel",
+            },
+        )
+
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == "Education moderation requires admin access"
 
     def test_validate_classes_endpoint(self, client):
         resp = client.post("/api/validate-classes", data={"classes_text": "9, 35, abc"})
@@ -1754,11 +2097,15 @@ class TestAccessControl:
                 "step_metadata": {"status": "success"},
                 "step_embeddings": {"status": "success"},
                 "step_ingest": {"status": "success"},
+                "step_event_ingest": {"status": "success"},
+                "step_final_status_repair": {"status": "success"},
                 "total_downloaded": 10,
                 "total_extracted": 9,
                 "total_parsed": 8,
                 "total_embedded": 7,
                 "total_ingested": 6,
+                "total_event_scopes_ingested": 5,
+                "total_final_status_repaired": 5,
                 "started_at": "2026-04-12T12:00:00+00:00",
                 "completed_at": "2026-04-12T12:10:00+00:00",
                 "duration_seconds": 600,
@@ -10147,18 +10494,19 @@ async def test_payment_service_activate_free_plan_data_raises_when_activation_fa
 
 
 @pytest.mark.asyncio
-async def test_pipeline_service_trigger_pipeline_run_data_schedules_background_job():
+async def test_pipeline_service_trigger_pipeline_run_data_launches_detached_worker():
     from services.pipeline_service import trigger_pipeline_run_data
 
     current_user = SimpleNamespace(email="admin@example.com")
     background_tasks = MagicMock()
-    background_runner = MagicMock()
+    process_launcher = MagicMock()
     mock_db_cm = MagicMock()
     mock_db = MagicMock()
     mock_cursor = MagicMock()
     mock_db.cursor.return_value = mock_cursor
     mock_db_cm.__enter__.return_value = mock_db
     mock_db_cm.__exit__.return_value = False
+    mock_cursor.fetchall.return_value = []
     mock_cursor.fetchone.return_value = None
 
     response = await trigger_pipeline_run_data(
@@ -10168,7 +10516,7 @@ async def test_pipeline_service_trigger_pipeline_run_data_schedules_background_j
         state_getter=lambda: (None, None),
         db_factory=MagicMock(return_value=mock_db_cm),
         run_id_factory=lambda: "run-1",
-        background_runner=background_runner,
+        process_launcher=process_launcher,
     )
 
     assert response == {
@@ -10176,9 +10524,17 @@ async def test_pipeline_service_trigger_pipeline_run_data_schedules_background_j
         "status": "started",
         "skip_download": True,
     }
-    background_tasks.add_task.assert_called_once_with(background_runner, "run-1", True)
-    assert "SELECT id FROM pipeline_runs" in mock_cursor.execute.call_args_list[0].args[0]
-    assert "INSERT INTO pipeline_runs" in mock_cursor.execute.call_args_list[1].args[0]
+    process_launcher.assert_called_once_with(
+        triggered_by="api",
+        run_id="run-1",
+        skip_download=True,
+        single_step=None,
+        service_logger=ANY,
+    )
+    executed_sql = [call.args[0] for call in mock_cursor.execute.call_args_list]
+    assert any("SELECT id, started_at, heartbeat_at, current_step" in sql for sql in executed_sql)
+    assert any("SELECT id FROM pipeline_runs" in sql for sql in executed_sql)
+    assert any("INSERT INTO pipeline_runs" in sql for sql in executed_sql)
     mock_db.conn.commit.assert_called_once()
 
 
@@ -10199,6 +10555,126 @@ async def test_pipeline_service_trigger_pipeline_step_data_rejects_invalid_step(
 
 
 @pytest.mark.asyncio
+async def test_pipeline_service_trigger_pipeline_step_data_launches_detached_worker():
+    from services.pipeline_service import trigger_pipeline_step_data
+
+    current_user = SimpleNamespace(email="admin@example.com")
+    process_launcher = MagicMock()
+    mock_db_cm = MagicMock()
+    mock_db = MagicMock()
+    mock_cursor = MagicMock()
+    mock_db.cursor.return_value = mock_cursor
+    mock_db_cm.__enter__.return_value = mock_db
+    mock_db_cm.__exit__.return_value = False
+    mock_cursor.fetchall.return_value = []
+    mock_cursor.fetchone.return_value = None
+
+    response = await trigger_pipeline_step_data(
+        step="extract",
+        background_tasks=MagicMock(),
+        current_user=current_user,
+        state_getter=lambda: (None, None),
+        db_factory=MagicMock(return_value=mock_db_cm),
+        run_id_factory=lambda: "run-step-1",
+        process_launcher=process_launcher,
+    )
+
+    assert response == {
+        "run_id": "run-step-1",
+        "status": "started",
+        "step": "extract",
+    }
+    process_launcher.assert_called_once_with(
+        triggered_by="api",
+        run_id="run-step-1",
+        skip_download=True,
+        single_step="extract",
+        service_logger=ANY,
+    )
+    executed_sql = [call.args[0] for call in mock_cursor.execute.call_args_list]
+    assert any("INSERT INTO pipeline_runs" in sql for sql in executed_sql)
+    mock_db.conn.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_service_trigger_pipeline_step_data_accepts_event_ingest():
+    from services.pipeline_service import trigger_pipeline_step_data
+
+    current_user = SimpleNamespace(email="admin@example.com")
+    process_launcher = MagicMock()
+    mock_db_cm = MagicMock()
+    mock_db = MagicMock()
+    mock_cursor = MagicMock()
+    mock_db.cursor.return_value = mock_cursor
+    mock_db_cm.__enter__.return_value = mock_db
+    mock_db_cm.__exit__.return_value = False
+    mock_cursor.fetchall.return_value = []
+    mock_cursor.fetchone.return_value = None
+
+    response = await trigger_pipeline_step_data(
+        step="event_ingest",
+        background_tasks=MagicMock(),
+        current_user=current_user,
+        state_getter=lambda: (None, None),
+        db_factory=MagicMock(return_value=mock_db_cm),
+        run_id_factory=lambda: "run-step-events",
+        process_launcher=process_launcher,
+    )
+
+    assert response == {
+        "run_id": "run-step-events",
+        "status": "started",
+        "step": "event_ingest",
+    }
+    process_launcher.assert_called_once_with(
+        triggered_by="api",
+        run_id="run-step-events",
+        skip_download=True,
+        single_step="event_ingest",
+        service_logger=ANY,
+    )
+
+
+@pytest.mark.asyncio
+async def test_pipeline_service_trigger_pipeline_step_data_accepts_final_status_repair():
+    from services.pipeline_service import trigger_pipeline_step_data
+
+    current_user = SimpleNamespace(email="admin@example.com")
+    process_launcher = MagicMock()
+    mock_db_cm = MagicMock()
+    mock_db = MagicMock()
+    mock_cursor = MagicMock()
+    mock_db.cursor.return_value = mock_cursor
+    mock_db_cm.__enter__.return_value = mock_db
+    mock_db_cm.__exit__.return_value = False
+    mock_cursor.fetchall.return_value = []
+    mock_cursor.fetchone.return_value = None
+
+    response = await trigger_pipeline_step_data(
+        step="final_status_repair",
+        background_tasks=MagicMock(),
+        current_user=current_user,
+        state_getter=lambda: (None, None),
+        db_factory=MagicMock(return_value=mock_db_cm),
+        run_id_factory=lambda: "run-step-repair",
+        process_launcher=process_launcher,
+    )
+
+    assert response == {
+        "run_id": "run-step-repair",
+        "status": "started",
+        "step": "final_status_repair",
+    }
+    process_launcher.assert_called_once_with(
+        triggered_by="api",
+        run_id="run-step-repair",
+        skip_download=True,
+        single_step="final_status_repair",
+        service_logger=ANY,
+    )
+
+
+@pytest.mark.asyncio
 async def test_pipeline_service_get_pipeline_status_data_maps_recent_runs():
     from services.pipeline_service import get_pipeline_status_data
 
@@ -10213,6 +10689,7 @@ async def test_pipeline_service_get_pipeline_status_data_maps_recent_runs():
             run_id="run-1",
             status="running",
             completed_at=None,
+            current_step="extract",
         )
     ]
 
@@ -10225,11 +10702,467 @@ async def test_pipeline_service_get_pipeline_status_data_maps_recent_runs():
     )
 
     assert response["is_running"] is True
-    assert response["current_run_id"] is None
-    assert response["current_step"] is None
+    assert response["current_run_id"] == "run-1"
+    assert response["current_step"] == "extract"
     assert response["next_scheduled"] == "2026-04-14T03:00:00"
     assert response["recent_runs"][0]["id"] == "run-1"
     assert response["recent_runs"][0]["status"] == "running"
+    assert response["recent_runs"][0]["current_step"] == "extract"
+    assert response["recent_runs"][0]["step_event_ingest"] == {"status": "success"}
+    assert response["recent_runs"][0]["total_event_scopes_ingested"] == 7
+    assert response["recent_runs"][0]["step_final_status_repair"] == {"status": "success"}
+
+
+@pytest.mark.asyncio
+async def test_pipeline_worker_single_step_event_ingest_runs_only_event_step(monkeypatch):
+    from workers.pipeline_worker import PipelineWorker, StepResult
+
+    worker = PipelineWorker()
+    calls = []
+
+    monkeypatch.setattr("workers.pipeline_worker._get_db_connection", lambda: (_ for _ in ()).throw(RuntimeError("tracking unavailable")))
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("unrelated pipeline step should not run")
+
+    monkeypatch.setattr(worker, "run_step_download", unexpected)
+    monkeypatch.setattr(worker, "run_step_extract", unexpected)
+    monkeypatch.setattr(worker, "run_step_metadata", unexpected)
+    monkeypatch.setattr(worker, "run_step_embeddings", unexpected)
+    monkeypatch.setattr(worker, "run_step_ingest", unexpected)
+    monkeypatch.setattr(worker, "run_step_conflict_scan", unexpected)
+    monkeypatch.setattr(worker, "run_step_final_status_repair", unexpected)
+
+    def run_events():
+        calls.append("event_ingest")
+        return StepResult(step_name="event_ingest", status="success", processed=45)
+
+    monkeypatch.setattr(worker, "run_step_event_ingest", run_events)
+
+    result = await worker.run_full_pipeline(
+        skip_download=True,
+        triggered_by="manual",
+        single_step="event_ingest",
+        run_id="run-event-step-1",
+    )
+
+    assert calls == ["event_ingest"]
+    assert result.status == "success"
+    assert [step.step_name for step in result.steps] == ["event_ingest"]
+    assert result.steps[0].processed == 45
+
+
+@pytest.mark.asyncio
+async def test_pipeline_worker_single_step_final_status_repair_runs_only_maintenance_step(monkeypatch):
+    from workers.pipeline_worker import PipelineWorker, StepResult
+
+    worker = PipelineWorker()
+    calls = []
+
+    monkeypatch.setattr("workers.pipeline_worker._get_db_connection", lambda: (_ for _ in ()).throw(RuntimeError("tracking unavailable")))
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("regular pipeline step should not run")
+
+    monkeypatch.setattr(worker, "run_step_download", unexpected)
+    monkeypatch.setattr(worker, "run_step_extract", unexpected)
+    monkeypatch.setattr(worker, "run_step_metadata", unexpected)
+    monkeypatch.setattr(worker, "run_step_embeddings", unexpected)
+    monkeypatch.setattr(worker, "run_step_ingest", unexpected)
+    monkeypatch.setattr(worker, "run_step_conflict_scan", unexpected)
+
+    def run_repair():
+        calls.append("final_status_repair")
+        return StepResult(step_name="final_status_repair", status="success", processed=123)
+
+    monkeypatch.setattr(worker, "run_step_final_status_repair", run_repair)
+
+    result = await worker.run_full_pipeline(
+        skip_download=True,
+        triggered_by="manual",
+        single_step="final_status_repair",
+        run_id="run-repair-1",
+    )
+
+    assert calls == ["final_status_repair"]
+    assert result.status == "success"
+    assert [step.step_name for step in result.steps] == ["final_status_repair"]
+    assert result.steps[0].processed == 123
+
+
+@pytest.mark.asyncio
+async def test_pipeline_worker_run_step_event_ingest_retries_once_on_hard_failure(monkeypatch):
+    from workers.pipeline_worker import PipelineWorker
+
+    worker = PipelineWorker()
+    calls = []
+
+    def fake_run_event_ingest(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise RuntimeError("transient failure")
+        return {
+            "status": "success",
+            "processed": 12,
+            "skipped": 3,
+            "failed": 0,
+            "alerts_generated": 4,
+        }
+
+    monkeypatch.setattr("ingest_events.run_event_ingest", fake_run_event_ingest)
+
+    result = worker.run_step_event_ingest()
+
+    assert len(calls) == 2
+    assert result.status == "success"
+    assert result.processed == 12
+    assert result.skipped == 3
+    assert result.failed == 0
+
+
+@pytest.mark.asyncio
+async def test_pipeline_worker_full_pipeline_continues_after_event_ingest_retry_exhaustion(monkeypatch):
+    from workers.pipeline_worker import PipelineWorker, StepResult
+
+    worker = PipelineWorker()
+    calls = []
+
+    monkeypatch.setattr("workers.pipeline_worker._get_db_connection", lambda: (_ for _ in ()).throw(RuntimeError("tracking unavailable")))
+
+    monkeypatch.setattr(worker, "run_step_download", AsyncMock(return_value=StepResult(step_name="download", status="success", processed=1)))
+    monkeypatch.setattr(worker, "run_step_extract", lambda: StepResult(step_name="extract", status="success", processed=2))
+    monkeypatch.setattr(worker, "run_step_metadata", lambda: StepResult(step_name="metadata", status="success", processed=3))
+    monkeypatch.setattr(worker, "run_step_embeddings", lambda: StepResult(step_name="embeddings", status="success", processed=4))
+    monkeypatch.setattr(worker, "run_step_ingest", lambda: StepResult(step_name="ingest", status="success", processed=5))
+
+    def run_events():
+        calls.append("event_ingest")
+        return StepResult(step_name="event_ingest", status="failed", processed=0, failed=1, error="retry exhausted")
+
+    def run_conflict():
+        calls.append("conflict_scan")
+        return StepResult(step_name="conflict_scan", status="success", processed=6)
+
+    monkeypatch.setattr(worker, "run_step_event_ingest", run_events)
+    monkeypatch.setattr(worker, "run_step_conflict_scan", run_conflict)
+
+    result = await worker.run_full_pipeline(
+        skip_download=False,
+        triggered_by="manual",
+        run_id="run-events-retry-exhausted",
+    )
+
+    assert calls == ["event_ingest", "conflict_scan"]
+    assert result.status == "partial"
+    assert [step.step_name for step in result.steps] == [
+        "download",
+        "extract",
+        "metadata",
+        "embeddings",
+        "ingest",
+        "event_ingest",
+        "conflict_scan",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_pipeline_service_get_pipeline_status_data_marks_stale_running_row_failed():
+    from services.pipeline_service import get_pipeline_status_data
+
+    stale_started_at = datetime.now(timezone.utc) - timedelta(days=5)
+    stale_row = _make_pipeline_run_row(
+        run_id="stale-run",
+        status="running",
+        started_at=stale_started_at,
+        completed_at=None,
+        heartbeat_at=None,
+        current_step=None,
+        duration_seconds=None,
+    )
+    repaired_row = dict(stale_row)
+    repaired_row["status"] = "failed"
+    repaired_row["completed_at"] = datetime.now(timezone.utc)
+    repaired_row["error_message"] = "Run marked failed after remaining in running state without a heartbeat."
+
+    mock_db_cm = MagicMock()
+    mock_db = MagicMock()
+    mock_cursor = MagicMock()
+    mock_db.cursor.return_value = mock_cursor
+    mock_db_cm.__enter__.return_value = mock_db
+    mock_db_cm.__exit__.return_value = False
+    mock_cursor.fetchall.side_effect = [
+        [stale_row],
+        [repaired_row],
+    ]
+
+    response = await get_pipeline_status_data(
+        limit=5,
+        current_user=MagicMock(),
+        state_getter=lambda: (None, None),
+        db_factory=MagicMock(return_value=mock_db_cm),
+        next_scheduled_getter=lambda: None,
+    )
+
+    executed_sql = [call.args[0] for call in mock_cursor.execute.call_args_list]
+    assert any("UPDATE pipeline_runs" in sql for sql in executed_sql)
+    assert mock_db.conn.commit.call_count == 1
+    assert response["is_running"] is False
+    assert response["current_run_id"] is None
+    assert response["recent_runs"][0]["id"] == "stale-run"
+    assert response["recent_runs"][0]["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_service_get_pipeline_status_data_marks_legacy_row_failed_even_after_heartbeat_backfill():
+    from services.pipeline_service import get_pipeline_status_data
+
+    stale_started_at = datetime.now(timezone.utc) - timedelta(days=5)
+    stale_row = _make_pipeline_run_row(
+        run_id="legacy-stale-run",
+        status="running",
+        started_at=stale_started_at,
+        completed_at=None,
+        heartbeat_at=datetime.now(timezone.utc),
+        current_step=None,
+        duration_seconds=None,
+    )
+    repaired_row = dict(stale_row)
+    repaired_row["status"] = "failed"
+    repaired_row["completed_at"] = datetime.now(timezone.utc)
+
+    mock_db_cm = MagicMock()
+    mock_db = MagicMock()
+    mock_cursor = MagicMock()
+    mock_db.cursor.return_value = mock_cursor
+    mock_db_cm.__enter__.return_value = mock_db
+    mock_db_cm.__exit__.return_value = False
+    mock_cursor.fetchall.side_effect = [
+        [stale_row],
+        [repaired_row],
+    ]
+
+    response = await get_pipeline_status_data(
+        limit=5,
+        current_user=MagicMock(),
+        state_getter=lambda: (None, None),
+        db_factory=MagicMock(return_value=mock_db_cm),
+        next_scheduled_getter=lambda: None,
+    )
+
+    executed_sql = [call.args[0] for call in mock_cursor.execute.call_args_list]
+    assert any("UPDATE pipeline_runs" in sql for sql in executed_sql)
+    assert response["is_running"] is False
+    assert response["recent_runs"][0]["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_service_trigger_pipeline_run_data_reconciles_stale_db_run_before_starting():
+    from services.pipeline_service import trigger_pipeline_run_data
+
+    current_user = SimpleNamespace(email="admin@example.com")
+    background_tasks = MagicMock()
+    process_launcher = MagicMock()
+    stale_started_at = datetime.now(timezone.utc) - timedelta(days=4)
+    stale_row = _make_pipeline_run_row(
+        run_id="stale-run",
+        status="running",
+        started_at=stale_started_at,
+        completed_at=None,
+        heartbeat_at=None,
+        current_step=None,
+        duration_seconds=None,
+    )
+    mock_db_cm = MagicMock()
+    mock_db = MagicMock()
+    mock_cursor = MagicMock()
+    mock_db.cursor.return_value = mock_cursor
+    mock_db_cm.__enter__.return_value = mock_db
+    mock_db_cm.__exit__.return_value = False
+    mock_cursor.fetchall.return_value = [stale_row]
+    mock_cursor.fetchone.return_value = None
+
+    response = await trigger_pipeline_run_data(
+        skip_download=False,
+        background_tasks=background_tasks,
+        current_user=current_user,
+        state_getter=lambda: (None, None),
+        db_factory=MagicMock(return_value=mock_db_cm),
+        run_id_factory=lambda: "run-2",
+        process_launcher=process_launcher,
+    )
+
+    executed_sql = [call.args[0] for call in mock_cursor.execute.call_args_list]
+    assert any("UPDATE pipeline_runs" in sql for sql in executed_sql)
+    assert any("INSERT INTO pipeline_runs" in sql for sql in executed_sql)
+    assert mock_db.conn.commit.call_count == 2
+    process_launcher.assert_called_once_with(
+        triggered_by="api",
+        run_id="run-2",
+        skip_download=False,
+        single_step=None,
+        service_logger=ANY,
+    )
+    assert response == {
+        "run_id": "run-2",
+        "status": "started",
+        "skip_download": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_pipeline_service_trigger_pipeline_step_data_rejects_active_db_run():
+    from fastapi import HTTPException
+    from services.pipeline_service import trigger_pipeline_step_data
+
+    fresh_row = _make_pipeline_run_row(
+        run_id="active-db-run",
+        status="running",
+        completed_at=None,
+        heartbeat_at=datetime.now(timezone.utc),
+        current_step="metadata",
+    )
+    mock_db_cm = MagicMock()
+    mock_db = MagicMock()
+    mock_cursor = MagicMock()
+    mock_db.cursor.return_value = mock_cursor
+    mock_db_cm.__enter__.return_value = mock_db
+    mock_db_cm.__exit__.return_value = False
+    mock_cursor.fetchall.return_value = [fresh_row]
+    mock_cursor.fetchone.return_value = {"id": "active-db-run"}
+
+    with pytest.raises(HTTPException) as exc_info:
+        await trigger_pipeline_step_data(
+            step="extract",
+            background_tasks=MagicMock(),
+            current_user=SimpleNamespace(email="admin@example.com"),
+            state_getter=lambda: (None, None),
+            db_factory=MagicMock(return_value=mock_db_cm),
+            process_launcher=MagicMock(),
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == {
+        "message": "Pipeline zaten calisiyor (veritabaninda)",
+        "run_id": "active-db-run",
+    }
+
+
+@pytest.mark.asyncio
+async def test_pipeline_service_trigger_pipeline_run_data_marks_row_failed_when_launch_fails():
+    from fastapi import HTTPException
+    from services.pipeline_service import trigger_pipeline_run_data
+
+    current_user = SimpleNamespace(email="admin@example.com")
+    mock_db_cm = MagicMock()
+    mock_db = MagicMock()
+    mock_cursor = MagicMock()
+    mock_db.cursor.return_value = mock_cursor
+    mock_db_cm.__enter__.return_value = mock_db
+    mock_db_cm.__exit__.return_value = False
+    mock_cursor.fetchall.return_value = []
+    mock_cursor.fetchone.return_value = None
+
+    with pytest.raises(HTTPException) as exc_info:
+        await trigger_pipeline_run_data(
+            skip_download=False,
+            background_tasks=MagicMock(),
+            current_user=current_user,
+            state_getter=lambda: (None, None),
+            db_factory=MagicMock(return_value=mock_db_cm),
+            run_id_factory=lambda: "run-launch-fail",
+            process_launcher=MagicMock(side_effect=RuntimeError("spawn failed")),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Pipeline worker sureci baslatilamadi"
+    executed_sql = [call.args[0] for call in mock_cursor.execute.call_args_list]
+    assert any("INSERT INTO pipeline_runs" in sql for sql in executed_sql)
+    assert any("UPDATE pipeline_runs" in sql for sql in executed_sql)
+    assert mock_db.conn.commit.call_count == 2
+
+
+def test_pipeline_launcher_launch_pipeline_process_builds_detached_command():
+    from workers.pipeline_launcher import launch_pipeline_process
+
+    process_runner = MagicMock(return_value=SimpleNamespace(pid=4321))
+    env = {"TEST_ENV": "1"}
+    working_directory = Path("C:/tmp/pipeline")
+
+    process = launch_pipeline_process(
+        triggered_by="api",
+        run_id="run-99",
+        skip_download=True,
+        single_step="extract",
+        process_runner=process_runner,
+        env=env,
+        working_directory=working_directory,
+    )
+
+    assert process.pid == 4321
+    command = process_runner.call_args.args[0]
+    kwargs = process_runner.call_args.kwargs
+    assert command == [
+        sys.executable,
+        "-m",
+        "workers.pipeline_worker",
+        "--triggered-by",
+        "api",
+        "--run-id",
+        "run-99",
+        "--skip-download",
+        "--step",
+        "extract",
+    ]
+    assert kwargs["cwd"] == str(working_directory)
+    assert kwargs["env"] == env
+    assert kwargs["stdin"] is not None
+    assert kwargs["stdout"] is not None
+    assert kwargs["stderr"] is not None
+    assert kwargs["close_fds"] is True
+    if os.name == "nt":
+        assert "creationflags" in kwargs
+        assert "start_new_session" not in kwargs
+    else:
+        assert kwargs["start_new_session"] is True
+        assert "creationflags" not in kwargs
+
+
+def test_pipeline_scheduler_full_job_launches_detached_worker():
+    sys.modules.pop("workers.pipeline_scheduler", None)
+
+    with patch.dict(sys.modules, {"schedule": MagicMock()}):
+        from workers.pipeline_scheduler import _run_full_pipeline
+
+        with patch(
+            "workers.pipeline_scheduler.launch_pipeline_process",
+            return_value=SimpleNamespace(pid=9876),
+        ) as mock_launch:
+            _run_full_pipeline()
+
+    mock_launch.assert_called_once_with(
+        triggered_by="schedule",
+        skip_download=False,
+        service_logger=ANY,
+    )
+
+
+def test_pipeline_scheduler_daily_job_launches_detached_worker():
+    sys.modules.pop("workers.pipeline_scheduler", None)
+
+    with patch.dict(sys.modules, {"schedule": MagicMock()}):
+        from workers.pipeline_scheduler import _run_daily_pipeline
+
+        with patch(
+            "workers.pipeline_scheduler.launch_pipeline_process",
+            return_value=SimpleNamespace(pid=6789),
+        ) as mock_launch:
+            _run_daily_pipeline()
+
+    mock_launch.assert_called_once_with(
+        triggered_by="schedule",
+        skip_download=True,
+        service_logger=ANY,
+    )
 
 
 @pytest.mark.asyncio
@@ -10253,6 +11186,10 @@ async def test_pipeline_service_get_pipeline_run_detail_data_formats_response():
 
     assert response["id"] == "run-42"
     assert response["total_downloaded"] == 12
+    assert response["step_event_ingest"] == {"status": "success"}
+    assert response["total_event_scopes_ingested"] == 7
+    assert response["step_final_status_repair"] == {"status": "success"}
+    assert response["total_final_status_repaired"] == 7
     assert response["duration_seconds"] == 720
     assert response["created_at"] == row["created_at"].isoformat()
 

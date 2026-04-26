@@ -8,9 +8,10 @@ The reconciliation logic uses the most recent date as tiebreaker:
 """
 import logging
 from datetime import date, datetime
-from typing import Optional, List, Tuple
+from typing import Iterator, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+DEFAULT_FINAL_STATUS_REPAIR_BATCH_SIZE = 10000
 
 # SQL CASE expression reused in update_final_status_batch() and migration
 _INGEST_DATE_EXPR = """COALESCE(
@@ -106,3 +107,79 @@ def update_final_status_batch(conn, app_nos: Optional[List[str]] = None) -> int:
     cur.close()
     logger.info(f"final_status recomputed for {count} trademarks")
     return count
+
+
+def iter_application_no_batches(
+    conn,
+    *,
+    batch_size: int = DEFAULT_FINAL_STATUS_REPAIR_BATCH_SIZE,
+) -> Iterator[List[str]]:
+    """Yield deterministic application number batches for full-table repair runs."""
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+
+    last_application_no: Optional[str] = None
+
+    while True:
+        cur = conn.cursor()
+        try:
+            if last_application_no is None:
+                cur.execute(
+                    """
+                    SELECT application_no
+                    FROM trademarks
+                    WHERE application_no IS NOT NULL
+                    ORDER BY application_no
+                    LIMIT %s
+                    """,
+                    (batch_size,),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT application_no
+                    FROM trademarks
+                    WHERE application_no IS NOT NULL
+                      AND application_no > %s
+                    ORDER BY application_no
+                    LIMIT %s
+                    """,
+                    (last_application_no, batch_size),
+                )
+
+            batch = [row[0] for row in cur.fetchall() if row and row[0]]
+        finally:
+            cur.close()
+
+        if not batch:
+            break
+
+        yield batch
+        last_application_no = batch[-1]
+
+
+def repair_final_statuses(
+    conn,
+    *,
+    batch_size: int = DEFAULT_FINAL_STATUS_REPAIR_BATCH_SIZE,
+) -> dict:
+    """Run chunked full-table final_status reconciliation."""
+    stats = {
+        "batches": 0,
+        "processed": 0,
+        "updated": 0,
+    }
+
+    for batch in iter_application_no_batches(conn, batch_size=batch_size):
+        updated = update_final_status_batch(conn, app_nos=batch)
+        stats["batches"] += 1
+        stats["processed"] += len(batch)
+        stats["updated"] += updated
+        logger.info(
+            "final_status repair batch %s complete: processed=%s updated=%s",
+            stats["batches"],
+            len(batch),
+            updated,
+        )
+
+    return stats
