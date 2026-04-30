@@ -50,7 +50,7 @@ from utils.class_utils import (
     calculate_class_overlap_score
 )
 
-# Unified scoring engine â€” single source of truth for all search paths
+# Unified scoring engine - single source of truth for all search paths
 from risk_engine import (
     score_pair,
     calculate_visual_similarity,

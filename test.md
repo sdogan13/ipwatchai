@@ -88,12 +88,14 @@ Existing suites:
 - `tests/test_zip.py`
 
 Scoring coverage note:
-- `tests/test_scoring_engine.py` covers the V2 text/visual scorer, including descriptor-like token caps, compact compounds, short-anchor phonetic guards, dominant-anchor fuzzy/phonetic quality guards, short non-exact anchor visual boost suppression, dominant-core added matter, bidirectional and single-anchor asymmetric changed-matter caps, continuous guardrail calibration, weak/limited-text visual guards, OCR disagreement, and search/watchlist wiring into `score_pair()`.
+- `tests/test_scoring_engine.py` covers the V2 text/visual scorer, including descriptor-like token caps, low-protectability shared-anchor guards, compact compounds, short-token boundary retrieval source checks, short-anchor phonetic guards, bidirectional short-acronym subset caps, short collapsed translation caps, dominant-anchor fuzzy/phonetic quality guards, short non-exact anchor visual boost suppression, dominant-core added matter, bidirectional and single-anchor asymmetric changed-matter caps, continuous guardrail calibration, weak/limited-text visual guards, OCR disagreement, and search/watchlist wiring into `score_pair()`.
+- `tests/test_api_endpoints.py` covers `/api/search` service wiring so unified enhanced search maps canonical `RiskEngine.assess_brand_risk()` results into the existing response shape.
 
 ### Layer 2: App API Integration
 
 Purpose:
 - verify FastAPI routes, auth gates, response shapes, validation, and service wiring with the test client
+- verify watchlist alert filtering behavior, including same-holder conflict exclusion by holder ID while preserving event alerts
 
 Existing suites:
 - `tests/test_api_endpoints.py`
@@ -217,6 +219,7 @@ Current environment note:
 | Alerts | Partial | Partial via watchlist | Yes | Covered | extend only if new alert actions, filter states, or escalation paths are added |
 | Applications | Partial | Yes | Yes | Covered | extend only if new paid-only application workflows are added |
 | Reports | Partial | Yes | Yes | Covered | add browser download coverage when an export-eligible persona is available |
+| AI Studio | Partial | Planned | Needs browser coverage | In progress | cover status gating, unified AI credits, Name Lab generation, Logo Studio project/revision generation, asynchronous audit polling, safe-candidate selection, and history rendering |
 | Billing and checkout | Partial | Yes | Yes | Blocked | keep pre-payment and failure-path coverage current; revisit successful paid checkout only after a real payment method/provider is configured |
 | Admin | Partial | Yes | Yes | Covered | deepen destructive admin actions only where they are product-critical |
 | Uploads and assets | Yes | Yes | Yes | Covered | extend only if new export/download asset paths are added |
@@ -241,7 +244,7 @@ Current environment note:
 - `tests/test_data_collection.py`: collector recency-window logic, Gazette validation, issue completeness checks, and download planning
 - `tests/test_subscription.py`: plan eligibility and credit logic
 - `tests/test_subscription_limits.py`: subscription limit behavior
-- `tests/test_scoring_engine.py`: V2 text/visual scoring behavior, common-anchor/generic/descriptor caps, descriptor-stat classifier tests, short-anchor and dominant-anchor fuzzy/phonetic guardrails, continuous cap calibration, short non-exact anchor visual boost suppression, single-anchor asymmetric added-matter caps, weak/limited-text visual guardrails, OCR-disagreement caps, Retrieval V2 normalization/source diagnostics, compact compound retrieval/scoring, added-matter scoring, duplicate/collapsed translation caps, compatibility fields, and combiner behavior
+- `tests/test_scoring_engine.py`: V2 text/visual scoring behavior, common-anchor/generic/descriptor caps, descriptor-stat classifier tests, low-protectability anchor classifier and weak shared-anchor caps, short-anchor and dominant-anchor fuzzy/phonetic guardrails, short-acronym subset and short collapsed translation caps, continuous cap calibration, short non-exact anchor visual boost suppression, single-anchor asymmetric added-matter caps, weak/limited-text visual guardrails, OCR-disagreement caps, Retrieval V2 normalization/source diagnostics, compact compound retrieval/scoring, added-matter scoring, duplicate/collapsed translation caps, compatibility fields, and combiner behavior
 - `tests/test_edge_cases.py`: scoring/search edge cases
 - `tests/test_translation.py`: translation behavior
 - `tests/test_translation_scoring.py`: translated-name Path B scoring behavior and CLIP/DINOv2/OCR visual composite coverage

@@ -5,6 +5,7 @@ import json
 import os
 import re
 from datetime import date as date_type
+from decimal import Decimal
 from uuid import UUID, uuid4
 
 import pandas as pd
@@ -25,13 +26,86 @@ from models.schemas import (
     WatchlistItemCreate,
     WatchlistItemResponse,
 )
+from utils.watchlist_filters import same_holder_alert_exclusion_sql
 
 WATCHLIST_LOGOS_DIR = os.path.join(settings.paths.upload_dir, "watchlist_logos")
+
+
+def is_custom_watchlist_logo_path(logo_path, logos_dir=None) -> bool:
+    """Return True only for logos uploaded into the watchlist logo store."""
+    if not logo_path:
+        return False
+    if logos_dir is None:
+        logos_dir = WATCHLIST_LOGOS_DIR
+
+    try:
+        logo_abs = os.path.abspath(os.fspath(logo_path))
+        logos_abs = os.path.abspath(os.fspath(logos_dir))
+        return os.path.commonpath([logo_abs, logos_abs]) == logos_abs
+    except (TypeError, ValueError, OSError):
+        normalized = str(logo_path).replace("\\", "/").strip("/").lower()
+        return "/watchlist_logos/" in f"/{normalized}/"
+
+
+def _visible_alert_condition(
+    alert_alias: str = "a",
+    conflict_alias: str = "t",
+    watched_alias: str = "my_tm",
+) -> str:
+    return same_holder_alert_exclusion_sql(alert_alias, conflict_alias, watched_alias)
 
 
 def _normalize_ratio_threshold(value) -> float:
     """Accept either decimal (0.8) or percentage (80) threshold input."""
     return value / 100.0 if value > 1.0 else float(value)
+
+
+def get_default_watchlist_alert_threshold(db, organization_id) -> float:
+    """Return the organization's default watchlist alert threshold."""
+    fallback = _normalize_ratio_threshold(settings.monitoring.default_similarity_threshold)
+    cur = db.cursor()
+    cur.execute(
+        """
+        SELECT default_alert_threshold
+        FROM organizations
+        WHERE id = %s
+        """,
+        (str(organization_id),),
+    )
+    row = cur.fetchone()
+
+    value = None
+    if isinstance(row, dict):
+        value = row.get("default_alert_threshold")
+    elif isinstance(row, (list, tuple)) and row:
+        value = row[0]
+    elif row is not None:
+        value = getattr(row, "default_alert_threshold", None)
+
+    if value is None:
+        return fallback
+    if not isinstance(value, (int, float, str, Decimal)):
+        return fallback
+
+    try:
+        return _normalize_ratio_threshold(float(value))
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _watchlist_item_with_similarity_threshold(data, threshold):
+    """Return a watchlist item payload with the server-owned threshold applied."""
+    threshold = _normalize_ratio_threshold(threshold)
+    if hasattr(data, "model_copy"):
+        return data.model_copy(update={"similarity_threshold": threshold})
+    if hasattr(data, "copy"):
+        return data.copy(update={"similarity_threshold": threshold})
+    if isinstance(data, dict):
+        copied = data.copy()
+        copied["similarity_threshold"] = threshold
+        return copied
+    setattr(data, "similarity_threshold", threshold)
+    return data
 
 
 def _days_until(target_date, today_factory=None):
@@ -61,10 +135,12 @@ def _load_conflict_summaries(
         resolved_or_dismissed_appeals = appeals_only and status_filter in ("resolved", "dismissed")
         params = (item_ids,)
 
+        visible_alert_condition = _visible_alert_condition()
         if resolved_or_dismissed_appeals:
-            where_clause = """
+            where_clause = f"""
                 a.watchlist_item_id = ANY(%s::uuid[])
                 AND a.status = %s
+                AND {visible_alert_condition}
             """
             params += (status_filter,)
             nearest_deadline_expr = "MIN(t.appeal_deadline) as nearest_deadline,"
@@ -79,11 +155,12 @@ def _load_conflict_summaries(
                 END) AS highest_severity_rank,
             """
         else:
-            where_clause = """
+            where_clause = f"""
                 a.watchlist_item_id = ANY(%s::uuid[])
                 AND a.status NOT IN ('dismissed', 'resolved')
                 AND (t.appeal_deadline IS NULL OR t.appeal_deadline >= CURRENT_DATE)
                 AND a.overall_risk_score >= %s
+                AND {visible_alert_condition}
             """
             params += (threshold,)
             nearest_deadline_expr = (
@@ -118,6 +195,8 @@ def _load_conflict_summaries(
                 COUNT(*) FILTER (WHERE a.severity = 'low') as sev_low
             FROM alerts_mt a
             LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
+            LEFT JOIN watchlist_mt w ON a.watchlist_item_id = w.id
+            LEFT JOIN trademarks my_tm ON w.customer_application_no = my_tm.application_no
             WHERE {where_clause}
             GROUP BY a.watchlist_item_id
         """,
@@ -169,6 +248,7 @@ async def get_watchlist_stats_summary(
 
     norm_score = _normalize_ratio_threshold(min_score)
     with database_factory() as db:
+        visible_alert_condition = _visible_alert_condition()
         cur = db.cursor()
         cur.execute(
             f"""
@@ -178,25 +258,32 @@ async def get_watchlist_stats_summary(
                 COUNT(DISTINCT w.id) FILTER (WHERE a.id IS NOT NULL
                     AND a.status NOT IN ('dismissed', 'resolved')
                     AND a.overall_risk_score >= {norm_score}
-                    AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)) AS items_with_threats,
+                    AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
+                    AND {visible_alert_condition}) AS items_with_threats,
                 COUNT(a.id) FILTER (WHERE a.severity = 'critical' AND a.status NOT IN ('dismissed', 'resolved')
                     AND a.overall_risk_score >= {norm_score}
-                    AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)) AS critical_threats,
+                    AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
+                    AND {visible_alert_condition}) AS critical_threats,
                 COUNT(a.id) FILTER (WHERE a.severity = 'high' AND a.status NOT IN ('dismissed', 'resolved')
                     AND a.overall_risk_score >= {norm_score}
-                    AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)) AS high_threats,
+                    AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
+                    AND {visible_alert_condition}) AS high_threats,
                 COUNT(a.id) FILTER (WHERE a.severity = 'medium' AND a.status NOT IN ('dismissed', 'resolved')
                     AND a.overall_risk_score >= {norm_score}
-                    AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)) AS medium_threats,
+                    AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
+                    AND {visible_alert_condition}) AS medium_threats,
                 COUNT(a.id) FILTER (WHERE a.severity = 'low' AND a.status NOT IN ('dismissed', 'resolved')
                     AND a.overall_risk_score >= {norm_score}
-                    AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)) AS low_threats,
+                    AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
+                    AND {visible_alert_condition}) AS low_threats,
                 COUNT(a.id) FILTER (WHERE a.status = 'new'
                     AND a.overall_risk_score >= {norm_score}
-                    AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)) AS new_alerts,
+                    AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
+                    AND {visible_alert_condition}) AS new_alerts,
                 MIN(t.appeal_deadline) FILTER (WHERE t.appeal_deadline > CURRENT_DATE
                     AND a.overall_risk_score >= {norm_score}
-                    AND a.status NOT IN ('dismissed', 'resolved')) AS nearest_deadline,
+                    AND a.status NOT IN ('dismissed', 'resolved')
+                    AND {visible_alert_condition}) AS nearest_deadline,
                 COUNT(DISTINCT w.id) FILTER (
                     WHERE (my_tm.application_date IS NOT NULL
                            AND my_tm.application_date + INTERVAL '10 years 6 months' <= CURRENT_DATE + INTERVAL '12 months')
@@ -241,7 +328,7 @@ async def get_watchlist_page(
     renewal_only: bool = False,
     appeals_only: bool = False,
     status_filter=None,
-    threshold: float = 0.50,
+    threshold: float = 0.70,
     tm_status=None,
     database_factory=None,
     watchlist_crud=None,
@@ -524,6 +611,12 @@ async def create_watchlist_item_record(
     with database_factory() as db:
         try:
             tm_ai = None
+            default_threshold = get_default_watchlist_alert_threshold(
+                db, current_user.organization_id
+            )
+            data_to_create = _watchlist_item_with_similarity_threshold(
+                data, default_threshold
+            )
 
             if app_no:
                 cur = db.cursor()
@@ -545,8 +638,7 @@ async def create_watchlist_item_record(
                     db,
                     current_user.organization_id,
                     current_user.id,
-                    data,
-                    logo_path=tm_ai.get("image_path") or None,
+                    data_to_create,
                     logo_embedding=_parse_embedding_vector(tm_ai.get("image_embedding")),
                     logo_dinov2_embedding=_parse_embedding_vector(
                         tm_ai.get("dinov2_embedding")
@@ -562,7 +654,7 @@ async def create_watchlist_item_record(
                     db,
                     current_user.organization_id,
                     current_user.id,
-                    data,
+                    data_to_create,
                 )
 
             return {
@@ -739,7 +831,7 @@ async def prepare_watchlist_scan_all(
     items_to_scan = items[:scan_max] if scan_max < 999999 else items
     message = f"{len(items_to_scan)} marka taramaya alindi (toplam: {total})"
     if len(items_to_scan) < len(items):
-        message += f" Ã¢â‚¬â€ plan limitiniz nedeniyle {scan_max} marka tarandi"
+        message += f" - plan limitiniz nedeniyle {scan_max} marka tarandi"
 
     return {
         "success": True,
@@ -918,6 +1010,9 @@ async def import_watchlist_items_bulk(
             db,
             current_user.organization_id,
         )
+        default_threshold = get_default_watchlist_alert_threshold(
+            db, current_user.organization_id
+        )
 
         created = 0
         failed = 0
@@ -943,8 +1038,11 @@ async def import_watchlist_items_bulk(
                 continue
 
             try:
+                item_to_create = _watchlist_item_with_similarity_threshold(
+                    item, default_threshold
+                )
                 result = watchlist_crud.create(
-                    db, current_user.organization_id, current_user.id, item
+                    db, current_user.organization_id, current_user.id, item_to_create
                 )
                 created += 1
                 created_ids.append(UUID(str(result["id"])))
@@ -1111,6 +1209,9 @@ async def import_watchlist_items_from_portfolio(
             db,
             current_user.organization_id,
         )
+        default_threshold = get_default_watchlist_alert_threshold(
+            db, current_user.organization_id
+        )
 
         created = 0
         failed = 0
@@ -1141,7 +1242,7 @@ async def import_watchlist_items_from_portfolio(
                     brand_name=brand,
                     nice_class_numbers=classes,
                     application_no=trademark.get("application_no"),
-                    similarity_threshold=data.similarity_threshold,
+                    similarity_threshold=default_threshold,
                 )
 
                 cur.execute("SAVEPOINT sp_bulk")
@@ -1150,7 +1251,6 @@ async def import_watchlist_items_from_portfolio(
                     current_user.organization_id,
                     current_user.id,
                     item_data,
-                    logo_path=trademark.get("image_path") or None,
                     logo_embedding=_parse_embedding_vector(trademark.get("image_embedding")),
                     logo_dinov2_embedding=_parse_embedding_vector(
                         trademark.get("dinov2_embedding")
@@ -1205,10 +1305,10 @@ def build_watchlist_upload_template():
     ws.title = "Marka Listesi"
 
     headers = [
-        ("Marka AdÄ± *", True),
-        ("BaÅŸvuru No *", True),
-        ("SÄ±nÄ±flar *", True),
-        ("BÃ¼lten No", False),
+        ("Marka Adı *", True),
+        ("Başvuru No *", True),
+        ("Sınıflar *", True),
+        ("Bülten No", False),
     ]
 
     required_fill = PatternFill(start_color="DC2626", end_color="DC2626", fill_type="solid")
@@ -1222,19 +1322,19 @@ def build_watchlist_upload_template():
         cell.alignment = Alignment(horizontal="center")
 
     sample_data = [
-        ["Ã–RNEK MARKA 1", "2023/12345", "9, 35", "305"],
-        ["Ã–RNEK MARKA 2", "2023/67890", "25, 35, 42", "306"],
-        ["Ã–RNEK MARKA 3", "2022/11111", "30, 43", ""],
+        ["ÖRNEK MARKA 1", "2023/12345", "9, 35", "305"],
+        ["ÖRNEK MARKA 2", "2023/67890", "25, 35, 42", "306"],
+        ["ÖRNEK MARKA 3", "2022/11111", "30, 43", ""],
     ]
 
     for row_idx, row_data in enumerate(sample_data, 2):
         for col_idx, value in enumerate(row_data, 1):
             ws.cell(row=row_idx, column=col_idx, value=value)
 
-    ws.cell(row=6, column=1, value="* Zorunlu sÃ¼tunlar. BÃ¼lten No opsiyoneldir.")
+    ws.cell(row=6, column=1, value="* Zorunlu sütunlar. Bülten No opsiyoneldir.")
     ws.cell(row=6, column=1).font = Font(italic=True, color="666666")
 
-    ws.cell(row=7, column=1, value="SÄ±nÄ±flar: VirgÃ¼lle ayÄ±rarak yazÄ±n (Ã¶rn: 9, 35, 42)")
+    ws.cell(row=7, column=1, value="Sınıflar: Virgülle ayırarak yazın (örn: 9, 35, 42)")
     ws.cell(row=7, column=1).font = Font(italic=True, color="666666")
 
     ws.column_dimensions["A"].width = 25
@@ -1409,6 +1509,37 @@ def _image_media_type_for_path(path):
     }.get(ext, "image/png")
 
 
+def _load_linked_trademark_visual_payload(db, application_no):
+    """Load registry logo embeddings for a linked trademark without copying its image path."""
+    if not application_no:
+        return None
+
+    cur = db.cursor()
+    cur.execute(
+        """
+        SELECT image_embedding::text, dinov2_embedding::text,
+               color_histogram::text, logo_ocr_text
+        FROM trademarks
+        WHERE application_no = %s
+        LIMIT 1
+        """,
+        (str(application_no).strip(),),
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+
+    payload = {
+        "logo_embedding": _parse_embedding_vector(row.get("image_embedding")),
+        "dino_embedding": _parse_embedding_vector(row.get("dinov2_embedding")),
+        "color_histogram": _parse_embedding_vector(row.get("color_histogram")),
+        "logo_ocr_text": row.get("logo_ocr_text"),
+    }
+    if any(value is not None for value in payload.values()):
+        return payload
+    return None
+
+
 async def resolve_watchlist_logo_file(
     item_id,
     database_factory=None,
@@ -1453,6 +1584,18 @@ async def resolve_watchlist_logo_file(
         if file_exists(candidate):
             return {"path": candidate, "media_type": _image_media_type_for_path(candidate)}
 
+    try:
+        from app_image_routes import find_trademark_image
+
+        trademark_image = find_trademark_image(logo_path)
+        if trademark_image and file_exists(trademark_image):
+            return {
+                "path": trademark_image,
+                "media_type": _image_media_type_for_path(trademark_image),
+            }
+    except Exception:
+        pass
+
     raise HTTPException(status_code=404, detail="Logo bulunamadi")
 
 
@@ -1463,6 +1606,7 @@ async def delete_watchlist_logo_asset(
     watchlist_crud=None,
     file_exists=None,
     remove_file=None,
+    custom_logo_checker=None,
 ):
     """Delete a watchlist logo file and clear its stored embeddings."""
     if database_factory is None:
@@ -1473,6 +1617,8 @@ async def delete_watchlist_logo_asset(
         file_exists = os.path.isfile
     if remove_file is None:
         remove_file = os.remove
+    if custom_logo_checker is None:
+        custom_logo_checker = is_custom_watchlist_logo_path
 
     with database_factory() as db:
         item = watchlist_crud.get_by_id(db, item_id, current_user.organization_id)
@@ -1480,6 +1626,12 @@ async def delete_watchlist_logo_asset(
             _raise_watchlist_item_not_found()
 
     logo_path = item.get("logo_path")
+    if not custom_logo_checker(logo_path):
+        return {
+            "success": True,
+            "message": "Silinecek ozel logo yok",
+        }
+
     if logo_path and file_exists(logo_path):
         try:
             remove_file(logo_path)
@@ -1488,6 +1640,17 @@ async def delete_watchlist_logo_asset(
 
     with database_factory() as db:
         watchlist_crud.clear_logo(db, item_id)
+        linked_visuals = _load_linked_trademark_visual_payload(
+            db,
+            item.get("customer_application_no"),
+        )
+        if linked_visuals:
+            watchlist_crud.update_logo(
+                db,
+                item_id,
+                logo_path=None,
+                **linked_visuals,
+            )
 
     return {
         "success": True,
@@ -1680,6 +1843,9 @@ def _import_watchlist_upload_rows(
         cur = db.cursor()
         org_id = str(current_user.organization_id)
         user_id = str(current_user.id)
+        default_threshold = get_default_watchlist_alert_threshold(
+            db, current_user.organization_id
+        )
 
         for idx, row in df.iterrows():
             row_num = idx + 2
@@ -1769,7 +1935,7 @@ def _import_watchlist_upload_rows(
                         alert_threshold, is_active, created_at, updated_at
                     ) VALUES (
                         %s, %s, %s, %s, %s, %s, %s,
-                        0.7, TRUE, NOW(), NOW()
+                        %s, TRUE, NOW(), NOW()
                     )
                 """,
                     (
@@ -1780,6 +1946,7 @@ def _import_watchlist_upload_rows(
                         nice_classes,
                         app_no,
                         bulletin_no,
+                        default_threshold,
                     ),
                 )
 

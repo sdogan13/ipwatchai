@@ -95,6 +95,21 @@ def test_prepare_updates_preserves_existing_lang_when_new_detection_unknown():
     assert stats["lang_changed"] == 0
 
 
+def test_prepare_updates_truncates_overlong_name_tr_to_db_limit():
+    very_long_translation = "x" * 700
+    rows = [
+        ("a", "SHORT", "old", "en", None, None, None),
+    ]
+    translations = [(very_long_translation, "en")]
+    updated_at = datetime(2026, 4, 24, 15, 0, tzinfo=timezone.utc)
+
+    updates, stats = refresh._prepare_updates(rows, translations, "madlad", updated_at)
+
+    assert len(updates[0][0]) == refresh.MAX_NAME_TR_LENGTH
+    assert updates[0][0] == "x" * refresh.MAX_NAME_TR_LENGTH
+    assert stats["name_tr_truncated"] == 1
+
+
 def test_apply_restore_batch_dry_run_returns_batch_size():
     restored = refresh._apply_restore_batch(None, [("elma", "en", "madlad", "model", None, "id-1")], dry_run=True)
     assert restored == 1

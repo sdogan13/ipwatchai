@@ -17,6 +17,33 @@ from psycopg2 import sql as psql
 PUBLIC_SEARCH_CLIENT_COOKIE = "public_search_client_id"
 PUBLIC_SEARCH_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365
 
+_LEGACY_MOJIBAKE_FOLD_REPLACEMENTS = [
+    ((195, 8222, 197, 184), "'g'"),       # double-encoded ğ
+    ((195, 8222, 197, 190), "'g'"),       # double-encoded Ğ
+    ((195, 8222, 194, 177), "'i'"),       # double-encoded ı
+    ((195, 8222, 194, 176), "'i'"),       # double-encoded İ
+    ((195, 402, 194, 182), "'o'"),        # double-encoded ö
+    ((195, 402, 226, 8364, 8220), "'o'"), # double-encoded Ö
+    ((195, 402, 194, 188), "'u'"),        # double-encoded ü
+    ((195, 402, 197, 8220), "'u'"),       # double-encoded Ü
+    ((195, 8230, 197, 184), "'s'"),       # double-encoded ş
+    ((195, 8230, 197, 190), "'s'"),       # double-encoded Ş
+    ((195, 402, 194, 167), "'c'"),        # double-encoded ç
+    ((195, 402, 226, 8364, 161), "'c'"),  # double-encoded Ç
+]
+
+
+def _sql_chr_literal(codes) -> str:
+    return " || ".join(f"CHR({code})" for code in codes)
+
+
+def _legacy_mojibake_normalize_sql(column: str) -> str:
+    """Fold legacy double-encoded Turkish text without embedding mojibake literals."""
+    expr = column
+    for source_codes, target in _LEGACY_MOJIBAKE_FOLD_REPLACEMENTS:
+        expr = f"REPLACE({expr}, {_sql_chr_literal(source_codes)}, {target})"
+    return f"LOWER({expr})"
+
 
 def resolve_public_search_client_id(request, id_factory=None):
     """Return the stable anonymous client id used for landing-page quotas."""
@@ -112,16 +139,39 @@ def check_public_search_eligibility(db, client_id: str, daily_limit_getter=None,
     }
 
 
+def _compact_translation_text(value) -> str:
+    from utils.idf_scoring import normalize_turkish
+
+    return normalize_turkish(value or "").replace(" ", "")
+
+
+def _is_duplicate_name_translation(name, name_tr) -> bool:
+    name_compact = _compact_translation_text(name)
+    name_tr_compact = _compact_translation_text(name_tr)
+    return bool(name_compact and name_tr_compact and name_compact == name_tr_compact)
+
+
+def _display_translation_similarity(result, scores) -> float:
+    if _is_duplicate_name_translation(
+        result.get("trademark_name") or result.get("name"),
+        result.get("name_tr"),
+    ):
+        return 0.0
+    return scores.get("translation_similarity", 0)
+
+
 def _map_public_search_results(results, status_code_getter=None):
     """Convert raw public search results into the limited response shape."""
     safe_results = []
     for result in (results or [])[:10]:
         scores = result.get("scores") or {}
+        trademark_name = result.get("trademark_name") or result.get("name")
+        translation_similarity = _display_translation_similarity(result, scores)
         image_path = result.get("image_path")
         image_url = f"/api/trademark-image/{image_path}" if image_path else None
         safe_results.append(
             {
-                "trademark_name": result.get("trademark_name") or result.get("name"),
+                "trademark_name": trademark_name,
                 "application_no": result.get("application_no"),
                 "status": result.get("status"),
                 "status_code": (
@@ -146,13 +196,85 @@ def _map_public_search_results(results, status_code_getter=None):
                 "scoring_path": scores.get("scoring_path"),
                 "text_similarity": round(scores.get("text_similarity", 0), 3),
                 "visual_similarity": round(scores.get("visual_similarity", 0), 3),
-                "translation_similarity": round(scores.get("translation_similarity", 0), 3),
+                "translation_similarity": round(translation_similarity, 3),
                 "phonetic_similarity": round(scores.get("phonetic_similarity", 0), 3),
                 "has_extracted_goods": result.get("has_extracted_goods", False),
                 "extracted_goods": result.get("extracted_goods"),
             }
         )
     return safe_results
+
+
+def _format_date_for_search(value, date_formatter):
+    if not value:
+        return None
+    if isinstance(value, str):
+        return value
+    return date_formatter(value)
+
+
+def _map_risk_engine_results_for_enhanced_search(
+    results,
+    *,
+    search_classes,
+    date_formatter,
+    status_code_getter,
+    image_url_getter,
+):
+    searched_classes_set = set(search_classes or [])
+    mapped = []
+    for result in results or []:
+        scores = result.get("scores") or {}
+        result_classes = result.get("classes") or result.get("nice_classes") or []
+        overlap_count = (
+            len(searched_classes_set.intersection(set(result_classes)))
+            if searched_classes_set
+            else 0
+        )
+        score_val = scores.get("total")
+        if score_val is None:
+            score_val = result.get("risk_score", 0)
+        try:
+            similarity_pct = round(float(score_val or 0.0) * 100, 1)
+        except (TypeError, ValueError):
+            similarity_pct = 0.0
+
+        image_path = result.get("image_path")
+        application_no = result.get("application_no")
+        bulletin_no = result.get("bulletin_no")
+        mapped.append(
+            {
+                "id": str(result.get("trademark_id") or result.get("id") or application_no),
+                "name": result.get("name") or result.get("trademark_name") or "",
+                "application_no": application_no,
+                "application_date": _format_date_for_search(
+                    result.get("application_date"),
+                    date_formatter,
+                ),
+                "registration_date": _format_date_for_search(
+                    result.get("registration_date"),
+                    date_formatter,
+                ),
+                "status": result.get("status") or "Bilinmiyor",
+                "status_code": status_code_getter(result.get("status")),
+                "nice_classes": result_classes,
+                "owner": result.get("holder_name"),
+                "holder_tpe_client_id": result.get("holder_tpe_client_id"),
+                "attorney": result.get("attorney_name"),
+                "attorney_no": result.get("attorney_no"),
+                "registration_no": result.get("registration_no"),
+                "bulletin_no": bulletin_no,
+                "image_url": image_url_getter(
+                    image_path,
+                    application_no,
+                    bulletin_no,
+                ),
+                "similarity": similarity_pct,
+                "name_similarity": similarity_pct,
+                "class_overlap_count": overlap_count,
+            }
+        )
+    return mapped
 
 
 async def run_public_search(
@@ -589,6 +711,7 @@ async def run_enhanced_search(
     image_url_getter,
     connect_fn=None,
     timer=None,
+    risk_engine_factory=None,
 ):
     """Run the enhanced text and optional image search flow."""
     if connect_fn is None:
@@ -645,6 +768,84 @@ async def run_enhanced_search(
                 logger.error(f"Class suggestion failed: {exc}")
 
     use_unified = settings.use_unified_scoring
+    if use_unified:
+        temp_image_path = None
+        engine = None
+        try:
+            image_path = None
+            if search_request.image_url:
+                import tempfile
+                import urllib.request
+
+                temp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
+                try:
+                    urllib.request.urlretrieve(search_request.image_url, temp_img.name)
+                    temp_img.close()
+                    temp_image_path = temp_img.name
+                    image_path = temp_image_path
+                except Exception:
+                    temp_img.close()
+                    if os.path.exists(temp_img.name):
+                        os.unlink(temp_img.name)
+                    raise
+
+            if risk_engine_factory is None:
+                from risk_engine import RiskEngine
+
+                risk_engine_factory = RiskEngine
+
+            engine = risk_engine_factory()
+            risk_result, _ = engine.assess_brand_risk(
+                name=search_request.name,
+                image_path=image_path,
+                target_classes=search_classes if search_classes else None,
+                attorney_no=search_request.attorney_no,
+            )
+            limit = search_request.limit if getattr(search_request, "limit", None) else 100
+            mapped_results = _map_risk_engine_results_for_enhanced_search(
+                (risk_result.get("top_candidates") or [])[:limit],
+                search_classes=search_classes,
+                date_formatter=date_formatter,
+                status_code_getter=status_code_getter,
+                image_url_getter=image_url_getter,
+            )
+            search_time = (timer() - start_time) * 1000
+            return {
+                "results": mapped_results,
+                "search_context": {
+                    "searched_name": search_request.name,
+                    "searched_classes": search_classes,
+                    "goods_description": search_request.goods_description,
+                    "total_results": len(mapped_results),
+                    "search_time_ms": round(search_time, 2),
+                },
+                "query": search_request.name,
+                "total_results": len(mapped_results),
+                "search_time_ms": round(search_time, 2),
+                "search_classes": search_classes,
+                "classes_were_auto_suggested": classes_were_auto_suggested,
+                "auto_suggested_classes": (
+                    auto_suggested
+                    if search_request.include_suggested_in_response and auto_suggested
+                    else None
+                ),
+                "suggestion_query": (
+                    suggestion_query if search_request.include_suggested_in_response else None
+                ),
+            }
+        except Exception as exc:
+            if logger:
+                logger.error(f"Enhanced unified search error: {exc}")
+            raise HTTPException(status_code=500, detail=str(exc))
+        finally:
+            if engine is not None and hasattr(engine, "close"):
+                try:
+                    engine.close()
+                except Exception:
+                    pass
+            if temp_image_path and os.path.exists(temp_image_path):
+                os.unlink(temp_image_path)
+
     conn = None
     cur = None
 
@@ -660,12 +861,7 @@ async def run_enhanced_search(
 
         name_normalized = normalize_turkish_fn(search_request.name)
 
-        normalize_sql = """
-            LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-            REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(t.name,
-            'Ã„Å¸','g'),'Ã„Å¾','g'),'Ã„Â±','i'),'Ã„Â°','i'),'ÃƒÂ¶','o'),'Ãƒâ€“','o'),
-            'ÃƒÂ¼','u'),'ÃƒÅ“','u'),'Ã…Å¸','s'),'Ã…Å¾','s'),'ÃƒÂ§','c'),'Ãƒâ€¡','c'))
-        """
+        normalize_sql = _legacy_mojibake_normalize_sql("t.name")
 
         tokens = [token for token in name_normalized.split() if len(token) > 2]
         token_clauses_simple = "FALSE"
@@ -1281,12 +1477,7 @@ async def run_legacy_rollback_search(
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
         name_normalized = normalize_turkish_fn(search_request.name)
-        normalize_sql = """
-            LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-            REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(t.name,
-            'Ã„Å¸','g'),'Ã„Å¾','g'),'Ã„Â±','i'),'Ã„Â°','i'),'ÃƒÂ¶','o'),'Ãƒâ€“','o'),
-            'ÃƒÂ¼','u'),'ÃƒÅ“','u'),'Ã…Å¸','s'),'Ã…Å¾','s'),'ÃƒÂ§','c'),'Ãƒâ€¡','c'))
-        """
+        normalize_sql = _legacy_mojibake_normalize_sql("t.name")
 
         sql = f"""
             SELECT t.id, t.application_no, t.name, t.final_status,

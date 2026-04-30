@@ -42,6 +42,27 @@ except Exception:
 OUTPUT_NAME = "metadata.json"
 SCRAPED_OUTPUT_NAME = "scraped_metadata.json"
 DEBUG_LIMIT = 0                  # Set to > 0 (e.g. 1000) to test on small data chunks
+AI_TEXT_FIELDS = (
+    "text_embedding",
+    "name_tr",
+    "detected_lang",
+    "name_tr_backend",
+    "name_tr_model",
+    "name_tr_updated_at",
+)
+AI_IMAGE_FIELDS = (
+    "image_embedding",
+    "dinov2_embedding",
+    "color_histogram",
+    "logo_ocr_text",
+)
+AI_FIELDS = AI_TEXT_FIELDS + AI_IMAGE_FIELDS
+VECTOR_AI_FIELDS = {
+    "text_embedding",
+    "image_embedding",
+    "dinov2_embedding",
+    "color_histogram",
+}
 _SCRAPED_MOJIBAKE_TOKENS = ("Ã", "Ä", "Å", "\ufffd")
 _SCRAPED_EMBEDDED_QUESTION_MARK_RE = re.compile(r"(?<=\w)\?(?=\w)")
 
@@ -107,6 +128,322 @@ def clean_appno(s: str) -> str:
     """Standardizes Application Number for use as a dictionary key."""
     s = clean_text(s)
     return re.sub(r"\s+", "", s)
+
+
+def normalize_ai_input(value) -> str:
+    return clean_text(str(value or "")).casefold()
+
+
+def record_name_key(record: dict) -> str:
+    tm = record.get("TRADEMARK") or {}
+    return normalize_ai_input(tm.get("NAME"))
+
+
+def record_image_key(record: dict) -> str:
+    image_id = normalize_ai_input(record.get("IMAGE"))
+    if "." in image_id:
+        image_id = Path(image_id).stem.casefold()
+    return image_id
+
+
+def has_ai_value(field: str, value) -> bool:
+    if field == "logo_ocr_text":
+        return value is not None
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, set, dict)):
+        return bool(value)
+    return True
+
+
+def ai_field_missing(record: dict, field: str) -> bool:
+    return not has_ai_value(field, record.get(field))
+
+
+def parse_vector_value(value):
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return value if value else None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, list) and parsed else None
+    except Exception:
+        try:
+            parsed = [float(part) for part in text.strip("[]").split(",") if part.strip()]
+            return parsed or None
+        except Exception:
+            return None
+
+
+def copy_ai_fields(
+    target: dict,
+    source: dict,
+    *,
+    preserve_text: bool,
+    preserve_image: bool,
+    only_missing: bool = True,
+) -> int:
+    copied = 0
+    allowed_fields = []
+    if preserve_text:
+        allowed_fields.extend(AI_TEXT_FIELDS)
+    if preserve_image:
+        allowed_fields.extend(AI_IMAGE_FIELDS)
+
+    for field in allowed_fields:
+        if only_missing and not ai_field_missing(target, field):
+            continue
+        value = source.get(field)
+        if not has_ai_value(field, value):
+            continue
+        if field in VECTOR_AI_FIELDS:
+            value = parse_vector_value(value)
+            if value is None:
+                continue
+        target[field] = value
+        copied += 1
+    return copied
+
+
+def clear_ai_fields(record: dict, fields) -> bool:
+    changed = False
+    for field in fields:
+        if field in record:
+            del record[field]
+            changed = True
+    return changed
+
+
+def index_records_by_appno(records: list[dict]) -> dict[str, dict]:
+    indexed = {}
+    for rec in records or []:
+        appno = clean_appno(rec.get("APPLICATIONNO", ""))
+        if appno:
+            indexed[appno] = rec
+    return indexed
+
+
+def load_existing_metadata_records(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            records = json.load(handle)
+        return records if isinstance(records, list) else []
+    except Exception:
+        return []
+
+
+def preserve_existing_ai_fields(new_records: list[dict], existing_records: list[dict]) -> int:
+    existing_by_appno = index_records_by_appno(existing_records)
+    copied = 0
+    for rec in new_records:
+        existing = existing_by_appno.get(clean_appno(rec.get("APPLICATIONNO", "")))
+        if not existing:
+            continue
+        copied += copy_ai_fields(
+            rec,
+            existing,
+            preserve_text=record_name_key(rec) == record_name_key(existing),
+            preserve_image=record_image_key(rec) == record_image_key(existing),
+        )
+    return copied
+
+
+def metadata_record_needs_ai_restore(record: dict, *, has_images: bool) -> bool:
+    has_name = bool((record.get("TRADEMARK") or {}).get("NAME"))
+    if has_name and any(ai_field_missing(record, field) for field in AI_TEXT_FIELDS[:3]):
+        return True
+    if has_images and record.get("IMAGE") and any(ai_field_missing(record, field) for field in AI_IMAGE_FIELDS):
+        return True
+    return False
+
+
+def db_image_matches_folder(image_path, folder_name: str, image_key: str) -> bool:
+    if not image_path or not image_key:
+        return False
+    normalized = str(image_path).replace("\\", "/")
+    path = Path(normalized)
+    stem_matches = path.stem.casefold() == image_key
+    if not stem_matches:
+        return False
+    parts = path.parts
+    folder_matches = (
+        len(parts) >= 3
+        and parts[-3].casefold() == folder_name.casefold()
+        and parts[-2].casefold() == "images"
+    )
+    # PostgreSQL keeps one current trademark row, so its image_path may point to
+    # a later source folder even when the image id/application stem is the same.
+    return folder_matches or stem_matches
+
+
+def db_row_to_ai_source(row: dict) -> dict:
+    return {
+        "text_embedding": row.get("text_embedding"),
+        "image_embedding": row.get("image_embedding"),
+        "dinov2_embedding": row.get("dinov2_embedding"),
+        "color_histogram": row.get("color_histogram"),
+        "logo_ocr_text": row.get("logo_ocr_text"),
+        "name_tr": row.get("name_tr"),
+        "detected_lang": row.get("detected_lang"),
+        "name_tr_backend": row.get("name_tr_backend"),
+        "name_tr_model": row.get("name_tr_model"),
+        "name_tr_updated_at": row.get("name_tr_updated_at"),
+    }
+
+
+def restore_ai_fields_from_database(
+    root_dir: Path = None,
+    *,
+    target_folder: str | None = None,
+    chunk_size: int = 2000,
+    verbose: bool = True,
+) -> dict:
+    """Fill missing metadata AI fields from PostgreSQL when inputs still match.
+
+    This is a recovery guard for metadata refreshes: Step 3 may rewrite records
+    from canonical archive data, while the database still has the expensive AI
+    fields generated by previous runs.
+    """
+    root_dir = root_dir or ROOT
+    stats = {
+        "folders_scanned": 0,
+        "folders_restored": 0,
+        "records_restored": 0,
+        "fields_restored": 0,
+        "skipped": 0,
+        "failed": 0,
+        "errors": [],
+    }
+
+    try:
+        import psycopg2
+        import psycopg2.extras
+
+        db_url = _app_settings.database.url
+    except Exception as exc:
+        stats["failed"] += 1
+        stats["errors"].append({"folder": None, "error": f"database restore unavailable: {exc}"})
+        if verbose:
+            logger.warning("[AI RESTORE] database restore unavailable: %s", exc)
+        return stats
+
+    if target_folder:
+        folders = [root_dir / target_folder]
+    else:
+        folders = sorted([p for p in root_dir.iterdir() if p.is_dir()], key=get_folder_number)
+
+    query = """
+        SELECT
+            application_no,
+            name,
+            image_path,
+            text_embedding::text AS text_embedding,
+            image_embedding::text AS image_embedding,
+            dinov2_embedding::text AS dinov2_embedding,
+            color_histogram::text AS color_histogram,
+            logo_ocr_text,
+            name_tr,
+            detected_lang,
+            name_tr_backend,
+            name_tr_model,
+            name_tr_updated_at::text AS name_tr_updated_at
+        FROM trademarks
+        WHERE application_no = ANY(%s)
+    """
+
+    conn = None
+    try:
+        conn = psycopg2.connect(db_url)
+        for folder in folders:
+            metadata_path = folder / OUTPUT_NAME
+            if not metadata_path.exists():
+                stats["skipped"] += 1
+                continue
+
+            stats["folders_scanned"] += 1
+            try:
+                with open(metadata_path, "r", encoding="utf-8") as handle:
+                    records = json.load(handle)
+                if not isinstance(records, list):
+                    raise ValueError("metadata root must be a JSON array")
+
+                has_images = (folder / "images").exists()
+                candidates = [
+                    rec for rec in records
+                    if clean_appno(rec.get("APPLICATIONNO", ""))
+                    and metadata_record_needs_ai_restore(rec, has_images=has_images)
+                ]
+                if not candidates:
+                    stats["skipped"] += 1
+                    continue
+
+                rows_by_appno = {}
+                appnos = [clean_appno(rec.get("APPLICATIONNO", "")) for rec in candidates]
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    for start in range(0, len(appnos), chunk_size):
+                        chunk = appnos[start:start + chunk_size]
+                        cur.execute(query, (chunk,))
+                        for row in cur.fetchall():
+                            rows_by_appno[clean_appno(row.get("application_no", ""))] = dict(row)
+
+                folder_fields = 0
+                folder_records = 0
+                for rec in candidates:
+                    row = rows_by_appno.get(clean_appno(rec.get("APPLICATIONNO", "")))
+                    if not row:
+                        continue
+
+                    text_matches = record_name_key(rec) == normalize_ai_input(row.get("name"))
+                    image_matches = db_image_matches_folder(
+                        row.get("image_path"),
+                        folder.name,
+                        record_image_key(rec),
+                    )
+                    copied = copy_ai_fields(
+                        rec,
+                        db_row_to_ai_source(row),
+                        preserve_text=text_matches,
+                        preserve_image=image_matches,
+                    )
+                    if copied:
+                        folder_records += 1
+                        folder_fields += copied
+
+                if folder_fields:
+                    with open(metadata_path, "w", encoding="utf-8") as handle:
+                        json.dump(records, handle, ensure_ascii=False, indent=2)
+                    stats["folders_restored"] += 1
+                    stats["records_restored"] += folder_records
+                    stats["fields_restored"] += folder_fields
+                    if verbose:
+                        logger.info(
+                            "[AI RESTORE] %s restored %d field(s) across %d record(s)",
+                            folder.name,
+                            folder_fields,
+                            folder_records,
+                        )
+                else:
+                    stats["skipped"] += 1
+
+            except Exception as exc:
+                stats["failed"] += 1
+                stats["errors"].append({"folder": folder.name, "error": str(exc)})
+                if verbose:
+                    logger.error("[AI RESTORE] %s failed: %s", folder.name, exc)
+
+    finally:
+        if conn is not None:
+            conn.close()
+
+    return stats
 
 
 def is_meaningful_scraped_value(value) -> bool:
@@ -522,11 +859,16 @@ def process_single_folder(folder_path: Path, skip_existing: bool = True) -> dict
     folder_date_str = extract_folder_date_str(folder_path.name)
 
     try:
+        existing_records = load_existing_metadata_records(out_path)
         data = parse_tmbulletin_files(db_files, status, folder_num_str, folder_date_str)
 
         if not data:
             result["status"] = "no_data"
             return result
+
+        preserved = preserve_existing_ai_fields(data, existing_records)
+        if preserved:
+            logger.info("[AI PRESERVE] %s preserved %d field(s)", folder_path.name, preserved)
 
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -548,6 +890,8 @@ def merge_scraped_record_into_canonical(canonical: dict, scraped: dict) -> bool:
         scraped_value = scraped.get(field)
         if is_meaningful_scraped_value(scraped_value) and canonical.get(field) != scraped_value:
             canonical[field] = scraped_value
+            if field == "IMAGE":
+                clear_ai_fields(canonical, AI_IMAGE_FIELDS)
             changed = True
 
     canonical_tm = canonical.setdefault("TRADEMARK", {})
@@ -563,6 +907,8 @@ def merge_scraped_record_into_canonical(canonical: dict, scraped: dict) -> bool:
             should_apply = is_meaningful_scraped_value(scraped_value) and canonical_tm.get(field) != scraped_value
         if should_apply:
             canonical_tm[field] = scraped_value
+            if field == "NAME":
+                clear_ai_fields(canonical, AI_TEXT_FIELDS)
             changed = True
 
     canonical_holders = canonical.get("HOLDERS") or []

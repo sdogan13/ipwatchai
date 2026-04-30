@@ -13,13 +13,14 @@ import cv2
 from pathlib import Path
 from PIL import Image
 from torchvision import transforms
-# CrossEncoder removed â€” was unused, wasted ~120MB VRAM
+# CrossEncoder removed - was unused, wasted ~120MB VRAM
 from dotenv import load_dotenv
 
 # Import Pipeline Components
 import scrapper
 from pipeline import ingest
 from pipeline import ai  # Optimization: Reuse models loaded here
+from pipeline.ingest_rules import _repair_mojibake
 from services.scoring_service import (
     RISK_THRESHOLDS,
     _calculate_visual_breakdown,
@@ -46,7 +47,7 @@ from utils.idf_scoring import (
     is_generic_word
 )
 # Translation similarity for cross-language conflict detection
-# Translation similarity no longer used directly â€” handled by dual-path scoring in score_pair()
+# Translation similarity no longer used directly - handled by dual-path scoring in score_pair()
 # Graduated phonetic scoring (replaces binary dMetaphone match)
 from utils.phonetic import calculate_phonetic_similarity
 from utils.class_utils import (
@@ -133,7 +134,7 @@ DATA_ROOT = _resolve_local_risk_root(
     _LOCAL_DEFAULT_BULLETINS_ROOT,
 )
 
-# ===================== RISK THRESHOLDS â€” Single source of truth =====================
+# ===================== RISK THRESHOLDS - Single source of truth =====================
 # Used by: risk_engine, watchlist/scanner, workers/universal_scanner, database/crud, agentic_search, frontend
 def get_status_category(status):
     """
@@ -142,46 +143,47 @@ def get_status_category(status):
     categories = {
         # HIGH RISK - Blocks your application
         'Tescil Edildi': {'level': 'RISK', 'multiplier': 1.0,
-                       'message': 'â›” Active trademark - blocks registration'},
-        'YayÄ±nda': {'level': 'RISK', 'multiplier': 1.0,
-                      'message': 'â›” Pending registration - likely to block'},
+                       'message': 'Active trademark - blocks registration'},
+        'Yayında': {'level': 'RISK', 'multiplier': 1.0,
+                      'message': 'Pending registration - likely to block'},
         'Yenilendi': {'level': 'RISK', 'multiplier': 1.0,
-                    'message': 'â›” Recently renewed - actively protected'},
-        'Ä°tiraz Edildi': {'level': 'RISK', 'multiplier': 0.9,
-                    'message': 'â›” Under opposition but still active'},
-        'BaÅŸvuruldu': {'level': 'RISK', 'multiplier': 0.85,
-                    'message': 'â›” Pending application - may be registered soon'},
+                    'message': 'Recently renewed - actively protected'},
+        'İtiraz Edildi': {'level': 'RISK', 'multiplier': 0.9,
+                    'message': 'Under opposition but still active'},
+        'Başvuruldu': {'level': 'RISK', 'multiplier': 0.85,
+                    'message': 'Pending application - may be registered soon'},
 
         # WARNING - Indicates protection exists / legal risk
         'Reddedildi': {'level': 'WARNING', 'multiplier': 0.8,
-                    'message': 'âš ï¸ Previous application REJECTED - office protects this name'},
-        'Ä°ptal Edildi': {'level': 'WARNING', 'multiplier': 0.75,
-                      'message': 'âš ï¸ CANCELLED by court/appeal - name is legally defended!'},
-        'KÄ±smi Red': {'level': 'WARNING', 'multiplier': 0.6,
-                            'message': 'âš ï¸ Partially rejected - some classes blocked'},
+                    'message': 'Previous application rejected - office protects this name'},
+        'İptal Edildi': {'level': 'WARNING', 'multiplier': 0.75,
+                      'message': 'Cancelled by court/appeal - name is legally defended'},
+        'Kısmi Red': {'level': 'WARNING', 'multiplier': 0.6,
+                            'message': 'Partially rejected - some classes blocked'},
 
         # OPPORTUNITY - Name may be available
-        'SÃ¼resi Doldu': {'level': 'OPPORTUNITY', 'multiplier': 0.3,
-                    'message': 'ðŸ’¡ EXPIRED - Name available! (Owner has 6-month grace period to renew)'},
-        'Geri Ã‡ekildi': {'level': 'OPPORTUNITY', 'multiplier': 0.3,
-                      'message': 'ðŸ’¡ WITHDRAWN - Owner abandoned, name available'},
+        'Süresi Doldu': {'level': 'OPPORTUNITY', 'multiplier': 0.3,
+                    'message': 'Expired - name may be available (owner has 6-month grace period to renew)'},
+        'Geri Çekildi': {'level': 'OPPORTUNITY', 'multiplier': 0.3,
+                      'message': 'Withdrawn - owner abandoned, name may be available'},
 
         'Bilinmiyor': {'level': 'UNKNOWN', 'multiplier': 0.5,
                     'message': 'Status unknown - verify manually'}
     }
     status_aliases = {
         'Registered': 'Tescil Edildi',
-        'Published': 'YayÄ±nda',
+        'Published': 'Yayında',
         'Renewed': 'Yenilendi',
-        'Opposed': 'Ä°tiraz Edildi',
-        'Applied': 'BaÅŸvuruldu',
+        'Opposed': 'İtiraz Edildi',
+        'Applied': 'Başvuruldu',
         'Refused': 'Reddedildi',
-        'Cancelled': 'Ä°ptal Edildi',
-        'Partial Refusal': 'KÄ±smi Red',
-        'Expired': 'SÃ¼resi Doldu',
-        'Withdrawn': 'Geri Ã‡ekildi',
+        'Cancelled': 'İptal Edildi',
+        'Partial Refusal': 'Kısmi Red',
+        'Expired': 'Süresi Doldu',
+        'Withdrawn': 'Geri Çekildi',
         'Unknown': 'Bilinmiyor',
     }
+    status = _repair_mojibake(status)
     canonical_status = status_aliases.get(status, status)
     return categories.get(canonical_status, categories['Bilinmiyor'])
 
@@ -203,10 +205,15 @@ class RiskEngine:
         self.dino_model = ai.dinov2_model
         self.dino_preprocess = ai.dinov2_preprocess
 
-        # Pre-warm NLLB translation model so first search isn't slow
+        # Pre-warm the configured live translation backend so first search isn't slow
         try:
-            from utils.translation import initialize as init_nllb
-            init_nllb(str(self.device))
+            from utils.translation import (
+                get_default_translation_backend,
+                initialize as init_translation,
+            )
+
+            live_backend = get_default_translation_backend("live")
+            init_translation(str(self.device), backend=live_backend)
         except Exception:
             pass
 
@@ -654,6 +661,54 @@ class RiskEngine:
             key=lambda token: anchor_candidates[token],
             reverse=True,
         )[:8]
+        short_anchor_tokens = [
+            token for token in anchor_tokens if 2 <= len(token) <= 3
+        ]
+        broad_anchor_tokens = [
+            token for token in anchor_tokens if len(token) > 3
+        ]
+
+        def short_token_boundary_clause(norm_expr, tokens, joiner):
+            clauses = []
+            params = []
+            padded_expr = f"(' ' || {norm_expr} || ' ')"
+            for token in tokens:
+                token_pattern = f"% {_sql_like_escape(token)} %"
+                clauses.append(f"{padded_expr} LIKE %s ESCAPE '\\'")
+                params.append(token_pattern)
+            return f" {joiner} ".join(clauses), params
+
+        def run_short_token_stage(stage, tokens, joiner, score, stage_limit):
+            if not tokens:
+                return
+            name_clause, name_params = short_token_boundary_clause(
+                name_norm_expr,
+                tokens,
+                joiner,
+            )
+            name_tr_clause, name_tr_params = short_token_boundary_clause(
+                name_tr_norm_expr,
+                tokens,
+                joiner,
+            )
+            token_sql = f"""
+                SELECT id, application_no, name, nice_class_numbers, image_path,
+                       {score} as lexical_score,
+                       ({name_clause}) as retrieval_name_match,
+                       ({name_tr_clause}) as retrieval_name_tr_match
+                FROM trademarks
+                WHERE (({name_clause}) OR ({name_tr_clause}))
+            """
+            token_params = name_params + name_tr_params + name_params + name_tr_params
+            token_sql, token_params = apply_common_filters(token_sql, token_params)
+            token_sql += f" ORDER BY length(name) ASC LIMIT {stage_limit};"
+            run_stage(
+                token_sql,
+                token_params,
+                stage,
+                "short_tokens:" + ",".join(tokens),
+                fields_getter=self._row_text_fields,
+            )
 
         def token_clause(norm_expr, compact_expr, tokens, joiner):
             clauses = []
@@ -691,10 +746,26 @@ class RiskEngine:
                 fields_getter=self._row_text_fields,
             )
 
-        if len(anchor_tokens) > 1:
-            run_token_stage("all-token", anchor_tokens, "AND", "0.85", 100)
-        if anchor_tokens:
-            run_token_stage("any-token", anchor_tokens, "OR", "0.80", 80)
+        if len(short_anchor_tokens) > 1:
+            run_short_token_stage(
+                "short-all-token",
+                short_anchor_tokens,
+                "AND",
+                "0.82",
+                80,
+            )
+        if short_anchor_tokens:
+            run_short_token_stage(
+                "short-token",
+                short_anchor_tokens,
+                "OR",
+                "0.78",
+                120,
+            )
+        if len(broad_anchor_tokens) > 1:
+            run_token_stage("all-token", broad_anchor_tokens, "AND", "0.85", 100)
+        if broad_anchor_tokens:
+            run_token_stage("any-token", broad_anchor_tokens, "OR", "0.80", 80)
 
         remaining_limit = max(limit - len(all_candidates), 0)
         if remaining_limit > 0:
@@ -1162,7 +1233,7 @@ class RiskEngine:
 
     def run_live_investigation(self, name, target_classes=None, progress_callback=None, attorney_no=None):
         """
-        Run live investigation: Scrape â†’ AI Enrich â†’ Ingest â†’ Recalculate.
+        Run live investigation: Scrape -> AI Enrich -> Ingest -> Recalculate.
         progress_callback(percent, message) is called to report progress.
         Returns updated result dict.
         """
@@ -1257,7 +1328,7 @@ class RiskEngine:
         result, needs_live = self.assess_brand_risk(name, image_path, target_classes, description)
 
         if needs_live:
-            logging.info("   âš ï¸ Risk < 75%. Triggering Live Investigation...")
+            logging.info("Risk < 75%. Triggering Live Investigation...")
             result = self.run_live_investigation(name, target_classes)
 
         return result
@@ -1265,6 +1336,6 @@ class RiskEngine:
 if __name__ == "__main__":
     engine = RiskEngine()
     report = engine.assess_brand_risk_full("Nike", target_classes=[25])
-    print(f"\nðŸ† Risk: {report['final_risk_score'] * 100:.2f}%")
+    print(f"\nRisk: {report['final_risk_score'] * 100:.2f}%")
     for m in report['top_candidates']:
         print(f" - {m['name']} ({m['status']}): {m['scores']['total']*100:.1f}%")

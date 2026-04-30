@@ -37,7 +37,7 @@ async def get_attorney_trademarks_data(
                 status_code=403,
                 detail={
                     "error": "pro_feature",
-                    "message": "Vekil portfÃ¶yÃ¼ gÃ¶rÃ¼ntÃ¼leme PRO Ã¶zelliÄŸidir",
+                    "message": "Vekil portföyü görüntüleme PRO özelliğidir",
                     "upgrade_url": "/pricing",
                 },
             )

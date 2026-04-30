@@ -223,7 +223,7 @@ async def refresh_token_data(
     if payload.type != "refresh":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token type â€” expected refresh token",
+            detail="Invalid token type - expected refresh token",
         )
 
     with db_factory() as db:
@@ -327,7 +327,7 @@ async def forgot_password_data(
                 lang=getattr(data, "lang", "tr"),
             )
         else:
-            logger.warning("SMTP not configured â€” password reset code not emailed")
+            logger.warning("SMTP not configured - password reset code not emailed")
     except Exception as exc:
         logger.error("Failed to send password reset email: %s", exc)
 

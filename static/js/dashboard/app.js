@@ -39,6 +39,14 @@ var studioInitialized = false;
 var studioActiveMode = 'name';
 var studioNameLoading = false;
 var studioLogoLoading = false;
+var studioStatus = null;
+var studioCredits = null;
+var studioHistoryFilter = 'all';
+var studioLastNameResult = null;
+var studioLastLogoResult = null;
+var studioActiveLogoProjectId = null;
+var studioSelectedLogoImageId = null;
+var studioLogoPollTimer = null;
 var LEADS_PER_PAGE = 20;
 var currentHolderTpeId = null;
 var _storedSearchResults = [];
@@ -148,6 +156,7 @@ function dashboard() {
                     self.allClasses = [];
                     self.loadAllClasses();
                 }
+                refreshStudioDynamicTranslations();
                 // Re-render watchlist grid (innerHTML-based, not Alpine-reactive)
                 if (_watchlistItemsCache && _watchlistItemsCache.length > 0) {
                     renderPortfolioGrid(_watchlistItemsCache);
@@ -163,6 +172,9 @@ function dashboard() {
                 // Re-render right-panel alerts list (innerHTML-based)
                 if (_watchlistAlertsCache && _watchlistAlertsCache.length > 0) {
                     renderWatchlistAlerts(_watchlistAlertsCache);
+                }
+                if (typeof _updateScanBanner === 'function') {
+                    _updateScanBanner();
                 }
             });
 
@@ -791,6 +803,9 @@ function dashboard() {
                 });
 
                 showToast(this.t('watchlist.added_toast'), 'success');
+                if (typeof _setScanInProgress === 'function' && typeof _getScanDurationMs === 'function') {
+                    _setScanInProgress(_getScanDurationMs(1), 'item');
+                }
                 if (typeof refreshWatchlistAndStats === 'function') refreshWatchlistAndStats();
             } catch (e) {
                 if (e.status === 409) {
@@ -1582,10 +1597,14 @@ function dashboard() {
 
         // ==================== LOGOUT ====================
         doLogout() {
-            localStorage.removeItem('auth_token');
-            sessionStorage.removeItem('auth_token');
-            localStorage.removeItem('refresh_token');
-            sessionStorage.removeItem('refresh_token');
+            if (window.AppAuth && window.AppAuth.logout) {
+                window.AppAuth.logout({ redirectTo: '/' });
+                return;
+            }
+            ['auth_token', 'access_token', 'token', 'refresh_token'].forEach(function (key) {
+                localStorage.removeItem(key);
+                sessionStorage.removeItem(key);
+            });
             window.location.href = '/';
         }
     };
@@ -2118,6 +2137,8 @@ function showDashboardTab(tabId) {
     }
     if (tabId === 'ai-studio') {
         initAIStudio();
+    } else {
+        stopLogoProjectPolling();
     }
     if (tabId === 'watchlist') {
         initWatchlistTab();
@@ -3122,52 +3143,26 @@ function buildSearchResultBannerHtml(results, queryName, queryClasses) {
 function initAIStudio() {
     if (studioInitialized) return;
     studioInitialized = true;
-    // Populate nice class selects for studio
     populateStudioNiceClasses('studio-name-classes');
     populateStudioNiceClasses('studio-logo-classes');
+    updateStudioClassSummary('studio-name-classes');
+    updateStudioClassSummary('studio-logo-classes');
+    initStudioColorSwatches();
     updateStudioCredits();
-    // Check service availability and disable features if unavailable
+    updateStudioModeMeta();
     checkCreativeSuiteStatus();
+    loadStudioUsageSummary();
+    loadStudioHistory();
 }
 
 function checkCreativeSuiteStatus() {
-    fetch('/api/v1/tools/status')
+    return fetch('/api/v1/tools/status')
         .then(function (res) { return res.json(); })
         .then(function (data) {
-            var nameBtn = document.getElementById('studio-name-btn');
-            var logoBtn = document.getElementById('studio-logo-btn');
-
-            if (data.name_generator && !data.name_generator.available) {
-                if (nameBtn) {
-                    nameBtn.disabled = true;
-                    nameBtn.classList.add('opacity-50', 'cursor-not-allowed');
-                    nameBtn.title = data.name_generator.reason || t('studio.service_unavailable');
-                }
-                var namePanel = document.getElementById('studio-name-panel');
-                if (namePanel && !document.getElementById('name-unavailable-banner')) {
-                    var banner = document.createElement('div');
-                    banner.id = 'name-unavailable-banner';
-                    banner.className = 'bg-amber-50 border border-amber-200 rounded-lg p-3 mb-3 text-sm text-amber-700';
-                    banner.innerHTML = '<strong>' + t('studio.service_unavailable_now') + '</strong> ' + (data.name_generator.reason || '');
-                    namePanel.insertBefore(banner, namePanel.firstChild);
-                }
-            }
-
-            if (data.logo_studio && !data.logo_studio.available) {
-                if (logoBtn) {
-                    logoBtn.disabled = true;
-                    logoBtn.classList.add('opacity-50', 'cursor-not-allowed');
-                    logoBtn.title = data.logo_studio.reason || t('studio.service_unavailable');
-                }
-                var logoPanel = document.getElementById('studio-logo-panel');
-                if (logoPanel && !document.getElementById('logo-unavailable-banner')) {
-                    var banner = document.createElement('div');
-                    banner.id = 'logo-unavailable-banner';
-                    banner.className = 'bg-amber-50 border border-amber-200 rounded-lg p-3 mb-3 text-sm text-amber-700';
-                    banner.innerHTML = '<strong>' + t('studio.logo_studio_unavailable') + '</strong> ' + (data.logo_studio.reason || '');
-                    logoPanel.insertBefore(banner, logoPanel.firstChild);
-                }
-            }
+            studioStatus = data || {};
+            applyStudioAvailability('name', studioStatus.name_generator);
+            applyStudioAvailability('logo', studioStatus.logo_studio);
+            updateStudioModeMeta();
         })
         .catch(function () {
             // Status endpoint unreachable — don't block usage, just log
@@ -3175,28 +3170,266 @@ function checkCreativeSuiteStatus() {
         });
 }
 
+function applyStudioAvailability(mode, toolStatus) {
+    var btn = document.getElementById(mode === 'name' ? 'studio-name-btn' : 'studio-logo-btn');
+    var panel = document.getElementById(mode === 'name' ? 'studio-name-panel' : 'studio-logo-panel');
+    var bannerId = mode === 'name' ? 'name-unavailable-banner' : 'logo-unavailable-banner';
+    var existing = document.getElementById(bannerId);
+    var available = !toolStatus || toolStatus.available !== false;
+    var translatedReason = translateStudioStatusReason(toolStatus && toolStatus.reason);
+
+    if (btn) {
+        btn.disabled = !available;
+        btn.classList.toggle('opacity-50', !available);
+        btn.classList.toggle('cursor-not-allowed', !available);
+        btn.title = available ? '' : (translatedReason || t('studio.service_unavailable'));
+    }
+
+    if (available) {
+        if (existing) existing.remove();
+        updateStudioModeMeta();
+        return;
+    }
+
+    if (panel && !existing) {
+        var banner = document.createElement('div');
+        banner.id = bannerId;
+        banner.className = 'studio-unavailable-banner';
+        var label = mode === 'name' ? t('studio.service_unavailable_now') : t('studio.logo_studio_unavailable');
+        banner.innerHTML = '<svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M12 18a9 9 0 110-18 9 9 0 010 18z"/></svg>'
+            + '<div><strong>' + escapeHtml(label) + '</strong> ' + escapeHtml(translatedReason || '') + '</div>';
+        panel.insertBefore(banner, panel.firstChild);
+    }
+    updateStudioModeMeta();
+}
+
+function translateStudioStatusReason(reason) {
+    if (!reason) return '';
+    var normalized = String(reason).toLowerCase();
+    if (normalized.indexOf('gemini') !== -1 && (normalized.indexOf('anahtar') !== -1 || normalized.indexOf('api key') !== -1 || normalized.indexOf('key') !== -1)) {
+        return t('studio.reason_gemini_not_configured');
+    }
+    if (normalized.indexOf('clip') !== -1 && normalized.indexOf('fonksiyonu') !== -1) {
+        return t('studio.reason_clip_function_missing');
+    }
+    if (normalized.indexOf('clip') !== -1 && (normalized.indexOf('model') !== -1 || normalized.indexOf('modeli') !== -1)) {
+        return t('studio.reason_clip_not_loaded');
+    }
+    return reason;
+}
+
+function refreshStudioAvailabilityText() {
+    ['name-unavailable-banner', 'logo-unavailable-banner'].forEach(function (id) {
+        var existing = document.getElementById(id);
+        if (existing) existing.remove();
+    });
+    if (studioStatus) {
+        applyStudioAvailability('name', studioStatus.name_generator);
+        applyStudioAvailability('logo', studioStatus.logo_studio);
+    } else {
+        updateStudioModeMeta();
+    }
+}
+
 function populateStudioNiceClasses(selectId) {
     var select = document.getElementById(selectId);
-    if (!select || select.options.length > 5) return;
+    if (!select || select.dataset.populated === '1') return;
+    if (select.tagName === 'SELECT' && select.options.length > 5) return;
     for (var i = 1; i <= 45; i++) {
-        var opt = document.createElement('option');
-        opt.value = i;
-        opt.textContent = i + ' - ' + t('nice_classes.' + i);
-        select.appendChild(opt);
+        if (select.tagName === 'SELECT') {
+            var opt = document.createElement('option');
+            opt.value = i;
+            opt.textContent = i + ' - ' + t('nice_classes.' + i);
+            select.appendChild(opt);
+        } else {
+            var chip = document.createElement('button');
+            chip.type = 'button';
+            chip.dataset.value = String(i);
+            chip.className = 'studio-class-chip';
+            chip.title = t('nice_classes.' + i);
+            chip.setAttribute('aria-pressed', 'false');
+            chip.textContent = i + ' - ' + t('nice_classes.' + i);
+            chip.onclick = function () {
+                var selected = this.getAttribute('aria-pressed') === 'true';
+                setStudioClassChipSelected(this, !selected);
+                updateStudioClassSummary(selectId);
+            };
+            select.appendChild(chip);
+        }
     }
+    select.dataset.populated = '1';
+    updateStudioClassSummary(selectId);
+}
+
+function setStudioClassChipSelected(chip, selected) {
+    chip.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    chip.classList.toggle('is-selected', selected);
 }
 
 function getStudioNiceClasses(selectId) {
     var select = document.getElementById(selectId);
     if (!select) return [];
-    return Array.from(select.selectedOptions).map(function (o) { return parseInt(o.value); }).filter(function (v) { return !isNaN(v); });
+    if (select.tagName === 'SELECT') {
+        return Array.from(select.selectedOptions).map(function (o) { return parseInt(o.value); }).filter(function (v) { return !isNaN(v); });
+    }
+    return Array.from(select.querySelectorAll('.studio-class-chip.is-selected'))
+        .map(function (chip) { return parseInt(chip.dataset.value); })
+        .filter(function (v) { return !isNaN(v); });
+}
+
+function refreshStudioClassPickers() {
+    ['studio-name-classes', 'studio-logo-classes'].forEach(function (selectId) {
+        var select = document.getElementById(selectId);
+        if (!select || select.tagName === 'SELECT') return;
+        var selected = getStudioNiceClasses(selectId);
+        select.innerHTML = '';
+        select.dataset.populated = '0';
+        populateStudioNiceClasses(selectId);
+        setStudioSelectValues(selectId, selected);
+        updateStudioClassSummary(selectId);
+    });
+}
+
+function refreshStudioClassToggleLabels() {
+    ['studio-name-classes', 'studio-logo-classes'].forEach(function (selectId) {
+        var picker = document.getElementById(selectId);
+        var toggle = document.getElementById(selectId + '-toggle');
+        if (!picker || !toggle) return;
+        var expanded = !picker.classList.contains('hidden');
+        toggle.textContent = expanded ? t('studio.done_classes') : t('studio.edit_classes');
+    });
+}
+
+function updateStudioClassSummary(selectId) {
+    var summary = document.getElementById(selectId + '-summary');
+    if (!summary) return;
+    var values = getStudioNiceClasses(selectId);
+    if (!values.length) {
+        summary.textContent = t('studio.no_classes_selected');
+        return;
+    }
+    var preview = values.slice(0, 4).join(', ');
+    if (values.length > 4) preview += ' +' + (values.length - 4);
+    summary.textContent = t('studio.classes_selected', { count: values.length }) + ' (' + preview + ')';
+}
+
+function toggleStudioClassPicker(selectId) {
+    var picker = document.getElementById(selectId);
+    var toggle = document.getElementById(selectId + '-toggle');
+    if (!picker || !toggle) return;
+    var expanded = picker.classList.toggle('hidden') === false;
+    toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    toggle.textContent = expanded ? t('studio.done_classes') : t('studio.edit_classes');
+}
+
+function initStudioColorSwatches() {
+    var input = document.getElementById('studio-logo-colors');
+    var selected = document.querySelector('.studio-color-swatch.is-selected');
+    if (input && input.value && !selected) {
+        Array.from(document.querySelectorAll('.studio-color-swatch')).some(function (btn) {
+            if (getStudioColorSwatchValue(btn) === input.value || btn.dataset.value === input.value) {
+                btn.classList.add('is-selected');
+                return true;
+            }
+            return false;
+        });
+    }
+}
+
+function getStudioColorSwatchValue(button) {
+    if (!button) return '';
+    var key = button.dataset.i18nValue;
+    return key ? t(key) : (button.dataset.value || '');
+}
+
+function selectStudioColorPalette(button) {
+    if (!button) return;
+    document.querySelectorAll('.studio-color-swatch').forEach(function (swatch) {
+        swatch.classList.remove('is-selected');
+    });
+    button.classList.add('is-selected');
+    var input = document.getElementById('studio-logo-colors');
+    if (input) input.value = getStudioColorSwatchValue(button);
+}
+
+function clearStudioColorPalette() {
+    document.querySelectorAll('.studio-color-swatch.is-selected').forEach(function (swatch) {
+        swatch.classList.remove('is-selected');
+    });
+}
+
+function refreshStudioColorSwatches() {
+    var selected = document.querySelector('.studio-color-swatch.is-selected');
+    var input = document.getElementById('studio-logo-colors');
+    if (selected && input) {
+        input.value = getStudioColorSwatchValue(selected);
+    }
+}
+
+function updateStudioModeMeta() {
+    var statusEl = document.getElementById('studio-active-status');
+    var costEl = document.getElementById('studio-run-cost');
+    var toolStatus = studioActiveMode === 'logo'
+        ? (studioStatus && studioStatus.logo_studio)
+        : (studioStatus && studioStatus.name_generator);
+    var checking = studioStatus === null;
+    var available = checking || !toolStatus || toolStatus.available !== false;
+    if (statusEl) {
+        statusEl.classList.toggle('is-available', !checking && available);
+        statusEl.classList.toggle('is-unavailable', !checking && !available);
+        statusEl.textContent = checking ? t('studio.status_checking') : (available ? t('studio.status_available') : t('studio.status_unavailable'));
+        statusEl.title = available ? '' : (translateStudioStatusReason(toolStatus && toolStatus.reason) || t('studio.service_unavailable'));
+    }
+    if (costEl) {
+        costEl.textContent = t('studio.run_cost', { cost: studioActiveMode === 'logo' ? 5 : 1 });
+    }
 }
 
 function updateStudioCredits() {
-    // Simple display update from latest generation response
     var el = document.getElementById('studio-credits-display');
     if (!el) return;
-    el.textContent = '-';
+    if (!studioCredits) {
+        el.textContent = '-';
+        return;
+    }
+    el.textContent = t('studio.credits_remaining_short', {
+        remaining: studioCredits.total_remaining || 0,
+        limit: studioCredits.monthly_limit || 0
+    });
+}
+
+function normalizeStudioCredits(raw, cost) {
+    raw = raw || {};
+    return {
+        monthly_remaining: raw.monthly_remaining != null ? raw.monthly_remaining : (raw.monthly || 0),
+        purchased_remaining: raw.purchased_remaining != null ? raw.purchased_remaining : (raw.purchased || 0),
+        total_remaining: raw.total_remaining != null ? raw.total_remaining : ((raw.monthly || 0) + (raw.purchased || 0)),
+        monthly_limit: raw.monthly_limit != null ? raw.monthly_limit : (raw.limit || 0),
+        cost: raw.cost || cost || 1
+    };
+}
+
+async function loadStudioUsageSummary() {
+    try {
+        var res = await fetch('/api/v1/usage/summary', {
+            headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+        });
+        if (!res.ok) return;
+        var data = await res.json();
+        var usage = data.usage || {};
+        var credits = usage.monthly_ai_credits || {};
+        studioCredits = normalizeStudioCredits({
+            total_remaining: credits.remaining || 0,
+            monthly_remaining: credits.remaining || 0,
+            purchased_remaining: 0,
+            monthly_limit: credits.limit || 0,
+            cost: studioActiveMode === 'logo' ? 5 : 1
+        }, studioActiveMode === 'logo' ? 5 : 1);
+        updateStudioCredits();
+        updateLogoCreditsDisplay();
+    } catch (e) {
+        console.warn('AI Studio usage summary failed');
+    }
 }
 
 function switchStudioMode(mode) {
@@ -3206,20 +3439,22 @@ function switchStudioMode(mode) {
     document.getElementById('studio-logo-panel').classList.toggle('hidden', mode !== 'logo');
 
     document.querySelectorAll('.studio-mode-btn').forEach(function (btn) {
-        btn.classList.remove('bg-white', 'text-gray-900', 'shadow-sm');
-        btn.classList.add('text-gray-500', 'hover:text-gray-700');
+        btn.classList.remove('is-active');
+        btn.setAttribute('aria-selected', 'false');
     });
 
     var activeBtn = document.getElementById('studio-mode-' + mode);
     if (activeBtn) {
-        activeBtn.classList.add('bg-white', 'text-gray-900', 'shadow-sm');
-        activeBtn.classList.remove('text-gray-500', 'hover:text-gray-700');
+        activeBtn.classList.add('is-active');
+        activeBtn.setAttribute('aria-selected', 'true');
     }
 
     // Update credits display for the active mode
     if (mode === 'logo') {
         updateLogoCreditsDisplay();
     }
+    updateStudioCredits();
+    updateStudioModeMeta();
 }
 
 // ============================================
@@ -3228,6 +3463,10 @@ function switchStudioMode(mode) {
 async function generateNames() {
     var query = (document.getElementById('studio-name-query').value || '').trim();
     if (!query) { showToast(t('search.enter_brand_name'), 'error'); return; }
+    if (studioStatus && studioStatus.name_generator && studioStatus.name_generator.available === false) {
+        showToast(translateStudioStatusReason(studioStatus.name_generator.reason) || t('studio.service_unavailable'), 'error');
+        return;
+    }
 
     if (studioNameLoading) return;
     studioNameLoading = true;
@@ -3238,6 +3477,8 @@ async function generateNames() {
 
     // Show loading, hide others
     document.getElementById('studio-name-loading').classList.remove('hidden');
+    var nameIdleEl = document.getElementById('studio-name-idle');
+    if (nameIdleEl) nameIdleEl.classList.add('hidden');
     document.getElementById('studio-name-results').classList.add('hidden');
     document.getElementById('studio-name-empty').classList.add('hidden');
     document.getElementById('studio-name-error').classList.add('hidden');
@@ -3255,34 +3496,17 @@ async function generateNames() {
             language: 'tr',
             avoid_names: []
         });
+        studioLastNameResult = data;
 
         document.getElementById('studio-name-loading').classList.add('hidden');
 
-        var safeNames = data.safe_names || [];
-        if (safeNames.length === 0) {
-            document.getElementById('studio-name-empty').classList.remove('hidden');
-        } else {
-            document.getElementById('studio-name-results').classList.remove('hidden');
-            document.getElementById('studio-name-meta').textContent =
-                t('studio.safe_count_meta', { safe: safeNames.length, total: data.total_generated, filtered: data.filtered_count })
-                + (data.cached ? ' ' + t('studio.from_cache') : '');
+        renderStudioNameResults(data);
 
-            var cardsHtml = '';
-            safeNames.forEach(function (name, i) {
-                cardsHtml += renderNameCard(name, i);
-            });
-            document.getElementById('studio-name-cards').innerHTML = cardsHtml;
-        }
-
-        // Update credits display
         if (data.credits_remaining) {
-            var credEl = document.getElementById('studio-credits-display');
-            if (credEl) {
-                var cr = data.credits_remaining;
-                var remaining = cr.session_limit === -1 ? t('studio.unlimited_label') : (cr.session_limit - cr.used);
-                credEl.textContent = remaining + (cr.purchased > 0 ? ' + ' + cr.purchased : '');
-            }
+            studioCredits = normalizeStudioCredits(data.credits_remaining, 1);
+            updateStudioCredits();
         }
+        loadStudioHistory();
 
     } catch (e) {
         document.getElementById('studio-name-loading').classList.add('hidden');
@@ -3293,12 +3517,41 @@ async function generateNames() {
     } finally {
         studioNameLoading = false;
         if (btn) { btn.disabled = false; btn.classList.remove('opacity-50'); }
+        if (studioStatus && studioStatus.name_generator) {
+            applyStudioAvailability('name', studioStatus.name_generator);
+        }
     }
 }
 
 // ============================================
 // NAME LAB: USE FOR LOGO
 // ============================================
+function renderStudioNameResults(data) {
+    data = data || {};
+    var safeNames = data.safe_names || [];
+    if (safeNames.length === 0) {
+        document.getElementById('studio-name-empty').classList.remove('hidden');
+        return;
+    }
+
+    document.getElementById('studio-name-results').classList.remove('hidden');
+    document.getElementById('studio-name-meta').textContent =
+        t('studio.safe_count_meta', { safe: safeNames.length, total: data.total_generated, filtered: data.filtered_count })
+        + (data.cached ? ' ' + t('studio.from_cache') : '');
+
+    var cardsHtml = '';
+    safeNames.forEach(function (name, i) {
+        cardsHtml += renderNameCard(name, i);
+    });
+    document.getElementById('studio-name-cards').innerHTML = cardsHtml;
+}
+
+function refreshStudioNameResultsText() {
+    var resultsEl = document.getElementById('studio-name-results');
+    if (!studioLastNameResult || !resultsEl || resultsEl.classList.contains('hidden')) return;
+    renderStudioNameResults(studioLastNameResult);
+}
+
 function useNameForLogo(name) {
     switchStudioMode('logo');
     document.getElementById('studio-logo-name').value = name;
@@ -3312,9 +3565,14 @@ function useNameForLogo(name) {
 async function generateLogos() {
     var brandName = (document.getElementById('studio-logo-name').value || '').trim();
     if (!brandName) { showToast(t('search.enter_brand_name'), 'error'); return; }
+    if (studioStatus && studioStatus.logo_studio && studioStatus.logo_studio.available === false) {
+        showToast(translateStudioStatusReason(studioStatus.logo_studio.reason) || t('studio.service_unavailable'), 'error');
+        return;
+    }
 
     if (studioLogoLoading) return;
     studioLogoLoading = true;
+    stopLogoProjectPolling();
 
     var description = (document.getElementById('studio-logo-desc').value || '').trim();
     var style = document.getElementById('studio-logo-style').value || 'modern';
@@ -3323,6 +3581,8 @@ async function generateLogos() {
 
     // Show loading, hide others
     document.getElementById('studio-logo-loading').classList.remove('hidden');
+    var logoIdleEl = document.getElementById('studio-logo-idle');
+    if (logoIdleEl) logoIdleEl.classList.add('hidden');
     document.getElementById('studio-logo-results').classList.add('hidden');
     document.getElementById('studio-logo-error').classList.add('hidden');
     var logoEmptyEl = document.getElementById('studio-logo-empty');
@@ -3339,33 +3599,21 @@ async function generateLogos() {
             color_preferences: colors,
             nice_classes: classes
         });
+        studioActiveLogoProjectId = data.project_id || null;
+        studioSelectedLogoImageId = null;
+        studioLastLogoResult = data;
 
         document.getElementById('studio-logo-loading').classList.add('hidden');
 
-        var logos = data.logos || [];
-        if (logos.length === 0) {
-            var emptyEl = document.getElementById('studio-logo-empty');
-            if (emptyEl) emptyEl.classList.remove('hidden');
-            else {
-                document.getElementById('studio-logo-error').classList.remove('hidden');
-                document.getElementById('studio-logo-error-msg').textContent = t('studio.logo_create_failed');
-            }
-        } else {
-            document.getElementById('studio-logo-results').classList.remove('hidden');
-            var cardsHtml = '';
-            logos.forEach(function (logo) {
-                cardsHtml += renderLogoCard(logo);
-            });
-            document.getElementById('studio-logo-cards').innerHTML = cardsHtml;
-            // Store logo data for detail toggle and load images with auth headers
-            storeLogoData(logos);
-            loadLogoImages(logos);
-        }
+        renderStudioLogoResults(data);
+        startLogoProjectPollingIfNeeded(data);
 
-        // Update credits
         if (data.credits_remaining) {
+            studioCredits = normalizeStudioCredits(data.credits_remaining, 5);
+            updateStudioCredits();
             updateLogoCreditsFromData(data.credits_remaining);
         }
+        loadStudioHistory();
 
     } catch (e) {
         document.getElementById('studio-logo-loading').classList.add('hidden');
@@ -3376,25 +3624,285 @@ async function generateLogos() {
     } finally {
         studioLogoLoading = false;
         if (btn) { btn.disabled = false; btn.classList.remove('opacity-50'); }
+        if (studioStatus && studioStatus.logo_studio) {
+            applyStudioAvailability('logo', studioStatus.logo_studio);
+        }
     }
+}
+
+function getLogoFormPayload(extra) {
+    extra = extra || {};
+    var payload = {
+        brand_name: (document.getElementById('studio-logo-name').value || '').trim(),
+        description: (document.getElementById('studio-logo-desc').value || '').trim(),
+        style: document.getElementById('studio-logo-style').value || 'modern',
+        color_preferences: (document.getElementById('studio-logo-colors').value || '').trim(),
+        nice_classes: getStudioNiceClasses('studio-logo-classes')
+    };
+    Object.keys(extra).forEach(function (key) {
+        payload[key] = extra[key];
+    });
+    return payload;
+}
+
+function hasPendingLogoAudits(logos) {
+    return (logos || []).some(function (logo) {
+        var status = logo.audit_status || 'completed';
+        return status === 'pending' || status === 'running';
+    });
+}
+
+function stopLogoProjectPolling() {
+    if (studioLogoPollTimer) {
+        clearInterval(studioLogoPollTimer);
+        studioLogoPollTimer = null;
+    }
+}
+
+function startLogoProjectPollingIfNeeded(data) {
+    var projectId = (data && (data.project_id || data.id)) || studioActiveLogoProjectId;
+    var logos = (data && data.logos) || [];
+    if (!projectId || !hasPendingLogoAudits(logos)) {
+        stopLogoProjectPolling();
+        return;
+    }
+    studioActiveLogoProjectId = projectId;
+    stopLogoProjectPolling();
+    studioLogoPollTimer = setInterval(function () {
+        fetchAndRenderLogoProject(projectId, true);
+    }, 2500);
+}
+
+async function fetchAndRenderLogoProject(projectId, fromPoll) {
+    if (!projectId) return null;
+    try {
+        var project = await getLogoProjectAPI(projectId);
+        studioActiveLogoProjectId = project.id;
+        studioLastLogoResult = {
+            logos: project.logos || [],
+            project_id: project.id,
+            selected_image_id: project.selected_image_id,
+            project: project
+        };
+        renderStudioLogoResults(studioLastLogoResult);
+        if (hasPendingLogoAudits(project.logos || [])) {
+            startLogoProjectPollingIfNeeded(project);
+        } else {
+            stopLogoProjectPolling();
+        }
+        if (!fromPoll) loadStudioHistory();
+        return project;
+    } catch (e) {
+        if (!fromPoll) showToast(e.message || t('studio.project_load_failed'), 'error');
+        return null;
+    }
+}
+
+async function reviseSelectedLogo() {
+    if (!studioActiveLogoProjectId || !studioSelectedLogoImageId) {
+        showToast(t('studio.select_logo_to_revise'), 'error');
+        return;
+    }
+    var prompt = (document.getElementById('studio-logo-revision-prompt').value || '').trim();
+    if (!prompt) {
+        showToast(t('studio.enter_revision_prompt'), 'error');
+        return;
+    }
+    if (studioLogoLoading) return;
+    studioLogoLoading = true;
+    stopLogoProjectPolling();
+    var btn = document.getElementById('studio-logo-revise-btn');
+    if (btn) { btn.disabled = true; btn.classList.add('opacity-50'); }
+    try {
+        var data = await generateLogosAPI(getLogoFormPayload({
+            project_id: studioActiveLogoProjectId,
+            parent_image_id: studioSelectedLogoImageId,
+            revision_prompt: prompt
+        }));
+        studioActiveLogoProjectId = data.project_id || studioActiveLogoProjectId;
+        if (data.credits_remaining) {
+            studioCredits = normalizeStudioCredits(data.credits_remaining, 5);
+            updateStudioCredits();
+            updateLogoCreditsFromData(data.credits_remaining);
+        }
+        await fetchAndRenderLogoProject(studioActiveLogoProjectId, false);
+        startLogoProjectPollingIfNeeded(data);
+        showToast(t('studio.revision_started'), 'success');
+    } catch (e) {
+        if (e.message !== 'upgrade_required' && e.message !== 'credits_exhausted' && e.message !== 'unauthorized') {
+            showToast(e.message || t('studio.logo_failed_msg'), 'error');
+        }
+    } finally {
+        studioLogoLoading = false;
+        if (btn) { btn.disabled = false; btn.classList.remove('opacity-50'); }
+    }
+}
+
+function chooseLogoForRevision(imageId) {
+    var logo = _studioLogos[imageId];
+    if (!logo) {
+        showToast(t('studio.logo_data_not_found'), 'error');
+        return;
+    }
+    var status = logo.audit_status || 'completed';
+    if (status === 'pending' || status === 'running') {
+        showToast(t('studio.audit_wait_to_revise'), 'info');
+        return;
+    }
+    studioSelectedLogoImageId = imageId;
+    updateLogoRevisionPanel();
+    renderStudioLogoResults(studioLastLogoResult);
+}
+
+function clearLogoCandidateSelection() {
+    studioSelectedLogoImageId = null;
+    updateLogoRevisionPanel();
+    renderStudioLogoResults(studioLastLogoResult);
+}
+
+async function selectFinalLogoCandidate(imageId) {
+    var logo = _studioLogos[imageId];
+    if (!logo || !logo.project_id) return;
+    try {
+        var project = await selectLogoCandidateAPI(logo.project_id, imageId);
+        studioActiveLogoProjectId = project.id;
+        studioLastLogoResult = {
+            logos: project.logos || [],
+            project_id: project.id,
+            selected_image_id: project.selected_image_id,
+            project: project
+        };
+        renderStudioLogoResults(studioLastLogoResult);
+        showToast(t('studio.logo_selected'), 'success');
+    } catch (e) {
+        showToast(e.message || t('studio.select_logo_failed'), 'error');
+    }
+}
+
+async function retryLogoAudit(imageId) {
+    try {
+        await retryLogoAuditAPI(imageId);
+        showToast(t('studio.audit_retry_started'), 'success');
+        if (studioActiveLogoProjectId) {
+            await fetchAndRenderLogoProject(studioActiveLogoProjectId, false);
+        }
+    } catch (e) {
+        showToast(e.message || t('studio.audit_retry_failed'), 'error');
+    }
+}
+
+function updateLogoRevisionPanel() {
+    var panel = document.getElementById('studio-logo-revision-panel');
+    var summary = document.getElementById('studio-logo-selected-summary');
+    var projectChip = document.getElementById('studio-logo-project-id');
+    if (!panel) return;
+    if (!studioActiveLogoProjectId) {
+        panel.classList.add('hidden');
+        return;
+    }
+    panel.classList.remove('hidden');
+    if (projectChip) projectChip.textContent = t('studio.project_chip', { id: studioActiveLogoProjectId.substring(0, 8) });
+    if (!summary) return;
+    if (!studioSelectedLogoImageId) {
+        summary.textContent = t('studio.revision_select_hint');
+        return;
+    }
+    var logo = _studioLogos[studioSelectedLogoImageId] || {};
+    summary.textContent = t('studio.revision_selected', {
+        id: studioSelectedLogoImageId.substring(0, 8),
+        status: t('studio.audit_status_' + (logo.audit_status || 'completed'))
+    });
 }
 
 function updateLogoCreditsDisplay() {
     var el = document.getElementById('studio-logo-credit-info');
     if (!el) return;
-    el.textContent = '';
+    if (!studioCredits) {
+        el.textContent = '';
+        return;
+    }
+    el.textContent = t('studio.ai_credits_info', {
+        total: studioCredits.total_remaining || 0,
+        monthly: studioCredits.monthly_remaining || 0,
+        purchased: studioCredits.purchased_remaining || 0,
+        cost: 5
+    });
 }
 
 function updateLogoCreditsFromData(credits) {
-    var total = (credits.monthly || 0) + (credits.purchased || 0);
+    credits = normalizeStudioCredits(credits, 5);
     var infoEl = document.getElementById('studio-logo-credit-info');
     if (infoEl) {
-        infoEl.textContent = t('studio.logo_credits_info', { total: total, monthly: credits.monthly || 0, purchased: credits.purchased || 0 });
+        infoEl.textContent = t('studio.ai_credits_info', {
+            total: credits.total_remaining || 0,
+            monthly: credits.monthly_remaining || 0,
+            purchased: credits.purchased_remaining || 0,
+            cost: 5
+        });
     }
     var badgeEl = document.getElementById('studio-credits-display');
     if (badgeEl) {
-        badgeEl.textContent = total;
+        badgeEl.textContent = t('studio.credits_remaining_short', {
+            remaining: credits.total_remaining || 0,
+            limit: credits.monthly_limit || 0
+        });
     }
+}
+
+function renderStudioLogoResults(data) {
+    data = data || {};
+    var logos = data.logos || [];
+    if (data.project_id) studioActiveLogoProjectId = data.project_id;
+    if (logos.length === 0) {
+        var emptyEl = document.getElementById('studio-logo-empty');
+        if (emptyEl) emptyEl.classList.remove('hidden');
+        else {
+            document.getElementById('studio-logo-error').classList.remove('hidden');
+            document.getElementById('studio-logo-error-msg').textContent = t('studio.logo_create_failed');
+        }
+        return;
+    }
+
+    document.getElementById('studio-logo-results').classList.remove('hidden');
+    var pendingCount = logos.filter(function (logo) {
+        var status = logo.audit_status || 'completed';
+        return status === 'pending' || status === 'running';
+    }).length;
+    var safeCount = logos.filter(function (logo) {
+        return (logo.audit_status || 'completed') === 'completed' && logo.is_safe;
+    }).length;
+    var riskyCount = logos.filter(function (logo) {
+        return (logo.audit_status || 'completed') === 'completed' && !logo.is_safe;
+    }).length;
+    var metaEl = document.getElementById('studio-logo-project-meta');
+    if (metaEl) {
+        metaEl.innerHTML = '<div class="studio-audit-summary">'
+            + '<span>' + t('studio.logo_project_summary', { count: logos.length }) + '</span>'
+            + '<span>' + t('studio.audit_safe_count', { count: safeCount }) + '</span>'
+            + '<span>' + t('studio.audit_risky_count', { count: riskyCount }) + '</span>'
+            + (pendingCount ? '<span class="is-pending">' + t('studio.audit_pending_count', { count: pendingCount }) + '</span>' : '')
+            + '</div>';
+    }
+    var cardsHtml = '';
+    logos.forEach(function (logo) {
+        logo.is_selected = data.selected_image_id && data.selected_image_id === logo.image_id;
+        logo.is_revision_target = studioSelectedLogoImageId && studioSelectedLogoImageId === logo.image_id;
+        cardsHtml += renderLogoCard(logo);
+    });
+    var logoCardsEl = document.getElementById('studio-logo-cards');
+    Array.from(logoCardsEl.querySelectorAll('[data-blob-url]')).forEach(function (el) {
+        window.URL.revokeObjectURL(el.dataset.blobUrl);
+    });
+    logoCardsEl.innerHTML = cardsHtml;
+    storeLogoData(logos);
+    loadLogoImages(logos);
+    updateLogoRevisionPanel();
+}
+
+function refreshStudioLogoResultsText() {
+    var resultsEl = document.getElementById('studio-logo-results');
+    if (!studioLastLogoResult || !resultsEl || resultsEl.classList.contains('hidden')) return;
+    renderStudioLogoResults(studioLastLogoResult);
 }
 
 var _studioLogos = {};
@@ -3418,18 +3926,22 @@ function toggleLogoDetail(imageId) {
         showToast(t('studio.logo_data_not_found'), 'error');
         return;
     }
+    if ((logo.audit_status || 'completed') !== 'completed') {
+        showToast(t('studio.audit_details_pending'), 'info');
+        return;
+    }
 
     var vb = logo.visual_breakdown || {};
     var simPct = Math.round(logo.similarity_score || 0);
 
     function makeBar(label, value) {
         var pct = Math.round((value || 0) * 100);
-        var color = pct >= 70 ? 'bg-red-500' : pct >= 50 ? 'bg-amber-500' : 'bg-green-500';
+        var color = pct >= 70 ? 'var(--color-risk-critical-text)' : pct >= 50 ? 'var(--color-risk-medium-text)' : 'var(--color-risk-low-text)';
         return '<div class="flex items-center gap-2 text-xs">'
-            + '<span class="w-14 text-gray-500">' + label + '</span>'
-            + '<div class="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">'
-            + '<div class="h-full rounded-full ' + color + '" style="width:' + pct + '%"></div></div>'
-            + '<span class="w-8 text-right font-medium text-gray-700">' + pct + '%</span></div>';
+            + '<span class="w-14" style="color:var(--color-text-muted)">' + label + '</span>'
+            + '<div class="flex-1 h-2 rounded-full overflow-hidden" style="background:var(--color-border)">'
+            + '<div class="h-full rounded-full" style="width:' + pct + '%;background:' + color + '"></div></div>'
+            + '<span class="w-8 text-right font-medium" style="color:var(--color-text-primary)">' + pct + '%</span></div>';
     }
 
     var barsHtml = '';
@@ -3439,15 +3951,15 @@ function toggleLogoDetail(imageId) {
     if (vb.color != null) barsHtml += makeBar(t('studio.color_label'), vb.color);
 
     if (!barsHtml) {
-        barsHtml = '<div class="text-xs text-gray-400 text-center py-2">' + t('studio.no_visual_data') + '</div>';
+        barsHtml = '<div class="text-xs text-center py-2" style="color:var(--color-text-faint)">' + t('studio.no_visual_data') + '</div>';
     }
 
     var closestHtml = logo.closest_match_name
-        ? '<div class="text-xs text-gray-500 mt-2">' + t('studio.closest_label') + ' <span class="font-medium">' + escapeHtml(logo.closest_match_name) + '</span> (' + simPct + '%)</div>'
+        ? '<div class="text-xs mt-2" style="color:var(--color-text-muted)">' + t('studio.closest_label') + ' <span class="font-medium" style="color:var(--color-text-secondary)">' + escapeHtml(logo.closest_match_name) + '</span> (' + simPct + '%)</div>'
         : '';
 
-    var panelHtml = '<div id="logo-detail-' + imageId + '" class="px-4 pb-4 border-t border-gray-100 mt-0 pt-3 bg-gray-50 rounded-b-xl">'
-        + '<div class="text-xs font-semibold text-gray-600 mb-2">' + t('studio.visual_analysis_label') + '</div>'
+    var panelHtml = '<div id="logo-detail-' + imageId + '" class="studio-logo-detail-panel">'
+        + '<div class="text-xs font-semibold mb-2" style="color:var(--color-text-secondary)">' + t('studio.visual_analysis_label') + '</div>'
         + '<div class="space-y-1.5">' + barsHtml + '</div>'
         + closestHtml
         + '</div>';
@@ -3455,7 +3967,7 @@ function toggleLogoDetail(imageId) {
     // Find the logo card by its image placeholder
     var imgContainer = document.getElementById('logo-img-' + imageId);
     if (imgContainer) {
-        var card = imgContainer.closest('.bg-white.rounded-xl');
+        var card = imgContainer.closest('[data-studio-logo-card="true"]');
         if (card) {
             card.insertAdjacentHTML('beforeend', panelHtml);
             return;
@@ -3470,6 +3982,136 @@ function toggleLogoDetail(imageId) {
 function showLogoCreditsExhausted(detail) {
     var msg = (detail && detail.message) || t('studio.logo_credits_exhausted');
     showCreditsModal({ message: msg });
+}
+
+function refreshStudioDynamicTranslations() {
+    if (!studioInitialized) return;
+    refreshStudioClassPickers();
+    refreshStudioClassToggleLabels();
+    refreshStudioColorSwatches();
+    refreshStudioAvailabilityText();
+    updateStudioCredits();
+    updateLogoCreditsDisplay();
+    updateStudioModeMeta();
+    refreshStudioNameResultsText();
+    refreshStudioLogoResultsText();
+    loadStudioHistory();
+}
+
+async function loadStudioHistory(featureType) {
+    if (featureType === undefined) {
+        featureType = studioHistoryFilter === 'logo' ? 'LOGO' : (studioHistoryFilter === 'name' ? 'NAME' : undefined);
+    }
+    var listEl = document.getElementById('studio-history-list');
+    var loadingEl = document.getElementById('studio-history-loading');
+    var emptyEl = document.getElementById('studio-history-empty');
+    if (!listEl) return;
+
+    if (loadingEl) loadingEl.classList.remove('hidden');
+    if (emptyEl) {
+        emptyEl.textContent = t('studio.history_empty');
+        emptyEl.classList.add('hidden');
+    }
+    Array.from(listEl.querySelectorAll('[data-blob-url]')).forEach(function (el) {
+        window.URL.revokeObjectURL(el.dataset.blobUrl);
+    });
+    listEl.innerHTML = '';
+
+    try {
+        var data = await getGenerationHistory(1, featureType);
+        var items = data.items || [];
+        if (loadingEl) loadingEl.classList.add('hidden');
+        if (!items.length) {
+            if (emptyEl) emptyEl.classList.remove('hidden');
+            return;
+        }
+        listEl.innerHTML = items.map(renderStudioHistoryItem).join('');
+        loadStudioHistoryImages(items);
+    } catch (e) {
+        if (loadingEl) loadingEl.classList.add('hidden');
+        if (emptyEl) {
+            emptyEl.classList.remove('hidden');
+            emptyEl.textContent = t('studio.history_failed');
+        }
+    }
+}
+
+function setStudioHistoryFilter(filter) {
+    studioHistoryFilter = filter || 'all';
+    document.querySelectorAll('.studio-history-filter').forEach(function (btn) {
+        var active = btn.dataset.studioHistoryFilter === studioHistoryFilter;
+        btn.classList.toggle('is-active', active);
+    });
+    var featureType = studioHistoryFilter === 'logo' ? 'LOGO' : (studioHistoryFilter === 'name' ? 'NAME' : undefined);
+    loadStudioHistory(featureType);
+}
+
+function renderStudioHistoryItem(item) {
+    var params = item.input_params || {};
+    var output = item.output_data || {};
+    var isLogo = item.feature_type === 'LOGO';
+    var pendingImages = isLogo ? (item.images || []).filter(function (image) {
+        var status = image.audit_status || 'completed';
+        return status === 'pending' || status === 'running';
+    }).length : 0;
+    var title = isLogo
+        ? (params.brand_name || t('studio.logo_studio'))
+        : (params.query || t('studio.name_lab'));
+    var subtitle = isLogo
+        ? t('studio.history_logo_meta', { count: (item.images || []).length }) + (pendingImages ? ' - ' + t('studio.audit_pending_count', { count: pendingImages }) : '')
+        : t('studio.history_name_meta', {
+            safe: output.safe_count || 0,
+            filtered: output.filtered_count || 0
+        });
+    var created = item.created_at ? new Date(item.created_at).toLocaleString() : '';
+    var imagesHtml = '';
+
+    if (isLogo && item.images && item.images.length) {
+        imagesHtml = '<div class="studio-history-thumbs">'
+            + item.images.map(function (image) {
+                return '<div id="studio-history-img-' + escapeHtml(image.image_id) + '" class="studio-history-thumb" title="' + t('studio.audit_status_' + (image.audit_status || 'completed')) + '">'
+                    + t('common.loading')
+                    + '</div>';
+            }).join('')
+            + '</div>';
+    }
+
+    return '<div class="studio-history-item">'
+        + '<div class="studio-history-item-header">'
+        + '<div class="min-w-0">'
+        + '<span class="studio-history-type">' + (isLogo ? t('studio.logo_studio') : t('studio.name_lab')) + '</span>'
+        + '<div class="studio-history-title">' + escapeHtml(title) + '</div>'
+        + '<div class="studio-history-subtitle">' + escapeHtml(subtitle) + '</div>'
+        + '</div>'
+        + '<div class="text-right flex-shrink-0">'
+        + '<div class="studio-history-date">' + escapeHtml(created) + '</div>'
+        + '<div class="studio-history-credit">' + t('studio.credits_used', { count: item.credits_used || 0 }) + '</div>'
+        + '</div>'
+        + '</div>'
+        + imagesHtml
+        + '</div>';
+}
+
+function loadStudioHistoryImages(items) {
+    items.forEach(function (item) {
+        if (item.feature_type !== 'LOGO' || !item.images) return;
+        item.images.forEach(function (image) {
+            var el = document.getElementById('studio-history-img-' + image.image_id);
+            if (!el || !image.image_url) return;
+            fetch(image.image_url, {
+                headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+            }).then(function (res) {
+                if (!res.ok) throw new Error('Failed');
+                return res.blob();
+            }).then(function (blob) {
+                var url = window.URL.createObjectURL(blob);
+                el.innerHTML = '<img src="' + url + '" alt="' + t('studio.logo_studio') + '" class="w-full h-full object-contain">';
+                el.dataset.blobUrl = url;
+            }).catch(function () {
+                el.textContent = t('dashboard.load_failed_short');
+            });
+        });
+    });
 }
 
 // ============================================
@@ -3498,9 +4140,17 @@ function openStudioWithContext(mode, context) {
 function setStudioSelectValues(selectId, values) {
     var select = document.getElementById(selectId);
     if (!select) return;
-    Array.from(select.options).forEach(function (opt) {
-        opt.selected = values.indexOf(parseInt(opt.value)) !== -1;
+    if (select.tagName === 'SELECT') {
+        Array.from(select.options).forEach(function (opt) {
+            opt.selected = values.indexOf(parseInt(opt.value)) !== -1;
+        });
+        updateStudioClassSummary(selectId);
+        return;
+    }
+    Array.from(select.querySelectorAll('.studio-class-chip')).forEach(function (chip) {
+        setStudioClassChipSelected(chip, values.indexOf(parseInt(chip.dataset.value)) !== -1);
     });
+    updateStudioClassSummary(selectId);
 }
 
 // ============================================
@@ -3707,16 +4357,44 @@ var _wlPageSize = 20;
 var _wlDebounceTimer = null;
 var _wlRightPanelMode = 'selected'; // 'selected' | 'all'
 var _wlAggPage = 1;
-var _activeThreshold = 0.50; // single source of truth for display filter (0.0–1.0 decimal)
+var WATCHLIST_THRESHOLD_STORAGE_KEY = 'ipwatch.watchlist.risk_threshold_pct';
+
+function _normalizeWatchlistThresholdPct(value) {
+    var pct = parseInt(value, 10);
+    return [50, 60, 70, 80, 90].indexOf(pct) >= 0 ? pct : 70;
+}
+
+function _loadWatchlistThresholdPct() {
+    try {
+        return _normalizeWatchlistThresholdPct(localStorage.getItem(WATCHLIST_THRESHOLD_STORAGE_KEY));
+    } catch (e) {
+        return 70;
+    }
+}
+
+function _persistWatchlistThresholdPct(pct) {
+    try {
+        localStorage.setItem(WATCHLIST_THRESHOLD_STORAGE_KEY, String(_normalizeWatchlistThresholdPct(pct)));
+    } catch (e) { /* ignore storage failures */ }
+}
+
+function _syncWatchlistThresholdControl() {
+    var sel = document.getElementById('wl-threshold-slider');
+    if (sel) sel.value = String(Math.round(_activeThreshold * 100));
+}
+
+var _activeThreshold = _loadWatchlistThresholdPct() / 100; // single source of truth for display filter (0.0-1.0 decimal)
 var _wlView = 'appeals'; // 'all' | 'renewal' | 'appeals'
 var _wlStatusFilter = '';
 var _wlTmStatusFilter = ''; // trademark final_status filter (e.g. 'Tescil Edildi')
 var _wlTotalCount = 0; // total active watchlist items (used for scan time estimate)
 var _wlLoadRequestSeq = 0;
+var _wlSilentRefresh = false;
 
 function initWatchlistTab() {
     if (watchlistTabInitialized) return;
     watchlistTabInitialized = true;
+    _syncWatchlistThresholdControl();
     // Apply default active tab style
     setWatchlistView('appeals');
     loadWatchlistStats();
@@ -3767,7 +4445,7 @@ function refreshWatchlistAndStats() {
 function loadPortfolio() {
     console.log('[Portfolio] Fetching portfolio with threshold:', _activeThreshold);
     var grid = document.getElementById('portfolio-grid');
-    if (grid && grid.innerHTML.indexOf('animate-pulse') === -1) {
+    if (!_wlSilentRefresh && grid && grid.innerHTML.indexOf('animate-pulse') === -1) {
         grid.innerHTML = '<div class="text-sm text-gray-400 text-center py-4">' + t('dashboard.loading') + '</div>';
     }
     var requestSeq = ++_wlLoadRequestSeq;
@@ -3793,6 +4471,9 @@ function loadPortfolio() {
             renderPortfolioGrid(items);
         }
         renderWatchlistPagination(total, totalPages, _wlCurrentPage);
+        if (_expandedWatchlistId) {
+            setTimeout(_restoreExpandedWatchlistPanel, 0);
+        }
     }).catch(function (e) {
         if (requestSeq !== _wlLoadRequestSeq) return;
         if (grid) grid.innerHTML = '<div class="text-sm text-gray-400 text-center py-4">' + t('dashboard.load_failed_short') + '</div>';
@@ -3842,7 +4523,10 @@ function onWatchlistTmStatusChange() {
 }
 
 function onWatchlistThresholdChange(pct) {
+    pct = _normalizeWatchlistThresholdPct(pct);
     _activeThreshold = pct / 100;
+    _persistWatchlistThresholdPct(pct);
+    _syncWatchlistThresholdControl();
     console.log('[Threshold] Dropdown changed. New threshold:', _activeThreshold);
     _wlCurrentPage = 1;
     loadPortfolio();
@@ -3977,9 +4661,7 @@ function loadAggregateAlerts() {
 }
 
 function _thresholdFilteredConflictCount(summary) {
-    // Always show ALL existing non-dismissed alerts regardless of threshold.
-    // The threshold is a scan parameter only — it controls what score qualifies
-    // as an alert during scanning, NOT what is displayed after scanning.
+    // The API summary is already filtered by the active watchlist-tab threshold.
     if (!summary) return 0;
     return (summary.sev_critical  || 0)
          + (summary.sev_very_high || 0)
@@ -4005,21 +4687,18 @@ function renderPortfolioGrid(items) {
         var classes = window.AppComponents.renderNiceClassBadges(item.nice_class_numbers, 3);
 
         // Logo with larger size for card layout
-        // Priority:
-        //   1) trademark_image_path from trademarks JOIN → /api/trademark-image/ (same as search results, reliable)
-        //   2) logo_url from watchlist logo endpoint (only for manually-uploaded logos without a linked trademark)
-        //   3) non-clickable placeholder
         // Priority: custom uploaded logo > trademark-linked image > placeholder
         var logoHtml;
-        if (item.has_logo && item.logo_url) {
-            // Manually-uploaded logo — takes priority over trademark image
+        var customLogoUrl = item.custom_logo_url || (item.has_custom_logo ? item.logo_url : null);
+        if (item.has_custom_logo && customLogoUrl) {
+            // Manually-uploaded logo - takes priority over trademark image
             var escapedBrand = esc(item.brand_name).replace(/'/g, "\\'");
-            var escapedLogoUrl = item.logo_url.replace(/'/g, "\\'");
+            var escapedLogoUrl = customLogoUrl.replace(/'/g, "\\'");
             var _thumbPlaceholderEsc = window.AppComponents.IMG_PLACEHOLDER_SVG.replace(/"/g, '&quot;').replace(/'/g, "\\'");
             logoHtml = '<div class="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 cursor-pointer hover:ring-2 hover:ring-blue-300 transition" '
                 + 'style="border:1px solid var(--color-border);background:var(--color-bg-muted)" '
                 + 'onclick="event.stopPropagation(); openLogoPreview(\'' + escapedLogoUrl + '\', \'' + escapedBrand + '\')" title="' + t('watchlist.view_logo') + '">'
-                + '<img src="' + item.logo_url + '" class="w-full h-full object-contain" '
+                + '<img src="' + customLogoUrl + '" class="w-full h-full object-contain" '
                 + 'onerror="this.style.display=\'none\'; this.parentElement.innerHTML=\'' + _thumbPlaceholderEsc + '\'; this.parentElement.style.cursor=\'default\'; this.parentElement.onclick=null;">'
                 + '</div>';
         } else if (item.trademark_image_path) {
@@ -4144,7 +4823,7 @@ function renderPortfolioGrid(items) {
             + '<button onclick="event.stopPropagation(); scanWatchlistItem(\'' + item.id + '\')" class="p-1 rounded hover:bg-blue-50 transition-colors" title="' + t('watchlist.scan_now') + '">'
             + '<svg class="w-3.5 h-3.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>'
             + '</button>'
-            + (item.has_logo
+            + (item.has_custom_logo
                 ? '<button onclick="event.stopPropagation(); deleteWatchlistLogo(\'' + item.id + '\')" class="p-1 rounded hover:bg-red-50 transition-colors group" title="' + t('watchlist.delete_logo_title') + '">'
                 + '<svg class="w-3.5 h-3.5 text-gray-400 group-hover:text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/><line x1="4" y1="4" x2="20" y2="20" stroke-width="2" stroke-linecap="round"/></svg>'
                 + '</button>'
@@ -4285,6 +4964,9 @@ function renderRenewalGrid(items) {
             + '<div class="text-xs mt-1" style="color:var(--color-text-muted)">' + t('watchlist.col_expiry') + ': ' + expDateStr + '</div>'
             + '</div>'
             + '</div>';
+        html += '<div id="wl-alerts-' + item.id + '" class="hidden px-4 pb-3 pt-2" style="background:var(--color-bg-card)">'
+            + '<div class="text-xs text-center py-2" style="color:var(--color-text-faint)">' + t('dashboard.loading') + '</div>'
+            + '</div>';
     });
     html += '</div>';
     grid.innerHTML = html;
@@ -4334,6 +5016,9 @@ function renderAppealsGrid(items) {
             + '<span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold" style="background:' + pillBg + ';color:' + pillColor + '">' + (hasDeadline ? (days + ' ' + t('watchlist.renewal_days_left')) : '-') + '</span>'
             + '<div class="text-xs mt-1" style="color:var(--color-text-muted)">' + t('watchlist.col_deadline') + ': ' + deadlineStr + '</div>'
             + '</div>'
+            + '</div>';
+        html += '<div id="wl-alerts-' + item.id + '" class="hidden px-4 pb-3 pt-2" style="background:var(--color-bg-card)">'
+            + '<div class="text-xs text-center py-2" style="color:var(--color-text-faint)">' + t('dashboard.loading') + '</div>'
             + '</div>';
     });
     html += '</div>';
@@ -4441,7 +5126,7 @@ async function loadInlineAlerts(watchlistItemId, panel) {
         });
         if (!res.ok) throw new Error('Failed');
         var data = await res.json();
-        // Show ALL existing alerts — threshold is a scan parameter only, not a display filter
+        // Show alerts that match the persisted watchlist-tab display threshold.
         var items = data.items || [];
         // Sync parent row badge to match actual alert count
         var badgeEl = document.getElementById('wl-conflict-count-' + watchlistItemId);
@@ -4921,9 +5606,7 @@ function scanWatchlistItem(itemId) {
     showToast(t('watchlist.scan_started'), 'info');
     AppAPI.scanWatchlistItem(itemId).then(function () {
         showToast(t('watchlist.scan_queued'), 'success');
-        // Scan runs as background task (~5-15s); refresh twice to catch results
-        setTimeout(refreshWatchlistAndStats, 10000);
-        setTimeout(refreshWatchlistAndStats, 25000);
+        _setScanInProgress(_getScanDurationMs(1), 'item');
     }).catch(function (e) {
         showToast(t('common.error') + ': ' + e.message, 'error');
     });
@@ -4934,12 +5617,29 @@ function scanWatchlistItem(itemId) {
 // ============================================
 var _SCAN_LS_START = 'wl_scan_start_ms';
 var _SCAN_LS_DUR   = 'wl_scan_dur_ms';
+var _SCAN_LS_MODE  = 'wl_scan_mode';
+var _scanPollTimer = null;
+
+function _getScanDurationMs(count) {
+    count = parseInt(count, 10);
+    if (!count || count < 1) count = 1;
+    return Math.max(count * 15000, 60000); // background scan duration varies; keep the visible session generous
+}
 
 function _getScanEstimate(count) {
     if (!count || count <= 0) return '';
-    var secs = count * 5; // ~5s per item in background queue
+    var secs = Math.ceil(_getScanDurationMs(count) / 1000);
     if (secs < 60) return t('watchlist.scan_est_under_minute') || '< 1 dakika';
     var mins = Math.ceil(secs / 60);
+    if (mins < 60) return '~' + mins + ' ' + (t('watchlist.scan_est_min') || 'dakika');
+    var hrs = Math.ceil(mins / 60);
+    return '~' + hrs + ' ' + (t('watchlist.scan_est_hour') || 'saat');
+}
+
+function _formatScanRemaining(ms) {
+    if (!ms || ms <= 0) return '';
+    if (ms < 60000) return t('watchlist.scan_est_under_minute') || '< 1 dakika';
+    var mins = Math.ceil(ms / 60000);
     if (mins < 60) return '~' + mins + ' ' + (t('watchlist.scan_est_min') || 'dakika');
     var hrs = Math.ceil(mins / 60);
     return '~' + hrs + ' ' + (t('watchlist.scan_est_hour') || 'saat');
@@ -4964,40 +5664,165 @@ function _updateScanButtonState(scanning) {
     }
 }
 
-function _setScanInProgress(estimatedMs) {
-    localStorage.setItem(_SCAN_LS_START, Date.now().toString());
-    localStorage.setItem(_SCAN_LS_DUR, estimatedMs.toString());
-    _updateScanButtonState(true);
+function _getScanState() {
+    try {
+        var start = parseInt(localStorage.getItem(_SCAN_LS_START) || '0', 10);
+        var dur = parseInt(localStorage.getItem(_SCAN_LS_DUR) || '0', 10);
+        var mode = localStorage.getItem(_SCAN_LS_MODE) || 'all';
+        var elapsed = start ? Date.now() - start : 0;
+        return {
+            hasState: !!(start && dur),
+            active: !!(start && dur && elapsed < dur),
+            start: start,
+            duration: dur,
+            mode: mode,
+            elapsed: elapsed,
+            remaining: Math.max(0, dur - elapsed)
+        };
+    } catch (e) {
+        return { hasState: false, active: false, start: 0, duration: 0, mode: 'all', elapsed: 0, remaining: 0 };
+    }
 }
 
-function _clearScanInProgress() {
-    localStorage.removeItem(_SCAN_LS_START);
-    localStorage.removeItem(_SCAN_LS_DUR);
+function _ensureScanBanner() {
+    var main = document.getElementById('tab-content-watchlist');
+    if (!main) return null;
+    var banner = document.getElementById('watchlist-scan-banner');
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'watchlist-scan-banner';
+        banner.className = 'mb-4 rounded-xl border px-4 py-3';
+        banner.style.cssText = 'display:none;background:rgba(59,130,246,0.08);border-color:rgba(59,130,246,0.25)';
+        main.insertBefore(banner, main.children[1] || null);
+    }
+    return banner;
+}
+
+function _hideScanBanner() {
+    var banner = document.getElementById('watchlist-scan-banner');
+    if (banner) banner.style.display = 'none';
+}
+
+function _updateScanBanner() {
+    var state = _getScanState();
+    if (!state.active) {
+        _hideScanBanner();
+        return;
+    }
+    var banner = _ensureScanBanner();
+    if (!banner) return;
+    var isSingle = state.mode === 'item';
+    var title = isSingle ? t('watchlist.scan_live_single_title') : t('watchlist.scan_live_title');
+    var remaining = _formatScanRemaining(state.remaining);
+    var status = t('watchlist.scan_live_refreshing');
+    if (remaining) {
+        status += ' · ' + t('watchlist.scan_live_remaining', { time: remaining });
+    }
+    banner.innerHTML =
+        '<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">'
+        + '<div class="flex items-start gap-3">'
+        + '<div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style="background:rgba(59,130,246,0.14);color:var(--color-primary)">' + _SPIN_ICON + '</div>'
+        + '<div>'
+        + '<div class="text-sm font-semibold" style="color:var(--color-text-primary)">' + title + '</div>'
+        + '<div class="text-xs mt-0.5" style="color:var(--color-text-muted)">' + t('watchlist.scan_live_desc') + '</div>'
+        + '</div>'
+        + '</div>'
+        + '<div class="text-xs font-medium px-2.5 py-1 rounded-full self-start sm:self-center" style="background:var(--color-bg-card);color:var(--color-text-secondary);border:1px solid var(--color-border)">' + status + '</div>'
+        + '</div>';
+    banner.style.display = '';
+}
+
+function _restoreExpandedWatchlistPanel() {
+    if (!_expandedWatchlistId) return;
+    var panel = document.getElementById('wl-alerts-' + _expandedWatchlistId);
+    if (!panel) return;
+    var chevron = document.getElementById('wl-chevron-' + _expandedWatchlistId);
+    panel.classList.remove('hidden');
+    if (chevron) chevron.style.transform = 'rotate(180deg)';
+    loadInlineAlerts(_expandedWatchlistId, panel);
+}
+
+function _refreshWatchlistDuringScan() {
+    loadWatchlistStats();
+    _wlSilentRefresh = true;
+    loadPortfolio();
+    _wlSilentRefresh = false;
+    if (window._alertFilterWatchlistId && typeof loadFilteredAlerts === 'function') {
+        loadFilteredAlerts(window._alertFilterWatchlistId);
+    }
+}
+
+function _scheduleScanPolling(refreshNow) {
+    if (_scanPollTimer) {
+        clearTimeout(_scanPollTimer);
+        _scanPollTimer = null;
+    }
+    var state = _getScanState();
+    if (!state.hasState) {
+        _updateScanButtonState(false);
+        _hideScanBanner();
+        return;
+    }
+    if (!state.active) {
+        _clearScanInProgress(true);
+        return;
+    }
+    _updateScanButtonState(true);
+    _updateScanBanner();
+    if (refreshNow) {
+        _refreshWatchlistDuringScan();
+    }
+    var delay = state.elapsed < 120000 ? 5000 : 10000;
+    _scanPollTimer = setTimeout(function () {
+        _scheduleScanPolling(true);
+    }, Math.min(delay, state.remaining || delay));
+}
+
+function _setScanInProgress(estimatedMs, mode) {
+    estimatedMs = Math.max(parseInt(estimatedMs, 10) || 60000, 30000);
+    try {
+        localStorage.setItem(_SCAN_LS_START, Date.now().toString());
+        localStorage.setItem(_SCAN_LS_DUR, estimatedMs.toString());
+        localStorage.setItem(_SCAN_LS_MODE, mode || 'all');
+    } catch (e) { /* ignore storage failures */ }
+    _updateScanButtonState(true);
+    _updateScanBanner();
+    _scheduleScanPolling(true);
+}
+
+function _clearScanInProgress(showDoneToast) {
+    if (_scanPollTimer) {
+        clearTimeout(_scanPollTimer);
+        _scanPollTimer = null;
+    }
+    try {
+        localStorage.removeItem(_SCAN_LS_START);
+        localStorage.removeItem(_SCAN_LS_DUR);
+        localStorage.removeItem(_SCAN_LS_MODE);
+    } catch (e) { /* ignore storage failures */ }
     _updateScanButtonState(false);
+    _hideScanBanner();
+    if (showDoneToast) {
+        _refreshWatchlistDuringScan();
+        showToast(t('watchlist.scan_live_done') || t('watchlist.scan_completed_check'), 'success');
+    }
 }
 
 function _initScanButtonState() {
-    var start = parseInt(localStorage.getItem(_SCAN_LS_START) || '0');
-    var dur   = parseInt(localStorage.getItem(_SCAN_LS_DUR)   || '0');
-    if (!start || !dur) return;
-    var elapsed = Date.now() - start;
-    if (elapsed < dur) {
-        _updateScanButtonState(true);
-        setTimeout(function () {
-            _clearScanInProgress();
-            refreshWatchlistAndStats();
-            showToast(t('watchlist.scan_completed_check') || 'Tarama tamamlandı olabilir. Sonuçları görmek için yenileyin.', 'info');
-        }, dur - elapsed);
+    var state = _getScanState();
+    if (!state.hasState) return;
+    if (state.active) {
+        _scheduleScanPolling(true);
     } else {
-        _clearScanInProgress();
-        refreshWatchlistAndStats();
+        _clearScanInProgress(false);
+        _refreshWatchlistDuringScan();
     }
 }
 
 function scanAllWatchlist() {
     var count = _wlTotalCount || 0;
     var estStr = _getScanEstimate(count);
-    var estimatedMs = Math.max(count * 5000, 30000); // min 30s
+    var estimatedMs = _getScanDurationMs(count);
 
     // Build inline confirmation modal
     var overlay = document.createElement('div');
@@ -5040,20 +5865,15 @@ function scanAllWatchlist() {
 
     document.getElementById('scan-confirm-ok').addEventListener('click', function () {
         removeOverlay();
-        _setScanInProgress(estimatedMs);
+        _setScanInProgress(estimatedMs, 'all');
         showToast(t('watchlist.scan_all_started') || 'Toplu tarama başlatılıyor...', 'info');
 
         AppAPI.scanAllWatchlist().then(function (res) {
             var msg = (res && res.message) ? res.message : t('watchlist.scan_all_queued');
             showToast(msg, 'success');
-            // Button stays disabled until estimated time passes, then refresh everything
-            setTimeout(function () {
-                _clearScanInProgress();
-                refreshWatchlistAndStats();
-                showToast(t('watchlist.scan_completed_check') || 'Tarama tamamlandı olabilir. Sonuçları görmek için yenileyin.', 'info');
-            }, estimatedMs);
+            _scheduleScanPolling(true);
         }).catch(function (e) {
-            _clearScanInProgress();
+            _clearScanInProgress(false);
             showToast((t('common.error') || 'Hata') + ': ' + e.message, 'error');
         });
     });
@@ -5473,6 +6293,9 @@ function submitBulkUpload() {
             + '</div>';
         document.getElementById('upload-wl-step-2').classList.add('hidden');
         resultEl.classList.remove('hidden');
+        if ((s.added || 0) > 0 && typeof _setScanInProgress === 'function' && typeof _getScanDurationMs === 'function') {
+            _setScanInProgress(_getScanDurationMs(s.added || 1), 'bulk');
+        }
         refreshWatchlistAndStats();
     }).catch(function (e) {
         if (e && e.status === 403) {

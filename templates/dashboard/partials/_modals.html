@@ -147,24 +147,24 @@
     <div class="rounded-2xl w-full max-w-2xl shadow-xl flex flex-col" style="background:var(--color-bg-card);border:1px solid var(--color-border);max-height:90vh">
         <!-- Header -->
         <div class="px-6 py-4 flex items-center justify-between flex-shrink-0" style="border-bottom:1px solid var(--color-border)">
-            <h3 class="text-lg font-bold" style="color:var(--color-text-primary)" x-text="t('leads.detail_title')">Lead DetayÄ±</h3>
+            <h3 class="text-lg font-bold" style="color:var(--color-text-primary)" x-text="t('leads.detail_title')">Lead Detayı</h3>
             <button onclick="hideLeadDetailModal()"
                 class="text-2xl leading-none btn-press min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg"
                 style="color:var(--color-text-faint)" aria-label="Close">&times;</button>
         </div>
-        <!-- Scrollable content â€” overflow-x-hidden prevents horizontal scrollbar -->
+        <!-- Scrollable content - overflow-x-hidden prevents horizontal scrollbar -->
         <div class="px-5 py-4 overflow-y-auto overflow-x-hidden flex-1 min-h-0" id="lead-detail-content"></div>
-        <!-- Footer buttons â€” always visible, never clipped -->
+        <!-- Footer buttons - always visible, never clipped -->
         <div class="px-6 py-3 flex gap-3 flex-shrink-0" style="border-top:1px solid var(--color-border)">
             <button onclick="markLeadContacted()"
                 class="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg flex items-center justify-center gap-2 text-sm font-medium btn-press min-h-[44px]"
                 x-text="t('leads.contacted')">
-                Ä°letiÅŸime GeÃ§ildi
+                İletişime Geçildi
             </button>
             <button onclick="markLeadConverted()"
                 class="flex-1 px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center justify-center gap-2 text-sm font-medium btn-press min-h-[44px]"
                 x-text="t('leads.converted')">
-                MÃ¼ÅŸteri Oldu
+                Müşteri Oldu
             </button>
             <button onclick="dismissLead()" class="px-4 py-2.5 rounded-lg text-sm font-medium btn-press min-h-[44px]"
                 style="background:var(--color-bg-muted);color:var(--color-text-secondary);border:1px solid var(--color-border)"
@@ -254,7 +254,6 @@
             application_no: '',
             nice_class_numbers: [],
             bulletin_no: '',
-            similarity_threshold: 0.7,
             description: '',
             monitor_text: true,
             monitor_visual: false,
@@ -291,6 +290,9 @@
                 this.open = false;
                 userWatchlistAppNos[this.formData.application_no] = true;
                 refreshWatchlistButtons();
+                if (typeof _setScanInProgress === 'function' && typeof _getScanDurationMs === 'function') {
+                    _setScanInProgress(_getScanDurationMs(1), 'item');
+                }
                 if (typeof refreshWatchlistAndStats === 'function') refreshWatchlistAndStats();
                 showToast(t('watchlist.added_toast'), 'success');
             } catch (e) {
@@ -380,20 +382,6 @@
 
                 <div>
                     <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)"
-                        x-text="t('watchlist.similarity_threshold')">Benzerlik Esigi</label>
-                    <select x-model="formData.similarity_threshold"
-                        class="w-full px-3 py-2 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
-                        <option value="0.5" x-text="t('watchlist.threshold_50')">%50 - Genis</option>
-                        <option value="0.6" x-text="t('watchlist.threshold_60')">%60 - Normal</option>
-                        <option value="0.7" x-text="t('watchlist.threshold_70')">%70 - Onerilen</option>
-                        <option value="0.8" x-text="t('watchlist.threshold_80')">%80 - Siki</option>
-                        <option value="0.9" x-text="t('watchlist.threshold_90')">%90 - Cok Siki</option>
-                    </select>
-                </div>
-
-                <div>
-                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)"
                         x-text="t('watchlist.description')">Aciklama (opsiyonel)</label>
                     <input type="text" x-model="formData.description"
                         :placeholder="t('watchlist.description_placeholder')"
@@ -430,7 +418,6 @@
         open: false,
         loading: false,
         submitting: false,
-        threshold: '0.7',
         portfolioType: '',
         entityId: '',
         entityName: '',
@@ -485,7 +472,6 @@
             this.entityId = data.id || '';
             this.entityName = data.name || '';
             this.totalItems = parseInt(data.totalCount) || 0;
-            this.threshold = '0.7';
             this.error = '';
             this.clearUpgradeState();
             this.submitting = false;
@@ -540,8 +526,8 @@
             try {
                 var token = getAuthToken();
                 var payload = this.portfolioType === 'holder'
-                    ? { holder_id: this.entityId, similarity_threshold: parseFloat(this.threshold) }
-                    : { attorney_no: this.entityId, similarity_threshold: parseFloat(this.threshold) };
+                    ? { holder_id: this.entityId }
+                    : { attorney_no: this.entityId };
                 var res = await fetch('/api/v1/watchlist/bulk-from-portfolio', {
                     method: 'POST',
                     headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
@@ -585,6 +571,9 @@
                 } else if (data.created === 0 && data.total > 0 && !data.skipped) {
                     this.open = false;
                     _showBulkResultBanner(0, data.total, 'info', 0);
+                }
+                if (data.created > 0 && typeof _setScanInProgress === 'function' && typeof _getScanDurationMs === 'function') {
+                    _setScanInProgress(_getScanDurationMs(data.created), 'bulk');
                 }
                 if (typeof refreshWatchlistAndStats === 'function') refreshWatchlistAndStats();
                 else if (typeof loadWatchlistCache === 'function') loadWatchlistCache();
@@ -682,21 +671,6 @@
                             x-text="t('watchlist.bulk_cannot_add', { count: '' }).replace('{count}', '')">eklenemez
                         </div>
                     </div>
-                </div>
-
-                <!-- Threshold selector -->
-                <div class="mb-4">
-                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)"
-                        x-text="t('watchlist.bulk_threshold_label')">Benzerlik Esigi</label>
-                    <select x-model="threshold"
-                        class="w-full px-3 py-2 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
-                        <option value="0.5" x-text="t('watchlist.threshold_50')">%50 - Genis</option>
-                        <option value="0.6" x-text="t('watchlist.threshold_60')">%60 - Normal</option>
-                        <option value="0.7" x-text="t('watchlist.threshold_70')">%70 - Onerilen</option>
-                        <option value="0.8" x-text="t('watchlist.threshold_80')">%80 - Siki</option>
-                        <option value="0.9" x-text="t('watchlist.threshold_90')">%90 - Cok Siki</option>
-                    </select>
                 </div>
 
                     <div id="bulk-watchlist-notice" x-show="notice" x-cloak class="mb-3 flex items-start gap-2 p-3 text-sm rounded border"
@@ -1078,17 +1052,17 @@
 
                 <!-- Left: avatar column -->
                 <div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0">
-                    <!-- 60px circle â€” always rendered, no x-show on the circle itself -->
-                    <div @click="$refs.avatarFileInput.click()" title="JPG, PNG, WebP â€” max 5MB"
+                    <!-- 60px circle - always rendered, no x-show on the circle itself -->
+                    <div @click="$refs.avatarFileInput.click()" title="JPG, PNG, WebP - max 5MB"
                         style="position:relative;width:60px;height:60px;min-width:60px;min-height:60px;cursor:pointer;border-radius:50%;overflow:hidden;border:2.5px solid #a5b4fc;box-sizing:content-box">
-                        <!-- Initials layer â€” always present as background -->
+                        <!-- Initials layer - always present as background -->
                         <div
                             style="position:absolute;top:0;left:0;right:0;bottom:0;background:#4f46e5;display:flex;align-items:center;justify-content:center">
                             <span
                                 style="color:white;font-size:20px;font-weight:700;letter-spacing:1px;line-height:1;text-align:center;user-select:none"
                                 x-text="((profileData.first_name || 'U').charAt(0) + (profileData.last_name || '').charAt(0)).toUpperCase()"></span>
                         </div>
-                        <!-- Photo layer â€” covers initials when photo exists -->
+                        <!-- Photo layer - covers initials when photo exists -->
                         <img x-show="profileAvatar" :src="profileAvatar ? profileAvatar : ''" alt=""
                             style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover">
                         <!-- Hover overlay with camera icon -->

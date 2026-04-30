@@ -182,7 +182,7 @@ class AISettings(BaseSettings):
     dino_model: str = Field(default="dinov2_vitb14", alias="DINO_MODEL")
 
     # Translation
-    translation_backend: str = Field(default="nllb", alias="TRANSLATION_BACKEND")
+    translation_backend: str = Field(default="madlad", alias="TRANSLATION_BACKEND")
     pipeline_translation_backend: str = Field(default="madlad", alias="PIPELINE_TRANSLATION_BACKEND")
     offline_translation_backend: str = Field(default="madlad", alias="OFFLINE_TRANSLATION_BACKEND")
     translation_model: str = Field(default="facebook/nllb-200-distilled-600M", alias="TRANSLATION_MODEL")
@@ -281,7 +281,7 @@ class CreativeSettings(BaseSettings):
 
     # Logo Studio
     logo_images_per_run: int = Field(default=4, alias="CREATIVE_LOGO_IMAGES_PER_RUN")
-    logo_similarity_threshold: float = Field(default=0.65, alias="CREATIVE_LOGO_SIMILARITY_THRESHOLD")
+    logo_similarity_threshold: float = Field(default=0.70, alias="CREATIVE_LOGO_SIMILARITY_THRESHOLD")
     logo_output_dir: str = Field(default=str(DEFAULT_LOGO_OUTPUT_DIR), alias="CREATIVE_LOGO_OUTPUT_DIR")
 
     # Redis

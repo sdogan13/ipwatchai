@@ -175,45 +175,46 @@ def embedding_to_halfvec(embedding, expected_dim=None):
 
 def _determine_db_status_raw(folder_name, status_raw, reg_no_val=None):
     folder_upper = folder_name.upper()
-    status_lower = str(status_raw).lower().replace('\u0307', '').strip() if status_raw else ""
+    status_text = _repair_mojibake(str(status_raw)) if status_raw else ""
+    status_lower = status_text.lower().replace('\u0307', '').strip()
     has_reg_no = reg_no_val and str(reg_no_val).strip() and str(reg_no_val).strip().lower() not in ('null', 'none', '')
 
     if status_lower:
-        refused_keywords = ['geÃ§ersiz', 'gecersiz', 'marka baÅŸvurusu/tescili geÃ§ersiz', 'baÅŸvuru geÃ§ersiz', 'basvuru gecersiz', 'tescil geÃ§ersiz', 'tescil gecersiz', 'reddedildi', 'red edildi', 'ret kararÄ±', 'red kararÄ±', 'refused', 'rejected']
+        refused_keywords = ['geçersiz', 'gecersiz', 'marka başvurusu/tescili geçersiz', 'başvuru geçersiz', 'basvuru gecersiz', 'tescil geçersiz', 'tescil gecersiz', 'reddedildi', 'red edildi', 'ret kararı', 'red kararı', 'refused', 'rejected']
         if 'başvuru geçersiz' in status_lower or 'marka başvurusu/tescili geçersiz' in status_lower or 'tescil geçersiz' in status_lower or 'ret kararı' in status_lower:
             return 'Reddedildi'
         if any(kw in status_lower for kw in refused_keywords): return 'Reddedildi'
 
-        withdrawn_keywords = ['feragat edildi', 'feragat', 'geri Ã§ekildi', 'geri cekildi', 'geri alÄ±ndÄ±', 'geri alindi', 'vazgeÃ§ildi', 'vazgecildi', 'withdrawn']
-        if any(kw in status_lower for kw in withdrawn_keywords): return 'Geri Ã‡ekildi'
+        withdrawn_keywords = ['feragat edildi', 'feragat', 'geri çekildi', 'geri cekildi', 'geri alındı', 'geri alindi', 'vazgeçildi', 'vazgecildi', 'withdrawn']
+        if any(kw in status_lower for kw in withdrawn_keywords): return 'Geri Çekildi'
 
-        cancelled_keywords = ['iptal edildi', 'mahkeme kararÄ±', 'mahkeme karari', 'cancelled', 'canceled']
-        if any(kw in status_lower for kw in cancelled_keywords): return 'Ä°ptal Edildi'
+        cancelled_keywords = ['iptal edildi', 'mahkeme kararı', 'mahkeme karari', 'cancelled', 'canceled']
+        if any(kw in status_lower for kw in cancelled_keywords): return 'İptal Edildi'
 
         registered_keywords = ['tescil edildi', 'tescilli', 'kabul edildi', 'registered']
         if any(kw in status_lower for kw in registered_keywords): return 'Tescil Edildi'
 
-        if 'itiraz' in status_lower or 'opposed' in status_lower: return 'Ä°tiraz Edildi'
+        if 'itiraz' in status_lower or 'opposed' in status_lower: return 'İtiraz Edildi'
 
-        expired_keywords = ['sona erdi', 'sÃ¼resi doldu', 'suresi doldu', 'hÃ¼kÃ¼msÃ¼z', 'hukumsuz', 'expired', 'yÃ¼rÃ¼rlÃ¼kten', 'yururlukten']
-        if any(kw in status_lower for kw in expired_keywords): return 'SÃ¼resi Doldu'
+        expired_keywords = ['sona erdi', 'süresi doldu', 'suresi doldu', 'hükümsüz', 'hukumsuz', 'expired', 'yürürlükten', 'yururlukten']
+        if any(kw in status_lower for kw in expired_keywords): return 'Süresi Doldu'
 
-        published_keywords = ['yayÄ±nlandÄ±', 'yayinlandi', 'ilan edildi', 'published']
-        if any(kw in status_lower for kw in published_keywords): return 'YayÄ±nda'
+        published_keywords = ['yayınlandı', 'yayinlandi', 'ilan edildi', 'published']
+        if any(kw in status_lower for kw in published_keywords): return 'Yayında'
 
         if 'renewed' in status_lower or 'yenilendi' in status_lower: return 'Yenilendi'
 
     if has_reg_no: return 'Tescil Edildi'
     if folder_upper.startswith("GZ_") or "GAZETE" in folder_upper: return 'Tescil Edildi'
-    if folder_upper.startswith("BLT_") or "BULTEN" in folder_upper: return 'YayÄ±nda'
+    if folder_upper.startswith("BLT_") or "BULTEN" in folder_upper: return 'Yayında'
 
-    return 'BaÅŸvuruldu'
+    return 'Başvuruldu'
 
 def get_status_rank(status):
     ranks = {
         'Yenilendi': 4, 'Tescil Edildi': 3, 'Devredildi': 3,
-        'SÃ¼resi Doldu': 2, 'Ä°tiraz Edildi': 2, 'Reddedildi': 2, 'Geri Ã‡ekildi': 2, 'Ä°ptal Edildi': 2,
-        'YayÄ±nda': 1, 'KÄ±smi Red': 1, 'BaÅŸvuruldu': 0
+        'Süresi Doldu': 2, 'İtiraz Edildi': 2, 'Reddedildi': 2, 'Geri Çekildi': 2, 'İptal Edildi': 2,
+        'Yayında': 1, 'Kısmi Red': 1, 'Başvuruldu': 0
     }
     return ranks.get(status, -1)
 
@@ -315,10 +316,7 @@ def _build_update_sql(source):
             """
 
 def clean_name(raw_name):
-    if not raw_name: return None
-    name = _re.sub(r'(?:\+\s*)?\b[ÅŸsÅžS][eE][kK][iÄ±Ä°I][lL]\b', '', raw_name)
-    name = ' '.join(name.split())
-    return name if name else None
+    return _rules.clean_name(raw_name)
 
 def sanitize(val):
     if val is None: return None
@@ -442,7 +440,7 @@ def _repair_corrupt_metadata(metadata_path: Path) -> dict:
     folder_path = metadata_path.parent
     folder_name = folder_path.name
     if not _has_tmbulletin_source(folder_path):
-        logging.warning(f"   UNRECOVERABLE: {folder_name} â€” no tmbulletin source files")
+        logging.warning(f"   UNRECOVERABLE: {folder_name} - no tmbulletin source files")
         return {"status": "unrecoverable", "records": 0, "error": "No tmbulletin source files"}
 
     backup_path = metadata_path.parent / "metadata.json.corrupt_backup"
@@ -469,17 +467,17 @@ def _repair_corrupt_metadata(metadata_path: Path) -> dict:
                 from pipeline.ai import process_folder as _ai_process_folder
                 logging.info(f"   Running AI feature generation for {folder_name} ({len(data)} records)...")
                 _ai_process_folder(folder_path)
-                logging.info(f"   REPAIRED: {folder_name} â€” regenerated {len(data)} records (with AI features)")
+                logging.info(f"   REPAIRED: {folder_name} - regenerated {len(data)} records (with AI features)")
             except Exception as ai_err:
-                logging.warning(f"   REPAIRED (no AI): {folder_name} â€” {len(data)} records, AI failed: {ai_err}")
+                logging.warning(f"   REPAIRED (no AI): {folder_name} - {len(data)} records, AI failed: {ai_err}")
             return {"status": "repaired", "records": len(data), "error": None}
         else:
             error_msg = result.get("error") or f"metadata.py returned status={result['status']}"
-            logging.error(f"   REGEN FAILED: {folder_name} â€” {error_msg}")
+            logging.error(f"   REGEN FAILED: {folder_name} - {error_msg}")
             if not metadata_path.exists() and backup_path.exists(): shutil.copy2(str(backup_path), str(metadata_path))
             return {"status": "regen_failed", "records": 0, "error": error_msg}
     except Exception as e:
-        logging.error(f"   REGEN FAILED: {folder_name} â€” {e}")
+        logging.error(f"   REGEN FAILED: {folder_name} - {e}")
         if not metadata_path.exists() and backup_path.exists(): shutil.copy2(str(backup_path), str(metadata_path))
         return {"status": "regen_failed", "records": 0, "error": str(e)}
 
@@ -553,16 +551,16 @@ def check_and_migrate_schema(conn):
             cur.execute("""
                 DO $$ BEGIN
                     CREATE TYPE tm_status AS ENUM (
-                        'BaÅŸvuruldu', 'YayÄ±nda', 'Ä°tiraz Edildi', 'Tescil Edildi',
-                        'Reddedildi', 'Geri Ã‡ekildi', 'Devredildi', 'Yenilendi',
-                        'KÄ±smi Red', 'SÃ¼resi Doldu', 'Bilinmiyor', 'Ä°ptal Edildi'
+                        'Başvuruldu', 'Yayında', 'İtiraz Edildi', 'Tescil Edildi',
+                        'Reddedildi', 'Geri Çekildi', 'Devredildi', 'Yenilendi',
+                        'Kısmi Red', 'Süresi Doldu', 'Bilinmiyor', 'İptal Edildi'
                     );
                 EXCEPTION WHEN duplicate_object THEN null; END $$;
             """)
         except Exception: conn.rollback()
 
         try:
-            cur.execute("ALTER TYPE tm_status ADD VALUE IF NOT EXISTS 'Ä°ptal Edildi';")
+            cur.execute("ALTER TYPE tm_status ADD VALUE IF NOT EXISTS 'İptal Edildi';")
             conn.commit()
         except Exception: conn.rollback()
 
@@ -571,7 +569,7 @@ def check_and_migrate_schema(conn):
                 id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
                 application_no VARCHAR(255) UNIQUE NOT NULL,
                 name TEXT,
-                current_status tm_status DEFAULT 'YayÄ±nda',
+                current_status tm_status DEFAULT 'Yayında',
                 last_event_date DATE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -694,11 +692,13 @@ _canonicalize_db_status = _rules._canonicalize_db_status
 parse_date = _rules.parse_date
 calculate_expiration_status = _rules.calculate_expiration_status
 extract_bulletin_info = _rules.extract_bulletin_info
+_explicit_db_status_from_text = _rules._explicit_db_status_from_text
 _determine_db_status_raw = _rules._determine_db_status_raw
 determine_db_status = _rules.determine_db_status
 determine_status = _rules.determine_status
 get_status_rank = _rules.get_status_rank
 get_source_rank = _rules.get_source_rank
+_name_cleans_to_empty = _rules._name_cleans_to_empty
 _SHARED_FIELDS = _rules._SHARED_FIELDS
 _SUSPICIOUS_SIX_FIELDS = _rules._SUSPICIOUS_SIX_FIELDS
 _BLT_OWNED_FIELDS = _rules._BLT_OWNED_FIELDS
@@ -857,9 +857,9 @@ def process_file_batch(conn, file_path, force=False):
 
         existing_db_records = {}
         if all_app_nos:
-            cur.execute("SELECT application_no, id, last_event_date, current_status, expiry_date, status_source FROM trademarks WHERE application_no = ANY(%s)", (all_app_nos,))
+            cur.execute("SELECT application_no, id, last_event_date, current_status, expiry_date, status_source, name FROM trademarks WHERE application_no = ANY(%s)", (all_app_nos,))
             for row in cur.fetchall():
-                existing_db_records[row[0]] = {"id": row[1], "last_date": row[2], "status": _canonicalize_db_status(row[3]), "expiry": row[4], "status_source": row[5]}
+                existing_db_records[row[0]] = {"id": row[1], "last_date": row[2], "status": _canonicalize_db_status(row[3]), "expiry": row[4], "status_source": row[5], "name": row[6]}
 
         new_inserts = []
         updates = []
@@ -871,7 +871,8 @@ def process_file_batch(conn, file_path, force=False):
             if not app_no: continue
 
             tm = rec.get("TRADEMARK", {})
-            tm_name = clean_name(tm.get("NAME", ""))
+            raw_tm_name = tm.get("NAME", "")
+            tm_name = clean_name(raw_tm_name)
 
             if tm_name and len(tm_name) > 2000:
                 skipped_count += 1
@@ -881,6 +882,7 @@ def process_file_batch(conn, file_path, force=False):
             reg_no_val = tm.get("REGISTERNO")
 
             db_status = determine_db_status(folder_name, status_raw, reg_no_val)
+            explicit_status = _explicit_db_status_from_text(status_raw)
 
             app_date = parse_date(tm.get("APPLICATIONDATE"))
             reg_date = parse_date(tm.get("REGISTERDATE"))
@@ -970,16 +972,26 @@ def process_file_batch(conn, file_path, force=False):
                 curr_status = existing['status']
                 existing_source = existing.get('status_source') or 'BLT'
                 old_source_rank = {'APP': 3, 'GZ': 2}.get(existing_source, 1)
+                clear_name = (
+                    _name_cleans_to_empty(raw_tm_name)
+                    and _name_cleans_to_empty(existing.get("name"))
+                )
 
                 should_update = force
                 next_status = db_status
 
-                if new_source_rank >= old_source_rank:
+                if (
+                    existing_source == "APP"
+                    and curr_status == DB_STATUS_APPLIED
+                    and not is_app_source
+                    and db_status != DB_STATUS_APPLIED
+                ):
                     should_update = True
-                    if is_app_source and db_status == DB_STATUS_APPLIED:
-                        strong_statuses = [DB_STATUS_REGISTERED, DB_STATUS_REFUSED, DB_STATUS_OPPOSED, DB_STATUS_WITHDRAWN, DB_STATUS_CANCELLED, DB_STATUS_EXPIRED, DB_STATUS_PARTIAL_REFUSAL, DB_STATUS_RENEWED]
-                        if curr_status in strong_statuses:
-                            next_status = curr_status
+                    next_status = db_status
+                elif new_source_rank >= old_source_rank:
+                    should_update = True
+                    if is_app_source and (db_status == DB_STATUS_APPLIED or explicit_status is None):
+                        next_status = curr_status
                 else:
                     should_update = True
                     next_status = curr_status
@@ -995,14 +1007,15 @@ def process_file_batch(conn, file_path, force=False):
                     next_source_tag = existing_source if (next_status == curr_status and not is_renewal) else source_tag
 
                     updates.append((
-                        sanitize(tm_name), next_status, clean_classes_list or None,
+                        sanitize(tm_name), clear_name, next_status, clean_classes_list or None,
                         Json(extracted_goods_data) if extracted_goods_data else None,
                         db_write_date, appeal_dl, new_expiry_date,
                         sanitize(tm.get("BULLETIN_NO")), bulletin_date_val,
                         sanitize(folder_gazette_no if is_gazette_source else tm.get("GAZETTE_NO")), gazette_date_val,
                         img_path, app_date, reg_date,
                         img_emb, dino_emb, txt_emb, color_emb, sanitize(ocr_text),
-                        name_tr, detected_lang, holder_name, holder_tpe_client_id,
+                        name_tr, detected_lang, None, None, None,
+                        holder_name, holder_tpe_client_id,
                         attorney_name, attorney_no,
                         next_source_tag,  # Stored as the ingest-owned status_source.
                         reg_no, wipo_no, vienna_classes or None, app_no
@@ -1161,10 +1174,13 @@ def _repair_mojibake(text):
     for _ in range(3):
         if not any(ch in repaired for ch in ("Ã", "Ä", "Å", "Â")):
             break
-        try:
-            candidate = repaired.encode("latin1").decode("utf-8")
-        except UnicodeError:
-            break
+        candidate = repaired
+        for source_encoding in ("latin1", "cp1252"):
+            try:
+                candidate = repaired.encode(source_encoding).decode("utf-8")
+                break
+            except UnicodeError:
+                continue
         if candidate == repaired:
             break
         repaired = candidate
@@ -1232,21 +1248,14 @@ def determine_status(folder_name, status_raw, reg_no_val=None):
         'Yenilendi': 'Renewed',
         'Tescil Edildi': 'Registered',
         'Devredildi': 'Transferred',
-        'SÃ¼resi Doldu': 'Expired',
-        'SÃƒÂ¼resi Doldu': 'Expired',
-        'Ä°tiraz Edildi': 'Opposed',
-        'Ã„Â°tiraz Edildi': 'Opposed',
+        'Süresi Doldu': 'Expired',
+        'İtiraz Edildi': 'Opposed',
         'Reddedildi': 'Refused',
-        'Geri Ã‡ekildi': 'Withdrawn',
-        'Geri Ãƒâ€¡ekildi': 'Withdrawn',
-        'Ä°ptal Edildi': 'Cancelled',
-        'Ã„Â°ptal Edildi': 'Cancelled',
-        'YayÄ±nda': 'Published',
-        'YayÃ„Â±nda': 'Published',
-        'KÄ±smi Red': 'Partial Refusal',
-        'KÃ„Â±smi Red': 'Partial Refusal',
-        'BaÅŸvuruldu': 'Applied',
-        'BaÃ…Å¸vuruldu': 'Applied',
+        'Geri Çekildi': 'Withdrawn',
+        'İptal Edildi': 'Cancelled',
+        'Yayında': 'Published',
+        'Kısmi Red': 'Partial Refusal',
+        'Başvuruldu': 'Applied',
     }
     status = determine_db_status(folder_name, status_raw, reg_no_val)
     return status_aliases.get(status, status)
@@ -1256,27 +1265,27 @@ def get_status_rank(status):
     status_aliases = {
         'Renewed': 'Yenilendi',
         'Registered': 'Tescil Edildi',
-        'Expired': 'SÃ¼resi Doldu',
-        'Opposed': 'Ä°tiraz Edildi',
+        'Expired': 'Süresi Doldu',
+        'Opposed': 'İtiraz Edildi',
         'Refused': 'Reddedildi',
-        'Withdrawn': 'Geri Ã‡ekildi',
-        'Cancelled': 'Ä°ptal Edildi',
-        'Published': 'YayÄ±nda',
-        'Applied': 'BaÅŸvuruldu',
-        'Partial Refusal': 'KÄ±smi Red',
+        'Withdrawn': 'Geri Çekildi',
+        'Cancelled': 'İptal Edildi',
+        'Published': 'Yayında',
+        'Applied': 'Başvuruldu',
+        'Partial Refusal': 'Kısmi Red',
     }
     ranks = {
         'Yenilendi': 4,
         'Tescil Edildi': 3,
         'Devredildi': 3,
-        'SÃ¼resi Doldu': 2,
-        'Ä°tiraz Edildi': 2,
+        'Süresi Doldu': 2,
+        'İtiraz Edildi': 2,
         'Reddedildi': 2,
-        'Geri Ã‡ekildi': 2,
-        'Ä°ptal Edildi': 2,
-        'YayÄ±nda': 1,
-        'KÄ±smi Red': 1,
-        'BaÅŸvuruldu': 0,
+        'Geri Çekildi': 2,
+        'İptal Edildi': 2,
+        'Yayında': 1,
+        'Kısmi Red': 1,
+        'Başvuruldu': 0,
     }
     status = status_aliases.get(status, status)
     return ranks.get(status, -1)
@@ -1420,6 +1429,57 @@ def _resolve_image_path(folder_name: str, image_field: str, root_dir: Path) -> s
 
     return None
 
+
+def cleanup_sekil_names(conn, batch_size: int = 5000) -> int:
+    """Remove placeholder-only 'sekil' values and clean mixed name variants."""
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, name
+        FROM trademarks
+        WHERE name IS NOT NULL
+          AND (
+              lower(name) LIKE '%sekil%'
+              OR name ~* '(s|ş)ek(i|ı|İ)l'
+          )
+        """
+    )
+    rows = cur.fetchall()
+    cleaned_total = 0
+
+    for start in range(0, len(rows), batch_size):
+        batch = rows[start:start + batch_size]
+        updates = []
+        for tm_id, current_name in batch:
+            cleaned = _rules.clean_name(current_name)
+            if cleaned != current_name:
+                updates.append((str(tm_id), sanitize(cleaned)))
+
+        if updates:
+            execute_values(
+                cur,
+                """
+                UPDATE trademarks AS tm
+                SET name = v.name::text,
+                    updated_at = NOW()
+                FROM (VALUES %s) AS v(id, name)
+                WHERE tm.id = v.id::uuid
+                """,
+                updates,
+            )
+            cleaned_total += len(updates)
+            conn.commit()
+
+    return cleaned_total
+
+
+def cleanup_applied_publication_statuses(conn) -> int:
+    """Compatibility wrapper for the standalone post-ingest status repair."""
+    from pipeline.status_repair import run_status_repair
+
+    return run_status_repair(conn=conn).get("repaired", 0)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Ingest trademark data (10M Scale).")
     parser.add_argument("--force", action="store_true", help="Force re-processing.")
@@ -1452,6 +1512,9 @@ def main():
         metadata_files.sort(key=sort_key)
 
         for json_file in metadata_files: process_file_batch(conn, json_file, args.force)
+        cleaned_names = cleanup_sekil_names(conn)
+        if cleaned_names:
+            logging.info("Cleaned %s trademark name placeholder(s)", cleaned_names)
     except Exception as e:
         logging.error(f"Ingestion failed: {e}")
         raise

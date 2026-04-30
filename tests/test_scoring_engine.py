@@ -13,7 +13,7 @@ import sys
 import os
 import math
 import inspect
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -323,6 +323,60 @@ class TestIDFWaterfall:
             }
 
     @staticmethod
+    def _seed_low_protectability_tokens(*tokens):
+        from idf_lookup import IDFLookup
+
+        for token in tokens:
+            IDFLookup._cache[token] = {
+                "idf": 8.8,
+                "is_generic": False,
+                "doc_freq": 120,
+                "word_class": "distinctive",
+                "descriptor_like": False,
+                "descriptor_score": 0.55,
+                "descriptor_stats": {
+                    "original_word_class": "distinctive",
+                    "final_word_class": "distinctive",
+                    "doc_frequency": 120,
+                    "last_rate": 0.46,
+                    "first_rate": 0.16,
+                    "single_rate": 0.03,
+                    "reason_flags": [
+                        "mostly_suffix",
+                        "low_initial_use",
+                        "low_single_use",
+                    ],
+                },
+            }
+
+    @staticmethod
+    def _seed_low_protectability_tokens_tr(*tokens):
+        from idf_lookup import IDFLookup
+
+        for token in tokens:
+            IDFLookup._cache_tr[token] = {
+                "idf": 8.8,
+                "is_generic": False,
+                "doc_freq": 120,
+                "word_class": "distinctive",
+                "descriptor_like": False,
+                "descriptor_score": 0.55,
+                "descriptor_stats": {
+                    "original_word_class": "distinctive",
+                    "final_word_class": "distinctive",
+                    "doc_frequency": 120,
+                    "last_rate": 0.46,
+                    "first_rate": 0.16,
+                    "single_rate": 0.03,
+                    "reason_flags": [
+                        "mostly_suffix",
+                        "low_initial_use",
+                        "low_single_use",
+                    ],
+                },
+            }
+
+    @staticmethod
     def _seed_descriptor_tokens(*tokens):
         from idf_lookup import IDFLookup
 
@@ -376,6 +430,63 @@ class TestIDFWaterfall:
                     "reason_flags": ["mostly_suffix", "high_partner_dispersion"],
                 },
             }
+
+    def test_suffix_heavy_corpus_distinctive_term_becomes_low_protectability_anchor(self):
+        from services.scoring_service import (
+            _is_low_protectability_anchor,
+            _token_role,
+        )
+
+        self._seed_low_protectability_tokens("bravox")
+
+        assert _is_low_protectability_anchor("bravox") is True
+        assert _token_role("bravox") == "low_protectability_anchor"
+
+    def test_high_first_use_brandlike_term_is_not_low_protectability_anchor(self):
+        from idf_lookup import IDFLookup
+        from services.scoring_service import _is_low_protectability_anchor, _token_role
+
+        IDFLookup._cache["brandx"] = {
+            "idf": 8.8,
+            "is_generic": False,
+            "doc_freq": 120,
+            "word_class": "distinctive",
+            "descriptor_like": False,
+            "descriptor_score": 0.2,
+            "descriptor_stats": {
+                "original_word_class": "distinctive",
+                "doc_frequency": 120,
+                "last_rate": 0.15,
+                "first_rate": 0.72,
+                "single_rate": 0.12,
+                "reason_flags": [],
+            },
+        }
+
+        assert _is_low_protectability_anchor("brandx") is False
+        assert _token_role("brandx") == "distinctive"
+
+    def test_descriptor_like_term_remains_generic_not_low_protectability_anchor(self):
+        from services.scoring_service import (
+            _is_low_protectability_anchor,
+            _token_role,
+        )
+
+        self._seed_descriptor_tokens("clubx")
+
+        assert _is_low_protectability_anchor("clubx") is False
+        assert _token_role("clubx") == "generic"
+
+    def test_normal_distinctive_term_remains_fully_distinctive(self):
+        from services.scoring_service import (
+            _is_low_protectability_anchor,
+            _token_role,
+        )
+
+        self._seed_distinctive_tokens("zendra")
+
+        assert _is_low_protectability_anchor("zendra") is False
+        assert _token_role("zendra") == "distinctive"
 
     def test_exact_match_returns_1(self):
         """Exact match → 1.0, scoring path EXACT_MATCH."""
@@ -1405,6 +1516,19 @@ class TestRiskEngineSqlNormalization:
         assert "COALESCE(similarity({name_tr_norm_expr}" in source
         assert "name_tr_phonetic" in source
 
+    def test_prescreen_has_short_token_boundary_stage_for_short_anchors(self):
+        import risk_engine
+
+        source = inspect.getsource(risk_engine.RiskEngine.pre_screen_candidates)
+
+        assert "short_token_boundary_clause" in source
+        assert "short_anchor_tokens" in source
+        assert "short-all-token" in source
+        assert "short-token" in source
+        assert "' ' || {norm_expr} || ' '" in source
+        assert "len(token) > 3" in source
+        assert 'run_token_stage("any-token", broad_anchor_tokens' in source
+
     def test_prescreen_anchor_retrieval_uses_descriptor_flags(self):
         import risk_engine
 
@@ -1458,6 +1582,29 @@ class TestRiskEngineSqlNormalization:
         row = ("id", "app", "name", [], None, 0.8, False, True)
 
         assert risk_engine.RiskEngine._row_text_fields(row) == ["name_tr"]
+
+
+def test_risk_engine_prewarms_configured_live_translation_backend(monkeypatch):
+    import risk_engine
+    import utils.translation as translation
+
+    mock_initialize = MagicMock(return_value=True)
+
+    monkeypatch.setattr(risk_engine.ai, "device", "cpu")
+    monkeypatch.setattr(risk_engine.ai, "text_model", MagicMock())
+    monkeypatch.setattr(risk_engine.ai, "clip_model", MagicMock())
+    monkeypatch.setattr(risk_engine.ai, "clip_preprocess", MagicMock())
+    monkeypatch.setattr(risk_engine.ai, "dinov2_model", MagicMock())
+    monkeypatch.setattr(risk_engine.ai, "dinov2_preprocess", MagicMock())
+    monkeypatch.setattr(risk_engine.RiskEngine, "_ensure_phonetic_capabilities", lambda self: None)
+    monkeypatch.setattr(translation, "initialize", mock_initialize)
+    monkeypatch.setattr(translation, "get_default_translation_backend", lambda scope="live": "madlad")
+
+    engine = risk_engine.RiskEngine(existing_conn=MagicMock())
+    try:
+        mock_initialize.assert_called_once_with("cpu", backend="madlad")
+    finally:
+        engine.close()
 
 
 class TestFeatureFlag:
@@ -1828,6 +1975,116 @@ class TestRegressionKnownPairs:
             "single_anchor_asymmetric_added_matter"
         ] is True
 
+    def test_low_protectability_shared_anchor_with_changed_matter_is_medium(self):
+        TestIDFWaterfall._seed_distinctive_tokens("alvora", "omera")
+        TestIDFWaterfall._seed_low_protectability_tokens("bravox")
+
+        result = score_pair(
+            "alvora bravox",
+            "bravox omera",
+            text_sim=0.5,
+            semantic_sim=0.2,
+        )
+
+        assert 0.50 <= result["total"] <= 0.65
+        assert "weak_shared_low_protectability_exact_anchor_cap:0.65" in (
+            result["caps_applied"]
+        )
+        assert result["textual_breakdown"]["path_a"]["weak_shared_anchor_guard"][
+            "applies"
+        ] is True
+
+    def test_low_protectability_fuzzy_variant_stays_below_high(self):
+        TestIDFWaterfall._seed_distinctive_tokens("alvora", "omera", "bravo")
+        TestIDFWaterfall._seed_low_protectability_tokens("bravox")
+
+        result = score_pair(
+            "alvora bravox",
+            "bravo omera",
+            text_sim=0.55,
+            semantic_sim=0.2,
+        )
+
+        assert result["total"] <= 0.58
+        assert "weak_shared_low_protectability_non_exact_anchor_cap:0.58" in (
+            result["caps_applied"]
+        )
+
+    def test_low_protectability_shared_anchor_is_directionally_comparable(self):
+        TestIDFWaterfall._seed_distinctive_tokens("alvora", "omera")
+        TestIDFWaterfall._seed_low_protectability_tokens("bravox")
+
+        forward = score_pair("alvora bravox", "omera bravox")
+        reverse = score_pair("omera bravox", "alvora bravox")
+
+        assert 0.50 <= forward["total"] <= 0.65
+        assert 0.50 <= reverse["total"] <= 0.65
+        assert abs(forward["total"] - reverse["total"]) <= 0.05
+
+    def test_full_copied_core_with_low_protectability_anchor_stays_high(self):
+        TestIDFWaterfall._seed_distinctive_tokens("alvora")
+        TestIDFWaterfall._seed_low_protectability_tokens("bravox")
+        TestIDFWaterfall._seed_descriptor_tokens("services")
+
+        result = score_pair(
+            "alvora bravox",
+            "alvora bravox services",
+            text_sim=0.7,
+            semantic_sim=0.2,
+        )
+
+        assert result["total"] >= 0.88
+        assert not any(
+            cap.startswith("weak_shared_low_protectability_")
+            for cap in result["caps_applied"]
+        )
+
+    def test_low_protectability_limited_text_blocks_moderate_visual_boost(self):
+        TestIDFWaterfall._seed_distinctive_tokens("alvora", "omera")
+        TestIDFWaterfall._seed_low_protectability_tokens("bravox")
+        visual_breakdown = {
+            "total": 0.62,
+            "active_components": ["clip", "dinov2", "ocr"],
+            "components": {"clip": 0.65, "dinov2": 0.64, "ocr": 0.20},
+            "ocr_disagreement": True,
+            "ocr_strong_match": False,
+            "very_strong_visual_components": False,
+        }
+
+        result = score_pair(
+            "alvora bravox",
+            "bravox omera",
+            text_sim=0.5,
+            semantic_sim=0.2,
+            visual_sim=0.62,
+            visual_breakdown=visual_breakdown,
+        )
+
+        assert result["total"] < 0.70
+        assert result["text_visual_guard"]["limited_text_cap_active"] is True
+        assert result["text_visual_guard"]["agreement_boost_suppressed"] is True
+
+    def test_translated_path_uses_low_protectability_shared_anchor_guard(self):
+        TestIDFWaterfall._seed_distinctive_tokens("alvora", "unrelated", "mark")
+        TestIDFWaterfall._seed_distinctive_tokens_tr("alvora", "omera")
+        TestIDFWaterfall._seed_low_protectability_tokens_tr("bravox")
+
+        result = score_pair(
+            "alvora bravox",
+            "unrelated mark",
+            text_sim=0.05,
+            semantic_sim=0.2,
+            visual_sim=0.55,
+            candidate_translations={"name_tr": "bravox omera"},
+        )
+
+        assert result["scoring_path_source"] == "TRANSLATED"
+        assert result["translation_similarity"] <= 0.65
+        assert result["total"] < 0.70
+        assert "weak_shared_low_protectability_exact_anchor_cap:0.65" in (
+            result["textual_breakdown"]["path_b"]["caps_applied"]
+        )
+
     def test_duplicate_translation_path_cannot_beat_original_path(self):
         TestIDFWaterfall._seed_distinctive_tokens("zendra", "sarayi")
         TestIDFWaterfall._seed_descriptor_tokens("group")
@@ -1852,6 +2109,151 @@ class TestRegressionKnownPairs:
         assert any(
             cap.startswith("translation_duplicate_original_cap")
             for cap in result["textual_breakdown"]["path_b"]["caps_applied"]
+        )
+
+    def test_short_acronym_subset_missing_query_matter_is_capped_upper_medium(self):
+        TestIDFWaterfall._seed_distinctive_tokens("ab")
+        TestIDFWaterfall._seed_low_protectability_tokens("modex")
+
+        result = score_pair("ab modex", "ab", text_sim=0.5, semantic_sim=0.2)
+
+        assert 0.68 <= result["total"] <= 0.82
+        assert result["total"] < 0.90
+        assert "short_acronym_subset_missing_matter_cap:0.82" in (
+            result["caps_applied"]
+        )
+        guard = result["textual_breakdown"]["path_a"]["short_acronym_subset_guard"]
+        assert guard["applies"] is True
+        assert result["text_visual_guard"]["limited_text_cap_active"] is True
+
+    def test_short_acronym_subset_missing_target_matter_is_capped_upper_medium(self):
+        TestIDFWaterfall._seed_distinctive_tokens("ab")
+        TestIDFWaterfall._seed_low_protectability_tokens("modex", "aix")
+
+        result = score_pair("ab", "ab modex aix", text_sim=0.5, semantic_sim=0.2)
+
+        assert 0.68 <= result["total"] <= 0.82
+        assert result["total"] < 0.90
+        assert "short_acronym_subset_missing_matter_cap:0.82" in (
+            result["caps_applied"]
+        )
+        guard = result["textual_breakdown"]["path_a"]["short_acronym_subset_guard"]
+        assert guard["applies"] is True
+        assert guard["calibration_breakdown"]["factors"]["missing_side"] == "target"
+        added = result["textual_breakdown"]["path_a"]["added_matter_breakdown"]
+        assert added["low_protectability_extra_count"] == 2
+        assert added["cap_reason"] == "single_anchor_low_protectability_extra"
+        assert result["text_visual_guard"]["limited_text_cap_active"] is True
+
+    def test_short_acronym_subset_guard_is_directionally_comparable(self):
+        TestIDFWaterfall._seed_distinctive_tokens("ab")
+        TestIDFWaterfall._seed_low_protectability_tokens("modex", "aix")
+
+        forward = score_pair("ab", "ab modex aix", text_sim=0.5, semantic_sim=0.2)
+        reverse = score_pair("ab modex aix", "ab", text_sim=0.5, semantic_sim=0.2)
+
+        assert forward["total"] <= 0.82
+        assert reverse["total"] <= 0.82
+        assert abs(forward["total"] - reverse["total"]) <= 0.08
+
+    def test_short_acronym_target_added_matter_blocks_moderate_visual_boost(self):
+        TestIDFWaterfall._seed_distinctive_tokens("ab")
+        TestIDFWaterfall._seed_low_protectability_tokens("modex", "aix")
+        visual_breakdown = {
+            "total": 0.76,
+            "active_components": ["clip", "dinov2", "ocr"],
+            "components": {"clip": 0.78, "dinov2": 0.76, "ocr": 0.2},
+            "ocr_disagreement": True,
+            "ocr_strong_match": False,
+            "very_strong_visual_components": False,
+        }
+
+        result = score_pair(
+            "ab",
+            "ab modex aix",
+            text_sim=0.5,
+            semantic_sim=0.2,
+            visual_sim=0.76,
+            visual_breakdown=visual_breakdown,
+        )
+
+        assert result["total"] < 0.80
+        assert result["text_visual_guard"]["limited_text_cap_active"] is True
+        assert result["text_visual_guard"]["agreement_boost_suppressed"] is True
+
+    def test_short_acronym_full_copied_core_with_added_matter_stays_high(self):
+        TestIDFWaterfall._seed_distinctive_tokens("ab")
+        TestIDFWaterfall._seed_low_protectability_tokens("modex", "aix")
+
+        result = score_pair("ab modex", "ab modex aix", text_sim=0.7, semantic_sim=0.2)
+
+        assert result["total"] >= 0.88
+        assert not any(
+            cap.startswith("short_acronym_subset_missing_matter_cap")
+            for cap in result["caps_applied"]
+        )
+
+    def test_short_collapsed_translation_path_is_capped_below_high(self):
+        TestIDFWaterfall._seed_distinctive_tokens("ab", "xab")
+        TestIDFWaterfall._seed_low_protectability_tokens("modex")
+        TestIDFWaterfall._seed_distinctive_tokens_tr("ab", "xab")
+        TestIDFWaterfall._seed_low_protectability_tokens_tr("modex")
+
+        result = score_pair(
+            "ab modex",
+            "xab",
+            text_sim=0.2,
+            semantic_sim=0.1,
+            candidate_translations={"name_tr": "ab"},
+        )
+
+        assert result["total"] < 0.70
+        assert result["path_b_score"] <= 0.45
+        flags = result["textual_breakdown"]["translation_quality_flags"]
+        assert "short_collapsed_candidate_translation" in flags
+        assert "translation_short_anchor_subset_cap" in flags
+        assert result["textual_breakdown"]["short_collapsed_candidate_translation"] is True
+        assert any(
+            cap.startswith("translation_short_anchor_subset_cap")
+            for cap in result["textual_breakdown"]["path_b"]["caps_applied"]
+        )
+
+    def test_bad_short_name_tr_cannot_create_translated_high_risk(self):
+        TestIDFWaterfall._seed_distinctive_tokens("xy", "xyp")
+        TestIDFWaterfall._seed_low_protectability_tokens("modex")
+        TestIDFWaterfall._seed_distinctive_tokens_tr("xy", "xyp")
+        TestIDFWaterfall._seed_low_protectability_tokens_tr("modex")
+
+        result = score_pair(
+            "xy modex",
+            "xyp",
+            text_sim=0.2,
+            semantic_sim=0.1,
+            candidate_translations={"name_tr": "xy"},
+        )
+
+        assert result["path_b_score"] <= 0.45
+        assert result["total"] < 0.70
+        assert "translation_short_anchor_subset_cap" in (
+            result["textual_breakdown"]["translation_quality_flags"]
+        )
+
+    def test_longer_legitimate_translated_path_still_scores_high(self):
+        TestIDFWaterfall._seed_distinctive_tokens("apple", "elma")
+        TestIDFWaterfall._seed_distinctive_tokens_tr("apple")
+
+        result = score_pair(
+            "apple",
+            "elma",
+            text_sim=0.05,
+            semantic_sim=0.1,
+            candidate_translations={"name_tr": "apple"},
+        )
+
+        assert result["total"] >= 0.90
+        assert result["scoring_path_source"] == "TRANSLATED"
+        assert "translation_short_anchor_subset_cap" not in (
+            result["textual_breakdown"]["translation_quality_flags"]
         )
 
     def test_full_length_one_edit_fuzzy_anchor_remains_meaningful(self):

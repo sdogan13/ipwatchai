@@ -47,6 +47,8 @@ logs/
 # Uploads & Generated content
 uploads/
 reports/
+artifacts/repair/live_full_run_*/
+artifacts/repair/live_trademark_checks/
 
 # IDE
 .vscode/

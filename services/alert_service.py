@@ -17,6 +17,15 @@ from models.schemas import (
     ConflictingTrademark,
     PaginatedResponse,
 )
+from utils.watchlist_filters import same_holder_alert_exclusion_sql
+
+
+def _visible_alert_condition(
+    alert_alias: str = "a",
+    conflict_alias: str = "t",
+    watched_alias: str = "my_tm",
+) -> str:
+    return same_holder_alert_exclusion_sql(alert_alias, conflict_alias, watched_alias)
 
 
 def format_alert_response(alert: dict, deadline_classifier=None) -> AlertResponse:
@@ -140,13 +149,17 @@ async def get_alerts_summary_data(
     """Return appealable alert summary counts by status and severity."""
     with db_factory() as db:
         cur = db.cursor()
+        visible_alert_condition = _visible_alert_condition()
         cur.execute(
-            """
+            f"""
             SELECT a.status, COUNT(*) as count
             FROM alerts_mt a
+            LEFT JOIN watchlist_mt w ON a.watchlist_item_id = w.id
             LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
+            LEFT JOIN trademarks my_tm ON w.customer_application_no = my_tm.application_no
             WHERE a.organization_id = %s
               AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
+              AND {visible_alert_condition}
             GROUP BY a.status
         """,
             (str(current_user.organization_id),),
@@ -154,12 +167,15 @@ async def get_alerts_summary_data(
         by_status = {row["status"]: row["count"] for row in cur.fetchall()}
 
         cur.execute(
-            """
+            f"""
             SELECT a.severity, COUNT(*) as count
             FROM alerts_mt a
+            LEFT JOIN watchlist_mt w ON a.watchlist_item_id = w.id
             LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
+            LEFT JOIN trademarks my_tm ON w.customer_application_no = my_tm.application_no
             WHERE a.organization_id = %s AND a.status = 'new'
               AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
+              AND {visible_alert_condition}
             GROUP BY a.severity
         """,
             (str(current_user.organization_id),),
@@ -187,6 +203,7 @@ async def aggregate_alerts_data(
     with db_factory() as db:
         cur = db.cursor()
         org_id = str(current_user.organization_id)
+        visible_alert_condition = _visible_alert_condition()
 
         where_extra = ""
         params = [org_id]
@@ -195,13 +212,15 @@ async def aggregate_alerts_data(
             params.append(severity)
 
         cur.execute(
-            """
+            f"""
             SELECT COUNT(*) FROM alerts_mt a
             JOIN watchlist_mt w ON a.watchlist_item_id = w.id
             LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
+            LEFT JOIN trademarks my_tm ON w.customer_application_no = my_tm.application_no
             WHERE a.organization_id = %s
                 AND a.status NOT IN ('dismissed', 'resolved')
                 AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
+                AND {visible_alert_condition}
         """
             + where_extra,
             params,
@@ -211,16 +230,18 @@ async def aggregate_alerts_data(
 
         offset = (page - 1) * page_size
         cur.execute(
-            """
+            f"""
             SELECT a.*, w.brand_name AS watched_brand_name,
                    a.opposition_deadline, a.conflicting_name,
                    t.name AS tm_name, t.final_status, t.bulletin_date
             FROM alerts_mt a
             JOIN watchlist_mt w ON a.watchlist_item_id = w.id
             LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
+            LEFT JOIN trademarks my_tm ON w.customer_application_no = my_tm.application_no
             WHERE a.organization_id = %s
                 AND a.status NOT IN ('dismissed', 'resolved')
                 AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
+                AND {visible_alert_condition}
         """
             + where_extra
             + """

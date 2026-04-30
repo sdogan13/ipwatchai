@@ -10,8 +10,12 @@
 
     <!-- PWA Meta -->
     <meta name="theme-color" content="#4f46e5">
-    <link rel="manifest" href="/static/manifest.json">
-    <link rel="icon" type="image/png" href="/static/icons/icon-192.png">
+    <link rel="manifest" href="/static/manifest.json?v=20260427">
+    <link rel="icon" href="/static/icons/favicon.ico?v=20260427" sizes="any">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32.png?v=20260427">
+    <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png?v=20260427">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon.png?v=20260427">
+    <script src="/static/js/utils/auth-guard.js?v=1"></script>
 
     <!-- Preconnect -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2176,11 +2180,11 @@
     <script>
         window.SERVER_PLANS = {{ plans | default({}, true) | tojson }};
     </script>
-<script src="/static/js/utils/i18n.js?v=38"></script>
+    <script src="/static/js/utils/i18n.js?v=42"></script>
 <script src="/static/js/utils/helpers.js?v=33"></script>
 <script src="/static/js/utils/toast.js?v=31"></script>
 <script src="/static/js/utils/upgrade-modal.js?v=4"></script>
 <script src="/static/js/components/score-badge.js?v=31"></script>
-<script src="/static/js/marketing/landing.js?v=50"></script>
+<script src="/static/js/marketing/landing.js?v=51"></script>
 </body>
 </html>

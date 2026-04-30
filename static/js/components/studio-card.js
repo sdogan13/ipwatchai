@@ -47,7 +47,7 @@ window.AppComponents.renderNameCard = function(name, index) {
 
     var useForLogoBtn = isSafe
         ? '<button onclick="useNameForLogo(\'' + escapeHtml(name.name).replace(/'/g, "\\'") + '\')" '
-          + 'class="text-xs text-purple-600 hover:text-purple-800 font-medium mt-2 flex items-center gap-1 btn-press">'
+          + 'class="studio-logo-action-button mt-3 btn-press">'
           + '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>'
           + t('studio.generate_logo_btn') + '</button>'
         : '';
@@ -66,7 +66,7 @@ window.AppComponents.renderNameCard = function(name, index) {
         + '<div class="flex-shrink-0">' + scoreRing + '</div>'
         + '</div>';
 
-    return window.AppComponents.renderCardShell(inner, { noMargin: true, riskLevel: riskLevel });
+    return '<div class="studio-name-card risk-stripe-' + riskLevel + '">' + inner + '</div>';
 };
 
 // ============================================
@@ -75,13 +75,25 @@ window.AppComponents.renderNameCard = function(name, index) {
 window.AppComponents.renderLogoCard = function(logo) {
     var simPct = Math.round(logo.similarity_score || 0);
     var isSafe = logo.is_safe;
+    var auditStatus = logo.audit_status || 'completed';
+    var auditDone = auditStatus === 'completed';
+    var auditPending = auditStatus === 'pending' || auditStatus === 'running';
+    var auditFailed = auditStatus === 'failed';
+    var canDownload = auditDone && isSafe;
 
-    var safetyBadge = isSafe
-        ? '<span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style="' + window.AppComponents.getScoreColor(20) + '">&#x2713; ' + t('studio.safe_badge') + '</span>'
-        : '<span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style="' + window.AppComponents.getScoreColor(90) + '">&#x26a0; ' + t('studio.risk_exists') + '</span>';
+    var safetyBadge = '';
+    if (auditPending) {
+        safetyBadge = '<span class="studio-audit-badge is-pending">' + t('studio.audit_status_' + auditStatus) + '</span>';
+    } else if (auditFailed) {
+        safetyBadge = '<span class="studio-audit-badge is-failed">' + t('studio.audit_status_failed') + '</span>';
+    } else {
+        safetyBadge = isSafe
+            ? '<span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style="' + window.AppComponents.getScoreColor(20) + '">&#x2713; ' + t('studio.safe_badge') + '</span>'
+            : '<span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style="' + window.AppComponents.getScoreColor(90) + '">&#x26a0; ' + t('studio.risk_exists') + '</span>';
+    }
 
     var closestHtml = '';
-    if (logo.closest_match_name) {
+    if (auditDone && logo.closest_match_name) {
         closestHtml = '<div class="text-xs mt-1" style="color:var(--color-text-muted)">'
             + t('studio.closest_match_full') + ' <span class="font-medium" style="color:var(--color-text-secondary)">' + escapeHtml(logo.closest_match_name) + '</span>'
             + ' <span style="color:var(--color-text-faint)">(' + t('studio.similarity_pct', { pct: simPct }) + ')</span>'
@@ -106,28 +118,45 @@ window.AppComponents.renderLogoCard = function(logo) {
     var imgPlaceholderId = 'logo-img-' + logo.image_id;
 
     var simColor = simPct >= 70 ? 'var(--color-risk-critical-text)' : simPct >= 50 ? 'var(--color-risk-medium-text)' : 'var(--color-risk-low-text)';
+    var scoreHtml = auditDone
+        ? '<span class="text-sm font-bold" style="color:' + simColor + '">' + simPct + '%</span>'
+        : '<span class="text-xs font-semibold" style="color:var(--color-text-muted)">' + t(auditPending ? 'studio.audit_preview_only' : 'studio.audit_failed_short') + '</span>';
+    var cardClasses = 'studio-logo-card';
+    if (logo.is_selected) cardClasses += ' is-selected';
+    if (logo.is_revision_target) cardClasses += ' is-revision-target';
+    var actions = '';
+    if (auditPending) {
+        actions = '<span class="studio-logo-action-note">' + t('studio.audit_pending_note') + '</span>';
+    } else if (auditFailed) {
+        actions = '<button onclick="retryLogoAudit(\'' + escapeHtml(logo.image_id) + '\')" class="studio-logo-action-button btn-press">' + t('studio.retry_audit') + '</button>';
+    } else {
+        actions = '<button onclick="chooseLogoForRevision(\'' + escapeHtml(logo.image_id) + '\')" class="studio-logo-action-button btn-press">' + t('studio.revise_btn') + '</button>';
+        if (canDownload) {
+            actions += '<button onclick="selectFinalLogoCandidate(\'' + escapeHtml(logo.image_id) + '\')" class="studio-logo-action-button btn-press">' + (logo.is_selected ? t('studio.selected_badge') : t('studio.select_logo')) + '</button>';
+            actions += '<button onclick="downloadLogo(\'' + escapeHtml(logo.image_id) + '\')" class="studio-logo-action-button is-primary btn-press">'
+                + '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>'
+                + t('studio.download_png') + '</button>';
+        } else {
+            actions += '<span class="studio-logo-action-note">' + t('studio.risky_download_blocked') + '</span>';
+        }
+        actions += '<button onclick="toggleLogoDetail(\'' + escapeHtml(logo.image_id) + '\')" class="studio-logo-action-button btn-press">' + t('studio.detail_btn') + '</button>';
+    }
 
-    var html = '<div class="rounded-xl shadow-sm hover:shadow-md transition-all overflow-hidden" style="background:var(--color-bg-card);border:1px solid var(--color-border)">'
+    var html = '<div data-studio-logo-card="true" class="' + cardClasses + '">'
         // Logo image area — loaded via JS fetch for auth
-        + '<div id="' + imgPlaceholderId + '" class="aspect-square flex items-center justify-center p-4" style="background:var(--color-bg-muted);border-bottom:1px solid var(--color-border)">'
-        + '<div class="animate-spin w-8 h-8 border-4 border-purple-200 border-t-purple-600 rounded-full"></div>'
+        + '<div id="' + imgPlaceholderId + '" class="studio-logo-image-frame">'
+        + '<div class="animate-spin w-8 h-8 rounded-full" style="border:4px solid var(--color-border);border-top-color:var(--color-primary)"></div>'
         + '</div>'
         // Info area
-        + '<div class="p-4">'
+        + '<div class="studio-logo-card-body">'
         + '<div class="flex items-center justify-between mb-1">'
         + safetyBadge
-        + '<span class="text-sm font-bold" style="color:' + simColor + '">' + simPct + '%</span>'
+        + scoreHtml
         + '</div>'
         + closestHtml
         // Actions
-        + '<div class="flex items-center gap-2 mt-3">'
-        + '<button onclick="downloadLogo(\'' + escapeHtml(logo.image_id) + '\')" '
-        + 'class="flex-1 text-xs px-3 py-1.5 rounded-lg flex items-center justify-center gap-1 font-medium transition-colors btn-press min-h-[36px]" style="background:var(--color-bg-muted);color:var(--color-text-secondary);border:1px solid var(--color-border)">'
-        + '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>'
-        + t('studio.download_png') + '</button>'
-        + '<button onclick="toggleLogoDetail(\'' + escapeHtml(logo.image_id) + '\')" '
-        + 'class="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors btn-press min-h-[36px]" style="background:var(--color-bg-muted);color:var(--color-text-secondary);border:1px solid var(--color-border)">'
-        + t('studio.detail_btn') + '</button>'
+        + '<div class="studio-logo-actions">'
+        + actions
         + '</div>'
         + '</div>'
         + '</div>';
@@ -139,6 +168,11 @@ window.AppComponents.renderLogoCard = function(logo) {
 // C) Helper: download logo
 // ============================================
 window.AppComponents.downloadLogo = function(imageId) {
+    var logo = (typeof _studioLogos !== 'undefined' && _studioLogos) ? _studioLogos[imageId] : null;
+    if (logo && ((logo.audit_status || 'completed') !== 'completed' || !logo.is_safe)) {
+        showToast(t('studio.download_requires_safe_audit'), 'error');
+        return;
+    }
     var url = '/api/v1/tools/generated-image/' + imageId;
     var a = document.createElement('a');
     a.href = url;
@@ -177,8 +211,12 @@ window.AppComponents.loadLogoImages = function(logos) {
             if (!res.ok) throw new Error('Failed');
             return res.blob();
         }).then(function(blob) {
+            if (container.dataset.blobUrl) {
+                window.URL.revokeObjectURL(container.dataset.blobUrl);
+            }
             var url = window.URL.createObjectURL(blob);
-            container.innerHTML = '<img src="' + url + '" alt="Logo" class="max-w-full max-h-full object-contain">';
+            container.dataset.blobUrl = url;
+            container.innerHTML = '<img src="' + url + '" alt="' + t('studio.logo_studio') + '" class="max-w-full max-h-full object-contain">';
         }).catch(function() {
             container.innerHTML = '<div class="text-center" style="color:var(--color-text-faint)">'
                 + '<svg class="w-12 h-12 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>'

@@ -317,6 +317,9 @@ def test_dashboard_feature_bundle_contains_dashboard_bootstrap():
     assert "showBulkUploadStepOne()" in script
     assert "isUploadLimitOnlyResult(data)" in script
     assert "'watchlist.upload_limit_result'" in script
+    assert "item.custom_logo_url || (item.has_custom_logo ? item.logo_url : null)" in script
+    assert "item.trademark_image_path" in script
+    assert "(item.has_custom_logo" in script
 
 
 def test_landing_feature_page_loads_canonical_landing_script_url():

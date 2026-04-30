@@ -45,6 +45,7 @@ NAME_GENERATION_PROMPT = """\
 You are a creative brand naming expert specializing in trademark law.
 
 Generate {count} unique brand name suggestions for:
+- Brand concept or source name: {concept}
 - Industry/Category: {industry}
 - Nice Classes: {nice_classes}
 - Style: {style}
@@ -72,6 +73,23 @@ Requirements:
 - White or transparent background
 - Professional quality, suitable for business use
 - The design should be distinctive and unique"""
+
+LOGO_REVISION_PROMPT = """\
+Revise the provided logo candidate for the brand "{brand_name}".
+
+Keep:
+- The text "{brand_name}" clearly visible and legible
+- Style direction: {style}
+- Original visual brief: {description}
+
+Apply this user revision request:
+{revision_prompt}
+
+Requirements:
+- Create one standalone logo candidate, not a grid, mockup, package, or presentation board
+- Use clean vector-style graphics suitable for trademark registration
+- White or transparent background
+- Preserve the useful direction from the reference image while making a distinct revised option"""
 
 
 # Retryable HTTP status codes
@@ -166,6 +184,7 @@ class GeminiClient:
 
     def build_name_prompt(
         self,
+        concept: str = "",
         industry: str = "",
         nice_classes: str = "",
         style: str = "modern",
@@ -176,6 +195,7 @@ class GeminiClient:
         """Build a name generation prompt from parameters."""
         return NAME_GENERATION_PROMPT.format(
             count=count,
+            concept=concept or "Not specified",
             industry=industry or "General",
             nice_classes=nice_classes or "Not specified",
             style=style,
@@ -243,7 +263,64 @@ class GeminiClient:
 
         return images
 
-    async def _generate_single_logo(self, prompt: str, config) -> Optional[bytes]:
+    async def generate_logo_revisions(
+        self,
+        brand_name: str,
+        description: str,
+        style: str = "modern",
+        revision_prompt: str = "",
+        reference_image_bytes: Optional[bytes] = None,
+        count: int = 4,
+    ) -> list[bytes]:
+        """Generate revised logo candidates from a selected prior candidate."""
+        if not self.is_available():
+            raise GeminiError("Gemini API key not configured", status_code=None)
+
+        from google.genai import types
+
+        prompt = LOGO_REVISION_PROMPT.format(
+            brand_name=brand_name,
+            style=style,
+            description=description or f"Professional logo for {brand_name}",
+            revision_prompt=revision_prompt or "Create a refined alternative that improves distinctiveness.",
+        )
+
+        config = types.GenerateContentConfig(
+            response_modalities=["IMAGE"],
+        )
+
+        contents = prompt
+        if reference_image_bytes:
+            try:
+                contents = [
+                    prompt,
+                    types.Part.from_bytes(
+                        data=reference_image_bytes,
+                        mime_type="image/png",
+                    ),
+                ]
+            except Exception:
+                logger.warning("logo_revision_reference_part_failed")
+                contents = prompt
+
+        images: list[bytes] = []
+        for i in range(count):
+            try:
+                image_bytes = await self._generate_single_logo(contents, config)
+                if image_bytes:
+                    images.append(image_bytes)
+            except GeminiError:
+                if i == 0:
+                    raise
+                logger.warning("logo_revision_variation_failed", variation=i + 1, total=count)
+                continue
+
+        if not images:
+            raise GeminiError("No revised logo images were generated", retries_attempted=self.max_retries)
+
+        return images
+
+    async def _generate_single_logo(self, prompt, config) -> Optional[bytes]:
         """Generate a single logo image and return its bytes."""
         from google.genai import types
 

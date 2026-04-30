@@ -1,28 +1,58 @@
 /**
- * auth.js - Authentication helpers + usage tracking
+ * auth.js - authenticated profile helpers + usage tracking.
+ *
+ * Session expiry/redirect behavior lives in auth-guard.js so protected pages
+ * can run the check before rendering the full app.
  */
 window.AppAuth = window.AppAuth || {};
 
-window.AppAuth.currentUserPlan = 'free';
-window.AppAuth.currentUserRole = '';
-window.AppAuth.currentUserName = '';
-window.AppAuth.currentUserIsSuperadmin = false;
-window.AppAuth.usage = null; // populated by fetchUsageSummary
+window.AppAuth.currentUserPlan = window.AppAuth.currentUserPlan || 'free';
+window.AppAuth.currentUserRole = window.AppAuth.currentUserRole || '';
+window.AppAuth.currentUserName = window.AppAuth.currentUserName || '';
+window.AppAuth.currentUserIsSuperadmin = !!window.AppAuth.currentUserIsSuperadmin;
+window.AppAuth.currentProfile = window.AppAuth.currentProfile || null;
+window.AppAuth.usage = window.AppAuth.usage || null; // populated by fetchUsageSummary
 
-window.AppAuth.getAuthToken = function() {
-    return localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token') || '';
+if (!window.AppAuth.getAuthToken) {
+    window.AppAuth.getAuthToken = function () {
+        return localStorage.getItem('auth_token')
+            || localStorage.getItem('access_token')
+            || sessionStorage.getItem('auth_token')
+            || sessionStorage.getItem('access_token')
+            || localStorage.getItem('token')
+            || sessionStorage.getItem('token')
+            || '';
+    };
+}
+
+if (!window.AppAuth.getToken) {
+    window.AppAuth.getToken = window.AppAuth.getAuthToken;
+}
+
+window.AppAuth.getProfile = function () {
+    return window.AppAuth.currentProfile;
 };
 
-window.AppAuth.fetchUserPlan = function() {
+function _authHandleUnauthorized(response) {
+    if (response && response.status === 401 && window.AppAuth.handleUnauthorized) {
+        window.AppAuth.handleUnauthorized(response);
+        return true;
+    }
+    return false;
+}
+
+window.AppAuth.fetchUserPlan = function () {
     var token = window.AppAuth.getAuthToken();
     if (!token) return;
     var opts = { headers: { 'Authorization': 'Bearer ' + token } };
     if (typeof AbortSignal.timeout === 'function') opts.signal = AbortSignal.timeout(15000);
-    fetch('/api/v1/auth/me', opts).then(function(res) {
+    fetch('/api/v1/auth/me', opts).then(function (res) {
+        if (_authHandleUnauthorized(res)) return null;
         if (res.ok) return res.json();
         return null;
-    }).then(function(profile) {
+    }).then(function (profile) {
         if (profile) {
+            window.AppAuth.currentProfile = profile;
             window.AppAuth.currentUserPlan = (profile.organization && profile.organization.plan) || 'free';
             currentUserPlan = window.AppAuth.currentUserPlan;
             window.AppAuth.currentUserRole = profile.role || '';
@@ -31,7 +61,7 @@ window.AppAuth.fetchUserPlan = function() {
             window.AppAuth.currentUserIsSuperadmin = !!profile.is_superadmin;
             // Initialize admin-only features (superadmin only)
             if (window.AppAuth.currentUserIsSuperadmin) {
-                initPipelineStatus();
+                if (typeof initPipelineStatus === 'function') initPipelineStatus();
                 // Show admin links in navbar
                 var deskLink = document.getElementById('admin-link-desktop');
                 if (deskLink) { deskLink.classList.remove('hidden'); deskLink.classList.add('flex'); }
@@ -43,30 +73,31 @@ window.AppAuth.fetchUserPlan = function() {
             // Fetch usage summary and update UI badges
             window.AppAuth.fetchUsageSummary();
         }
-    }).catch(function(e) { /* silent */ });
+    }).catch(function (e) { /* silent */ });
 };
 
-window.AppAuth.fetchUsageSummary = function() {
+window.AppAuth.fetchUsageSummary = function () {
     var token = window.AppAuth.getAuthToken();
     if (!token) return;
     var opts = { headers: { 'Authorization': 'Bearer ' + token } };
     if (typeof AbortSignal.timeout === 'function') opts.signal = AbortSignal.timeout(15000);
-    fetch('/api/v1/usage/summary', opts).then(function(res) {
+    fetch('/api/v1/usage/summary', opts).then(function (res) {
+        if (_authHandleUnauthorized(res)) return null;
         if (res.ok) return res.json();
         return null;
-    }).then(function(data) {
+    }).then(function (data) {
         if (data) {
             window.AppAuth.usage = data.usage;
             window.AppAuth.updatePlanBadges();
         }
-    }).catch(function(e) { /* silent */ });
+    }).catch(function (e) { /* silent */ });
 };
 
 /**
  * Update UI badges based on plan and remaining credits.
  * Called after usage summary is fetched.
  */
-window.AppAuth.updatePlanBadges = function() {
+window.AppAuth.updatePlanBadges = function () {
     var plan = window.AppAuth.currentUserPlan;
     var usage = window.AppAuth.usage;
     if (!usage) return;

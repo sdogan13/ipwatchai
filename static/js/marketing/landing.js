@@ -19,7 +19,7 @@ function landing() {
         activeTab: 'home',
 
         // Auth state
-        isLoggedIn: !!(localStorage.getItem('auth_token') || localStorage.getItem('access_token')),
+        isLoggedIn: !!(window.AppAuth && window.AppAuth.hasValidAccessToken && window.AppAuth.hasValidAccessToken()),
 
         // Search state
         searchQuery: '',
@@ -215,6 +215,7 @@ function landing() {
 
         // ==================== EDUCATION ====================
         getAuthToken: function () {
+            if (window.AppAuth && window.AppAuth.getAuthToken) return window.AppAuth.getAuthToken();
             return localStorage.getItem('auth_token')
                 || localStorage.getItem('access_token')
                 || sessionStorage.getItem('auth_token')
@@ -1879,7 +1880,7 @@ function landing() {
             params.set('bw_count', String(this.portfolioTotalCount || 0));
             var redirectUrl = '/dashboard?' + params.toString();
 
-            var token = localStorage.getItem('auth_token') || localStorage.getItem('access_token');
+            var token = this.getAuthToken();
             if (!token) {
                 // Save redirect so after login user lands on dashboard with bulk modal
                 localStorage.setItem('pending_studio_redirect', redirectUrl);
@@ -1916,8 +1917,12 @@ function landing() {
                 .then(function (data) {
                     if (data.access_token) {
                         self.isLoggedIn = true;
-                        localStorage.setItem('auth_token', data.access_token);
-                        if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token);
+                        if (window.AppAuth && window.AppAuth.storeTokenPair) {
+                            window.AppAuth.storeTokenPair(data);
+                        } else {
+                            localStorage.setItem('auth_token', data.access_token);
+                            if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token);
+                        }
                         var pendingRedirect = self.consumePostAuthRedirect();
                         if (pendingRedirect) {
                             window.location.href = pendingRedirect;
@@ -2049,8 +2054,12 @@ function landing() {
                 .then(function (data) {
                     if (data.access_token) {
                         self.isLoggedIn = true;
-                        localStorage.setItem('auth_token', data.access_token);
-                        if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token);
+                        if (window.AppAuth && window.AppAuth.storeTokenPair) {
+                            window.AppAuth.storeTokenPair(data);
+                        } else {
+                            localStorage.setItem('auth_token', data.access_token);
+                            if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token);
+                        }
                         var pendingRedirect = self.consumePostAuthRedirect();
                         if (pendingRedirect) {
                             window.location.href = pendingRedirect;

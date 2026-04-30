@@ -62,6 +62,7 @@ BATCH_ORDERING_CHOICES = {
 }
 BATCH_UPDATE_SIZE = 500
 METADATA_QUERY_BATCH_SIZE = 1000
+MAX_NAME_TR_LENGTH = 500
 
 try:
     from config.settings import settings
@@ -314,6 +315,17 @@ def _serialize_timestamp(value) -> str | None:
     else:
         value = value.astimezone(timezone.utc)
     return value.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _truncate_name_tr_for_storage(value: str | None) -> tuple[str | None, bool]:
+    if value is None:
+        return None, False
+    if len(value) <= MAX_NAME_TR_LENGTH:
+        return value, False
+    truncated = value[:MAX_NAME_TR_LENGTH].rstrip()
+    if not truncated:
+        truncated = value[:MAX_NAME_TR_LENGTH]
+    return truncated, True
 
 
 def _chunked(values: Sequence[str], size: int) -> Iterable[Sequence[str]]:
@@ -689,6 +701,7 @@ def _prepare_updates(rows: Sequence[tuple], translations: Sequence[tuple[str, st
         "translation_changed": 0,
         "lang_changed": 0,
         "provenance_changed": 0,
+        "name_tr_truncated": 0,
         "translated": 0,
         "preserved": 0,
     }
@@ -699,8 +712,11 @@ def _prepare_updates(rows: Sequence[tuple], translations: Sequence[tuple[str, st
             continue
 
         normalized_tr = turkish_lower(new_name_tr) if new_name_tr else turkish_lower(name)
+        normalized_tr, was_truncated = _truncate_name_tr_for_storage(normalized_tr)
         final_lang = new_lang if new_lang and new_lang != "unknown" else (old_lang or "unknown")
         stats["processed"] += 1
+        if was_truncated:
+            stats["name_tr_truncated"] += 1
         if normalized_tr != turkish_lower(name):
             stats["translated"] += 1
         else:
@@ -775,6 +791,7 @@ def run_refresh(
         "translation_changed": 0,
         "lang_changed": 0,
         "provenance_changed": 0,
+        "name_tr_truncated": 0,
         "translated": 0,
         "preserved": 0,
         "model_rows": 0,

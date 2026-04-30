@@ -6,6 +6,7 @@ This repo includes:
 - the application backend and server-rendered frontend
 - authenticated and public trademark search flows
 - watchlists, alerts, reports, applications, billing, and admin tools
+- holder-aware watchlist alert filtering so a holder's own later applications do not appear as similarity conflicts against their existing watched marks
 - bulletin collection and ingest pipeline code
 - unit, API, live, browser, and nightly verification suites
 
@@ -147,9 +148,12 @@ Current version: `v2_text_visual`.
 - `translation_similarity` is the translated-name textual path score, not a separate overall signal
 - text token weighting separates true descriptive generics such as `patent` and `ltd` from common trademark anchors such as `dogan`
 - descriptor-like category/service/entity terms are now classified from local corpus behavior in `word_idf` and `word_idf_tr`; high-IDF descriptor terms stay generic and cannot become common anchors on their own
+- low-protectability anchors are detected from descriptor statistics when a corpus-distinctive term behaves like a suffix-heavy weak modifier; shared weak-anchor-only matches are capped as limited text unless the full query core is copied
 - short acronym-style anchors require exact normalized copying; non-exact fuzzy/phonetic matches such as a two-character acronym against a longer translated word are capped as weak evidence
+- exact short-acronym subset matches with missing matter on either side are capped as limited text, and short collapsed `name_tr` values cannot turn a longer original candidate into a high translated match
 - compact compounds with true-generic suffixes, such as `doganpatent`, are scored through their anchor plus generic components
 - Retrieval V2 pre-screening searches normalized, compact, containment, token, fuzzy, OCR, semantic, visual, and phonetic candidate paths before V2 scoring
+- short anchor tokens use exact token-boundary retrieval across `name` and `name_tr`; broad substring token retrieval is reserved for longer anchors so short queries are not flooded by unrelated fragments
 - textual retrieval runs symmetrically across `trademarks.name` and `trademarks.name_tr`, so translated-name candidates enter the same scoring flow as original-name candidates
 - retrieval diagnostics record which internal stage and field found a candidate; scoring still decides Path A (`name`) versus Path B (`name_tr`)
 - dominant-core scoring keeps fully copied marks high with generic additions, while capping changed extra matter such as a different second brand term
@@ -166,9 +170,11 @@ Current version: `v2_text_visual`.
 - final text/visual combining is max-plus, so a strong text or logo match is not diluted when the other signal is missing
 - the score remains a `0.0-1.0` similarity-risk score; legal factors such as status, class relatedness, seniority, and enforceability are handled outside this scoring slice
 
+When unified scoring is enabled, `/api/search` maps the canonical `RiskEngine.assess_brand_risk()` result into its legacy response shape, so enhanced search, public search, and watchlist conflicts use the same candidate retrieval and `score_pair()` scoring behavior.
+
 ## Translation Refresh
 
-- Live query translation continues to use the default NLLB backend from `utils/translation.py`.
+- Live query translation now defaults to the MADLAD backend from `utils/translation.py`, so search-time translated queries stay aligned with the refreshed MADLAD-backed `name_tr` corpus.
 - Offline `name_tr` regeneration is now driven by `scripts/regenerate_name_tr.py`, which:
   - benchmarks the candidate backend against the current NLLB baseline
   - exports a rollback snapshot before refresh
@@ -239,6 +245,7 @@ See `test.md` for the current test lanes and coverage expectations.
 - `/api/v1/search/public`: public landing-page search
 - `/api/v1/search/quick`: authenticated quick search
 - `/api/v1/search/intelligent`: authenticated deeper search flow
+- `/api/v1/tools/status`: AI Studio Name Lab and Logo Studio availability
 
 ## Pipeline Notes
 
@@ -261,11 +268,17 @@ Pipeline runtime notes:
 - successful PDF extraction now relocates a top-level raw PDF into its canonical issue folder as `bulletin.pdf`
 - Step 2 now also runs `pdf_extract_events.py` across BLT/GZ issue folders missing `events.json`, including repair of older top-level raw-PDF cases when the issue folder already exists
 - Step 3 now prefers archive DB/text inputs over an existing `metadata.json`, so mixed PDF + archive folders are re-parsed from the archive source and `metadata.json` is overwritten
+- Step 3 preserves existing AI feature fields when the trademark-name and image inputs still match, and it can restore missing AI fields from the database before `pipeline/ai.py` evaluates skip logic
 - `pipeline/ingest.py` is now a thin compatibility wrapper; canonical ingest status rules live in `pipeline/ingest_rules.py`, runtime orchestration lives in `pipeline/ingest_runtime.py`, and explicit ingest-runtime setup/readiness checks live in `pipeline/ingest_bootstrap.py`
 - ingest no longer self-patches schema/reference tables on every run; apply `python migrations/run_ingest_runtime_migration.py` once per environment and normal ingest will then fail fast if runtime prerequisites are missing
+- APP ingest records no longer overwrite an existing BLT/GZ status with `Applied` or registration-number fallback status; APP can only overwrite an existing status when its explicit `STATUS` text maps to a recognized non-`Applied` status
+- ingest normalizes placeholder trademark names by removing `sekil`/variant figure markers before writing metadata into the database
+- `python -m workers.pipeline_worker --force-ingest` forces the trademark ingest step to reprocess existing metadata files, which is useful for repairing earlier ingest-state drift without changing collection or extraction inputs
+- the post-ingest `repair` step now also supports batched live TURKPATENT checks: older `Yayında` rows are status-audited from live result `Durumu`, and exact-six class rows are repaired only from `DETAY` `Nice Sınıfları`; progress is stored in `repair_live_trademark_checks`
 - pipeline translation for future folders now defaults to the MADLAD backend, so `pipeline/ai.py` writes `name_tr`, `detected_lang`, and translation provenance into `metadata.json` using MADLAD unless `PIPELINE_TRANSLATION_BACKEND` is overridden
 - MADLAD translation runtime tuning is shared between refresh and pipeline paths through `MADLAD_TRANSLATE_BATCH_SIZE` (default `16`), so future folder translation uses the same safer generation microbatch unless explicitly overridden
-- when FastText is unavailable, language detection now reports `unknown` instead of heuristic guesses; the MADLAD refresh path still evaluates every trademark name, preserves an existing `detected_lang` when fresh detection is `unknown`, cleans generic prompt/meta leakage, and falls back to the original trademark when translated digits drift, while live/default NLLB translation keeps its existing fallback-to-English source behavior
+- `TRANSLATION_BACKEND=nllb` remains the immediate rollback lever if live query latency or behavior needs to revert without changing the MADLAD-backed corpus
+- when FastText is unavailable, language detection now reports `unknown` instead of heuristic guesses; the MADLAD refresh path still evaluates every trademark name, preserves an existing `detected_lang` when fresh detection is `unknown`, cleans generic prompt/meta leakage, and falls back to the original trademark when translated digits drift, while live MADLAD query translation preserves the original query text if the model fails
 - the normal worker path now runs `event_ingest` automatically after trademark ingest and before conflict scan, so `trademark_events`, event-derived trademark state, `final_status*`, and event-based watchlist alerts stay in sync with the latest pipeline run
 - `ingest_events.py` now reconciles `trademark_events` per local BLT/GZ issue scope instead of append-only inserts, so reruns replace a scope with the current `events.json` payload
 - event-row uniqueness is now enforced by a full-payload `event_fingerprint`, which preserves distinct same-type events while removing exact duplicates

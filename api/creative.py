@@ -3,6 +3,9 @@ Creative Suite API.
 
 POST /api/v1/tools/suggest-names
 POST /api/v1/tools/generate-logo
+GET  /api/v1/tools/logo-projects/{project_id}
+POST /api/v1/tools/logo-projects/{project_id}/select
+POST /api/v1/tools/generated-image/{image_id}/audit-retry
 GET  /api/v1/tools/generated-image/{image_id}
 GET  /api/v1/tools/generation-history
 GET  /api/v1/tools/status
@@ -12,7 +15,7 @@ import json
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
 
 from auth.authentication import CurrentUser, get_current_user
 from database.crud import Database
@@ -20,14 +23,20 @@ from models.schemas import (
     GenerationHistoryResponse,
     LogoGenerationRequest,
     LogoGenerationResponse,
+    LogoProjectResponse,
+    LogoProjectSelectRequest,
     NameSuggestionRequest,
     NameSuggestionResponse,
 )
 from services.creative_service import (
+    audit_generated_logo_image,
     creative_suite_status_data,
     generate_logo_data,
     get_generated_image_response,
     get_generation_history_data,
+    get_logo_project_data,
+    retry_logo_audit_data,
+    select_logo_project_candidate_data,
     suggest_names_data,
 )
 
@@ -122,13 +131,60 @@ async def suggest_names(
 @router.post("/generate-logo", response_model=LogoGenerationResponse)
 async def generate_logo(
     request: LogoGenerationRequest,
+    background_tasks: BackgroundTasks = None,
     current_user: CurrentUser = Depends(get_current_user),
 ):
+    def _schedule_audit(image_id: str) -> None:
+        if background_tasks is not None:
+            background_tasks.add_task(audit_generated_logo_image, image_id)
+
     return await generate_logo_data(
         request=request,
         current_user=current_user,
+        audit_scheduler=_schedule_audit,
         generation_log_handler=_log_generation,
         audit_log_handler=_audit_log,
+    )
+
+
+@router.get("/logo-projects/{project_id}", response_model=LogoProjectResponse)
+async def get_logo_project(
+    project_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    return await get_logo_project_data(
+        project_id=project_id,
+        current_user=current_user,
+    )
+
+
+@router.post("/logo-projects/{project_id}/select", response_model=LogoProjectResponse)
+async def select_logo_project_candidate(
+    project_id: str,
+    request: LogoProjectSelectRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    return await select_logo_project_candidate_data(
+        project_id=project_id,
+        image_id=request.image_id,
+        current_user=current_user,
+    )
+
+
+@router.post("/generated-image/{image_id}/audit-retry")
+async def retry_logo_audit(
+    image_id: str,
+    background_tasks: BackgroundTasks = None,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    def _schedule_audit(retry_image_id: str) -> None:
+        if background_tasks is not None:
+            background_tasks.add_task(audit_generated_logo_image, retry_image_id)
+
+    return await retry_logo_audit_data(
+        image_id=image_id,
+        current_user=current_user,
+        audit_scheduler=_schedule_audit,
     )
 
 

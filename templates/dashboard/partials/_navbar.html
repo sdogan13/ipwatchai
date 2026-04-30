@@ -8,7 +8,7 @@
             <!-- Left: hamburger (mobile) + logo -->
             <div class="flex items-center gap-2 md:gap-3">
                 <!-- Hamburger (mobile only) -->
-                <button onclick="toggleMobileDrawer()" class="md:hidden p-2 rounded-lg hover:bg-gray-100 min-h-[44px] min-w-[44px] flex items-center justify-center" aria-label="Open menu" aria-expanded="false" id="hamburger-btn">
+                <button onclick="toggleMobileDrawer()" class="lg:hidden p-2 rounded-lg hover:bg-gray-100 min-h-[44px] min-w-[44px] flex items-center justify-center" aria-label="Open menu" aria-expanded="false" id="hamburger-btn">
                     <svg class="h-5 w-5" style="color:var(--color-text-secondary)" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
                     </svg>
@@ -21,7 +21,7 @@
                 </a>
 
                 <!-- Desktop Tab Navigation (inline in header) -->
-                <nav class="hidden md:flex items-center gap-1 ml-4 lg:ml-6" role="tablist" aria-label="Dashboard tabs">
+                <nav class="hidden lg:flex items-center gap-1 ml-4 lg:ml-6" role="tablist" aria-label="Dashboard tabs">
                     <button onclick="showDashboardTab('overview')" id="tab-btn-overview"
                             class="dashboard-tab-btn nav-tab-btn px-3 lg:px-4 py-1.5 rounded-lg text-sm font-medium transition-all bg-indigo-600 text-white whitespace-nowrap"
                             role="tab" aria-selected="true">

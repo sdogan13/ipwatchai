@@ -6,6 +6,7 @@ import psycopg2
 import psycopg2.extras
 from fastapi import Request
 from pydantic import BaseModel, Field
+from pipeline.ingest_rules import _repair_mojibake
 
 
 class SearchRequest(BaseModel):
@@ -53,7 +54,7 @@ class TrademarkResult(BaseModel):
     application_no: str = Field(..., description="Application number")
     application_date: Optional[str] = Field(None, description="Application date (YYYY-MM-DD)")
     registration_date: Optional[str] = Field(None, description="Registration date if registered")
-    status: str = Field(..., description="Human-readable status (Tescilli, BaÃ…Å¸vuru, etc.)")
+    status: str = Field(..., description="Human-readable status (Tescilli, Başvuru, etc.)")
     status_code: str = Field(
         default="unknown",
         description="Status code (registered, pending, rejected, published)",
@@ -115,25 +116,26 @@ def get_status_code(status_text: Optional[str]) -> str:
     if not status_text:
         return "unknown"
 
+    status_text = _repair_mojibake(status_text)
     status_map = {
         "Tescil Edildi": "registered",
         "Tescilli": "registered",
         "Tescil": "registered",
-        "YayÃ„Â±nda": "published",
-        "YayÃ„Â±n": "published",
-        "BaÃ…Å¸vuruldu": "pending",
-        "BaÃ…Å¸vuru": "pending",
-        "Ã„Â°nceleme": "pending",
-        "Ã„Â°ncelemede": "pending",
+        "Yayında": "published",
+        "Yayın": "published",
+        "Başvuruldu": "pending",
+        "Başvuru": "pending",
+        "İnceleme": "pending",
+        "İncelemede": "pending",
         "Reddedildi": "rejected",
         "Red": "rejected",
-        "Ã„Â°ptal Edildi": "cancelled",
-        "Ã„Â°ptal": "cancelled",
-        "SÃƒÂ¼resi Doldu": "expired",
-        "Geri Ãƒâ€¡ekildi": "withdrawn",
-        "Ã„Â°tiraz Edildi": "opposed",
+        "İptal Edildi": "cancelled",
+        "İptal": "cancelled",
+        "Süresi Doldu": "expired",
+        "Geri Çekildi": "withdrawn",
+        "İtiraz Edildi": "opposed",
         "Yenilendi": "renewed",
-        "KÃ„Â±smi Red": "partial_refusal",
+        "Kısmi Red": "partial_refusal",
         "Devredildi": "transferred",
         "Bilinmiyor": "unknown",
     }

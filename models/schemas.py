@@ -2,11 +2,18 @@
 Pydantic Models for API Request/Response
 """
 from datetime import datetime, date
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal
 from uuid import UUID
 from enum import Enum
 
 from pydantic import BaseModel, EmailStr, Field, validator, root_validator
+
+
+def _is_custom_watchlist_logo_path(logo_path: Optional[str]) -> bool:
+    if not logo_path:
+        return False
+    normalized = str(logo_path).replace("\\", "/").strip("/").lower()
+    return "/watchlist_logos/" in f"/{normalized}/"
 
 
 # ==========================================
@@ -217,7 +224,7 @@ class WatchlistItemBase(BaseModel):
     application_date: Optional[date] = None
     
     # Monitoring settings
-    similarity_threshold: float = Field(default=0.50, ge=0.0, le=1.0)
+    similarity_threshold: float = Field(default=0.70, ge=0.0, le=1.0)
     monitor_text: bool = True
     monitor_visual: bool = True
     monitor_phonetic: bool = True
@@ -274,7 +281,7 @@ class WatchlistItemResponse(WatchlistItemBase):
 
     # Override to map DB column names to API field names
     # DB stores threshold as 'alert_threshold'; schema exposes it as 'similarity_threshold'
-    similarity_threshold: float = Field(default=0.50, validation_alias='alert_threshold', ge=0.0, le=1.0)
+    similarity_threshold: float = Field(default=0.70, validation_alias='alert_threshold', ge=0.0, le=1.0)
     application_no: Optional[str] = Field(None, validation_alias='customer_application_no')
     bulletin_no: Optional[str] = Field(None, validation_alias='customer_bulletin_no')
     registration_no: Optional[str] = Field(None, validation_alias='customer_registration_no')
@@ -286,6 +293,8 @@ class WatchlistItemResponse(WatchlistItemBase):
     logo_path: Optional[str] = Field(None, exclude=True)
     has_logo: bool = False
     logo_url: Optional[str] = None
+    has_custom_logo: bool = False
+    custom_logo_url: Optional[str] = None
 
     # Computed fields
     new_alerts_count: Optional[int] = 0
@@ -312,6 +321,21 @@ class WatchlistItemResponse(WatchlistItemBase):
         item_id = values.get('id')
         logo_path = values.get('logo_path')
         if item_id and logo_path:
+            return f"/api/v1/watchlist/{item_id}/logo"
+        return None
+
+    @validator('has_custom_logo', pre=True, always=True)
+    def compute_has_custom_logo(cls, v, values):
+        if v:
+            return v
+        return _is_custom_watchlist_logo_path(values.get('logo_path'))
+
+    @validator('custom_logo_url', pre=True, always=True)
+    def compute_custom_logo_url(cls, v, values):
+        if v:
+            return v
+        item_id = values.get('id')
+        if item_id and values.get('has_custom_logo'):
             return f"/api/v1/watchlist/{item_id}/logo"
         return None
 
@@ -892,14 +916,14 @@ class NameSuggestionRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=200, description="Original brand name or concept")
     nice_classes: List[int] = Field(default=[], description="Nice classes to check against")
     industry: str = Field(default="", max_length=200, description="Industry description for context")
-    style: str = Field(default="modern", description="Naming style: modern, classic, playful, technical")
-    language: str = Field(default="tr", description="Primary language preference: tr, en")
+    style: Literal["modern", "classic", "playful", "technical"] = Field(default="modern", description="Naming style")
+    language: Literal["tr", "en"] = Field(default="tr", description="Primary language preference")
     avoid_names: List[str] = Field(default=[], description="Names to explicitly avoid")
 
     @validator("nice_classes", each_item=True)
     def validate_nice_classes(cls, v):
-        if v < 1 or v > 99:
-            raise ValueError("Nice class must be between 1 and 99")
+        if v < 1 or v > 45:
+            raise ValueError("Nice class must be between 1 and 45")
         return v
 
 
@@ -934,14 +958,17 @@ class LogoGenerationRequest(BaseModel):
     """Request for AI-powered logo generation"""
     brand_name: str = Field(..., min_length=1, max_length=200, description="Text to render in the logo")
     description: str = Field(default="", max_length=500, description="Visual description / style guide")
-    style: str = Field(default="modern", description="Logo style: modern, classic, minimal, bold, playful")
+    style: Literal["modern", "classic", "minimal", "bold", "playful"] = Field(default="modern", description="Logo style")
     nice_classes: List[int] = Field(default=[], description="Nice classes for targeted similarity search")
     color_preferences: str = Field(default="", max_length=200, description="Color preferences, e.g. 'blue and white'")
+    project_id: Optional[str] = Field(default=None, description="Existing Logo Studio project/thread id for revisions")
+    parent_image_id: Optional[str] = Field(default=None, description="Selected logo image id to revise")
+    revision_prompt: str = Field(default="", max_length=800, description="Natural-language revision request")
 
     @validator("nice_classes", each_item=True)
     def validate_nice_classes(cls, v):
-        if v < 1 or v > 99:
-            raise ValueError("Nice class must be between 1 and 99")
+        if v < 1 or v > 45:
+            raise ValueError("Nice class must be between 1 and 45")
         return v
 
 
@@ -954,6 +981,14 @@ class LogoResult(BaseModel):
     closest_match_image_url: Optional[str] = None       # image URL of the closest match
     is_safe: bool                                       # True if similarity < 70% threshold
     visual_breakdown: Optional[Dict[str, Any]] = None   # {"clip": 0.45, "dino": 0.38, "ocr": 0.0, ...}
+    project_id: Optional[str] = None
+    parent_image_id: Optional[str] = None
+    variant_index: Optional[int] = None
+    generation_kind: str = "INITIAL"
+    revision_prompt: Optional[str] = None
+    audit_status: str = "completed"                     # pending/running/completed/failed
+    audit_error: Optional[str] = None
+    audited_at: Optional[datetime] = None
 
 
 class LogoGenerationResponse(BaseModel):
@@ -961,6 +996,28 @@ class LogoGenerationResponse(BaseModel):
     logos: List[LogoResult]
     credits_remaining: Dict[str, Any]                   # { monthly: N, purchased: N }
     generation_id: str                                  # UUID of the generation_logs entry
+    project_id: Optional[str] = None
+
+
+class LogoProjectSelectRequest(BaseModel):
+    """Mark an audited safe logo candidate as the selected project option."""
+    image_id: str = Field(..., min_length=1)
+
+
+class LogoProjectResponse(BaseModel):
+    """Logo Studio project/thread with its generated candidates."""
+    id: str
+    org_id: str
+    user_id: str
+    brand_name: str
+    description: str = ""
+    style: str = "modern"
+    nice_classes: List[int] = []
+    color_preferences: str = ""
+    selected_image_id: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    logos: List[LogoResult] = []
 
 
 # ==========================================

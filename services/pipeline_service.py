@@ -15,7 +15,16 @@ from workers.pipeline_launcher import launch_pipeline_process
 
 logger = logging.getLogger(__name__)
 
-VALID_STEPS = ("download", "extract", "metadata", "embeddings", "ingest", "event_ingest", "final_status_repair")
+VALID_STEPS = (
+    "download",
+    "extract",
+    "metadata",
+    "embeddings",
+    "ingest",
+    "repair",
+    "event_ingest",
+    "final_status_repair",
+)
 PIPELINE_HEARTBEAT_GRACE_PERIOD = timedelta(minutes=20)
 PIPELINE_LEGACY_RUNNING_GRACE_PERIOD = timedelta(hours=12)
 
@@ -233,6 +242,7 @@ async def run_pipeline_background(
             "run_step_metadata": "metadata",
             "run_step_embeddings": "embeddings",
             "run_step_ingest": "ingest",
+            "run_step_repair": "repair",
             "run_step_event_ingest": "event_ingest",
             "run_step_final_status_repair": "final_status_repair",
             "run_step_conflict_scan": "conflict_scan",
@@ -520,9 +530,9 @@ async def get_pipeline_status_data(
                 """
                 SELECT id, status, triggered_by, skip_download,
                        step_download, step_extract, step_metadata,
-                       step_embeddings, step_ingest, step_event_ingest, step_final_status_repair,
+                       step_embeddings, step_ingest, step_repair, step_event_ingest, step_final_status_repair,
                        total_downloaded, total_extracted, total_parsed,
-                       total_embedded, total_ingested, total_event_scopes_ingested, total_final_status_repaired,
+                       total_embedded, total_ingested, total_repaired, total_event_scopes_ingested, total_final_status_repaired,
                        started_at, completed_at, duration_seconds,
                        error_message, heartbeat_at, current_step
                 FROM pipeline_runs
@@ -545,8 +555,10 @@ async def get_pipeline_status_data(
                         "step_metadata": row["step_metadata"],
                         "step_embeddings": row["step_embeddings"],
                         "step_ingest": row["step_ingest"],
+                        "step_repair": row["step_repair"],
                         "step_event_ingest": row["step_event_ingest"],
                         "step_final_status_repair": row["step_final_status_repair"],
+                        "total_repaired": row["total_repaired"],
                         "total_event_scopes_ingested": row["total_event_scopes_ingested"],
                         "started_at": row["started_at"].isoformat() if row["started_at"] else None,
                         "completed_at": row["completed_at"].isoformat()
@@ -589,9 +601,9 @@ async def get_pipeline_run_detail_data(
                 """
                 SELECT id, status, triggered_by, skip_download,
                        step_download, step_extract, step_metadata,
-                       step_embeddings, step_ingest, step_event_ingest, step_final_status_repair,
+                       step_embeddings, step_ingest, step_repair, step_event_ingest, step_final_status_repair,
                        total_downloaded, total_extracted, total_parsed,
-                       total_embedded, total_ingested, total_event_scopes_ingested, total_final_status_repaired,
+                       total_embedded, total_ingested, total_repaired, total_event_scopes_ingested, total_final_status_repaired,
                        started_at, completed_at, duration_seconds,
                        error_message, created_at
                 FROM pipeline_runs
@@ -616,6 +628,7 @@ async def get_pipeline_run_detail_data(
         "step_metadata": row["step_metadata"],
         "step_embeddings": row["step_embeddings"],
         "step_ingest": row["step_ingest"],
+        "step_repair": row["step_repair"],
         "step_event_ingest": row["step_event_ingest"],
         "step_final_status_repair": row["step_final_status_repair"],
         "total_downloaded": row["total_downloaded"],
@@ -623,6 +636,7 @@ async def get_pipeline_run_detail_data(
         "total_parsed": row["total_parsed"],
         "total_embedded": row["total_embedded"],
         "total_ingested": row["total_ingested"],
+        "total_repaired": row["total_repaired"],
         "total_event_scopes_ingested": row["total_event_scopes_ingested"],
         "total_final_status_repaired": row["total_final_status_repaired"],
         "started_at": row["started_at"].isoformat() if row["started_at"] else None,

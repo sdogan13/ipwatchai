@@ -36,7 +36,7 @@ async def get_holder_trademarks_data(
                 status_code=403,
                 detail={
                     "error": "pro_feature",
-                    "message": "Sahip portfÃ¶yÃ¼ gÃ¶rÃ¼ntÃ¼leme PRO Ã¶zelliÄŸidir",
+                    "message": "Sahip portföyü görüntüleme PRO özelliğidir",
                     "upgrade_url": "/pricing",
                 },
             )

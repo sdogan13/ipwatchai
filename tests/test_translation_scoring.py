@@ -43,7 +43,7 @@ def seed_idf_lookup():
 
     # Seed distinctive words (IDF >= 8.0)
     distinctive = [
-        "elma", "kaplan", "nike", "bmw", "motors", "dunya",
+        "elma", "kaplan", "nike", "bmw", "motors", "dunya", "ip", "cordage",
         "kirmizi", "yesil", "gunes", "dünyası",
     ]
     for w in distinctive:
@@ -231,6 +231,49 @@ class TestTranslationScoreFloor:
         )
         assert result["total"] >= 0.90, \
             f"Path B exact match should give total >= 0.90, got {result['total']}"
+
+    def test_translated_path_does_not_overwrite_direct_text_similarity(self):
+        """A translated exact match can drive risk without making direct text show 100%."""
+        from risk_engine import score_pair
+        result = score_pair(
+            query_name="ip",
+            candidate_name="cordage",
+            text_sim=0.0,
+            semantic_sim=0.0,
+            visual_sim=0.0,
+            phonetic_sim=0.0,
+            candidate_translations={"name_tr": "ip"},
+        )
+        assert result["scoring_path_source"] == "TRANSLATED"
+        assert result["total"] >= 0.90
+        assert result["translation_similarity"] >= 0.90
+        assert result["text_similarity"] < 0.30
+        assert result["phonetic_similarity"] < 0.30
+        assert result["direct_text_similarity"] == result["text_similarity"]
+        assert result["selected_path_text_similarity"] >= 0.90
+        assert result["selected_text_similarity"] >= 0.90
+        assert result["textual_breakdown"]["path_b"]["text_similarity"] >= 0.90
+
+    def test_duplicate_name_tr_does_not_display_as_translation_match(self):
+        """When name_tr is just the original name, Text can be exact but Translation is not."""
+        from risk_engine import score_pair
+        result = score_pair(
+            query_name="ip",
+            candidate_name="ip",
+            text_sim=0.0,
+            semantic_sim=0.0,
+            visual_sim=0.0,
+            phonetic_sim=0.0,
+            candidate_translations={"name_tr": "ip"},
+        )
+        assert result["scoring_path_source"] == "ORIGINAL"
+        assert result["total"] >= 0.90
+        assert result["text_similarity"] >= 0.90
+        assert result["translation_similarity"] == 0.0
+        assert result["translation_path_similarity"] >= 0.90
+        assert "translation_duplicate_original" in (
+            result["textual_breakdown"]["translation_quality_flags"]
+        )
 
     def test_path_b_low_when_name_tr_does_not_match(self):
         """Path B should not boost when name_tr doesn't match query."""

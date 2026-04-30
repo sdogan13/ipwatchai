@@ -105,14 +105,16 @@ Search scoring response note:
 - search routes continue to expose the existing scoring fields such as `total`, `text_similarity`, `semantic_similarity`, `phonetic_similarity`, `visual_similarity`, `translation_similarity`, `path_a_score`, `path_b_score`, `scoring_path_source`, `dynamic_weights`, and `matched_words`
 - the canonical scorer now also returns `score_version: "v2_text_visual"`, `textual_breakdown`, `visual_breakdown`, and `decision_reason`
 - `translation_similarity` is the translated-name textual path score from `name_tr`; it is not an additional overall combiner signal
-- textual diagnostics may include `token_role` for matched words, `descriptor_terms` for corpus-derived descriptor-like terms that cannot become anchors, compatibility alias `non_protectable_terms`, `descriptor_stats` evidence when available, `compound_expansions` for compact generic-suffix compounds, `short_anchor_guard` for blocked non-exact acronym-style phonetic/fuzzy matches, `anchor_quality_guard` for weak dominant-anchor fuzzy or phonetic matches, compatibility alias `fuzzy_anchor_guard`, `added_matter_breakdown` for dominant-core/additional-word scoring, and `translation_quality_flags` when `name_tr` is capped for dropping material from the original candidate name or for weak translated non-exact-anchor evidence
+- textual diagnostics may include `token_role` for matched words, `descriptor_terms` for corpus-derived descriptor-like terms that cannot become anchors, compatibility alias `non_protectable_terms`, `descriptor_stats` evidence when available, `low_protectability_terms` and `low_protectability_stats` for corpus-distinctive weak modifier-like anchors, `weak_shared_anchor_guard` when shared weak-anchor-only evidence is capped, `short_acronym_subset_guard` when an exact short acronym is copied but material matter is missing on either side, `compound_expansions` for compact generic-suffix compounds, `short_anchor_guard` for blocked non-exact acronym-style phonetic/fuzzy matches, `anchor_quality_guard` for weak dominant-anchor fuzzy or phonetic matches, compatibility alias `fuzzy_anchor_guard`, `added_matter_breakdown` for dominant-core/additional-word scoring, and `translation_quality_flags` when `name_tr` is capped for dropping material from the original candidate name, short collapsed translated tokens, or weak translated non-exact-anchor evidence
 - textual diagnostics may include `calibration_breakdown` when a guarded cap is applied; these diagnostics show the evidence-weighted score under the cap ceiling so similarly capped cases do not all return the same value
-- result diagnostics may include `text_visual_guard` when weak text such as generic-only, missing-anchor, dominant-anchor-missing, semantic/phonetic-only evidence, weak fuzzy/phonetic-anchor evidence, or limited one-anchor changed-matter/asymmetric-added-matter evidence prevents visual similarity from dominating the final score; `short_non_exact_anchor_visual_guard` suppresses agreement boosts for short one-token marks when OCR disagrees with a non-exact anchor match
-- translated-path diagnostics may include `translation_duplicate_original` when `name_tr` normalizes to the same candidate text and is capped so translated IDF flags cannot inflate Path B over Path A
+- result diagnostics may include `text_visual_guard` when weak text such as generic-only, missing-anchor, dominant-anchor-missing, semantic/phonetic-only evidence, weak fuzzy/phonetic-anchor evidence, weak shared low-protectability-anchor evidence, short-acronym subset evidence, or limited one-anchor changed-matter/asymmetric-added-matter evidence prevents visual similarity from dominating the final score; `short_non_exact_anchor_visual_guard` suppresses agreement boosts for short one-token marks when OCR disagrees with a non-exact anchor match
+- translated-path diagnostics may include `translation_duplicate_original` when `name_tr` normalizes to the same candidate text and `short_collapsed_candidate_translation` when a one-token short `name_tr` collapses from a longer original candidate; both cap translated Path B so translated IDF flags cannot inflate risk
 - result diagnostics may include internal retrieval context such as `retrieval_sources`, `retrieval_matched_fields`, `retrieval_matched_stages`, and `retrieval_query_variants`; these explain how the candidate entered the scoring pool and do not change scoring math
+- retrieval uses exact token-boundary matching for short anchor tokens across `name` and `name_tr`, while broad substring token retrieval is limited to longer anchors; this keeps short-query recall consistent with watchlist scoring without admitting unrelated fragments as anchor-token matches
 - visual scoring uses active CLIP, DINOv2, and OCR components; color similarity is accepted by compatibility callers but ignored by the V2 risk score
 - `visual_breakdown` may include OCR-disagreement and weak-text visual cap diagnostics; moderate neural visual similarity cannot create high risk when wordmark OCR disagrees and textual evidence is weak
 - `dynamic_weights` is a compatibility explanation of active text/visual contribution under the max-plus combiner
+- when unified scoring is enabled, `POST /api/search` returns the same response shape but is backed by canonical `RiskEngine.assess_brand_risk()` retrieval and scoring instead of the legacy SQL prefilter
 
 Portfolio and monitoring:
 - `/api/v1/watchlist`
@@ -122,6 +124,8 @@ Portfolio and monitoring:
 - `/api/v1/education/progress`
 - `/api/v1/education/progress/sync`
 - `/api/v1/education/moderation` (admin and superadmin only)
+
+Watchlist similarity alerts exclude same-holder conflicts when the watched mark's `customer_application_no` can be resolved to a trademark holder identifier and the candidate trademark has the same `holder_tpe_client_id` or `holder_id`. Event alerts for the watched trademark remain visible.
 
 Commercial and workflow:
 - `/api/v1/leads`
@@ -135,6 +139,16 @@ Admin, tooling, and pipeline:
 - `/api/v1/admin`
 - `/api/v1/tools`
 - `/api/v1/pipeline`
+
+AI Studio lives under `/api/v1/tools`:
+- `GET /api/v1/tools/status` is public and reports per-tool availability, disabled reason, AI credit cost, and Logo Studio audit readiness
+- `POST /api/v1/tools/suggest-names` is authenticated, costs 1 unified AI credit only when usable safe names are returned, and validates Nice classes as `1..45`
+- `POST /api/v1/tools/generate-logo` is authenticated, costs 5 unified AI credits, generates four logo candidates with `audit_status="pending"`, creates or appends to a Logo Studio project thread, and queues visual trademark audits in the request background task
+- `GET /api/v1/tools/logo-projects/{project_id}` is authenticated and returns an organization-scoped Logo Studio project with all initial and revision candidates
+- `POST /api/v1/tools/logo-projects/{project_id}/select` is authenticated and selects only candidates whose audit is completed and safe
+- `POST /api/v1/tools/generated-image/{image_id}/audit-retry` is authenticated and queues another audit for a failed completed image
+- `GET /api/v1/tools/generated-image/{image_id}` is authenticated, organization-scoped, and serves only generated images stored under the configured AI Studio logo output directory; UI download remains blocked until the audit is completed and safe
+- `GET /api/v1/tools/generation-history` is authenticated and returns organization-scoped Name Lab and Logo Studio generation logs with logo project/audit metadata
 
 Pipeline note:
 - pipeline trigger endpoints launch `workers.pipeline_worker` as a detached child process after persisting the `pipeline_runs` record, so the run is no longer tied to the request lifecycle of the FastAPI worker that accepted the trigger

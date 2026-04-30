@@ -23,6 +23,7 @@ Important migration add-ons:
 - `migrations/trademark_events.sql`
 - `migrations/add_universal_conflicts.sql`
 - `migrations/creative_suite.sql`
+- `migrations/logo_studio_projects.sql`
 - `migrations/pipeline_runs.sql`
 - `migrations/descriptor_idf_stats.sql`
 
@@ -48,6 +49,8 @@ Notes:
 - `trademark_history` is partitioned by date range in the bootstrap schema
 - vector similarity support depends on `pgvector`
 - ingest runtime prerequisites for `processed_files`, `nice_classes_lookup`, `tm_status`, and ingest-owned `trademarks` columns now come from `migrations/ingest_runtime.sql` plus `migrations/run_ingest_runtime_migration.py`, not opportunistic schema mutation during `pipeline/ingest.py` runs
+- ingest owns `trademarks.current_status` and `status_source`; APP source updates preserve an existing BLT/GZ status unless APP supplies explicit recognized non-`Applied` status text
+- the post-ingest `repair` step can fix known DB data pollution, including APP-applied status downgrades, `sekil`/`şekil` shape descriptors in `trademarks.name` and `trademarks.name_tr`, six-class scraper truncation in `trademarks.nice_class_numbers` when BLT/GZ metadata proves more classes, and batched live TURKPATENT status/class checks tracked in `repair_live_trademark_checks`
 
 ### Multi-Tenant And Auth
 
@@ -93,11 +96,14 @@ Additional product tables:
 - `lead_access_log`
 - `generation_logs`
 - `generated_images`
+- `logo_projects`
 - `pipeline_runs`
 - `trademark_applications_mt`
 - `trademark_events`
 
 Notes:
+- `logo_projects` groups Logo Studio initial candidates and revision runs into an organization-scoped project thread. It stores the original brief, Nice classes, color preference, selected safe candidate, and updated timestamp.
+- `generated_images` now stores Logo Studio project metadata (`project_id`, `parent_image_id`, `variant_index`, `generation_kind`, `revision_prompt`) plus asynchronous audit state (`audit_status`, `audit_error`, `audited_at`). New candidates start as `pending`; background visual audit updates similarity, safety, visual breakdown, and completion state.
 - `pipeline_runs` stores pipeline step results plus run liveness fields so the superadmin dashboard can show the active step and recover interrupted runs that were left in `running` state
 - `pipeline_runs` now tracks automatic event-ingest execution via `step_event_ingest` plus `total_event_scopes_ingested`, alongside the existing core step JSON and aggregate counters
 - `pipeline_runs` also records manual maintenance runs such as `final_status_repair`

@@ -6,13 +6,18 @@
 // ============ AUTH & API HELPER ============
 
 function getToken() {
+    if (window.AppAuth && window.AppAuth.getToken) return window.AppAuth.getToken();
     return localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token') || '';
 }
 
 async function adminFetch(url, options = {}) {
     var token = getToken();
     if (!token) {
-        window.location.href = '/dashboard';
+        if (window.AppAuth && window.AppAuth.redirectToLogin) {
+            window.AppAuth.redirectToLogin('missing');
+        } else {
+            window.location.href = '/?login=1';
+        }
         return null;
     }
     var headers = {
@@ -31,7 +36,11 @@ async function adminFetch(url, options = {}) {
             return null;
         }
         if (response.status === 401) {
-            window.location.href = '/dashboard';
+            if (window.AppAuth && window.AppAuth.handleUnauthorized) {
+                window.AppAuth.handleUnauthorized(response);
+            } else {
+                window.location.href = '/?login=1&session=expired';
+            }
             return null;
         }
         return response;
@@ -105,7 +114,11 @@ function adminPanel() {
         async init() {
             var res = await adminFetch('/api/v1/admin/overview');
             if (!res || !res.ok) {
-                window.location.href = '/dashboard';
+                if (window.AppAuth && window.AppAuth.redirectToLogin && !getToken()) {
+                    window.AppAuth.redirectToLogin('missing');
+                } else {
+                    window.location.href = '/dashboard';
+                }
                 return;
             }
             // Decode JWT for user info

@@ -7,12 +7,21 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 from uuid import UUID, uuid4
 
 from models.schemas import AlertStatus
+from utils.watchlist_filters import same_holder_alert_exclusion_sql
 
 if TYPE_CHECKING:
     from database.crud import Database
 
 
 class AlertCRUD:
+    @staticmethod
+    def _visible_alert_condition(
+        alert_alias: str = "a",
+        conflict_alias: str = "t",
+        watched_alias: str = "my_tm",
+    ) -> str:
+        return same_holder_alert_exclusion_sql(alert_alias, conflict_alias, watched_alias)
+
     @staticmethod
     def create(
         db: Database,
@@ -54,7 +63,7 @@ class AlertCRUD:
         alert_id = uuid4()
 
         cur.execute(
-            """
+            f"""
             INSERT INTO alerts_mt (
                 id, user_id, organization_id, watchlist_item_id, conflicting_trademark_id,
                 conflicting_name, conflicting_application_no,
@@ -110,8 +119,11 @@ class AlertCRUD:
                    t.nice_class_numbers as conflict_live_classes,
                    t.application_date as conflict_application_date
             FROM alerts_mt a
+            LEFT JOIN watchlist_mt w ON a.watchlist_item_id = w.id
             LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
+            LEFT JOIN trademarks my_tm ON w.customer_application_no = my_tm.application_no
             WHERE a.id = %s AND a.organization_id = %s
+              AND {AlertCRUD._visible_alert_condition()}
         """,
             (str(alert_id), str(org_id)),
         )
@@ -154,12 +166,17 @@ class AlertCRUD:
 
         where_clause = " AND ".join(conditions)
 
+        visible_alert_condition = AlertCRUD._visible_alert_condition()
+
         cur.execute(
             f"""
             SELECT COUNT(*) FROM alerts_mt a
+            LEFT JOIN watchlist_mt w ON a.watchlist_item_id = w.id
             LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
+            LEFT JOIN trademarks my_tm ON w.customer_application_no = my_tm.application_no
             WHERE {where_clause}
             AND (t.appeal_deadline IS NULL OR t.appeal_deadline >= CURRENT_DATE)
+            AND {visible_alert_condition}
         """,
             params,
         )
@@ -186,12 +203,14 @@ class AlertCRUD:
             FROM alerts_mt a
             LEFT JOIN watchlist_mt w ON a.watchlist_item_id = w.id
             LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
+            LEFT JOIN trademarks my_tm ON w.customer_application_no = my_tm.application_no
             WHERE a.organization_id = %s
             AND (t.appeal_deadline IS NULL OR t.appeal_deadline >= CURRENT_DATE)
             {"AND a.status = ANY(%s)" if status else ""}
             {"AND a.severity = ANY(%s)" if severity else ""}
             {"AND a.watchlist_item_id = %s" if watchlist_id else ""}
             {"AND a.overall_risk_score >= %s" if min_score > 0.0 else ""}
+            AND {visible_alert_condition}
             ORDER BY a.overall_risk_score DESC, a.created_at DESC
             LIMIT %s OFFSET %s
         """,
@@ -260,7 +279,7 @@ class AlertCRUD:
 
         if channel == "email":
             cur.execute(
-                """
+                f"""
                 UPDATE alerts_mt SET email_sent = TRUE, email_sent_at = NOW()
                 WHERE id = %s
             """,
@@ -290,10 +309,14 @@ class AlertCRUD:
                 FROM alerts_mt a
                 JOIN watchlist_mt w ON a.watchlist_item_id = w.id
                 JOIN users u ON w.user_id = u.id
+                LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
+                LEFT JOIN trademarks my_tm ON w.customer_application_no = my_tm.application_no
                 WHERE a.email_sent = FALSE
                   AND w.notify_email = TRUE
                   AND w.notification_frequency = %s
                   AND a.status = 'new'
+                  AND a.overall_risk_score >= COALESCE(w.alert_threshold, 0.7)
+                  AND {AlertCRUD._visible_alert_condition()}
                 ORDER BY a.organization_id, a.created_at
             """,
                 (frequency,),

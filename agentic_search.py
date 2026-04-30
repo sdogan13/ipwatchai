@@ -807,6 +807,27 @@ _search_limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/api/v1/search", tags=["Agentic Search"])
 
 
+def _compact_translation_text(value) -> str:
+    from utils.idf_scoring import normalize_turkish
+
+    return normalize_turkish(value or "").replace(" ", "")
+
+
+def _is_duplicate_name_translation(name, name_tr) -> bool:
+    name_compact = _compact_translation_text(name)
+    name_tr_compact = _compact_translation_text(name_tr)
+    return bool(name_compact and name_tr_compact and name_compact == name_tr_compact)
+
+
+def _display_translation_similarity(result, scores) -> float:
+    if _is_duplicate_name_translation(
+        result.get("trademark_name") or result.get("name"),
+        result.get("name_tr"),
+    ):
+        return 0.0
+    return scores.get("translation_similarity", 0)
+
+
 def _normalize_search_results(result: dict) -> None:
     """
     Normalize raw search results in-place to match the public search format.
@@ -842,7 +863,7 @@ def _normalize_search_results(result: dict) -> None:
         r["risk_score"] = scores.get("total") if scores.get("total") is not None else r.get("risk_score", 0)
         r["text_similarity"] = round(scores.get("text_similarity", 0), 3)
         r["visual_similarity"] = round(scores.get("visual_similarity", 0), 3)
-        r["translation_similarity"] = round(scores.get("translation_similarity", 0), 3)
+        r["translation_similarity"] = round(_display_translation_similarity(r, scores), 3)
         r["phonetic_similarity"] = round(scores.get("phonetic_similarity", 0), 3)
         r["status_code"] = _local_get_status_code(r.get("status"))
 

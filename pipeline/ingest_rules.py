@@ -28,10 +28,13 @@ def _repair_mojibake(text):
     for _ in range(3):
         if not any(ch in repaired for ch in ("Ã", "Ä", "Å", "Â")):
             break
-        try:
-            candidate = repaired.encode("latin1").decode("utf-8")
-        except UnicodeError:
-            break
+        candidate = repaired
+        for source_encoding in ("latin1", "cp1252"):
+            try:
+                candidate = repaired.encode(source_encoding).decode("utf-8")
+                break
+            except UnicodeError:
+                continue
         if candidate == repaired:
             break
         repaired = candidate
@@ -121,15 +124,9 @@ def extract_bulletin_info(folder_name: str):
     return bulletin_no, bulletin_date
 
 
-def _determine_db_status_raw(folder_name, status_raw, reg_no_val=None):
-    folder_upper = folder_name.upper()
+def _explicit_db_status_from_text(status_raw):
     status_text = _repair_mojibake(str(status_raw)) if status_raw else ""
     status_lower = status_text.lower().replace("\u0307", "").strip()
-    has_reg_no = (
-        reg_no_val
-        and str(reg_no_val).strip()
-        and str(reg_no_val).strip().lower() not in ("null", "none", "")
-    )
 
     if status_lower:
         refused_keywords = [
@@ -206,6 +203,21 @@ def _determine_db_status_raw(folder_name, status_raw, reg_no_val=None):
         if "renewed" in status_lower or "yenilendi" in status_lower:
             return DB_STATUS_RENEWED
 
+    return None
+
+
+def _determine_db_status_raw(folder_name, status_raw, reg_no_val=None):
+    folder_upper = folder_name.upper()
+    has_reg_no = (
+        reg_no_val
+        and str(reg_no_val).strip()
+        and str(reg_no_val).strip().lower() not in ("null", "none", "")
+    )
+
+    explicit_status = _explicit_db_status_from_text(status_raw)
+    if explicit_status:
+        return explicit_status
+
     if has_reg_no:
         return DB_STATUS_REGISTERED
     if folder_upper.startswith("GZ_") or "GAZETE" in folder_upper:
@@ -279,6 +291,33 @@ def get_source_rank(folder_name):
     return 1, "BLT"
 
 
+_SEKIL_WORD_RE = re.compile(
+    r"(?:\+\s*)?\b(?:s|\u015f)ek(?:i|\u0131|\u0130)l\b",
+    re.IGNORECASE,
+)
+
+
+def clean_name(raw_name):
+    if not raw_name:
+        return None
+
+    name = _repair_mojibake(str(raw_name))
+    name = _SEKIL_WORD_RE.sub("", name)
+    name = " ".join(name.split())
+    return name if name else None
+
+
+def _name_cleans_to_empty(raw_name):
+    if raw_name is None:
+        return False
+
+    raw_text = _repair_mojibake(str(raw_name)).strip()
+    if not raw_text:
+        return False
+
+    return clean_name(raw_text) is None
+
+
 _SHARED_FIELDS = [
     ("name", "v.name"),
     ("name_tr", "v.name_tr"),
@@ -323,6 +362,9 @@ _GZ_OWNED_FIELDS = [
 
 
 def _priority_coalesce(col, val, source):
+    if col == "name":
+        return _priority_name_coalesce(val, source)
+
     target_col = f"tm.{col}"
     if source == "APP":
         return f"{col} = COALESCE({val}, {target_col})"
@@ -335,6 +377,24 @@ def _priority_coalesce(col, val, source):
         f"{col} = CASE WHEN COALESCE(tm.status_source, '') IN ('APP', 'GZ') "
         f"THEN COALESCE({target_col}, {val}) ELSE COALESCE({val}, {target_col}) END"
     )
+
+
+def _priority_name_coalesce(val, source):
+    target_col = "tm.name"
+    if source == "APP":
+        priority_logic = f"COALESCE({val}, {target_col})"
+    elif source == "GZ":
+        priority_logic = (
+            f"CASE WHEN COALESCE(tm.status_source, '') = 'APP' "
+            f"THEN COALESCE({target_col}, {val}) ELSE COALESCE({val}, {target_col}) END"
+        )
+    else:
+        priority_logic = (
+            f"CASE WHEN COALESCE(tm.status_source, '') IN ('APP', 'GZ') "
+            f"THEN COALESCE({target_col}, {val}) ELSE COALESCE({val}, {target_col}) END"
+        )
+
+    return f"name = CASE WHEN v.clear_name THEN NULL ELSE {priority_logic} END"
 
 
 def _suspicious_six_coalesce(col, val, source):
@@ -387,7 +447,7 @@ def _build_update_sql(source):
                 SET
                     {_build_update_set(source)}
                 FROM (VALUES %s) AS v(
-                    name, status, nice_classes, goods, last_date, appeal, expiry,
+                    name, clear_name, status, nice_classes, goods, last_date, appeal, expiry,
                     b_no, b_date, g_no, g_date, img_path,
                     app_date, reg_date, img_emb, dino_emb, txt_emb, color_emb,
                     ocr_text,
@@ -420,16 +480,20 @@ __all__ = [
     "parse_date",
     "calculate_expiration_status",
     "extract_bulletin_info",
+    "_explicit_db_status_from_text",
     "_determine_db_status_raw",
     "determine_db_status",
     "determine_status",
     "get_status_rank",
     "get_source_rank",
+    "clean_name",
+    "_name_cleans_to_empty",
     "_SHARED_FIELDS",
     "_SUSPICIOUS_SIX_FIELDS",
     "_BLT_OWNED_FIELDS",
     "_GZ_OWNED_FIELDS",
     "_priority_coalesce",
+    "_priority_name_coalesce",
     "_suspicious_six_coalesce",
     "_owned_field",
     "_build_update_set",

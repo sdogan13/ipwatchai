@@ -66,7 +66,107 @@ def test_process_single_folder_overwrites_existing_metadata_when_db_files_presen
         "490",
         "2026-04-13",
     )
-    mocked_open.assert_called_once_with(metadata_path, "w", encoding="utf-8")
+    mocked_open.assert_any_call(metadata_path, "w", encoding="utf-8")
+
+
+def test_process_single_folder_preserves_ai_fields_when_inputs_match(monkeypatch, tmp_path: Path):
+    folder = tmp_path / "BLT_490_2026-04-13"
+    folder.mkdir()
+    metadata_path = folder / metadata.OUTPUT_NAME
+    metadata_path.write_text(
+        json.dumps(
+            [
+                {
+                    "APPLICATIONNO": "2026 / 123456",
+                    "IMAGE": "2026_123456",
+                    "TRADEMARK": {"NAME": "ORION"},
+                    "text_embedding": [0.1],
+                    "image_embedding": [0.2],
+                    "dinov2_embedding": [0.3],
+                    "color_histogram": [0.4],
+                    "logo_ocr_text": "",
+                    "name_tr": "ORION",
+                    "detected_lang": "tr",
+                    "name_tr_backend": "local",
+                    "name_tr_model": "model",
+                    "name_tr_updated_at": "2026-04-29T00:00:00Z",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(metadata, "find_db_files", Mock(return_value=[folder / "tmbulletin.script"]))
+    monkeypatch.setattr(
+        metadata,
+        "parse_tmbulletin_files",
+        Mock(
+            return_value=[
+                {
+                    "APPLICATIONNO": "2026/123456",
+                    "IMAGE": "2026_123456",
+                    "STATUS": "Application/Published",
+                    "TRADEMARK": {"NAME": "ORION"},
+                }
+            ]
+        ),
+    )
+
+    result = metadata.process_single_folder(folder, skip_existing=True)
+    saved = json.loads(metadata_path.read_text(encoding="utf-8"))[0]
+
+    assert result["status"] == "success"
+    assert saved["text_embedding"] == [0.1]
+    assert saved["image_embedding"] == [0.2]
+    assert saved["logo_ocr_text"] == ""
+    assert saved["name_tr_backend"] == "local"
+
+
+def test_process_single_folder_does_not_preserve_stale_text_ai_when_name_changes(monkeypatch, tmp_path: Path):
+    folder = tmp_path / "BLT_490_2026-04-13"
+    folder.mkdir()
+    metadata_path = folder / metadata.OUTPUT_NAME
+    metadata_path.write_text(
+        json.dumps(
+            [
+                {
+                    "APPLICATIONNO": "2026/123456",
+                    "IMAGE": "2026_123456",
+                    "TRADEMARK": {"NAME": "OLD"},
+                    "text_embedding": [0.1],
+                    "image_embedding": [0.2],
+                    "name_tr": "OLD",
+                    "detected_lang": "tr",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(metadata, "find_db_files", Mock(return_value=[folder / "tmbulletin.script"]))
+    monkeypatch.setattr(
+        metadata,
+        "parse_tmbulletin_files",
+        Mock(
+            return_value=[
+                {
+                    "APPLICATIONNO": "2026/123456",
+                    "IMAGE": "2026_123456",
+                    "STATUS": "Application/Published",
+                    "TRADEMARK": {"NAME": "NEW"},
+                }
+            ]
+        ),
+    )
+
+    result = metadata.process_single_folder(folder, skip_existing=True)
+    saved = json.loads(metadata_path.read_text(encoding="utf-8"))[0]
+
+    assert result["status"] == "success"
+    assert "text_embedding" not in saved
+    assert "name_tr" not in saved
+    assert "detected_lang" not in saved
+    assert saved["image_embedding"] == [0.2]
 
 
 def test_process_single_folder_skips_existing_metadata_when_no_db_files_present(monkeypatch):
@@ -152,6 +252,47 @@ def test_merge_scraped_records_overwrites_allowed_fields_but_preserves_canonical
     assert merged["HOLDERS"][0]["ADDRESS"] == "Old Address"
     assert merged["GOODS"] == [{"TEXT": "canonical goods"}]
     assert merged["EXTRACTEDGOODS"] == ["canonical extracted goods"]
+
+
+def test_merge_scraped_records_clears_dependent_ai_fields_when_inputs_change():
+    canonical = [
+        {
+            "APPLICATIONNO": "2026/123456",
+            "IMAGE": "old_image",
+            "TRADEMARK": {"NAME": "OLD NAME"},
+            "text_embedding": [0.1],
+            "name_tr": "OLD NAME",
+            "detected_lang": "tr",
+            "image_embedding": [0.2],
+            "dinov2_embedding": [0.3],
+            "color_histogram": [0.4],
+            "logo_ocr_text": "old ocr",
+        }
+    ]
+    scraped = [
+        {
+            "APPLICATIONNO": "2026/123456",
+            "IMAGE": "new_image",
+            "TRADEMARK": {"NAME": "NEW NAME"},
+        }
+    ]
+
+    result = metadata.merge_scraped_records(canonical, scraped)
+    merged = result["records"][0]
+
+    assert result["changed_records"] == 1
+    assert merged["IMAGE"] == "new_image"
+    assert merged["TRADEMARK"]["NAME"] == "NEW NAME"
+    for field in metadata.AI_TEXT_FIELDS + metadata.AI_IMAGE_FIELDS:
+        assert field not in merged
+
+
+def test_db_image_matches_folder_accepts_same_image_stem_from_different_source_folder():
+    assert metadata.db_image_matches_folder(
+        "bulletins/Marka/GZ_457_2019-01-31/images/2018_74350.jpg",
+        "BLT_309_2018-09-27",
+        "2018_74350",
+    )
 
 
 def test_merge_scraped_records_ignores_empty_values_and_unmatched_records():

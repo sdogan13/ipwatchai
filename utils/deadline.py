@@ -56,166 +56,55 @@ def calculate_appeal_deadline(bulletin_date) -> date | None:
     return bulletin_date + relativedelta(months=2)
 
 
+def _repair_mojibake(text):
+    if not isinstance(text, str):
+        return text
+
+    repaired = text
+    for _ in range(3):
+        if not any(ch in repaired for ch in ("Ã", "Ä", "Å", "Â")):
+            break
+        candidate = repaired
+        for source_encoding in ("latin1", "cp1252"):
+            try:
+                candidate = repaired.encode(source_encoding).decode("utf-8")
+                break
+            except UnicodeError:
+                continue
+        if candidate == repaired:
+            break
+        repaired = candidate
+    return repaired
+
+
+def _canonical_status(final_status: str) -> str:
+    final_status = _repair_mojibake(final_status or "")
+    status_aliases = {
+        "Refused": "Reddedildi",
+        "Withdrawn": "Geri Çekildi",
+        "Opposed": "İtiraz Edildi",
+        "Registered": "Tescil Edildi",
+        "Renewed": "Yenilendi",
+        "Expired": "Süresi Doldu",
+        "Applied": "Başvuruldu",
+        "Published": "Yayında",
+    }
+    return status_aliases.get(final_status, final_status)
+
+
 def classify_deadline_status(final_status: str, bulletin_date, appeal_deadline) -> dict:
     """
     Classify a trademark conflict's deadline status for UI display.
-    Returns: { status: str, days_remaining: int|None, label_tr: str, urgency: str }
+    Accepts clean Turkish, English canonical statuses, and legacy mojibake input.
     """
     today = date.today()
-    final_status = final_status or ""
-    status_aliases = {
-        "Refused": "Reddedildi",
-        "Withdrawn": "Geri Ã‡ekildi",
-        "Opposed": "Ä°tiraz Edildi",
-        "Registered": "Tescil Edildi",
-        "Renewed": "Yenilendi",
-        "Expired": "SÃ¼resi Doldu",
-        "Applied": "BaÅŸvuruldu",
-        "Published": "Yayında",
-    }
-    final_status = status_aliases.get(final_status, final_status)
+    final_status = _canonical_status(final_status)
 
-    # Threat removed — mark was refused or withdrawn
-    if final_status in ('Reddedildi', 'Geri Çekildi'):
-        return {
-            "status": "resolved",
-            "days_remaining": None,
-            "label_tr": "Tehdit kalkt\u0131",
-            "urgency": "none"
-        }
-
-    # Already opposed by someone
-    if final_status == 'İtiraz Edildi':
-        return {
-            "status": "opposed",
-            "days_remaining": None,
-            "label_tr": "\u0130tiraz edilmi\u015f",
-            "urgency": "info"
-        }
-
-    # Fully registered — opposition not possible
-    if final_status in ('Tescil Edildi', 'Yenilendi'):
-        return {
-            "status": "registered",
-            "days_remaining": None,
-            "label_tr": "Tescil edildi",
-            "urgency": "low"
-        }
-
-    # Partial refusal — still partially active, treat like active
-    # Transferred — ownership changed, still a threat
-    # Expired — scanner typically excludes, but handle defensively
-    if final_status == 'Süresi Doldu':
-        return {
-            "status": "expired",
-            "days_remaining": None,
-            "label_tr": "Marka s\u00fcresi doldu",
-            "urgency": "none"
-        }
-
-    # Pre-publication — applied but not yet in bulletin
-    if not bulletin_date or final_status == 'Başvuruldu':
-        # Check if bulletin_date is actually present for Applied status
-        if not bulletin_date:
-            return {
-                "status": "pre_publication",
-                "days_remaining": None,
-                "label_tr": "Erken Uyar\u0131 \u2014 Hen\u00fcz yay\u0131nlanmad\u0131",
-                "urgency": "info"
-            }
-
-    # Has bulletin_date — check appeal deadline
-    if appeal_deadline:
-        if isinstance(appeal_deadline, str):
-            try:
-                appeal_deadline = date.fromisoformat(appeal_deadline)
-            except (ValueError, TypeError):
-                appeal_deadline = None
-
-        if isinstance(appeal_deadline, datetime):
-            appeal_deadline = appeal_deadline.date()
-
-        if appeal_deadline:
-            days_remaining = (appeal_deadline - today).days
-
-            if days_remaining < 0:
-                return {
-                    "status": "expired",
-                    "days_remaining": days_remaining,
-                    "label_tr": "\u0130tiraz s\u00fcresi doldu",
-                    "urgency": "none"
-                }
-            elif days_remaining <= 7:
-                return {
-                    "status": "active_critical",
-                    "days_remaining": days_remaining,
-                    "label_tr": f"\u0130tiraz s\u00fcresi: {days_remaining} g\u00fcn kald\u0131",
-                    "urgency": "critical"
-                }
-            elif days_remaining <= 30:
-                return {
-                    "status": "active_urgent",
-                    "days_remaining": days_remaining,
-                    "label_tr": f"\u0130tiraz s\u00fcresi: {days_remaining} g\u00fcn kald\u0131",
-                    "urgency": "urgent"
-                }
-            else:
-                return {
-                    "status": "active",
-                    "days_remaining": days_remaining,
-                    "label_tr": f"\u0130tiraz s\u00fcresi: {days_remaining} g\u00fcn kald\u0131",
-                    "urgency": "normal"
-                }
-
-    # Fallback — published but no deadline computed (data gap)
-    return {
-        "status": "unknown",
-        "days_remaining": None,
-        "label_tr": "Durum belirsiz",
-        "urgency": "none"
-    }
-
-
-def classify_deadline_status(final_status: str, bulletin_date, appeal_deadline) -> dict:
-    """
-    Compatibility redefinition that accepts both clean Turkish strings and
-    legacy mojibake variants while preserving the existing UI contract.
-    """
-    today = date.today()
-    final_status = final_status or ""
-
-    resolved_statuses = {
-        "Refused",
-        "Withdrawn",
-        "Reddedildi",
-        "Geri \u00c7ekildi",
-        "Geri Ã‡ekildi",
-        "Geri Ãƒâ€¡ekildi",
-    }
-    opposed_statuses = {
-        "Opposed",
-        "\u0130tiraz Edildi",
-        "Ä°tiraz Edildi",
-        "Ã„Â°tiraz Edildi",
-    }
-    registered_statuses = {
-        "Registered",
-        "Renewed",
-        "Tescil Edildi",
-        "Yenilendi",
-    }
-    expired_statuses = {
-        "Expired",
-        "S\u00fcresi Doldu",
-        "SÃ¼resi Doldu",
-        "SÃƒÂ¼resi Doldu",
-    }
-    applied_statuses = {
-        "Applied",
-        "Ba\u015fvuruldu",
-        "BaÅŸvuruldu",
-        "BaÃ…Å¸vuruldu",
-    }
+    resolved_statuses = {"Reddedildi", "Geri Çekildi"}
+    opposed_statuses = {"İtiraz Edildi"}
+    registered_statuses = {"Tescil Edildi", "Yenilendi"}
+    expired_statuses = {"Süresi Doldu"}
+    applied_statuses = {"Başvuruldu"}
 
     if final_status in resolved_statuses:
         return {
@@ -254,7 +143,7 @@ def classify_deadline_status(final_status: str, bulletin_date, appeal_deadline) 
             return {
                 "status": "pre_publication",
                 "days_remaining": None,
-                "label_tr": "Erken Uyar\u0131 \u2014 Hen\u00fcz yay\u0131nlanmad\u0131",
+                "label_tr": "Erken Uyarı - Henüz yayınlanmadı",
                 "urgency": "info",
             }
 

@@ -3,6 +3,7 @@
 from fastapi import HTTPException
 
 from database.crud import Database
+from pipeline.ingest_rules import _repair_mojibake
 
 
 # ---------------------------------------------------------------------------
@@ -10,26 +11,26 @@ from database.crud import Database
 # ---------------------------------------------------------------------------
 EVENT_TYPE_LABELS = {
     "transfer": "Devir",
-    "merger": "BirleÅŸme",
-    "partial_transfer": "KÄ±smi Devir",
-    "cancellation": "Ä°ptal",
-    "withdrawal": "Geri Ã‡ekme",
+    "merger": "Birleşme",
+    "partial_transfer": "Kısmi Devir",
+    "cancellation": "İptal",
+    "withdrawal": "Geri Çekme",
     "renewal": "Yenileme",
     "seizure": "Haciz",
-    "precautionary_seizure": "Ä°htiyati Haciz",
-    "injunction": "Ä°htiyati Tedbir",
-    "precautionary_injunction": "Ä°htiyati Tedbir",
-    "seizure_lift": "Haciz KaldÄ±rma",
-    "injunction_lift": "Tedbir KaldÄ±rma",
-    "restriction_lift": "KÄ±sÄ±tlama KaldÄ±rma",
+    "precautionary_seizure": "İhtiyati Haciz",
+    "injunction": "İhtiyati Tedbir",
+    "precautionary_injunction": "İhtiyati Tedbir",
+    "seizure_lift": "Haciz Kaldırma",
+    "injunction_lift": "Tedbir Kaldırma",
+    "restriction_lift": "Kısıtlama Kaldırma",
     "license": "Lisans",
-    "bankruptcy": "Ä°flas",
-    "correction": "DÃ¼zeltme",
+    "bankruptcy": "İflas",
+    "correction": "Düzeltme",
     "madrid_registration": "Madrid Tescil",
     "madrid_renewal": "Madrid Yenileme",
-    "address_change": "Adres DeÄŸiÅŸikliÄŸi",
-    "name_change": "Unvan DeÄŸiÅŸikliÄŸi",
-    "class_change": "SÄ±nÄ±f DeÄŸiÅŸikliÄŸi",
+    "address_change": "Adres Değişikliği",
+    "name_change": "Unvan Değişikliği",
+    "class_change": "Sınıf Değişikliği",
 }
 
 # Health card severity: critical > warning > info
@@ -90,12 +91,13 @@ async def get_trademark_events_data(
         tm = cur.fetchone()
 
         if not tm:
-            raise HTTPException(status_code=404, detail="Marka bulunamadÄ±")
+            raise HTTPException(status_code=404, detail="Marka bulunamadı")
 
         # 2. Build health card
         event_flags = tm.get("event_flags") or {}
+        effective_status = _repair_mojibake(tm["effective_status"])
         health_card = {
-            "effective_status": tm["effective_status"],
+            "effective_status": effective_status,
             "final_status": tm["final_status"],
             "active_restriction_count": tm["active_restriction_count"] or 0,
             "has_restrictions": tm["has_restrictions"] or False,
@@ -119,11 +121,11 @@ async def get_trademark_events_data(
         severity = "healthy"
         if tm["active_restriction_count"] and tm["active_restriction_count"] > 0:
             severity = "critical"
-        elif tm["effective_status"] in ("Ä°ptal Edildi",):
+        elif effective_status in ("İptal Edildi",):
             severity = "critical"
-        elif tm["effective_status"] in ("Geri Ã‡ekildi",):
+        elif effective_status in ("Geri Çekildi",):
             severity = "warning"
-        elif tm["effective_status"] in ("Devredildi",):
+        elif effective_status in ("Devredildi",):
             severity = "warning"
         elif event_flags.get("has_bankruptcy"):
             severity = "critical"

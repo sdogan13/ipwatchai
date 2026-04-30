@@ -6,9 +6,10 @@ import json
 import logging
 import math
 import os
+import sys
 import uuid
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -22,6 +23,7 @@ from models.schemas import (
     GenerationHistoryResponse,
     LogoGenerationRequest,
     LogoGenerationResponse,
+    LogoProjectResponse,
     LogoResult,
     NameSuggestionRequest,
     NameSuggestionResponse,
@@ -29,6 +31,7 @@ from models.schemas import (
 )
 from risk_engine import RISK_THRESHOLDS, calculate_visual_similarity, score_pair
 from utils.subscription import (
+    check_ai_credit_eligibility,
     check_logo_generation_eligibility,
     check_name_generation_eligibility,
     deduct_logo_credit,
@@ -42,6 +45,11 @@ logger = logging.getLogger(__name__)
 
 _redis_client = None
 _risk_engine_instance = None
+
+LOGO_AUDIT_PENDING = "pending"
+LOGO_AUDIT_RUNNING = "running"
+LOGO_AUDIT_COMPLETED = "completed"
+LOGO_AUDIT_FAILED = "failed"
 
 
 def _get_redis():
@@ -67,6 +75,46 @@ def _session_key(org_id: str, query: str) -> str:
     """Build Redis key for a name generation session."""
     query_hash = hashlib.md5(query.lower().strip().encode("utf-8")).hexdigest()[:12]
     return f"namesession:{org_id}:{query_hash}"
+
+
+def _normalize_name_request_payload(request: NameSuggestionRequest) -> dict:
+    """Return the stable request payload used for name cache/session keys."""
+    return {
+        "query": request.query.strip().lower(),
+        "nice_classes": sorted({int(value) for value in request.nice_classes}),
+        "industry": request.industry.strip().lower(),
+        "style": request.style,
+        "language": request.language,
+        "avoid_names": sorted({name.strip().lower() for name in request.avoid_names if name.strip()}),
+    }
+
+
+def _name_request_cache_key(request: NameSuggestionRequest) -> str:
+    """Build a stable cache/session key so different prompts do not share results."""
+    payload = json.dumps(
+        _normalize_name_request_payload(request),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return f"name-request-v2:{payload}"
+
+
+def _get_loaded_pipeline_ai_module():
+    """Return the already-loaded pipeline AI module without triggering model loading."""
+    return sys.modules.get("pipeline.ai")
+
+
+def _logo_visual_audit_available(ai_module=None) -> tuple[bool, str]:
+    """Check whether Logo Studio can audit generated logos before exposing the tool."""
+    module = ai_module if ai_module is not None else _get_loaded_pipeline_ai_module()
+    if module is None:
+        return False, "CLIP modeli yuklenmemis"
+    if not hasattr(module, "clip_model") or module.clip_model is None:
+        return False, "CLIP modeli yuklenmemis"
+    if not hasattr(module, "get_clip_embedding_cached"):
+        return False, "CLIP gorsel analiz fonksiyonu yuklenmemis"
+    return True, ""
 
 
 def _get_session_count(org_id: str, query: str) -> int:
@@ -131,7 +179,7 @@ def _batch_validate_names(
     if not candidate_names:
         return []
 
-    import ai
+    from pipeline import ai
     from db.pool import get_connection, release_connection
     from risk_engine import get_risk_level
 
@@ -371,30 +419,63 @@ def _cache_results(
         pass
 
 
-def _get_plan_credits(org_id: str, session_count: int) -> dict:
-    """Get current credit status for the response."""
+def _get_ai_credits_remaining(org_id: str, cost: int) -> dict:
+    """Get current unified AI credit status for the response."""
     try:
         with Database() as db:
             plan = get_org_plan(db, org_id)
-            cur = db.cursor()
-            cur.execute(
-                """
-                SELECT COALESCE(name_credits_purchased, 0) as purchased
-                FROM organizations WHERE id = %s
-            """,
-                (org_id,),
-            )
-            row = cur.fetchone()
-            purchased = row["purchased"] if row else 0
-
+            _, _, details = check_ai_credit_eligibility(db, org_id, cost=cost)
         return {
-            "session_limit": plan["name_suggestions_per_session"],
-            "used": session_count,
-            "purchased": purchased,
-            "plan": plan["plan_name"],
+            "current_plan": details.get("current_plan", plan.get("plan_name", "free")),
+            "display_name": details.get("display_name", plan.get("display_name", "")),
+            "monthly_remaining": details.get("monthly_remaining", 0),
+            "purchased_remaining": details.get("purchased_remaining", 0),
+            "total_remaining": details.get("total_remaining", 0),
+            "monthly_limit": details.get("monthly_limit", 0),
+            "cost": cost,
+            # Compatibility fields for older UI/tests during the migration.
+            "monthly": details.get("monthly_remaining", 0),
+            "purchased": details.get("purchased_remaining", 0),
+            "plan": details.get("current_plan", plan.get("plan_name", "free")),
         }
     except Exception:
-        return {"session_limit": 5, "used": session_count, "purchased": 0, "plan": "free"}
+        return {
+            "current_plan": "free",
+            "display_name": "",
+            "monthly_remaining": 0,
+            "purchased_remaining": 0,
+            "total_remaining": 0,
+            "monthly_limit": 0,
+            "cost": cost,
+            "monthly": 0,
+            "purchased": 0,
+            "plan": "free",
+        }
+
+
+def _get_plan_credits(org_id: str, session_count: int) -> dict:
+    """Get current name-generation credit status for the response."""
+    credits = _get_ai_credits_remaining(org_id, cost=1)
+    try:
+        with Database() as db:
+            plan = get_org_plan(db, org_id)
+        credits.update(
+            {
+                "session_limit": plan["name_suggestions_per_session"],
+                "used": session_count,
+                "plan": plan["plan_name"],
+            }
+        )
+        return credits
+    except Exception:
+        credits.update(
+            {
+                "session_limit": 5,
+                "used": session_count,
+                "plan": credits.get("plan", "free"),
+            }
+        )
+        return credits
 
 
 def _save_logo_image(image_bytes: bytes, org_id: str, generation_id: str, index: int) -> Optional[str]:
@@ -423,7 +504,7 @@ def _save_logo_image(image_bytes: bytes, org_id: str, generation_id: str, index:
 
 def _generate_all_visual_features(image_path: str) -> dict:
     """Generate CLIP, DINOv2, and OCR features for a generated logo."""
-    import ai
+    from pipeline import ai
 
     features = {
         "clip_embedding": None,
@@ -633,6 +714,13 @@ def _store_generated_image(
     dino_embedding: Optional[list] = None,
     ocr_text: Optional[str] = None,
     visual_breakdown: Optional[dict] = None,
+    project_id: Optional[str] = None,
+    parent_image_id: Optional[str] = None,
+    variant_index: Optional[int] = None,
+    generation_kind: str = "INITIAL",
+    revision_prompt: Optional[str] = None,
+    audit_status: str = LOGO_AUDIT_COMPLETED,
+    audit_error: Optional[str] = None,
 ) -> Optional[str]:
     """Persist a generated logo image and return its UUID."""
     try:
@@ -643,10 +731,15 @@ def _store_generated_image(
                 INSERT INTO generated_images
                     (generation_log_id, org_id, image_path, clip_embedding,
                      dino_embedding, ocr_text, visual_breakdown,
-                     similarity_score, is_safe)
+                     similarity_score, is_safe, project_id, parent_image_id,
+                     variant_index, generation_kind, revision_prompt,
+                     audit_status, audit_error, audited_at)
                 VALUES (%s, %s, %s, %s::halfvec,
                         %s::halfvec, %s, %s::jsonb,
-                        %s, %s)
+                        %s, %s, %s, %s,
+                        %s, %s, %s,
+                        %s, %s,
+                        CASE WHEN %s = 'completed' THEN NOW() ELSE NULL END)
                 RETURNING id
             """,
                 (
@@ -659,6 +752,14 @@ def _store_generated_image(
                     json.dumps(visual_breakdown, ensure_ascii=False) if visual_breakdown else None,
                     similarity_score,
                     is_safe,
+                    project_id,
+                    parent_image_id,
+                    variant_index,
+                    generation_kind,
+                    revision_prompt,
+                    audit_status,
+                    audit_error,
+                    audit_status,
                 ),
             )
             db.commit()
@@ -670,25 +771,169 @@ def _store_generated_image(
 
 
 def _get_logo_credits_remaining(org_id: str) -> dict:
-    """Get the remaining logo-generation credits for the org."""
-    try:
-        with Database() as db:
-            cur = db.cursor()
-            cur.execute(
-                """
-                SELECT
-                    COALESCE(logo_credits_monthly, 0) as monthly,
-                    COALESCE(logo_credits_purchased, 0) as purchased
-                FROM organizations WHERE id = %s
+    """Get the remaining unified AI credits for a logo-generation run."""
+    return _get_ai_credits_remaining(org_id, cost=5)
+
+
+def _create_logo_project(
+    *,
+    org_id: str,
+    user_id: str,
+    request: LogoGenerationRequest,
+    database_factory=Database,
+) -> str:
+    """Create a Logo Studio project thread and return its UUID."""
+    with database_factory() as db:
+        cur = db.cursor()
+        cur.execute(
+            """
+            INSERT INTO logo_projects
+                (org_id, user_id, brand_name, description, style, nice_classes, color_preferences)
+            VALUES (%s, %s, %s, %s, %s, %s::int[], %s)
+            RETURNING id
             """,
-                (org_id,),
+            (
+                org_id,
+                user_id,
+                request.brand_name.strip(),
+                request.description.strip(),
+                request.style,
+                request.nice_classes,
+                request.color_preferences.strip(),
+            ),
+        )
+        db.commit()
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": "project_create_failed",
+                    "message": "Logo projesi olusturulamadi.",
+                    "message_en": "Logo project could not be created.",
+                },
             )
-            row = cur.fetchone()
-            if row:
-                return {"monthly": row["monthly"], "purchased": row["purchased"]}
-    except Exception:
-        pass
-    return {"monthly": 0, "purchased": 0}
+        return str(row["id"])
+
+
+def _get_logo_project_row(
+    *,
+    project_id: str,
+    org_id: str,
+    database_factory=Database,
+):
+    """Return an org-scoped Logo Studio project row."""
+    try:
+        UUID(project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid project ID format") from exc
+
+    with database_factory() as db:
+        cur = db.cursor()
+        cur.execute(
+            """
+            SELECT
+                id, org_id, user_id, brand_name, description, style,
+                nice_classes, color_preferences, selected_image_id,
+                created_at, updated_at
+            FROM logo_projects
+            WHERE id = %s AND org_id = %s
+            """,
+            (project_id, org_id),
+        )
+        row = cur.fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Logo project not found")
+    return row
+
+
+def _get_logo_image_row(
+    *,
+    image_id: str,
+    org_id: str,
+    database_factory=Database,
+):
+    """Return an org-scoped generated logo image row."""
+    try:
+        UUID(image_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid image ID format") from exc
+
+    with database_factory() as db:
+        cur = db.cursor()
+        cur.execute(
+            """
+            SELECT
+                id, generation_log_id, org_id, image_path, project_id, parent_image_id,
+                variant_index, generation_kind, revision_prompt,
+                similarity_score, is_safe, visual_breakdown,
+                audit_status, audit_error, audited_at, created_at
+            FROM generated_images
+            WHERE id = %s AND org_id = %s
+            """,
+            (image_id, org_id),
+        )
+        row = cur.fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Logo image not found")
+    return row
+
+
+def _logo_result_from_row(row: dict) -> LogoResult:
+    """Map a generated_images row to the public LogoResult shape."""
+    image_id = str(row["id"])
+    breakdown = row.get("visual_breakdown")
+    if isinstance(breakdown, str):
+        try:
+            breakdown = json.loads(breakdown)
+        except Exception:
+            breakdown = None
+    breakdown = breakdown or {}
+    return LogoResult(
+        image_id=image_id,
+        image_url=f"/api/v1/tools/generated-image/{image_id}",
+        similarity_score=float(row.get("similarity_score") or 0),
+        closest_match_name=breakdown.get("closest_match_name"),
+        closest_match_image_url=breakdown.get("closest_match_image_url"),
+        is_safe=bool(row.get("is_safe", False)),
+        visual_breakdown=breakdown or None,
+        project_id=str(row["project_id"]) if row.get("project_id") else None,
+        parent_image_id=str(row["parent_image_id"]) if row.get("parent_image_id") else None,
+        variant_index=row.get("variant_index"),
+        generation_kind=row.get("generation_kind") or "INITIAL",
+        revision_prompt=row.get("revision_prompt"),
+        audit_status=row.get("audit_status") or LOGO_AUDIT_COMPLETED,
+        audit_error=row.get("audit_error"),
+        audited_at=row.get("audited_at"),
+    )
+
+
+def _get_project_logo_results(
+    *,
+    project_id: str,
+    org_id: str,
+    database_factory=Database,
+) -> List[LogoResult]:
+    """Return all candidates for a Logo Studio project."""
+    with database_factory() as db:
+        cur = db.cursor()
+        cur.execute(
+            """
+            SELECT
+                id, generation_log_id, org_id, image_path, project_id, parent_image_id,
+                variant_index, generation_kind, revision_prompt,
+                similarity_score, is_safe, visual_breakdown,
+                audit_status, audit_error, audited_at, created_at
+            FROM generated_images
+            WHERE project_id = %s AND org_id = %s
+            ORDER BY created_at ASC, variant_index ASC NULLS LAST
+            """,
+            (project_id, org_id),
+        )
+        rows = cur.fetchall()
+    return [_logo_result_from_row(row) for row in rows]
 
 
 def _build_closest_match_image_url(match: dict) -> Optional[str]:
@@ -712,12 +957,151 @@ def _image_media_type(image_path: str) -> str:
     return media_types.get(ext, "image/png")
 
 
+def audit_generated_logo_image(
+    image_id: str,
+    *,
+    database_factory=Database,
+    visual_audit_available_checker=None,
+    generate_visual_features_handler=None,
+    visual_similarity_search_handler=None,
+    closest_match_image_url_builder=None,
+    settings_obj=settings,
+) -> None:
+    """Run the visual trademark audit for one generated logo image."""
+    if visual_audit_available_checker is None:
+        visual_audit_available_checker = _logo_visual_audit_available
+    if generate_visual_features_handler is None:
+        generate_visual_features_handler = _generate_all_visual_features
+    if visual_similarity_search_handler is None:
+        visual_similarity_search_handler = _full_visual_similarity_search
+    if closest_match_image_url_builder is None:
+        closest_match_image_url_builder = _build_closest_match_image_url
+
+    try:
+        UUID(str(image_id))
+    except ValueError:
+        logger.warning("Skipping logo audit with invalid image id: %s", image_id)
+        return
+
+    with database_factory() as db:
+        cur = db.cursor()
+        cur.execute(
+            """
+            UPDATE generated_images
+            SET audit_status = %s, audit_error = NULL
+            WHERE id = %s
+            RETURNING id, org_id, image_path, project_id
+            """,
+            (LOGO_AUDIT_RUNNING, image_id),
+        )
+        row = cur.fetchone()
+        db.commit()
+
+    if not row:
+        logger.warning("Logo audit skipped; generated image not found: %s", image_id)
+        return
+
+    org_id = str(row["org_id"])
+    image_path = str(row["image_path"])
+    project_id = str(row["project_id"]) if row.get("project_id") else None
+    brand_name = ""
+    nice_classes = []
+    if project_id:
+        with database_factory() as db:
+            cur = db.cursor()
+            cur.execute(
+                """
+                SELECT brand_name, nice_classes
+                FROM logo_projects
+                WHERE id = %s AND org_id = %s
+                """,
+                (project_id, org_id),
+            )
+            project = cur.fetchone()
+            if project:
+                brand_name = project.get("brand_name") or ""
+                nice_classes = list(project.get("nice_classes") or [])
+
+    try:
+        visual_ready, visual_reason = visual_audit_available_checker()
+        if not visual_ready:
+            raise RuntimeError(visual_reason or "visual audit unavailable")
+
+        features = generate_visual_features_handler(image_path)
+        max_similarity = 0.0
+        is_safe = False
+        top_breakdown = None
+
+        if not features.get("clip_embedding"):
+            raise RuntimeError("CLIP logo embedding could not be generated")
+
+        matches = visual_similarity_search_handler(
+            features=features,
+            nice_classes=nice_classes,
+            brand_name=brand_name,
+            top_k=5,
+        )
+        if matches:
+            top_match = matches[0]
+            max_similarity = float(top_match.get("combined_sim") or 0)
+            top_breakdown = dict(top_match.get("visual_breakdown") or {})
+            top_breakdown["closest_match_name"] = top_match.get("name")
+            top_breakdown["closest_match_image_url"] = closest_match_image_url_builder(top_match)
+
+        logo_threshold = getattr(settings_obj.creative, "logo_similarity_threshold", RISK_THRESHOLDS["high"])
+        is_safe = max_similarity < logo_threshold
+
+        with database_factory() as db:
+            cur = db.cursor()
+            cur.execute(
+                """
+                UPDATE generated_images
+                SET
+                    clip_embedding = %s::halfvec,
+                    dino_embedding = %s::halfvec,
+                    ocr_text = %s,
+                    visual_breakdown = %s::jsonb,
+                    similarity_score = %s,
+                    is_safe = %s,
+                    audit_status = %s,
+                    audit_error = NULL,
+                    audited_at = NOW()
+                WHERE id = %s
+                """,
+                (
+                    str(features.get("clip_embedding")) if features.get("clip_embedding") else None,
+                    str(features.get("dino_embedding")) if features.get("dino_embedding") else None,
+                    features.get("ocr_text") or None,
+                    json.dumps(top_breakdown, ensure_ascii=False) if top_breakdown else None,
+                    round(max_similarity * 100, 1),
+                    is_safe,
+                    LOGO_AUDIT_COMPLETED,
+                    image_id,
+                ),
+            )
+            db.commit()
+    except Exception as exc:
+        logger.error("Logo visual audit failed for %s: %s", image_id, exc)
+        with database_factory() as db:
+            cur = db.cursor()
+            cur.execute(
+                """
+                UPDATE generated_images
+                SET audit_status = %s, audit_error = %s, audited_at = NOW()
+                WHERE id = %s
+                """,
+                (LOGO_AUDIT_FAILED, str(exc)[:500], image_id),
+            )
+            db.commit()
+
+
 async def get_generated_image_response(
     *,
     image_id: str,
     current_user=None,
     database_factory=Database,
     file_exists=os.path.isfile,
+    logo_output_dir: Optional[str] = None,
 ):
     """Resolve and return an auth-scoped generated image file."""
     org_id = str(current_user.organization_id)
@@ -745,16 +1129,21 @@ async def get_generated_image_response(
     if str(row["org_id"]) != org_id:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    image_path = row["image_path"]
-    if ".." in image_path:
+    image_path = str(row["image_path"])
+    try:
+        resolved_image_path = Path(image_path).expanduser().resolve()
+        resolved_output_dir = Path(logo_output_dir or settings.creative.logo_output_dir).expanduser().resolve()
+        if resolved_output_dir not in [resolved_image_path, *resolved_image_path.parents]:
+            raise ValueError("Generated image path is outside the configured logo directory")
+    except Exception:
         raise HTTPException(status_code=400, detail="Invalid image path")
 
-    if not file_exists(image_path):
+    if not file_exists(str(resolved_image_path)):
         raise HTTPException(status_code=404, detail="Image file not found on disk")
 
     return FileResponse(
-        path=image_path,
-        media_type=_image_media_type(image_path),
+        path=str(resolved_image_path),
+        media_type=_image_media_type(str(resolved_image_path)),
         headers={
             "Cache-Control": "public, max-age=604800",
         },
@@ -829,10 +1218,12 @@ async def get_generation_history_data(
                 cur.execute(
                     """
                     SELECT
-                        id, image_path, similarity_score, is_safe, created_at
+                        id, image_path, project_id, parent_image_id, variant_index,
+                        generation_kind, revision_prompt, similarity_score, is_safe,
+                        visual_breakdown, audit_status, audit_error, audited_at, created_at
                     FROM generated_images
                     WHERE generation_log_id = %s AND org_id = %s
-                    ORDER BY created_at
+                    ORDER BY created_at, variant_index ASC NULLS LAST
                 """,
                     (str(row["id"]), org_id),
                 )
@@ -841,8 +1232,17 @@ async def get_generation_history_data(
                     {
                         "image_id": str(ir["id"]),
                         "image_url": f"/api/v1/tools/generated-image/{ir['id']}",
+                        "project_id": str(ir["project_id"]) if ir.get("project_id") else None,
+                        "parent_image_id": str(ir["parent_image_id"]) if ir.get("parent_image_id") else None,
+                        "variant_index": ir.get("variant_index"),
+                        "generation_kind": ir.get("generation_kind") or "INITIAL",
+                        "revision_prompt": ir.get("revision_prompt"),
                         "similarity_score": float(ir.get("similarity_score") or 0),
-                        "is_safe": bool(ir.get("is_safe", True)),
+                        "is_safe": bool(ir.get("is_safe", False)),
+                        "visual_breakdown": ir.get("visual_breakdown"),
+                        "audit_status": ir.get("audit_status") or LOGO_AUDIT_COMPLETED,
+                        "audit_error": ir.get("audit_error"),
+                        "audited_at": ir.get("audited_at").isoformat() if ir.get("audited_at") else None,
                     }
                     for ir in img_rows
                 ]
@@ -858,6 +1258,125 @@ async def get_generation_history_data(
     )
 
 
+async def get_logo_project_data(
+    *,
+    project_id: str,
+    current_user=None,
+    database_factory=Database,
+) -> LogoProjectResponse:
+    """Return a Logo Studio project and all of its candidates."""
+    org_id = str(current_user.organization_id)
+    row = _get_logo_project_row(
+        project_id=project_id,
+        org_id=org_id,
+        database_factory=database_factory,
+    )
+    logos = _get_project_logo_results(
+        project_id=project_id,
+        org_id=org_id,
+        database_factory=database_factory,
+    )
+    return LogoProjectResponse(
+        id=str(row["id"]),
+        org_id=str(row["org_id"]),
+        user_id=str(row["user_id"]),
+        brand_name=row.get("brand_name") or "",
+        description=row.get("description") or "",
+        style=row.get("style") or "modern",
+        nice_classes=list(row.get("nice_classes") or []),
+        color_preferences=row.get("color_preferences") or "",
+        selected_image_id=str(row["selected_image_id"]) if row.get("selected_image_id") else None,
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+        logos=logos,
+    )
+
+
+async def select_logo_project_candidate_data(
+    *,
+    project_id: str,
+    image_id: str,
+    current_user=None,
+    database_factory=Database,
+) -> LogoProjectResponse:
+    """Select an audited safe logo candidate for the project."""
+    org_id = str(current_user.organization_id)
+    _get_logo_project_row(
+        project_id=project_id,
+        org_id=org_id,
+        database_factory=database_factory,
+    )
+    image = _get_logo_image_row(
+        image_id=image_id,
+        org_id=org_id,
+        database_factory=database_factory,
+    )
+    if str(image.get("project_id")) != project_id:
+        raise HTTPException(status_code=400, detail="Logo image does not belong to this project")
+    if (image.get("audit_status") or LOGO_AUDIT_COMPLETED) != LOGO_AUDIT_COMPLETED:
+        raise HTTPException(status_code=409, detail="Logo audit must complete before selection")
+    if not image.get("is_safe"):
+        raise HTTPException(status_code=409, detail="Risky logos cannot be selected for final use")
+
+    with database_factory() as db:
+        cur = db.cursor()
+        cur.execute(
+            """
+            UPDATE logo_projects
+            SET selected_image_id = %s, updated_at = NOW()
+            WHERE id = %s AND org_id = %s
+            """,
+            (image_id, project_id, org_id),
+        )
+        db.commit()
+
+    return await get_logo_project_data(
+        project_id=project_id,
+        current_user=current_user,
+        database_factory=database_factory,
+    )
+
+
+async def retry_logo_audit_data(
+    *,
+    image_id: str,
+    current_user=None,
+    database_factory=Database,
+    audit_scheduler: Optional[Callable[[str], None]] = None,
+) -> LogoResult:
+    """Reset a generated logo to pending and queue another visual audit."""
+    org_id = str(current_user.organization_id)
+    image = _get_logo_image_row(
+        image_id=image_id,
+        org_id=org_id,
+        database_factory=database_factory,
+    )
+    if (image.get("audit_status") or LOGO_AUDIT_COMPLETED) in (LOGO_AUDIT_PENDING, LOGO_AUDIT_RUNNING):
+        raise HTTPException(status_code=409, detail="Logo audit is already running")
+
+    with database_factory() as db:
+        cur = db.cursor()
+        cur.execute(
+            """
+            UPDATE generated_images
+            SET audit_status = %s, audit_error = NULL
+            WHERE id = %s AND org_id = %s
+            RETURNING
+                id, generation_log_id, org_id, image_path, project_id, parent_image_id,
+                variant_index, generation_kind, revision_prompt,
+                similarity_score, is_safe, visual_breakdown,
+                audit_status, audit_error, audited_at, created_at
+            """,
+            (LOGO_AUDIT_PENDING, image_id, org_id),
+        )
+        row = cur.fetchone()
+        db.commit()
+
+    if audit_scheduler is not None:
+        audit_scheduler(image_id)
+    return _logo_result_from_row(row)
+
+
 async def creative_suite_status_data(
     *,
     feature_enabled_getter=None,
@@ -871,8 +1390,14 @@ async def creative_suite_status_data(
         feature_enabled_getter = is_feature_enabled
 
     status = {
-        "name_generator": {"available": False, "reason": ""},
-        "logo_studio": {"available": False, "reason": ""},
+        "name_generator": {"available": False, "reason": "", "cost": 1},
+        "logo_studio": {
+            "available": False,
+            "reason": "",
+            "cost": 5,
+            "audit_available": False,
+            "audit_reason": "",
+        },
     }
 
     if not feature_enabled_getter("ai_studio_enabled"):
@@ -900,15 +1425,9 @@ async def creative_suite_status_data(
         status["name_generator"]["reason"] = reason
         status["logo_studio"]["reason"] = reason
 
-    if status["logo_studio"]["available"]:
-        try:
-            if ai_module is None:
-                import ai as ai_module
-
-            if not hasattr(ai_module, "clip_model") or ai_module.clip_model is None:
-                status["logo_studio"]["reason"] = "CLIP modeli yuklenmemis"
-        except Exception:
-            pass
+    visual_ready, visual_reason = _logo_visual_audit_available(ai_module)
+    status["logo_studio"]["audit_available"] = visual_ready
+    status["logo_studio"]["audit_reason"] = visual_reason
 
     return status
 
@@ -953,8 +1472,9 @@ async def suggest_names_data(
     org_id = str(current_user.organization_id)
     user_id = str(current_user.id)
     query = request.query.strip()
+    request_key = _name_request_cache_key(request)
 
-    session_count = session_count_getter(org_id, query)
+    session_count = session_count_getter(org_id, request_key)
 
     with database_factory() as db:
         can_generate, reason, details = name_eligibility_checker(
@@ -969,7 +1489,7 @@ async def suggest_names_data(
 
     using_purchased = details.get("using_purchased_credits", False)
 
-    cached_results = cached_results_getter(org_id, query)
+    cached_results = cached_results_getter(org_id, request_key)
     if cached_results is not None:
         plan = plan_credits_getter(org_id, session_count)
         return NameSuggestionResponse(
@@ -995,6 +1515,7 @@ async def suggest_names_data(
     avoid_list = list(set(request.avoid_names + [query]))
     nice_classes_str = ", ".join(str(c) for c in request.nice_classes) if request.nice_classes else "Not specified"
     prompt = client.build_name_prompt(
+        concept=query,
         industry=request.industry,
         nice_classes=nice_classes_str,
         style=request.style,
@@ -1045,13 +1566,23 @@ async def suggest_names_data(
     safe_names = [result for result in all_results if result.is_safe]
     filtered_count = total_generated - len(safe_names)
 
-    with database_factory() as db:
-        if using_purchased:
-            deduct_name_credit_handler(db, org_id)
-        increment_name_generation_usage_handler(db, user_id, org_id)
+    credits_used = 0
+    if safe_names:
+        with database_factory() as db:
+            if not deduct_name_credit_handler(db, org_id):
+                raise HTTPException(
+                    status_code=402,
+                    detail={
+                        "error": "credits_exhausted",
+                        "message": "AI kredisi dusulemedi.",
+                        "message_en": "Could not deduct AI credit.",
+                    },
+                )
+            increment_name_generation_usage_handler(db, user_id, org_id)
+        credits_used = 1
 
-    new_session_count = session_count_incrementer(org_id, query, len(safe_names))
-    cache_results_handler(org_id, query, safe_names, filtered_count, total_generated)
+    new_session_count = session_count_incrementer(org_id, request_key, len(safe_names))
+    cache_results_handler(org_id, request_key, safe_names, filtered_count, total_generated)
 
     if generation_log_handler is not None:
         generation_log_handler(
@@ -1073,6 +1604,7 @@ async def suggest_names_data(
                 "filtered_count": filtered_count,
                 "safe_names": [name.name for name in safe_names],
             },
+            credits_used=credits_used,
         )
 
     if audit_log_handler is not None:
@@ -1117,10 +1649,13 @@ async def generate_logo_data(
     store_generated_image_handler=None,
     logo_credits_remaining_getter=None,
     closest_match_image_url_builder=None,
+    visual_audit_available_checker=None,
+    audit_scheduler: Optional[Callable[[str], None]] = None,
+    create_logo_project_handler=None,
     generation_log_handler=None,
     audit_log_handler=None,
 ):
-    """Generate AI logos and audit them against the trademark image corpus."""
+    """Generate AI logo candidates and queue their trademark visual audits."""
     if gemini_client_getter is None:
         from generative_ai.gemini_client import get_gemini_client
 
@@ -1139,6 +1674,10 @@ async def generate_logo_data(
         logo_credits_remaining_getter = _get_logo_credits_remaining
     if closest_match_image_url_builder is None:
         closest_match_image_url_builder = _build_closest_match_image_url
+    if visual_audit_available_checker is None:
+        visual_audit_available_checker = _logo_visual_audit_available
+    if create_logo_project_handler is None:
+        create_logo_project_handler = _create_logo_project
 
     org_id = str(current_user.organization_id)
     user_id = str(current_user.id)
@@ -1149,6 +1688,48 @@ async def generate_logo_data(
     if not can_generate:
         status_code = 403 if reason == "upgrade_required" else 402
         raise HTTPException(status_code=status_code, detail=details)
+
+    client = gemini_client_getter()
+    if not client.is_available():
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "service_unavailable",
+                "message": "Logo olusturma servisi su anda kullanilamiyor.",
+                "message_en": "Logo generation service is currently unavailable.",
+            },
+        )
+
+    revision_prompt = request.revision_prompt.strip()
+    is_revision = bool(revision_prompt or request.parent_image_id)
+    project_id = request.project_id
+    parent_row = None
+
+    if project_id:
+        _get_logo_project_row(
+            project_id=project_id,
+            org_id=org_id,
+            database_factory=database_factory,
+        )
+
+    if request.parent_image_id:
+        parent_row = _get_logo_image_row(
+            image_id=request.parent_image_id,
+            org_id=org_id,
+            database_factory=database_factory,
+        )
+        parent_project_id = str(parent_row["project_id"]) if parent_row.get("project_id") else None
+        if project_id and parent_project_id and parent_project_id != project_id:
+            raise HTTPException(status_code=400, detail="Parent logo does not belong to this project")
+        if not project_id:
+            project_id = parent_project_id
+        if not project_id:
+            raise HTTPException(status_code=400, detail="Parent logo is not attached to a project")
+        if (parent_row.get("audit_status") or LOGO_AUDIT_COMPLETED) in (LOGO_AUDIT_PENDING, LOGO_AUDIT_RUNNING):
+            raise HTTPException(status_code=409, detail="Parent logo audit is still running")
+
+    if is_revision and not project_id:
+        raise HTTPException(status_code=400, detail="A project and selected logo are required for revision")
 
     with database_factory() as db:
         deducted = deduct_logo_credit_handler(db, org_id)
@@ -1163,30 +1744,35 @@ async def generate_logo_data(
             },
         )
 
-    client = gemini_client_getter()
-    if not client.is_available():
-        with database_factory() as db:
-            refund_logo_credit_handler(db, org_id)
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "error": "service_unavailable",
-                "message": "Logo olusturma servisi su anda kullanilamiyor. Krediniz iade edildi.",
-                "message_en": "Logo generation service is currently unavailable. Your credit has been refunded.",
-            },
-        )
-
     description = request.description
     if request.color_preferences:
         description = f"{description}. Color scheme: {request.color_preferences}".strip(". ")
 
     try:
-        image_bytes_list = await client.generate_logos(
-            brand_name=request.brand_name,
-            description=description,
-            style=request.style,
-            count=settings_obj.creative.logo_images_per_run,
-        )
+        if is_revision and parent_row is not None and hasattr(client, "generate_logo_revisions"):
+            reference_bytes = None
+            reference_path = parent_row.get("image_path")
+            if reference_path and os.path.isfile(str(reference_path)):
+                with open(str(reference_path), "rb") as image_file:
+                    reference_bytes = image_file.read()
+            image_bytes_list = await client.generate_logo_revisions(
+                brand_name=request.brand_name,
+                description=description,
+                style=request.style,
+                revision_prompt=revision_prompt,
+                reference_image_bytes=reference_bytes,
+                count=settings_obj.creative.logo_images_per_run,
+            )
+        else:
+            generation_description = description
+            if revision_prompt:
+                generation_description = f"{description}. Revision request: {revision_prompt}".strip(". ")
+            image_bytes_list = await client.generate_logos(
+                brand_name=request.brand_name,
+                description=generation_description,
+                style=request.style,
+                count=settings_obj.creative.logo_images_per_run,
+            )
     except Exception as exc:
         retries_attempted = getattr(exc, "retries_attempted", None)
         logger.error(
@@ -1217,7 +1803,21 @@ async def generate_logo_data(
             },
         )
 
+    if not project_id:
+        try:
+            project_id = create_logo_project_handler(
+                org_id=org_id,
+                user_id=user_id,
+                request=request,
+                database_factory=database_factory,
+            )
+        except Exception:
+            with database_factory() as db:
+                refund_logo_credit_handler(db, org_id)
+            raise
+
     generation_id = str(generation_uuid_factory())
+    generation_kind = "REVISION" if is_revision else "INITIAL"
     log_id = None
     if generation_log_handler is not None:
         log_id = generation_log_handler(
@@ -1226,6 +1826,10 @@ async def generate_logo_data(
             feature_type="LOGO",
             input_prompt=f"Logo for '{request.brand_name}': {description}",
             input_params={
+                "project_id": project_id,
+                "parent_image_id": request.parent_image_id,
+                "revision_prompt": revision_prompt,
+                "generation_kind": generation_kind,
                 "brand_name": request.brand_name,
                 "description": request.description,
                 "style": request.style,
@@ -1233,7 +1837,13 @@ async def generate_logo_data(
                 "color_preferences": request.color_preferences,
                 "count": len(image_bytes_list),
             },
-            output_data={"generation_id": generation_id, "variations": len(image_bytes_list)},
+            output_data={
+                "generation_id": generation_id,
+                "project_id": project_id,
+                "variations": len(image_bytes_list),
+                "audit_status": LOGO_AUDIT_PENDING,
+            },
+            credits_used=5,
         )
     if not log_id:
         log_id = generation_id
@@ -1244,52 +1854,52 @@ async def generate_logo_data(
         if not saved_path:
             continue
 
-        features = generate_visual_features_handler(saved_path)
-        max_similarity = 0.0
-        closest_match_name = None
-        closest_match_image_url = None
-        top_breakdown = None
-
-        if features.get("clip_embedding"):
-            matches = visual_similarity_search_handler(
-                features=features,
-                nice_classes=request.nice_classes,
-                brand_name=request.brand_name,
-                top_k=5,
-            )
-            if matches:
-                top_match = matches[0]
-                max_similarity = top_match["combined_sim"]
-                closest_match_name = top_match.get("name")
-                closest_match_image_url = closest_match_image_url_builder(top_match)
-                top_breakdown = top_match.get("visual_breakdown")
-
-        is_safe = max_similarity < RISK_THRESHOLDS["high"]
         image_id = store_generated_image_handler(
             generation_log_id=log_id,
             org_id=org_id,
             image_path=saved_path,
-            clip_embedding=features.get("clip_embedding"),
-            similarity_score=round(max_similarity * 100, 1),
-            is_safe=is_safe,
-            dino_embedding=features.get("dino_embedding"),
-            ocr_text=features.get("ocr_text") or None,
-            visual_breakdown=top_breakdown,
+            clip_embedding=None,
+            similarity_score=0.0,
+            is_safe=False,
+            dino_embedding=None,
+            ocr_text=None,
+            visual_breakdown=None,
+            project_id=project_id,
+            parent_image_id=request.parent_image_id,
+            variant_index=index + 1,
+            generation_kind=generation_kind,
+            revision_prompt=revision_prompt or None,
+            audit_status=LOGO_AUDIT_PENDING,
+            audit_error=None,
         )
         if not image_id:
-            image_id = str(generation_uuid_factory())
+            logger.error("Skipping generated logo because image metadata could not be stored: %s", saved_path)
+            try:
+                os.remove(saved_path)
+            except Exception:
+                pass
+            continue
 
         logo_results.append(
             LogoResult(
                 image_id=image_id,
                 image_url=f"/api/v1/tools/generated-image/{image_id}",
-                similarity_score=round(max_similarity * 100, 1),
-                closest_match_name=closest_match_name,
-                closest_match_image_url=closest_match_image_url,
-                is_safe=is_safe,
-                visual_breakdown=top_breakdown,
+                similarity_score=0.0,
+                closest_match_name=None,
+                closest_match_image_url=None,
+                is_safe=False,
+                visual_breakdown=None,
+                project_id=project_id,
+                parent_image_id=request.parent_image_id,
+                variant_index=index + 1,
+                generation_kind=generation_kind,
+                revision_prompt=revision_prompt or None,
+                audit_status=LOGO_AUDIT_PENDING,
+                audit_error=None,
             )
         )
+        if audit_scheduler is not None:
+            audit_scheduler(image_id)
 
     if not logo_results:
         with database_factory() as db:
@@ -1303,6 +1913,14 @@ async def generate_logo_data(
             },
         )
 
+    with database_factory() as db:
+        cur = db.cursor()
+        cur.execute(
+            "UPDATE logo_projects SET updated_at = NOW() WHERE id = %s AND org_id = %s",
+            (project_id, org_id),
+        )
+        db.commit()
+
     if audit_log_handler is not None:
         audit_log_handler(
             user_id=user_id,
@@ -1311,10 +1929,13 @@ async def generate_logo_data(
             resource_type="creative_suite",
             resource_id=log_id,
             metadata={
+                "project_id": project_id,
+                "generation_kind": generation_kind,
+                "parent_image_id": request.parent_image_id,
                 "brand_name": request.brand_name,
                 "style": request.style,
                 "variations_generated": len(logo_results),
-                "safe_count": sum(1 for logo in logo_results if logo.is_safe),
+                "audit_status": LOGO_AUDIT_PENDING,
             },
         )
 
@@ -1323,4 +1944,5 @@ async def generate_logo_data(
         logos=logo_results,
         credits_remaining=credits,
         generation_id=log_id,
+        project_id=project_id,
     )

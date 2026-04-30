@@ -100,6 +100,71 @@ def _make_application_row(app_id=None, organization_id=None, user_id=None, **ove
     return row
 
 
+def test_watchlist_same_holder_filter_helper_matches_holder_ids():
+    from utils.watchlist_filters import is_same_holder_conflict
+
+    assert is_same_holder_conflict(
+        {"holder_tpe_client_id": " HOLDER-1 "},
+        {"watched_holder_tpe_client_id": "holder-1"},
+    )
+    holder_uuid = uuid.uuid4()
+    assert is_same_holder_conflict(
+        {"holder_id": holder_uuid},
+        {"watched_holder_id": str(holder_uuid)},
+    )
+    assert not is_same_holder_conflict(
+        {"holder_tpe_client_id": "holder-1"},
+        {"watched_holder_tpe_client_id": "holder-2"},
+    )
+
+
+def test_watchlist_scanner_skips_same_holder_conflict_before_scoring():
+    from watchlist.scanner import WatchlistScanner
+
+    scanner = object.__new__(WatchlistScanner)
+
+    with patch("watchlist.scanner.score_pair") as score_pair:
+        conflict = scanner._check_conflict(
+            {
+                "application_no": "APP-2",
+                "holder_tpe_client_id": "HOLDER-1",
+            },
+            {
+                "id": str(uuid.uuid4()),
+                "customer_application_no": "APP-1",
+                "watched_holder_tpe_client_id": "holder-1",
+            },
+        )
+
+    assert conflict is None
+    score_pair.assert_not_called()
+
+
+def test_alert_queries_exclude_same_holder_similarity_alerts():
+    from database.repositories.alert_repository import AlertCRUD
+
+    mock_db = MagicMock()
+    mock_cursor = MagicMock()
+    mock_db.cursor.return_value = mock_cursor
+    mock_cursor.fetchone.return_value = {"count": 0}
+    mock_cursor.fetchall.return_value = []
+
+    AlertCRUD.get_by_organization(
+        mock_db,
+        uuid.uuid4(),
+        page=1,
+        page_size=10,
+        min_score=0.7,
+    )
+
+    executed_sql = "\n".join(call.args[0] for call in mock_cursor.execute.call_args_list)
+    assert "LEFT JOIN watchlist_mt w ON a.watchlist_item_id = w.id" in executed_sql
+    assert "LEFT JOIN trademarks my_tm ON w.customer_application_no = my_tm.application_no" in executed_sql
+    assert "a.alert_type = 'similarity'" in executed_sql
+    assert "my_tm.holder_tpe_client_id" in executed_sql
+    assert "t.holder_tpe_client_id" in executed_sql
+
+
 def _make_alert_row(alert_id=None, organization_id=None, watchlist_id=None, **overrides):
     """Build a representative alert row for response-model tests."""
     now = datetime(2026, 4, 12, 12, 0, tzinfo=timezone.utc)
@@ -232,6 +297,7 @@ def _make_pipeline_run_row(run_id=None, **overrides):
         "step_metadata": {"status": "success"},
         "step_embeddings": {"status": "success"},
         "step_ingest": {"status": "success"},
+        "step_repair": {"status": "success"},
         "step_event_ingest": {"status": "success"},
         "step_final_status_repair": {"status": "success"},
         "total_downloaded": 12,
@@ -239,6 +305,7 @@ def _make_pipeline_run_row(run_id=None, **overrides):
         "total_parsed": 10,
         "total_embedded": 9,
         "total_ingested": 8,
+        "total_repaired": 6,
         "total_event_scopes_ingested": 7,
         "total_final_status_repaired": 7,
         "started_at": started_at,
@@ -2097,6 +2164,7 @@ class TestAccessControl:
                 "step_metadata": {"status": "success"},
                 "step_embeddings": {"status": "success"},
                 "step_ingest": {"status": "success"},
+                "step_repair": {"status": "success"},
                 "step_event_ingest": {"status": "success"},
                 "step_final_status_repair": {"status": "success"},
                 "total_downloaded": 10,
@@ -2104,6 +2172,7 @@ class TestAccessControl:
                 "total_parsed": 8,
                 "total_embedded": 7,
                 "total_ingested": 6,
+                "total_repaired": 4,
                 "total_event_scopes_ingested": 5,
                 "total_final_status_repaired": 5,
                 "started_at": "2026-04-12T12:00:00+00:00",
@@ -3103,6 +3172,7 @@ async def test_search_service_run_public_search_maps_safe_fields():
         "results": [
             {
                 "trademark_name": "NIKE",
+                "name_tr": "nayk",
                 "application_no": "2024/1",
                 "status": "Published",
                 "scores": {
@@ -3149,7 +3219,7 @@ async def test_search_service_run_public_search_maps_safe_fields():
                 "risk_score": 0.91,
                 "nice_classes": [25, 35],
                 "image_url": "/api/trademark-image/logo.png",
-                "name_tr": None,
+                "name_tr": "nayk",
                 "holder_name": "Nike Inc.",
                 "holder_tpe_client_id": "123",
                 "attorney_name": "Agent",
@@ -3167,6 +3237,43 @@ async def test_search_service_run_public_search_maps_safe_fields():
         ],
         "total": 1,
     }
+
+
+@pytest.mark.asyncio
+async def test_search_service_run_public_search_hides_duplicate_translation_score():
+    from services.search_service import run_public_search
+
+    mock_searcher = MagicMock()
+    mock_searcher.search.return_value = {
+        "results": [
+            {
+                "trademark_name": "ip",
+                "name_tr": "ip",
+                "application_no": "2021/160894",
+                "status": "Tescil Edildi",
+                "scores": {
+                    "total": 1.0,
+                    "text_similarity": 1.0,
+                    "translation_similarity": 1.0,
+                    "phonetic_similarity": 1.0,
+                },
+                "classes": [9, 42],
+            }
+        ]
+    }
+    mock_searcher_cm = MagicMock()
+    mock_searcher_cm.__enter__.return_value = mock_searcher
+    mock_searcher_cm.__exit__.return_value = False
+
+    data = await run_public_search(
+        query="ip",
+        logger=MagicMock(),
+        searcher_factory=MagicMock(return_value=mock_searcher_cm),
+    )
+
+    result = data["results"][0]
+    assert result["text_similarity"] == 1.0
+    assert result["translation_similarity"] == 0.0
 
 
 @pytest.mark.asyncio
@@ -3775,6 +3882,85 @@ async def test_search_service_run_enhanced_search_auto_suggests_and_formats_resu
 
 
 @pytest.mark.asyncio
+async def test_search_service_run_enhanced_search_uses_risk_engine_when_unified():
+    from app_enhanced_search_routes import SearchRequest
+    from services.search_service import run_enhanced_search
+
+    mock_engine = MagicMock()
+    mock_engine.assess_brand_risk.return_value = (
+        {
+            "top_candidates": [
+                {
+                    "trademark_id": "tm-1",
+                    "application_no": "2026/1",
+                    "name": "AA MODEX",
+                    "status": "Yayınlandı",
+                    "classes": [9, 42],
+                    "image_path": "aa.png",
+                    "holder_name": "Owner",
+                    "holder_tpe_client_id": "H-1",
+                    "attorney_name": "Agent",
+                    "attorney_no": "A-1",
+                    "registration_no": None,
+                    "bulletin_no": "489",
+                    "application_date": "2026-02-13",
+                    "scores": {"total": 0.7472},
+                }
+            ]
+        },
+        False,
+    )
+    risk_engine_factory = MagicMock(return_value=mock_engine)
+    connect_fn = MagicMock()
+
+    settings_obj = SimpleNamespace(
+        use_unified_scoring=True,
+        database=SimpleNamespace(
+            host="localhost",
+            port=5432,
+            name="db",
+            user="user",
+            password="pass",
+        ),
+    )
+
+    response = await run_enhanced_search(
+        search_request=SearchRequest(name="AA", classes=[9, 42], limit=10),
+        settings=settings_obj,
+        logger=MagicMock(),
+        normalize_turkish_fn=lambda value: value.lower(),
+        score_pair_fn=MagicMock(),
+        visual_similarity_fn=MagicMock(),
+        class_suggestions_handler=MagicMock(),
+        text_embedding_getter=MagicMock(),
+        encode_query_image_handler=MagicMock(),
+        date_formatter=lambda value: value.strftime("%Y-%m-%d") if value else None,
+        status_code_getter=lambda value: "published" if value == "Yayınlandı" else "unknown",
+        image_url_getter=lambda image_path, application_no, bulletin_no=None: (
+            f"/api/trademark-image/{image_path}" if image_path else None
+        ),
+        connect_fn=connect_fn,
+        timer=MagicMock(side_effect=[100.0, 100.1]),
+        risk_engine_factory=risk_engine_factory,
+    )
+
+    risk_engine_factory.assert_called_once_with()
+    mock_engine.assess_brand_risk.assert_called_once_with(
+        name="AA",
+        image_path=None,
+        target_classes=[9, 42],
+        attorney_no=None,
+    )
+    mock_engine.close.assert_called_once()
+    connect_fn.assert_not_called()
+    assert response["results"][0]["name"] == "AA MODEX"
+    assert response["results"][0]["similarity"] == 74.7
+    assert response["results"][0]["class_overlap_count"] == 2
+    assert response["results"][0]["status_code"] == "published"
+    assert response["search_context"]["searched_classes"] == [9, 42]
+
+
+@pytest.mark.asyncio
 async def test_extracted_suggest_nice_classes_helper_delegates_to_service():
     from app_nice_class_routes import ClassSuggestionRequest, suggest_nice_classes
 
@@ -4073,14 +4259,16 @@ async def test_watchlist_service_create_watchlist_item_record_uses_trademark_ai_
         create_db,
         current_user.organization_id,
         current_user.id,
-        data,
-        logo_path="nike.png",
+        ANY,
         logo_embedding=[0.1, 0.2],
         logo_dinov2_embedding=[0.3],
         logo_color_histogram=[0.4, 0.5],
         logo_ocr_text="NIKE",
         text_embedding=[0.6],
     )
+    created_payload = watchlist_crud.create_with_embeddings.call_args.args[3]
+    assert created_payload.brand_name == data.brand_name
+    assert created_payload.similarity_threshold == 0.7
 
 
 @pytest.mark.asyncio
@@ -5059,7 +5247,6 @@ async def test_watchlist_service_import_watchlist_items_from_portfolio_uses_embe
         current_user.organization_id,
         current_user.id,
         ANY,
-        logo_path="logo1.png",
         logo_embedding=[0.1, 0.2],
         logo_dinov2_embedding=[0.3],
         logo_color_histogram=[0.4, 0.5],
@@ -5752,6 +5939,7 @@ async def test_watchlist_service_delete_watchlist_logo_asset_removes_file_and_cl
             current_user=current_user,
             database_factory=MagicMock(side_effect=[mock_db_lookup_cm, mock_db_clear_cm]),
             watchlist_crud=watchlist_crud,
+            custom_logo_checker=MagicMock(return_value=True),
         )
     finally:
         if os.path.exists(temp_path):
@@ -5759,6 +5947,41 @@ async def test_watchlist_service_delete_watchlist_logo_asset_removes_file_and_cl
 
     assert payload == {"success": True, "message": "Logo silindi"}
     watchlist_crud.clear_logo.assert_called_once_with(mock_db_clear, item_id)
+
+
+@pytest.mark.asyncio
+async def test_watchlist_service_delete_watchlist_logo_asset_ignores_linked_trademark_logo():
+    from services.watchlist_service import delete_watchlist_logo_asset
+
+    item_id = uuid.uuid4()
+    current_user = MagicMock()
+    current_user.organization_id = uuid.uuid4()
+
+    mock_db_lookup_cm = MagicMock()
+    mock_db_lookup = MagicMock()
+    mock_db_lookup_cm.__enter__.return_value = mock_db_lookup
+    mock_db_lookup_cm.__exit__.return_value = False
+
+    watchlist_crud = MagicMock()
+    watchlist_crud.get_by_id.return_value = {
+        "id": item_id,
+        "logo_path": "bulletins/Marka/LOGOS/ip.png",
+        "customer_application_no": "2021/160894",
+    }
+    remove_file = MagicMock()
+
+    payload = await delete_watchlist_logo_asset(
+        item_id=item_id,
+        current_user=current_user,
+        database_factory=MagicMock(return_value=mock_db_lookup_cm),
+        watchlist_crud=watchlist_crud,
+        remove_file=remove_file,
+        custom_logo_checker=MagicMock(return_value=False),
+    )
+
+    assert payload == {"success": True, "message": "Silinecek ozel logo yok"}
+    remove_file.assert_not_called()
+    watchlist_crud.clear_logo.assert_not_called()
 
 
 def test_watchlist_logo_background_wrapper_delegates_to_service():
@@ -6011,6 +6234,8 @@ async def test_watchlist_service_get_watchlist_page_attaches_conflict_summary():
     assert data["items"][0]["monitor_phonetic"] is False
     assert data["items"][0]["has_logo"] is True
     assert data["items"][0]["logo_url"] == f"/api/v1/watchlist/{item_id}/logo"
+    assert data["items"][0]["has_custom_logo"] is True
+    assert data["items"][0]["custom_logo_url"] == f"/api/v1/watchlist/{item_id}/logo"
     assert "logo_path" not in data["items"][0]
     assert data["items"][0]["conflict_summary"] == {
         "total": 3,
@@ -6042,6 +6267,36 @@ async def test_watchlist_service_get_watchlist_page_attaches_conflict_summary():
         tm_status="published",
     )
     assert mock_cursor.execute.call_args.args[1] == ([item_id], 0.8)
+
+
+def test_watchlist_response_distinguishes_linked_trademark_logo_from_custom_logo():
+    from models.schemas import WatchlistItemResponse
+
+    item_id = uuid.uuid4()
+    payload = _make_watchlist_item_payload(item_id)
+    payload["logo_path"] = "bulletins/Marka/LOGOS/ip.png"
+    payload["trademark_image_path"] = "bulletins/Marka/BLT_2021/images/ip.png"
+
+    data = WatchlistItemResponse(**payload).model_dump()
+
+    assert data["has_logo"] is True
+    assert data["logo_url"] == f"/api/v1/watchlist/{item_id}/logo"
+    assert data["has_custom_logo"] is False
+    assert data["custom_logo_url"] is None
+    assert data["trademark_image_path"] == "bulletins/Marka/BLT_2021/images/ip.png"
+
+
+def test_watchlist_service_custom_logo_path_detection():
+    from services.watchlist_service import is_custom_watchlist_logo_path
+
+    assert is_custom_watchlist_logo_path(
+        os.path.join("uploads", "watchlist_logos", "org-id", "logo.png"),
+        logos_dir=os.path.join("uploads", "watchlist_logos"),
+    )
+    assert not is_custom_watchlist_logo_path(
+        os.path.join("bulletins", "Marka", "LOGOS", "ip.png"),
+        logos_dir=os.path.join("uploads", "watchlist_logos"),
+    )
 
 
 @pytest.mark.asyncio
@@ -6948,7 +7203,7 @@ async def test_extracted_upload_trademarks_route_delegates_to_service():
         file=file,
         add_to_watchlist=False,
         run_analysis=True,
-        alert_threshold=0.8,
+        alert_threshold=None,
         current_user=current_user,
     )
 
@@ -8199,6 +8454,7 @@ async def test_extracted_generate_logo_route_delegates_to_service():
     mock_generate_logo_data.assert_awaited_once()
     assert mock_generate_logo_data.await_args.kwargs["request"] == request
     assert mock_generate_logo_data.await_args.kwargs["current_user"] == current_user
+    assert callable(mock_generate_logo_data.await_args.kwargs["audit_scheduler"])
     assert (
         mock_generate_logo_data.await_args.kwargs["generation_log_handler"]
         is creative_module._log_generation
@@ -8207,6 +8463,86 @@ async def test_extracted_generate_logo_route_delegates_to_service():
         mock_generate_logo_data.await_args.kwargs["audit_log_handler"]
         is creative_module._audit_log
     )
+
+
+@pytest.mark.asyncio
+async def test_extracted_logo_project_routes_delegate_to_service():
+    from api import creative as creative_module
+    from models.schemas import LogoProjectSelectRequest
+
+    current_user = MagicMock()
+    expected = {
+        "id": "project-1",
+        "org_id": "org-1",
+        "user_id": "user-1",
+        "brand_name": "Acme",
+        "description": "",
+        "style": "modern",
+        "nice_classes": [],
+        "color_preferences": "",
+        "selected_image_id": None,
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
+        "logos": [],
+    }
+
+    with patch(
+        "api.creative.get_logo_project_data",
+        new=AsyncMock(return_value=expected),
+    ) as mock_get_project:
+        response = await creative_module.get_logo_project(
+            project_id="project-1",
+            current_user=current_user,
+        )
+
+    assert response == expected
+    mock_get_project.assert_awaited_once_with(project_id="project-1", current_user=current_user)
+
+    with patch(
+        "api.creative.select_logo_project_candidate_data",
+        new=AsyncMock(return_value=expected),
+    ) as mock_select:
+        response = await creative_module.select_logo_project_candidate(
+            project_id="project-1",
+            request=LogoProjectSelectRequest(image_id="image-1"),
+            current_user=current_user,
+        )
+
+    assert response == expected
+    mock_select.assert_awaited_once_with(
+        project_id="project-1",
+        image_id="image-1",
+        current_user=current_user,
+    )
+
+
+@pytest.mark.asyncio
+async def test_extracted_retry_logo_audit_route_delegates_to_service():
+    from api import creative as creative_module
+
+    current_user = MagicMock()
+    expected = {
+        "image_id": "image-1",
+        "image_url": "/api/v1/tools/generated-image/image-1",
+        "similarity_score": 0,
+        "is_safe": False,
+        "audit_status": "pending",
+    }
+
+    with patch(
+        "api.creative.retry_logo_audit_data",
+        new=AsyncMock(return_value=expected),
+    ) as mock_retry:
+        response = await creative_module.retry_logo_audit(
+            image_id="image-1",
+            current_user=current_user,
+        )
+
+    assert response == expected
+    mock_retry.assert_awaited_once()
+    assert mock_retry.await_args.kwargs["image_id"] == "image-1"
+    assert mock_retry.await_args.kwargs["current_user"] == current_user
+    assert callable(mock_retry.await_args.kwargs["audit_scheduler"])
 
 
 @pytest.mark.asyncio
@@ -8236,12 +8572,51 @@ async def test_creative_service_get_generated_image_response_returns_file_respon
             image_id=image_id,
             current_user=current_user,
             database_factory=MagicMock(return_value=mock_db_cm),
+            logo_output_dir=os.path.dirname(temp_path),
         )
 
         assert response.path == temp_path
         assert response.media_type == "image/png"
         assert response.headers["cache-control"] == "public, max-age=604800"
         mock_cursor.execute.assert_called_once()
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+
+@pytest.mark.asyncio
+async def test_creative_service_get_generated_image_response_rejects_outside_logo_dir():
+    from services.creative_service import get_generated_image_response
+
+    current_user = SimpleNamespace(organization_id=uuid.uuid4())
+    image_id = str(uuid.uuid4())
+
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        tmp.write(b"creative-image")
+        temp_path = tmp.name
+
+    mock_db_cm = MagicMock()
+    mock_db = MagicMock()
+    mock_cursor = MagicMock()
+    mock_db.cursor.return_value = mock_cursor
+    mock_cursor.fetchone.return_value = {
+        "image_path": temp_path,
+        "org_id": str(current_user.organization_id),
+    }
+    mock_db_cm.__enter__.return_value = mock_db
+    mock_db_cm.__exit__.return_value = False
+
+    try:
+        with pytest.raises(Exception) as exc_info:
+            await get_generated_image_response(
+                image_id=image_id,
+                current_user=current_user,
+                database_factory=MagicMock(return_value=mock_db_cm),
+                logo_output_dir=os.path.join(os.path.dirname(temp_path), "allowed"),
+            )
+
+        assert exc_info.value.status_code == 400
+        assert exc_info.value.detail == "Invalid image path"
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
@@ -8304,6 +8679,53 @@ async def test_creative_service_get_generation_history_data_maps_logo_items():
     assert mock_cursor.execute.call_count == 3
 
 
+def test_creative_service_audit_generated_logo_image_updates_completed_status():
+    from services.creative_service import audit_generated_logo_image
+
+    image_id = str(uuid.uuid4())
+    org_id = str(uuid.uuid4())
+    project_id = str(uuid.uuid4())
+
+    mock_db_cm = MagicMock()
+    mock_db = MagicMock()
+    mock_cursor = MagicMock()
+    mock_db.cursor.return_value = mock_cursor
+    mock_db_cm.__enter__.return_value = mock_db
+    mock_db_cm.__exit__.return_value = False
+    mock_cursor.fetchone.side_effect = [
+        {"id": image_id, "org_id": org_id, "image_path": "generated/logo.png", "project_id": project_id},
+        {"brand_name": "Acme", "nice_classes": [25]},
+    ]
+
+    audit_generated_logo_image(
+        image_id,
+        database_factory=MagicMock(return_value=mock_db_cm),
+        visual_audit_available_checker=MagicMock(return_value=(True, "")),
+        generate_visual_features_handler=MagicMock(
+            return_value={"clip_embedding": [0.1, 0.2], "dino_embedding": [0.3, 0.4], "ocr_text": "acme"}
+        ),
+        visual_similarity_search_handler=MagicMock(
+            return_value=[
+                {
+                    "name": "ACME OLD",
+                    "image_path": "logos/acme-old.png",
+                    "combined_sim": 0.42,
+                    "visual_breakdown": {"clip": 0.4, "raw_combined": 0.42},
+                }
+            ]
+        ),
+        closest_match_image_url_builder=MagicMock(return_value="/api/trademark-image/logos/acme-old.png"),
+        settings_obj=SimpleNamespace(creative=SimpleNamespace(logo_similarity_threshold=0.7)),
+    )
+
+    final_params = mock_cursor.execute.call_args_list[-1].args[1]
+    assert final_params[4] == 42.0
+    assert final_params[5] is True
+    assert final_params[6] == "completed"
+    assert '"closest_match_name": "ACME OLD"' in final_params[3]
+    assert mock_db.commit.call_count == 2
+
+
 @pytest.mark.asyncio
 async def test_creative_service_status_data_respects_feature_flag():
     from services.creative_service import creative_suite_status_data
@@ -8333,8 +8755,81 @@ async def test_creative_service_status_data_marks_gemini_availability():
     )
 
     assert response["name_generator"]["available"] is True
+    assert response["name_generator"]["cost"] == 1
     assert response["logo_studio"]["available"] is True
-    assert response["logo_studio"]["reason"] == "CLIP modeli yuklenmemis"
+    assert response["logo_studio"]["cost"] == 5
+    assert response["logo_studio"]["reason"] == ""
+    assert response["logo_studio"]["audit_available"] is False
+    assert response["logo_studio"]["audit_reason"] == "CLIP modeli yuklenmemis"
+
+
+@pytest.mark.asyncio
+async def test_creative_service_status_data_marks_logo_available_with_clip():
+    from services.creative_service import creative_suite_status_data
+
+    client = MagicMock()
+    client.is_available.return_value = True
+    ai_module = SimpleNamespace(clip_model=object(), get_clip_embedding_cached=lambda path: [0.1])
+
+    response = await creative_suite_status_data(
+        feature_enabled_getter=lambda name: True,
+        gemini_client_getter=lambda: client,
+        ai_module=ai_module,
+    )
+
+    assert response["name_generator"]["available"] is True
+    assert response["logo_studio"]["available"] is True
+    assert response["logo_studio"]["reason"] == ""
+    assert response["logo_studio"]["audit_available"] is True
+
+
+def test_creative_request_validation_rejects_invalid_classes_and_styles():
+    from models.schemas import LogoGenerationRequest, NameSuggestionRequest
+
+    with pytest.raises(Exception):
+        NameSuggestionRequest(query="Acme", nice_classes=[46])
+
+    with pytest.raises(Exception):
+        NameSuggestionRequest(query="Acme", style="luxury")
+
+    with pytest.raises(Exception):
+        LogoGenerationRequest(brand_name="Acme", nice_classes=[99])
+
+    with pytest.raises(Exception):
+        LogoGenerationRequest(brand_name="Acme", style="technical")
+
+
+def test_creative_name_request_cache_key_includes_prompt_context():
+    from models.schemas import NameSuggestionRequest
+    from services.creative_service import _name_request_cache_key
+
+    base = NameSuggestionRequest(
+        query="Acme",
+        nice_classes=[25],
+        industry="Footwear",
+        style="modern",
+        language="tr",
+        avoid_names=["Nike"],
+    )
+    changed_style = NameSuggestionRequest(
+        query="Acme",
+        nice_classes=[25],
+        industry="Footwear",
+        style="classic",
+        language="tr",
+        avoid_names=["Nike"],
+    )
+    changed_classes = NameSuggestionRequest(
+        query="Acme",
+        nice_classes=[9],
+        industry="Footwear",
+        style="modern",
+        language="tr",
+        avoid_names=["Nike"],
+    )
+
+    assert _name_request_cache_key(base) != _name_request_cache_key(changed_style)
+    assert _name_request_cache_key(base) != _name_request_cache_key(changed_classes)
 
 
 @pytest.mark.asyncio
@@ -8495,6 +8990,8 @@ async def test_creative_service_suggest_names_data_generates_and_logs_results():
     assert response.filtered_count == 1
     assert response.session_count == 5
     assert [item.name for item in response.safe_names] == ["ACMIA"]
+    client.build_name_prompt.assert_called_once()
+    assert client.build_name_prompt.call_args.kwargs["concept"] == "Acme"
     client.generate_names.assert_awaited_once_with(prompt="prompt", count=4)
     deduct_name_credit_handler.assert_called_once_with(mock_db, str(org_id))
     increment_name_generation_usage_handler.assert_called_once_with(
@@ -8502,7 +8999,10 @@ async def test_creative_service_suggest_names_data_generates_and_logs_results():
         str(user_id),
         str(org_id),
     )
-    session_count_incrementer.assert_called_once_with(str(org_id), "Acme", 1)
+    session_count_incrementer.assert_called_once()
+    assert session_count_incrementer.call_args.args[0] == str(org_id)
+    assert "acme" in session_count_incrementer.call_args.args[1]
+    assert session_count_incrementer.call_args.args[2] == 1
     cache_results_handler.assert_called_once()
     generation_log_handler.assert_called_once()
     audit_log_handler.assert_called_once()
@@ -8537,6 +9037,8 @@ async def test_creative_service_generate_logo_data_generates_and_logs_results():
     audit_log_handler = MagicMock()
     deduct_logo_credit_handler = MagicMock(return_value=True)
     refund_logo_credit_handler = MagicMock()
+    create_logo_project_handler = MagicMock(return_value="project-1")
+    scheduled_audits = []
     save_logo_image_handler = MagicMock(
         side_effect=["generated/logo-1.png", "generated/logo-2.png"]
     )
@@ -8591,18 +9093,23 @@ async def test_creative_service_generate_logo_data_generates_and_logs_results():
         visual_similarity_search_handler=visual_similarity_search_handler,
         store_generated_image_handler=store_generated_image_handler,
         logo_credits_remaining_getter=logo_credits_remaining_getter,
+        visual_audit_available_checker=MagicMock(return_value=(True, "")),
+        audit_scheduler=scheduled_audits.append,
+        create_logo_project_handler=create_logo_project_handler,
         generation_log_handler=generation_log_handler,
         audit_log_handler=audit_log_handler,
     )
 
     assert response.generation_id == "gen-log-1"
+    assert response.project_id == "project-1"
     assert response.credits_remaining == {"monthly": 2, "purchased": 1}
     assert len(response.logos) == 2
     assert response.logos[0].image_id == "img-1"
-    assert response.logos[0].closest_match_name == "ACME OLD"
-    assert response.logos[0].closest_match_image_url == "/api/trademark-image/logos/acme-old.png"
-    assert response.logos[0].is_safe is True
-    assert response.logos[0].visual_breakdown["clip"] == 0.4
+    assert response.logos[0].project_id == "project-1"
+    assert response.logos[0].variant_index == 1
+    assert response.logos[0].audit_status == "pending"
+    assert response.logos[0].is_safe is False
+    assert response.logos[0].visual_breakdown is None
     assert response.logos[1].image_id == "img-2"
     assert response.logos[1].similarity_score == 0.0
     client.generate_logos.assert_awaited_once_with(
@@ -8613,6 +9120,11 @@ async def test_creative_service_generate_logo_data_generates_and_logs_results():
     )
     deduct_logo_credit_handler.assert_called_once_with(mock_db, str(org_id))
     refund_logo_credit_handler.assert_not_called()
+    create_logo_project_handler.assert_called_once()
+    assert scheduled_audits == ["img-1", "img-2"]
+    generate_visual_features_handler.assert_not_called()
+    visual_similarity_search_handler.assert_not_called()
+    assert store_generated_image_handler.call_args_list[0].kwargs["audit_status"] == "pending"
     generation_log_handler.assert_called_once()
     audit_log_handler.assert_called_once()
     logo_credits_remaining_getter.assert_called_once_with(str(org_id))
@@ -8653,12 +9165,73 @@ async def test_creative_service_generate_logo_data_refunds_when_gemini_is_unavai
             deduct_logo_credit_handler=deduct_logo_credit_handler,
             refund_logo_credit_handler=refund_logo_credit_handler,
             gemini_client_getter=lambda: client,
+            visual_audit_available_checker=MagicMock(return_value=(True, "")),
         )
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.detail["error"] == "service_unavailable"
-    deduct_logo_credit_handler.assert_called_once_with(mock_db, str(org_id))
-    refund_logo_credit_handler.assert_called_once_with(mock_db, str(org_id))
+    deduct_logo_credit_handler.assert_not_called()
+    refund_logo_credit_handler.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_creative_service_generate_logo_data_refunds_when_image_store_fails():
+    from models.schemas import LogoGenerationRequest
+    from services.creative_service import generate_logo_data
+
+    org_id = uuid.uuid4()
+    current_user = SimpleNamespace(id=uuid.uuid4(), organization_id=org_id)
+    request = LogoGenerationRequest(
+        brand_name="Acme",
+        description="Modern wordmark",
+        style="modern",
+        nice_classes=[25],
+        color_preferences="blue",
+    )
+
+    mock_db_cm = MagicMock()
+    mock_db = MagicMock()
+    mock_db_cm.__enter__.return_value = mock_db
+    mock_db_cm.__exit__.return_value = False
+
+    client = MagicMock()
+    client.is_available.return_value = True
+    client.generate_logos = AsyncMock(return_value=[b"image-1"])
+    deduct_logo_credit_handler = MagicMock(return_value=True)
+    refund_logo_credit_handler = MagicMock()
+
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        saved_path = tmp.name
+
+    try:
+        with pytest.raises(Exception) as exc_info:
+            await generate_logo_data(
+                request=request,
+                current_user=current_user,
+                settings_obj=SimpleNamespace(creative=SimpleNamespace(logo_images_per_run=1)),
+                database_factory=MagicMock(return_value=mock_db_cm),
+                logo_eligibility_checker=MagicMock(return_value=(True, "ok", {})),
+                deduct_logo_credit_handler=deduct_logo_credit_handler,
+                refund_logo_credit_handler=refund_logo_credit_handler,
+                gemini_client_getter=lambda: client,
+                generation_uuid_factory=lambda: uuid.UUID("11111111-1111-1111-1111-111111111111"),
+                save_logo_image_handler=MagicMock(return_value=saved_path),
+                generate_visual_features_handler=MagicMock(return_value={"clip_embedding": [0.1], "dino_embedding": None, "ocr_text": ""}),
+                visual_similarity_search_handler=MagicMock(return_value=[]),
+                store_generated_image_handler=MagicMock(return_value=None),
+                visual_audit_available_checker=MagicMock(return_value=(True, "")),
+                create_logo_project_handler=MagicMock(return_value="project-1"),
+                generation_log_handler=MagicMock(return_value="gen-log-1"),
+            )
+
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail["error"] == "processing_failed"
+        deduct_logo_credit_handler.assert_called_once_with(mock_db, str(org_id))
+        refund_logo_credit_handler.assert_called_once_with(mock_db, str(org_id))
+        assert not os.path.exists(saved_path)
+    finally:
+        if os.path.exists(saved_path):
+            os.remove(saved_path)
 
 
 @pytest.mark.asyncio
@@ -9413,7 +9986,7 @@ async def test_upload_service_process_trademark_upload_adds_watchlist_items():
             "watchlist_id": str(fixed_item_id),
         }
     ]
-    assert mock_cur.execute.call_count == 2
+    assert mock_cur.execute.call_count == 3
     mock_db.commit.assert_called_once()
 
 
@@ -10636,6 +11209,45 @@ async def test_pipeline_service_trigger_pipeline_step_data_accepts_event_ingest(
 
 
 @pytest.mark.asyncio
+async def test_pipeline_service_trigger_pipeline_step_data_accepts_repair():
+    from services.pipeline_service import trigger_pipeline_step_data
+
+    current_user = SimpleNamespace(email="admin@example.com")
+    process_launcher = MagicMock()
+    mock_db_cm = MagicMock()
+    mock_db = MagicMock()
+    mock_cursor = MagicMock()
+    mock_db.cursor.return_value = mock_cursor
+    mock_db_cm.__enter__.return_value = mock_db
+    mock_db_cm.__exit__.return_value = False
+    mock_cursor.fetchall.return_value = []
+    mock_cursor.fetchone.return_value = None
+
+    response = await trigger_pipeline_step_data(
+        step="repair",
+        background_tasks=MagicMock(),
+        current_user=current_user,
+        state_getter=lambda: (None, None),
+        db_factory=MagicMock(return_value=mock_db_cm),
+        run_id_factory=lambda: "run-step-db-repair",
+        process_launcher=process_launcher,
+    )
+
+    assert response == {
+        "run_id": "run-step-db-repair",
+        "status": "started",
+        "step": "repair",
+    }
+    process_launcher.assert_called_once_with(
+        triggered_by="api",
+        run_id="run-step-db-repair",
+        skip_download=True,
+        single_step="repair",
+        service_logger=ANY,
+    )
+
+
+@pytest.mark.asyncio
 async def test_pipeline_service_trigger_pipeline_step_data_accepts_final_status_repair():
     from services.pipeline_service import trigger_pipeline_step_data
 
@@ -10709,6 +11321,8 @@ async def test_pipeline_service_get_pipeline_status_data_maps_recent_runs():
     assert response["recent_runs"][0]["status"] == "running"
     assert response["recent_runs"][0]["current_step"] == "extract"
     assert response["recent_runs"][0]["step_event_ingest"] == {"status": "success"}
+    assert response["recent_runs"][0]["step_repair"] == {"status": "success"}
+    assert response["recent_runs"][0]["total_repaired"] == 6
     assert response["recent_runs"][0]["total_event_scopes_ingested"] == 7
     assert response["recent_runs"][0]["step_final_status_repair"] == {"status": "success"}
 
@@ -11187,6 +11801,8 @@ async def test_pipeline_service_get_pipeline_run_detail_data_formats_response():
     assert response["id"] == "run-42"
     assert response["total_downloaded"] == 12
     assert response["step_event_ingest"] == {"status": "success"}
+    assert response["step_repair"] == {"status": "success"}
+    assert response["total_repaired"] == 6
     assert response["total_event_scopes_ingested"] == 7
     assert response["step_final_status_repair"] == {"status": "success"}
     assert response["total_final_status_repaired"] == 7

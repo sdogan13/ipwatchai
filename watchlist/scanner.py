@@ -29,11 +29,16 @@ from utils.class_utils import (
     GLOBAL_CLASS,
     get_overlapping_classes,
 )
+from utils.watchlist_filters import is_same_holder_conflict
 from pipeline import ai  # Shared AI models (loaded once at app startup)
 from risk_engine import score_pair  # Centralized scoring
 from utils.phonetic import calculate_phonetic_similarity  # Graduated phonetic scoring
 
 logger = logging.getLogger(__name__)
+
+# Store conflicts down to this baseline so the watchlist tab can reveal lower
+# risk matches when the user changes the display filter.
+CONFLICT_GENERATION_FLOOR = 0.50
 
 
 def generate_logo_embeddings(logo_path: str) -> Optional[Dict]:
@@ -159,17 +164,19 @@ class WatchlistScanner:
                 ScanLogCRUD.complete(self.db, scan_id, len(trademark_ids), 0, 0)
                 return 0
 
-            # Purge stale alerts for every watchlist item before scanning.
-            # If a user raised their threshold since the last scan, old alerts
-            # that no longer meet the new threshold are resolved here.
+            # Purge only alerts below the storage floor. The user-selected
+            # risk threshold is a display/notification preference; alerts at
+            # or above the floor stay available for later filtering.
             stale_resolved = 0
             for wl_item in watchlist_items:
-                threshold = wl_item.get('alert_threshold', 0.7)
                 stale_resolved += AlertCRUD.resolve_below_threshold(
-                    self.db, UUID(wl_item['id']), threshold
+                    self.db, UUID(wl_item['id']), CONFLICT_GENERATION_FLOOR
                 )
             if stale_resolved:
-                logger.info(f"   Pre-scan cleanup: resolved {stale_resolved} stale alert(s) below threshold")
+                logger.info(
+                    f"   Pre-scan cleanup: resolved {stale_resolved} stale alert(s) "
+                    f"below storage floor {CONFLICT_GENERATION_FLOOR:.0%}"
+                )
 
             # Get trademark details
             trademarks = self._get_trademarks_by_ids(trademark_ids)
@@ -188,9 +195,7 @@ class WatchlistScanner:
                     # Check for conflict
                     conflict = self._check_conflict(tm, wl_item)
 
-                    threshold = wl_item.get('alert_threshold', 0.7)
-
-                    if conflict and conflict['total'] >= threshold:
+                    if conflict and conflict['total'] >= CONFLICT_GENERATION_FLOOR:
                         # Collect conflict for later sorting/limiting
                         if wl_id not in conflicts_by_watchlist:
                             conflicts_by_watchlist[wl_id] = []
@@ -240,6 +245,7 @@ class WatchlistScanner:
                                 'status': tm.get('final_status'),
                                 'classes': tm.get('nice_class_numbers', []),
                                 'holder': tm.get('holder_name'),
+                                'holder_tpe_client_id': tm.get('holder_tpe_client_id'),
                                 'image_path': tm.get('image_path')
                             },
                             scores=conflict,
@@ -305,20 +311,23 @@ class WatchlistScanner:
         # All trademarks within appeal deadline
         candidates = self._get_trademarks_within_deadline()
 
-        threshold = wl_item.get('alert_threshold', 0.7)
-
-        # Purge stale alerts that no longer meet the current threshold before
-        # generating new ones — handles the case where threshold was raised.
-        resolved = AlertCRUD.resolve_below_threshold(self.db, watchlist_id, threshold)
+        # Purge only alerts below the storage floor; display filtering happens
+        # in the watchlist tab.
+        resolved = AlertCRUD.resolve_below_threshold(
+            self.db, watchlist_id, CONFLICT_GENERATION_FLOOR
+        )
         if resolved:
-            logger.info(f"   Resolved {resolved} stale alert(s) below threshold {threshold:.0%}")
+            logger.info(
+                f"   Resolved {resolved} stale alert(s) below storage floor "
+                f"{CONFLICT_GENERATION_FLOOR:.0%}"
+            )
 
         # Collect all conflicts first
         conflicts: List[Tuple[Dict, Dict]] = []
         for tm in candidates:
             conflict = self._check_conflict(tm, wl_item)
 
-            if conflict and conflict['total'] >= threshold:
+            if conflict and conflict['total'] >= CONFLICT_GENERATION_FLOOR:
                 conflicts.append((tm, conflict))
 
         # Sort by score DESC and limit
@@ -350,6 +359,7 @@ class WatchlistScanner:
                         'status': tm.get('final_status'),
                         'classes': tm.get('nice_class_numbers', []),
                         'holder': tm.get('holder_name'),
+                        'holder_tpe_client_id': tm.get('holder_tpe_client_id'),
                         'image_path': tm.get('image_path')
                     },
                     scores=conflict,
@@ -377,6 +387,14 @@ class WatchlistScanner:
         own_app_no = watchlist_item.get('customer_application_no')
         tm_app_no = trademark.get('application_no')
         if own_app_no and tm_app_no and own_app_no == tm_app_no:
+            return None
+        if is_same_holder_conflict(trademark, watchlist_item):
+            logger.debug(
+                "Skipping same-holder watchlist conflict: watchlist=%s candidate=%s holder=%s",
+                watchlist_item.get('id'),
+                tm_app_no,
+                trademark.get('holder_tpe_client_id') or trademark.get('holder_id'),
+            )
             return None
 
         # 1. Check Nice class overlap

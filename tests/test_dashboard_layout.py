@@ -16,6 +16,7 @@ PARTIALS = TEMPLATES / "dashboard" / "partials"
 STATIC = ROOT / "static"
 DASHBOARD_TEMPLATE = TEMPLATES / "dashboard" / "page.html"
 DASHBOARD_APP = STATIC / "js" / "dashboard" / "app.js"
+I18N_JS = STATIC / "js" / "utils" / "i18n.js"
 
 
 class TestDashboardHTML:
@@ -42,10 +43,12 @@ class TestDashboardHTML:
         assert ".desktop-tabs" not in self.html
 
     def test_mobile_bottom_bar_hidden_on_desktop(self):
+        assert "@media (min-width: 1024px)" in self.html
         assert ".mobile-bottom-bar {" in self.html
         assert "display: none !important;" in self.html
 
     def test_mobile_drawer_hidden_on_desktop(self):
+        assert "@media (min-width: 1024px)" in self.html
         assert ".mobile-drawer-backdrop {" in self.html
         assert "display: none !important;" in self.html
 
@@ -109,8 +112,8 @@ class TestNavbar:
         assert "tabs.new" in chunk
 
     def test_tabs_hidden_on_mobile(self):
-        """Desktop tabs nav should be hidden on mobile via md:flex."""
-        assert 'class="hidden md:flex items-center' in self.html
+        """Desktop tabs nav should stay hidden through tablet widths."""
+        assert 'class="hidden lg:flex items-center' in self.html
 
     def test_i18n_on_search_tab(self):
         assert "t('tabs.search')" in self.html
@@ -251,6 +254,28 @@ class TestOtherPanels:
         tag_chunk = html[tag_start:idx + 50]
         assert "hidden" in tag_chunk
 
+    def test_ai_studio_has_history_and_class_pickers(self):
+        html = (PARTIALS / "_ai_studio_panel.html").read_text(encoding="utf-8")
+        assert 'class="studio-shell"' in html
+        assert 'class="studio-workbench"' in html
+        assert 'class="studio-workbench-panel"' in html
+        assert 'id="studio-history-panel"' in html
+        assert 'class="studio-history-sidebar"' in html
+        assert 'data-studio-history-filter="all"' in html
+        assert 'class="studio-class-picker' in html
+        assert 'id="studio-name-classes"' in html
+        assert 'id="studio-logo-classes"' in html
+        assert 'id="studio-name-classes-toggle"' in html
+        assert 'id="studio-logo-classes-toggle"' in html
+        assert 'id="studio-logo-color-swatches"' in html
+        assert 'id="studio-logo-project-meta"' in html
+        assert 'id="studio-logo-revision-panel"' in html
+        assert 'id="studio-logo-revision-prompt"' in html
+        assert 'id="studio-logo-revise-btn"' in html
+        assert 'data-i18n-value="studio.palette_blue_value"' in html
+        assert 'id="studio-name-classes-summary" class="studio-class-summary" x-text' not in html
+        assert 'id="studio-logo-classes-summary" class="studio-class-summary" x-text' not in html
+
     def test_reports_panel_hidden(self):
         html = (PARTIALS / "_reports_panel.html").read_text(encoding="utf-8")
         assert 'id="tab-content-reports"' in html
@@ -297,6 +322,23 @@ class TestAppJS:
         assert "'event_ingest': t('pipeline.event_ingest_name')" in self.js
         assert "'conflict_scan': t('pipeline.conflict_scan_name')" in self.js
 
+    def test_ai_studio_loads_status_credits_and_history(self):
+        assert "checkCreativeSuiteStatus()" in self.js
+        assert "loadStudioUsageSummary()" in self.js
+        assert "loadStudioHistory()" in self.js
+        assert "applyStudioAvailability" in self.js
+        assert "toggleStudioClassPicker" in self.js
+        assert "setStudioHistoryFilter" in self.js
+        assert "selectStudioColorPalette" in self.js
+        assert "updateStudioModeMeta" in self.js
+        assert "refreshStudioDynamicTranslations" in self.js
+        assert "translateStudioStatusReason" in self.js
+        assert "fetchAndRenderLogoProject" in self.js
+        assert "startLogoProjectPollingIfNeeded" in self.js
+        assert "reviseSelectedLogo" in self.js
+        assert "selectFinalLogoCandidate" in self.js
+        assert "retryLogoAudit" in self.js
+
 
 class TestLocaleFiles:
     """Tests for i18n locale files — tabs.search key."""
@@ -331,6 +373,101 @@ class TestLocaleFiles:
             assert data["pipeline"]["step_event_ingest"]
             assert data["pipeline"]["event_ingest_name"]
             assert data["pipeline"]["conflict_scan_name"]
+
+    def test_all_locales_have_ai_studio_readiness_keys(self):
+        import json
+
+        required = {
+            "credits_remaining_short",
+            "ai_credits_info",
+            "history_title",
+            "history_subtitle",
+            "refresh_history",
+            "history_empty",
+            "history_logo_meta",
+            "history_name_meta",
+            "credits_used",
+            "mode_label",
+            "status_checking",
+            "status_available",
+            "status_unavailable",
+            "run_cost",
+            "no_classes_selected",
+            "classes_selected",
+            "edit_classes",
+            "done_classes",
+            "palette_label",
+            "palette_blue",
+            "palette_green",
+            "palette_mono",
+            "palette_signal",
+            "palette_blue_value",
+            "palette_green_value",
+            "palette_mono_value",
+            "palette_signal_value",
+            "name_idle_title",
+            "name_idle_body",
+            "logo_idle_title",
+            "logo_idle_body",
+            "history_filter_label",
+            "history_filter_all",
+            "history_filter_names",
+            "history_filter_logos",
+            "reason_gemini_not_configured",
+            "reason_clip_not_loaded",
+            "reason_clip_function_missing",
+            "logo_project_summary",
+            "audit_status_pending",
+            "audit_status_running",
+            "audit_status_completed",
+            "audit_status_failed",
+            "audit_pending_note",
+            "download_requires_safe_audit",
+            "revision_title",
+            "revision_prompt_label",
+            "revision_prompt_placeholder",
+            "generate_revision",
+            "revise_btn",
+            "select_logo",
+            "selected_badge",
+            "select_logo_to_revise",
+            "enter_revision_prompt",
+            "project_load_failed",
+        }
+        for locale in ("en", "tr", "ar"):
+            data = json.loads((STATIC / "locales" / f"{locale}.json").read_text(encoding="utf-8"))
+            assert required <= set(data["studio"].keys())
+
+    def test_i18n_asset_versions_bust_ai_studio_locale_cache(self):
+        import re
+
+        i18n_js = I18N_JS.read_text(encoding="utf-8")
+        locale_version = re.search(r"_localeAssetVersion = '(\d+)'", i18n_js)
+        assert locale_version
+        assert int(locale_version.group(1)) >= 43
+
+        for template in [
+            TEMPLATES / "dashboard" / "page.html",
+            TEMPLATES / "billing" / "checkout.html",
+            TEMPLATES / "billing" / "pricing.html",
+            TEMPLATES / "marketing" / "landing.html",
+        ]:
+            html = template.read_text(encoding="utf-8")
+            script_version = re.search(r"/static/js/utils/i18n\.js\?v=(\d+)", html)
+            assert script_version, f"Missing i18n script version in {template}"
+            assert int(script_version.group(1)) >= 42
+
+    def test_dashboard_ai_studio_asset_versions_bumped(self):
+        import re
+
+        html = DASHBOARD_TEMPLATE.read_text(encoding="utf-8")
+        css_version = re.search(r"/static/css/tokens\.css\?v=(\d+)", html)
+        studio_card_version = re.search(r"/static/js/components/studio-card\.js\?v=(\d+)", html)
+        dashboard_app_version = re.search(r"/static/js/dashboard/app\.js\?v=(\d+)", html)
+
+        assert css_version and int(css_version.group(1)) >= 24
+        assert studio_card_version and int(studio_card_version.group(1)) >= 33
+        assert dashboard_app_version and int(dashboard_app_version.group(1)) >= 64
 
 
 class TestNoSearchLeakage:

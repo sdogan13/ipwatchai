@@ -163,7 +163,7 @@ async def list_watchlist(
     renewal_only: bool = Query(False),
     appeals_only: bool = Query(False),
     status_filter: Optional[str] = Query(None),
-    threshold: float = Query(0.50, ge=0.0, le=100.0),
+    threshold: float = Query(0.70, ge=0.0, le=100.0),
     tm_status: Optional[str] = Query(None, max_length=50),
     current_user: CurrentUser = Depends(get_current_user),
 ):
@@ -458,7 +458,6 @@ async def preview_portfolio_import(
 class BulkFromPortfolioRequest(PydanticBaseModel):
     holder_id: Optional[str] = None
     attorney_no: Optional[str] = None
-    similarity_threshold: float = 0.50
 
 
 @watchlist_router.post("/bulk-from-portfolio", response_model=WatchlistBulkImportResult)
@@ -586,7 +585,6 @@ async def bulk_import_from_portfolio(
                     brand_name=brand,
                     nice_class_numbers=classes,
                     application_no=trademark.get("application_no"),
-                    similarity_threshold=data.similarity_threshold,
                 )
 
                 img_path = trademark.get("image_path") or None
@@ -1455,7 +1453,7 @@ async def trigger_scan_all(
 
     msg = f"{len(items_to_scan)} marka taramaya alindi (toplam: {total})"
     if len(items_to_scan) < len(items):
-        msg += f" â€” plan limitiniz nedeniyle {_scan_max} marka tarandi"
+        msg += f" - plan limitiniz nedeniyle {_scan_max} marka tarandi"
     return SuccessResponse(message=msg)
 
 

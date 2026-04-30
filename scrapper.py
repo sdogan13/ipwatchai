@@ -4,6 +4,7 @@ import json
 import os
 import re
 import requests
+import html
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
@@ -444,6 +445,25 @@ class TurkPatentScraper:
             } catch(e) {}
         }""", dy)
 
+    def _js_scroll_to_top(self, scroll_target_sel: str):
+        """Scrolls to top of the current result container."""
+        if self._is_body_scroll(scroll_target_sel):
+            self.page.evaluate("""() => {
+                const el = document.scrollingElement || document.documentElement;
+                if (!el) return;
+                el.scrollTop = 0;
+                el.dispatchEvent(new Event('scroll', { bubbles: true }));
+            }""")
+            return
+        loc = self.page.locator(scroll_target_sel).first
+        loc.evaluate("""(el) => {
+            try {
+              const tgt = el.querySelector('.dx-scrollable-container') || el;
+              tgt.scrollTop = 0;
+              tgt.dispatchEvent(new Event('scroll', { bubbles: true }));
+            } catch(e) {}
+        }""")
+
     def _wheel_inside_scroll_target(self, scroll_target_sel: str, delta_y: int):
         """
         EXACT wheel scroll logic from tescil_test.py - includes click before wheel.
@@ -528,6 +548,348 @@ class TurkPatentScraper:
                     data_store[key] = row_data
         except Exception:
             pass
+
+    @staticmethod
+    def _row_application_no(row: List[str]) -> str:
+        return row[1].strip() if len(row) > 1 and row[1] else ""
+
+    @staticmethod
+    def _row_status(row: List[str]) -> str:
+        return row[6].strip() if len(row) > 6 and row[6] else ""
+
+    @staticmethod
+    def parse_detail_nice_classes(detail_text: str) -> List[int]:
+        """Extract Nice classes from DETAY -> Marka Bilgileri -> Nice Sınıfları."""
+        if not detail_text:
+            return []
+
+        text = html.unescape(str(detail_text))
+        text = re.sub(r"\r\n?", "\n", text)
+        lines = [line.strip() for line in text.split("\n") if line.strip()]
+        def normalize_label(value: str) -> str:
+            return (
+                value.lower()
+                .replace("Ä±", "i")
+                .replace("Ä°", "i")
+                .replace("ÅŸ", "s")
+                .replace("Åž", "s")
+                .replace("ı", "i")
+                .replace("İ", "i")
+                .replace("ş", "s")
+                .replace("Ş", "s")
+                .replace("ü", "u")
+                .replace("Ü", "u")
+            )
+
+        normalized_lines = [normalize_label(line) for line in lines]
+        start_index = 0
+        end_index = len(lines)
+        for index, normalized in enumerate(normalized_lines):
+            if "marka bilgileri" in normalized:
+                start_index = index
+                break
+        for index in range(start_index, len(lines)):
+            if "mal ve hizmet bilgileri" in normalized_lines[index]:
+                end_index = index
+                break
+
+        label_re = re.compile(r"nice\s+s(?:ı|i|Ä±)n(?:ı|i|Ä±)flar(?:ı|i|Ä±)", flags=re.IGNORECASE)
+        for index in range(start_index, end_index):
+            normalized = normalized_lines[index]
+            if "nice siniflari" not in normalized:
+                continue
+            if "islem" in normalized and "sekil" in normalized:
+                continue
+
+            same_line = lines[index]
+            inline = label_re.split(same_line, maxsplit=1)
+            candidates = []
+            if len(inline) > 1:
+                candidates.append(re.split(r"\bT(?:ü|u|Ã¼)r(?:ü|u|Ã¼)\b", inline[-1], maxsplit=1, flags=re.IGNORECASE)[0])
+            candidates.extend(lines[index + 1:min(index + 4, end_index)])
+
+            for candidate in candidates:
+                if "/" not in candidate and len(re.findall(r"\d{1,3}", candidate)) == 1:
+                    continue
+                values = sorted(
+                    {
+                        int(value)
+                        for value in re.findall(r"\d{1,3}", candidate)
+                        if value.isdigit() and 1 <= int(value) <= 45
+                    }
+                )
+                if values:
+                    return values
+
+        match = re.search(
+            r"nice\s+s(?:ı|i|Ä±)n(?:ı|i|Ä±)flar(?:ı|i|Ä±)\s*[:\-]?\s*([0-9\s/.,;]+)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if not match:
+            return []
+        return sorted(
+            {
+                int(value)
+                for value in re.findall(r"\d{1,3}", match.group(1))
+                if value.isdigit() and 1 <= int(value) <= 45
+            }
+        )
+
+    def _click_detail_for_application_no(self, application_no: str, max_scrolls: int = 80) -> bool:
+        row_sel, scroll_target_sel = self._detect_grid()
+        self._js_scroll_to_top(scroll_target_sel)
+        self.page.wait_for_timeout(300)
+
+        for _ in range(max_scrolls):
+            rows = self.page.locator(row_sel)
+            try:
+                count = rows.count()
+            except Exception:
+                count = 0
+
+            for index in range(count):
+                row = rows.nth(index)
+                try:
+                    row_text = row.inner_text(timeout=1000)
+                except Exception:
+                    continue
+                if application_no not in row_text:
+                    continue
+
+                detail = row.locator("button:has-text('DETAY'), a:has-text('DETAY')").first
+                try:
+                    if detail.count() > 0:
+                        detail.click(timeout=5000, force=True)
+                        self.page.wait_for_timeout(1200)
+                        return True
+                except Exception:
+                    pass
+
+                try:
+                    row.get_by_text(re.compile(r"DETAY", re.I)).first.click(timeout=5000, force=True)
+                    self.page.wait_for_timeout(1200)
+                    return True
+                except Exception:
+                    return False
+
+            self._wheel_inside_scroll_target(scroll_target_sel, delta_y=2200)
+            self.page.wait_for_timeout(250)
+
+        return False
+
+    def _scroll_detail_content_to_bottom(self) -> None:
+        try:
+            self.page.evaluate(
+                """async () => {
+                    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+                    const normalize = (value) => (value || '')
+                        .toLowerCase()
+                        .replaceAll('ı', 'i')
+                        .replaceAll('İ', 'i')
+                        .replaceAll('ş', 's')
+                        .replaceAll('Ş', 's');
+                    const elements = Array.from(document.querySelectorAll('body, body *'));
+                    const detailMatches = elements
+                        .filter((el) => {
+                            const text = normalize(el.innerText);
+                            return text.includes('marka bilgileri') && text.includes('mal ve hizmet bilgileri');
+                        })
+                        .sort((a, b) => (a.innerText || '').length - (b.innerText || '').length);
+                    const detailRoot = detailMatches[0] || document.body;
+                    const scrollables = elements.filter((el) => {
+                        const style = window.getComputedStyle(el);
+                        const canScroll = el.scrollHeight > el.clientHeight + 24;
+                        const scrollStyle = `${style.overflow} ${style.overflowY}`;
+                        return canScroll && /(auto|scroll|overlay)/i.test(scrollStyle);
+                    });
+                    const scopedScrollables = scrollables.filter(
+                        (el) => detailRoot.contains(el) || el.contains(detailRoot) || el === detailRoot
+                    );
+                    const targets = scopedScrollables.length ? scopedScrollables : scrollables;
+                    for (const el of targets) {
+                        let previous = -1;
+                        for (let attempt = 0; attempt < 30; attempt += 1) {
+                            el.scrollTop = el.scrollHeight;
+                            await sleep(80);
+                            if (el.scrollTop === previous) {
+                                break;
+                            }
+                            previous = el.scrollTop;
+                        }
+                    }
+                    window.scrollTo(0, document.body.scrollHeight);
+                    await sleep(120);
+                }"""
+            )
+        except Exception:
+            pass
+
+    def _extract_detail_panel_text(self, application_no: str | None = None) -> str:
+        try:
+            return self.page.evaluate(
+                """(applicationNo) => {
+                    const normalize = (value) => (value || '')
+                        .toLowerCase()
+                        .replaceAll('ı', 'i')
+                        .replaceAll('İ', 'i')
+                        .replaceAll('ş', 's')
+                        .replaceAll('Ş', 's');
+                    const isVisible = (el) => {
+                        if (!el || !el.tagName) {
+                            return false;
+                        }
+                        const tag = el.tagName.toLowerCase();
+                        if (['script', 'style', 'noscript', 'template', 'svg', 'path'].includes(tag)) {
+                            return false;
+                        }
+                        const style = window.getComputedStyle(el);
+                        if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) {
+                            return false;
+                        }
+                        const rect = el.getBoundingClientRect();
+                        return rect.width > 0 && rect.height > 0;
+                    };
+                    const elements = Array.from(document.querySelectorAll('body, body *'));
+                    const detailMatches = elements
+                        .filter((el) => {
+                            if (!isVisible(el)) {
+                                return false;
+                            }
+                            const text = normalize(el.innerText);
+                            if (!text.includes('marka bilgileri') || !text.includes('mal ve hizmet bilgileri')) {
+                                return false;
+                            }
+                            return !applicationNo || (el.innerText || '').includes(applicationNo);
+                        })
+                        .map((el) => {
+                            const text = el.innerText || '';
+                            const normalized = normalize(text);
+                            return {
+                                el,
+                                text,
+                                detailIndex: normalized.indexOf('marka bilgileri'),
+                                length: text.length,
+                                hasHistory: normalized.includes('basvuru islem bilgileri'),
+                                hasSearchHeader: normalized.includes('marka arastirma')
+                            };
+                        })
+                        .filter((item) => item.el !== document.body && item.el !== document.documentElement)
+                        .sort((a, b) => {
+                            if (a.hasSearchHeader !== b.hasSearchHeader) {
+                                return a.hasSearchHeader ? 1 : -1;
+                            }
+                            if (a.hasHistory !== b.hasHistory) {
+                                return a.hasHistory ? -1 : 1;
+                            }
+                            if (a.detailIndex !== b.detailIndex) {
+                                return a.detailIndex - b.detailIndex;
+                            }
+                            return b.length - a.length;
+                        });
+                    return detailMatches[0]?.text || '';
+                }""",
+                application_no,
+            )
+        except Exception:
+            return ""
+
+    def _save_detail_artifacts(self, application_no: str, artifact_root: Path, detail_text: str | None = None) -> dict:
+        safe_app_no = re.sub(r"[^0-9A-Za-z._-]+", "_", application_no)
+        out_dir = artifact_root / safe_app_no
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        result = {"artifact_dir": str(out_dir), "html_saved": False, "pdf_saved": False, "error": None}
+        try:
+            (out_dir / "detail.html").write_text(self.page.content(), encoding="utf-8")
+            artifact_text = detail_text or self._extract_detail_panel_text(application_no)
+            if not artifact_text:
+                artifact_text = self.page.evaluate("() => document.body ? document.body.innerText : ''") or ""
+            (out_dir / "detail.txt").write_text(artifact_text, encoding="utf-8")
+            result["html_saved"] = True
+        except Exception as exc:
+            result["error"] = str(exc)
+
+        return result
+
+    def fetch_live_detail_evidence(
+        self,
+        application_no: str,
+        trademark_name: str,
+        *,
+        artifact_root: str | Path,
+        limit: int = 200,
+        max_scroll_seconds: int = 90,
+    ) -> dict:
+        """
+        Search TURKPATENT, exact-match application_no, open DETAY, and return live evidence.
+
+        This method does not persist APP metadata. It is intended for repair/audit flows.
+        """
+        if not self.page:
+            self.start_browser()
+
+        rows = self._do_search(trademark_name, min(max(limit, 1), MAX_SCRAPE_LIMIT), max_scroll_seconds)
+        matched_row = next((row for row in rows if self._row_application_no(row) == application_no), None)
+        if matched_row is None:
+            return {
+                "application_no": application_no,
+                "query": trademark_name,
+                "matched": False,
+                "status_text": "",
+                "nice_classes": [],
+                "artifact_dir": None,
+                "artifact_error": None,
+            }
+
+        detail_opened = self._click_detail_for_application_no(application_no)
+        if not detail_opened:
+            return {
+                "application_no": application_no,
+                "query": trademark_name,
+                "matched": True,
+                "detail_opened": False,
+                "status_text": self._row_status(matched_row),
+                "nice_classes": [],
+                "artifact_dir": None,
+                "artifact_error": "detail_button_not_found",
+            }
+
+        detail_text = ""
+        for _ in range(20):
+            detail_text = self.page.evaluate("() => document.body ? document.body.innerText : ''") or ""
+            detail_ready_text = (
+                detail_text.lower()
+                .replace("ı", "i")
+                .replace("İ", "i")
+                .replace("ş", "s")
+                .replace("Ş", "s")
+            )
+            if (
+                application_no in detail_text
+                and "marka bilgileri" in detail_ready_text
+                and "mal ve hizmet bilgileri" in detail_ready_text
+            ):
+                break
+            self.page.wait_for_timeout(250)
+
+        self._scroll_detail_content_to_bottom()
+        detail_text = self._extract_detail_panel_text(application_no)
+        if not detail_text:
+            detail_text = self.page.evaluate("() => document.body ? document.body.innerText : ''") or ""
+        artifact = self._save_detail_artifacts(application_no, Path(artifact_root), detail_text=detail_text)
+        return {
+            "application_no": application_no,
+            "query": trademark_name,
+            "matched": True,
+            "detail_opened": True,
+            "status_text": self._row_status(matched_row),
+            "nice_classes": self.parse_detail_nice_classes(detail_text),
+            "artifact_dir": artifact.get("artifact_dir"),
+            "artifact_error": artifact.get("error"),
+            "artifact_html_saved": artifact.get("html_saved", False),
+            "artifact_pdf_saved": artifact.get("pdf_saved", False),
+        }
 
     def save_to_json(self, data: List[List[str]]):
         """Saves the captured data to a JSON file following the specified schema."""

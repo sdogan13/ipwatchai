@@ -857,6 +857,42 @@ window.AppAPI.getGenerationHistory = async function (page, featureType) {
     return await res.json();
 };
 
+window.AppAPI.getLogoProject = async function (projectId) {
+    var res = await fetch('/api/v1/tools/logo-projects/' + encodeURIComponent(projectId), {
+        headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+    });
+    if (!res.ok) throw new Error(t('studio.project_load_failed'));
+    return await res.json();
+};
+
+window.AppAPI.selectLogoCandidate = async function (projectId, imageId) {
+    var res = await fetch('/api/v1/tools/logo-projects/' + encodeURIComponent(projectId) + '/select', {
+        method: 'POST',
+        headers: {
+            'Authorization': 'Bearer ' + getAuthToken(),
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ image_id: imageId })
+    });
+    var data = await res.json().catch(function () { return {}; });
+    if (!res.ok) {
+        throw _buildApiError(res, data, t('studio.select_logo_failed'));
+    }
+    return data;
+};
+
+window.AppAPI.retryLogoAudit = async function (imageId) {
+    var res = await fetch('/api/v1/tools/generated-image/' + encodeURIComponent(imageId) + '/audit-retry', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+    });
+    var data = await res.json().catch(function () { return {}; });
+    if (!res.ok) {
+        throw _buildApiError(res, data, t('studio.audit_retry_failed'));
+    }
+    return data;
+};
+
 // ============================================
 // PIPELINE MANAGEMENT (admin only)
 // ============================================
@@ -1216,6 +1252,9 @@ var searchAttorneys = window.AppAPI.searchAttorneys;
 var generateNamesAPI = window.AppAPI.generateNames;
 var generateLogosAPI = window.AppAPI.generateLogos;
 var getGenerationHistory = window.AppAPI.getGenerationHistory;
+var getLogoProjectAPI = window.AppAPI.getLogoProject;
+var selectLogoCandidateAPI = window.AppAPI.selectLogoCandidate;
+var retryLogoAuditAPI = window.AppAPI.retryLogoAudit;
 var generateReport = window.AppAPI.generateReport;
 var loadReportsAPI = window.AppAPI.loadReports;
 var downloadReportAPI = window.AppAPI.downloadReport;

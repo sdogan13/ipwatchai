@@ -29,13 +29,31 @@ _TEXT_TOKEN_WEIGHTS = {
     "distinctive": 1.0,
     "common_anchor": 0.65,
     "semi_generic": 0.45,
+    "low_protectability_anchor": 0.45,
     "generic": 0.10,
 }
 
-_ANCHOR_TOKEN_ROLES = frozenset({"distinctive", "common_anchor", "semi_generic"})
+_ANCHOR_TOKEN_ROLES = frozenset(
+    {"distinctive", "common_anchor", "semi_generic", "low_protectability_anchor"}
+)
 _COMMON_ANCHOR_MIN_IDF = 6.5
 _TRUE_GENERIC_ONLY_CAP = 0.18
 _MISSING_COMMON_ANCHOR_CAP = 0.18
+_LOW_PROTECTABILITY_MIN_DOC_FREQ = 50
+_LOW_PROTECTABILITY_MIN_LAST_RATE = 0.30
+_LOW_PROTECTABILITY_MAX_FIRST_RATE = 0.30
+_LOW_PROTECTABILITY_MAX_SINGLE_RATE = 0.08
+_LOW_PROTECTABILITY_EXACT_CAP = 0.65
+_LOW_PROTECTABILITY_NON_EXACT_CAP = 0.58
+_LOW_PROTECTABILITY_SIGNALS = frozenset(
+    {
+        "mostly_suffix",
+        "low_initial_use",
+        "low_single_use",
+        "moderate_suffix_with_dispersion",
+        "compound_suffix",
+    }
+)
 _COMPOUND_PREFIX_MIN_LENGTH = 4
 _COMPOUND_SUFFIX_MIN_LENGTH = 3
 _ADDED_MATTER_CHANGED_CORE_CAP = 0.78
@@ -53,6 +71,8 @@ _FUZZY_ANCHOR_STRONG_LENGTH_RATIO = 0.80
 _FUZZY_ANCHOR_STRONG_RAW_MIN = 0.78
 _MISSING_DOMINANT_ANCHOR_CAP = 0.62
 _SHORT_ANCHOR_NON_EXACT_MAX_LENGTH = 2
+_SHORT_ACRONYM_SUBSET_FLOOR = 0.68
+_SHORT_ACRONYM_SUBSET_CAP = 0.82
 _SHORT_NON_EXACT_VISUAL_MAX_LENGTH = 6
 _SHORT_ANCHOR_NON_EXACT_CAP = 0.45
 _WEAK_TEXT_VISUAL_LOW_MAX = 0.80
@@ -81,10 +101,14 @@ _LIMITED_TEXT_CAP_MARKERS = frozenset(
     {
         "added_matter_partial_multi_anchor_changed_matter_cap",
         "added_matter_single_anchor_asymmetric_added_matter_cap",
+        "added_matter_single_anchor_low_protectability_extra_cap",
         "weak_fuzzy_anchor_fragment_cap",
         "weak_fuzzy_anchor_quality_cap",
         "weak_phonetic_anchor_fragment_cap",
         "weak_phonetic_anchor_quality_cap",
+        "weak_shared_low_protectability_exact_anchor_cap",
+        "weak_shared_low_protectability_non_exact_anchor_cap",
+        "short_acronym_subset_missing_matter_cap",
     }
 )
 
@@ -514,6 +538,42 @@ def _is_descriptor_like_term(word: str, use_translated_idf: bool = False) -> boo
     )
 
 
+def _descriptor_stat_number(stats: Dict, key: str) -> float:
+    try:
+        return float(stats.get(key, 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _is_low_protectability_anchor(word: str, use_translated_idf: bool = False) -> bool:
+    word_norm = normalize_turkish(word or "")
+    if not word_norm or _is_true_generic(word_norm, use_translated_idf):
+        return False
+
+    get_class = IDFLookup.get_word_class_tr if use_translated_idf else IDFLookup.get_word_class
+    if get_class(word_norm) not in {"distinctive", "semi_generic"}:
+        return False
+
+    stats = _descriptor_stats_for_word(word_norm, use_translated_idf)
+    if not stats:
+        return False
+
+    doc_frequency = _descriptor_stat_number(stats, "doc_frequency")
+    last_rate = _descriptor_stat_number(stats, "last_rate")
+    first_rate = _descriptor_stat_number(stats, "first_rate")
+    single_rate = _descriptor_stat_number(stats, "single_rate")
+    reason_flags = set(stats.get("reason_flags") or [])
+    signal_count = len(reason_flags.intersection(_LOW_PROTECTABILITY_SIGNALS))
+
+    return (
+        doc_frequency >= _LOW_PROTECTABILITY_MIN_DOC_FREQ
+        and last_rate >= _LOW_PROTECTABILITY_MIN_LAST_RATE
+        and first_rate <= _LOW_PROTECTABILITY_MAX_FIRST_RATE
+        and single_rate <= _LOW_PROTECTABILITY_MAX_SINGLE_RATE
+        and signal_count >= 2
+    )
+
+
 def _is_true_generic(word: str, use_translated_idf: bool = False) -> bool:
     word_norm = normalize_turkish(word or "")
     return (
@@ -568,6 +628,11 @@ def _token_role(word: str, use_translated_idf: bool = False) -> str:
 
     get_idf = IDFLookup.get_idf_tr if use_translated_idf else IDFLookup.get_idf
     word_class = _word_class(word_norm, use_translated_idf)
+    if (
+        word_class in {"distinctive", "semi_generic"}
+        and _is_low_protectability_anchor(word_norm, use_translated_idf)
+    ):
+        return "low_protectability_anchor"
     if (
         word_class == "generic"
         and get_idf(word_norm) >= _COMMON_ANCHOR_MIN_IDF
@@ -650,7 +715,13 @@ def _ordered_expanded_tokens(
 
 
 def _empty_role_sets() -> Dict[str, Set[str]]:
-    return {"distinctive": set(), "common_anchor": set(), "semi_generic": set(), "generic": set()}
+    return {
+        "distinctive": set(),
+        "common_anchor": set(),
+        "semi_generic": set(),
+        "low_protectability_anchor": set(),
+        "generic": set(),
+    }
 
 
 def _text_breakdown_base(
@@ -694,6 +765,10 @@ def _text_breakdown_base(
         "caps_applied": [],
         "compound_expansions": {"query": [], "target": []},
         "added_matter_breakdown": {},
+        "weak_shared_anchor_guard": {},
+        "short_acronym_subset_guard": {},
+        "low_protectability_terms": {"query": [], "target": []},
+        "low_protectability_stats": {},
         "short_anchor_guard": [],
         "use_translated_idf": use_translated_idf,
     }
@@ -944,6 +1019,7 @@ def _group_added_matter_tokens(
         "true_generic": [],
         "semi_generic": [],
         "common_anchor": [],
+        "low_protectability_anchor": [],
         "distinctive": [],
         "ignored_short_initial": [],
     }
@@ -978,7 +1054,7 @@ def _material_added_matter_terms(
     use_translated_idf: bool = False,
 ) -> List[str]:
     terms = []
-    for role in ("semi_generic", "common_anchor", "distinctive"):
+    for role in ("semi_generic", "common_anchor", "low_protectability_anchor", "distinctive"):
         terms.extend(groups.get(role, []))
     terms.extend(_legacy_override_material_terms(groups, use_translated_idf))
     return sorted(set(terms))
@@ -1105,6 +1181,274 @@ def _calibration_record(
         "evidence_score": round(_clamp_score(evidence), 4),
         "calibrated_score": round(_clamp_score(calibrated_score), 4),
         "factors": factors or {},
+    }
+
+
+def _low_protectability_stats_for_tokens(
+    tokens: Set[str],
+    use_translated_idf: bool = False,
+) -> Dict[str, Dict]:
+    stats = {}
+    for token in sorted(tokens):
+        if _is_low_protectability_anchor(token, use_translated_idf):
+            token_stats = _descriptor_stats_for_word(token, use_translated_idf)
+            if token_stats:
+                stats[token] = token_stats
+    return stats
+
+
+def _weak_shared_low_protectability_anchor_guard(
+    *,
+    q_classes: Dict[str, Set[str]],
+    t_classes: Dict[str, Set[str]],
+    matches: List[Dict],
+    added_matter_breakdown: Dict,
+    use_translated_idf: bool = False,
+) -> Dict:
+    base_record = {
+        "applies": False,
+        "reason": "",
+        "cap_reason": "",
+        "score_cap": None,
+        "calibrated_score_cap": None,
+        "calibration_breakdown": {},
+        "matched_anchor": None,
+        "low_protectability_tokens": [],
+    }
+    query_anchor_tokens = set().union(*(q_classes[role] for role in _ANCHOR_TOKEN_ROLES))
+    target_anchor_tokens = set().union(*(t_classes[role] for role in _ANCHOR_TOKEN_ROLES))
+    anchor_matches = [
+        match
+        for match in matches
+        if (
+            match.get("score", 0.0) >= 0.70
+            and (
+                match.get("query_word") in query_anchor_tokens
+                or match.get("target_word") in target_anchor_tokens
+            )
+        )
+    ]
+    if len(anchor_matches) != 1:
+        return base_record
+
+    match = anchor_matches[0]
+    low_tokens = sorted(
+        token
+        for token in {match.get("query_word", ""), match.get("target_word", "")}
+        if token and _is_low_protectability_anchor(token, use_translated_idf)
+    )
+    if not low_tokens:
+        return base_record
+
+    non_weak_query_anchors = query_anchor_tokens - q_classes["low_protectability_anchor"]
+    query_extra_tokens = set(added_matter_breakdown.get("query_extra_tokens") or [])
+    if not query_extra_tokens and non_weak_query_anchors:
+        return base_record
+
+    match_score = _clamp_score(match.get("score", 0.0))
+    match_type = match.get("match_type") or ""
+    exact_match = match_type == "exact" and match_score >= 0.98
+    floor = 0.50 if exact_match else 0.42
+    ceiling = (
+        _LOW_PROTECTABILITY_EXACT_CAP
+        if exact_match
+        else _LOW_PROTECTABILITY_NON_EXACT_CAP
+    )
+    cap_reason = (
+        "weak_shared_low_protectability_exact_anchor_cap"
+        if exact_match
+        else "weak_shared_low_protectability_non_exact_anchor_cap"
+    )
+    query_anchor_coverage = _clamp_score(
+        added_matter_breakdown.get("query_anchor_coverage", 0.0)
+    )
+    target_anchor_coverage = _clamp_score(
+        added_matter_breakdown.get("target_anchor_coverage", 0.0)
+    )
+    full_query_token_coverage = _clamp_score(
+        added_matter_breakdown.get("full_query_token_coverage", 0.0)
+    )
+    full_target_token_coverage = _clamp_score(
+        added_matter_breakdown.get("full_target_token_coverage", 0.0)
+    )
+    material_extra_count = int(
+        added_matter_breakdown.get("query_material_extra_count", 0) or 0
+    ) + int(added_matter_breakdown.get("target_material_extra_count", 0) or 0)
+    extra_penalty = min(0.12, material_extra_count * 0.04)
+    raw_evidence = (
+        (match_score * 0.45)
+        + (min(query_anchor_coverage, target_anchor_coverage) * 0.25)
+        + (min(full_query_token_coverage, full_target_token_coverage) * 0.20)
+        + ((1.0 if exact_match else 0.0) * 0.10)
+        - extra_penalty
+    )
+    evidence = _clamp_score(raw_evidence)
+    calibrated_score = _bounded_score(floor, ceiling, evidence)
+
+    return {
+        "applies": True,
+        "reason": (
+            "only shared anchor has low protectability; full query core is not copied"
+        ),
+        "cap_reason": cap_reason,
+        "score_cap": ceiling,
+        "calibrated_score_cap": calibrated_score,
+        "calibration_breakdown": _calibration_record(
+            floor=floor,
+            ceiling=ceiling,
+            evidence=evidence,
+            calibrated_score=calibrated_score,
+            factors={
+                "match_score": round(match_score, 4),
+                "match_type": match_type,
+                "query_anchor_coverage": round(query_anchor_coverage, 4),
+                "target_anchor_coverage": round(target_anchor_coverage, 4),
+                "full_query_token_coverage": round(full_query_token_coverage, 4),
+                "full_target_token_coverage": round(full_target_token_coverage, 4),
+                "material_extra_count": material_extra_count,
+                "extra_penalty": round(extra_penalty, 4),
+            },
+        ),
+        "matched_anchor": {
+            "query_word": match.get("query_word", ""),
+            "target_word": match.get("target_word", ""),
+            "match_type": match_type,
+            "score": round(match_score, 4),
+        },
+        "low_protectability_tokens": low_tokens,
+    }
+
+
+def _short_acronym_subset_guard(
+    *,
+    q_tokens: Set[str],
+    t_tokens: Set[str],
+    q_classes: Dict[str, Set[str]],
+    t_classes: Dict[str, Set[str]],
+    matches: List[Dict],
+    added_matter_breakdown: Dict,
+    use_translated_idf: bool = False,
+) -> Dict:
+    base_record = {
+        "applies": False,
+        "reason": "",
+        "cap_reason": "",
+        "score_cap": None,
+        "calibrated_score_cap": None,
+        "calibration_breakdown": {},
+        "matched_anchor": None,
+    }
+    meaningful_q_tokens = {
+        token for token in q_tokens if not _is_ignored_added_matter_token(token)
+    }
+    meaningful_t_tokens = {
+        token for token in t_tokens if not _is_ignored_added_matter_token(token)
+    }
+    query_longer = len(meaningful_q_tokens) >= 2 and len(meaningful_t_tokens) == 1
+    target_longer = len(meaningful_q_tokens) == 1 and len(meaningful_t_tokens) >= 2
+    if not (query_longer or target_longer):
+        return base_record
+
+    query_anchor_tokens = set().union(*(q_classes[role] for role in _ANCHOR_TOKEN_ROLES))
+    target_anchor_tokens = set().union(*(t_classes[role] for role in _ANCHOR_TOKEN_ROLES))
+    exact_short_anchor_matches = [
+        match
+        for match in matches
+        if (
+            match.get("match_type") == "exact"
+            and match.get("score", 0.0) >= 0.98
+            and match.get("query_word") in query_anchor_tokens
+            and match.get("target_word") in target_anchor_tokens
+            and len(match.get("query_word", "")) <= _SHORT_ANCHOR_NON_EXACT_MAX_LENGTH
+            and len(match.get("target_word", "")) <= _SHORT_ANCHOR_NON_EXACT_MAX_LENGTH
+        )
+    ]
+    if len(exact_short_anchor_matches) != 1:
+        return base_record
+
+    match = exact_short_anchor_matches[0]
+    if query_longer:
+        if meaningful_t_tokens != {match.get("target_word", "")}:
+            return base_record
+        if _clamp_score(added_matter_breakdown.get("full_query_token_coverage", 0.0)) >= 0.98:
+            return base_record
+        missing_side = "query"
+        missing_material_extra_count = int(
+            added_matter_breakdown.get("query_material_extra_count", 0) or 0
+        )
+        missing_extra_tokens = set(added_matter_breakdown.get("query_extra_tokens") or [])
+    else:
+        if meaningful_q_tokens != {match.get("query_word", "")}:
+            return base_record
+        if _clamp_score(added_matter_breakdown.get("full_target_token_coverage", 0.0)) >= 0.98:
+            return base_record
+        missing_side = "target"
+        missing_material_extra_count = int(
+            added_matter_breakdown.get("target_material_extra_count", 0) or 0
+        )
+        missing_extra_tokens = set(added_matter_breakdown.get("target_extra_tokens") or [])
+
+    if missing_material_extra_count <= 0 and not missing_extra_tokens:
+        return base_record
+
+    match_score = _clamp_score(match.get("score", 0.0))
+    query_anchor_coverage = _clamp_score(
+        added_matter_breakdown.get("query_anchor_coverage", 0.0)
+    )
+    target_anchor_coverage = _clamp_score(
+        added_matter_breakdown.get("target_anchor_coverage", 0.0)
+    )
+    full_query_token_coverage = _clamp_score(
+        added_matter_breakdown.get("full_query_token_coverage", 0.0)
+    )
+    full_target_token_coverage = _clamp_score(
+        added_matter_breakdown.get("full_target_token_coverage", 0.0)
+    )
+    missing_matter_count = max(missing_material_extra_count, len(missing_extra_tokens))
+    missing_matter_penalty = min(0.18, missing_matter_count * 0.06)
+    raw_evidence = (
+        (min(full_query_token_coverage, full_target_token_coverage) * 0.45)
+        + (query_anchor_coverage * 0.20)
+        + (target_anchor_coverage * 0.15)
+        + (match_score * 0.20)
+        - missing_matter_penalty
+    )
+    evidence = _clamp_score(raw_evidence)
+    calibrated_score = _bounded_score(
+        _SHORT_ACRONYM_SUBSET_FLOOR,
+        _SHORT_ACRONYM_SUBSET_CAP,
+        evidence,
+    )
+
+    return {
+        "applies": True,
+        "reason": f"exact short anchor copied but material {missing_side} matter is missing",
+        "cap_reason": "short_acronym_subset_missing_matter_cap",
+        "score_cap": _SHORT_ACRONYM_SUBSET_CAP,
+        "calibrated_score_cap": calibrated_score,
+        "calibration_breakdown": _calibration_record(
+            floor=_SHORT_ACRONYM_SUBSET_FLOOR,
+            ceiling=_SHORT_ACRONYM_SUBSET_CAP,
+            evidence=evidence,
+            calibrated_score=calibrated_score,
+            factors={
+                "match_score": round(match_score, 4),
+                "query_anchor_coverage": round(query_anchor_coverage, 4),
+                "target_anchor_coverage": round(target_anchor_coverage, 4),
+                "full_query_token_coverage": round(full_query_token_coverage, 4),
+                "full_target_token_coverage": round(full_target_token_coverage, 4),
+                "missing_side": missing_side,
+                "missing_material_extra_count": missing_material_extra_count,
+                "missing_extra_token_count": len(missing_extra_tokens),
+                "missing_matter_penalty": round(missing_matter_penalty, 4),
+            },
+        ),
+        "matched_anchor": {
+            "query_word": match.get("query_word", ""),
+            "target_word": match.get("target_word", ""),
+            "match_type": match.get("match_type", ""),
+            "score": round(match_score, 4),
+        },
     }
 
 
@@ -1426,18 +1770,21 @@ def _analyze_added_matter_v2(
         "true_generic",
         "semi_generic",
         "common_anchor",
+        "low_protectability_anchor",
         "distinctive",
     )
     query_strict_material_extra_count = _count_grouped_tokens(
         query_extra_roles,
         "semi_generic",
         "common_anchor",
+        "low_protectability_anchor",
         "distinctive",
     )
     target_strict_material_extra_count = _count_grouped_tokens(
         target_extra_roles,
         "semi_generic",
         "common_anchor",
+        "low_protectability_anchor",
         "distinctive",
     )
     query_legacy_override_material_terms = _legacy_override_material_terms(
@@ -1461,6 +1808,10 @@ def _analyze_added_matter_v2(
         "common_anchor",
         "distinctive",
     ) + len(query_legacy_override_material_terms) + len(target_legacy_override_material_terms)
+    low_protectability_extra_count = _count_grouped_tokens(
+        all_extra_roles,
+        "low_protectability_anchor",
+    )
     query_material_extra_count = len(query_material_extra_terms)
     target_material_extra_count = len(target_material_extra_terms)
     semi_generic_extra_count = _count_grouped_tokens(all_extra_roles, "semi_generic")
@@ -1558,6 +1909,24 @@ def _analyze_added_matter_v2(
                     score_cap = _ADDED_MATTER_DISTINCTIVE_EXTRA_CAP
                     cap_reason = "distinctive_extra"
                     reason = "copied core plus distinctive added matter"
+            elif low_protectability_extra_count and copied_core_size <= 1:
+                dominant_core_score, calibration_breakdown = (
+                    _calibrate_added_matter_score(
+                        floor=0.66,
+                        ceiling=_ADDED_MATTER_SINGLE_ANCHOR_EXTRA_CAP,
+                        query_anchor_coverage=query_anchor_coverage,
+                        target_anchor_coverage=target_anchor_coverage,
+                        full_query_token_coverage=full_query_token_coverage,
+                        full_target_token_coverage=full_target_token_coverage,
+                        match_quality=anchor_match_quality,
+                        query_material_extra_count=query_material_extra_count,
+                        target_material_extra_count=target_material_extra_count,
+                        brandlike_extra_count=low_protectability_extra_count,
+                    )
+                )
+                score_cap = _ADDED_MATTER_SINGLE_ANCHOR_EXTRA_CAP
+                cap_reason = "single_anchor_low_protectability_extra"
+                reason = "single copied anchor plus low-protectability added matter"
             elif semi_generic_extra_count:
                 dominant_core_score = max(
                     0.80,
@@ -1669,6 +2038,7 @@ def _analyze_added_matter_v2(
         "target_strict_material_extra_count": target_strict_material_extra_count,
         "query_material_extra_count": query_material_extra_count,
         "target_material_extra_count": target_material_extra_count,
+        "low_protectability_extra_count": low_protectability_extra_count,
         "partial_multi_anchor_changed_matter": partial_multi_anchor_changed_matter,
         "single_anchor_asymmetric_added_matter": single_anchor_asymmetric_added_matter,
         "anchor_match_quality": round(anchor_match_quality, 4),
@@ -1826,6 +2196,25 @@ def _score_textual_path_v2(
     descriptor_stats = {token: stats for token, stats in descriptor_stats.items() if stats}
     if descriptor_stats:
         breakdown["descriptor_stats"] = descriptor_stats
+    low_protectability_terms = {
+        "query": sorted(
+            token
+            for token in q_tokens
+            if _is_low_protectability_anchor(token, use_translated_idf)
+        ),
+        "target": sorted(
+            token
+            for token in t_tokens
+            if _is_low_protectability_anchor(token, use_translated_idf)
+        ),
+    }
+    breakdown["low_protectability_terms"] = low_protectability_terms
+    low_protectability_stats = _low_protectability_stats_for_tokens(
+        set(low_protectability_terms["query"] + low_protectability_terms["target"]),
+        use_translated_idf,
+    )
+    if low_protectability_stats:
+        breakdown["low_protectability_stats"] = low_protectability_stats
 
     exact_overlap = q_tokens.intersection(t_tokens)
     breakdown["token_overlap"] = round(len(exact_overlap) / len(q_tokens), 4)
@@ -1837,6 +2226,9 @@ def _score_textual_path_v2(
         breakdown["distinctive_match"] = 1.0 if q_classes["distinctive"] else 0.0
         breakdown["common_anchor_match"] = 1.0 if q_classes["common_anchor"] else 0.0
         breakdown["semi_generic_match"] = 1.0 if q_classes["semi_generic"] else 0.0
+        breakdown["low_protectability_match"] = (
+            1.0 if q_classes["low_protectability_anchor"] else 0.0
+        )
         breakdown["generic_match"] = 1.0 if q_classes["generic"] else 0.0
         breakdown["matched_words"] = [
             _matched_word_record(
@@ -1896,6 +2288,14 @@ def _score_textual_path_v2(
             for match in matches
             if match["token_role"] == "semi_generic" and match["score"] >= 0.70
         },
+        "low_protectability_anchor": {
+            match["query_word"]
+            for match in matches
+            if (
+                match["token_role"] == "low_protectability_anchor"
+                and match["score"] >= 0.70
+            )
+        },
         "generic": {
             match["query_word"]
             for match in matches
@@ -1916,6 +2316,12 @@ def _score_textual_path_v2(
     if q_classes["semi_generic"]:
         breakdown["semi_generic_match"] = round(
             len(matched_by_class["semi_generic"]) / len(q_classes["semi_generic"]),
+            4,
+        )
+    if q_classes["low_protectability_anchor"]:
+        breakdown["low_protectability_match"] = round(
+            len(matched_by_class["low_protectability_anchor"])
+            / len(q_classes["low_protectability_anchor"]),
             4,
         )
     if q_classes["generic"]:
@@ -1996,6 +2402,22 @@ def _score_textual_path_v2(
         q_classes=q_classes,
         t_classes=t_classes,
         matches=matches,
+        use_translated_idf=use_translated_idf,
+    )
+    weak_shared_anchor_guard = _weak_shared_low_protectability_anchor_guard(
+        q_classes=q_classes,
+        t_classes=t_classes,
+        matches=matches,
+        added_matter_breakdown=added_matter_breakdown,
+        use_translated_idf=use_translated_idf,
+    )
+    short_acronym_subset_guard = _short_acronym_subset_guard(
+        q_tokens=q_tokens,
+        t_tokens=t_tokens,
+        q_classes=q_classes,
+        t_classes=t_classes,
+        matches=matches,
+        added_matter_breakdown=added_matter_breakdown,
         use_translated_idf=use_translated_idf,
     )
     anchor_quality_guard = _anchor_quality_guard(
@@ -2091,9 +2513,43 @@ def _score_textual_path_v2(
     added_matter_cap = added_matter_breakdown.get("score_cap")
     added_matter_effective_cap = added_matter_breakdown.get("calibrated_score_cap")
     added_matter_cap_reason = added_matter_breakdown.get("cap_reason")
-    if added_matter_cap is not None and added_matter_cap_reason:
+    if (
+        added_matter_cap is not None
+        and added_matter_cap_reason
+        and not weak_shared_anchor_guard.get("applies")
+    ):
         score = min(score, added_matter_effective_cap or added_matter_cap)
         cap_notes.append(f"added_matter_{added_matter_cap_reason}_cap:{added_matter_cap:.2f}")
+
+    weak_shared_anchor_cap = weak_shared_anchor_guard.get("score_cap")
+    weak_shared_anchor_effective_cap = weak_shared_anchor_guard.get(
+        "calibrated_score_cap"
+    )
+    weak_shared_anchor_cap_reason = weak_shared_anchor_guard.get("cap_reason")
+    if weak_shared_anchor_guard.get("applies") and weak_shared_anchor_cap_reason:
+        score = min(
+            score,
+            weak_shared_anchor_effective_cap or weak_shared_anchor_cap,
+        )
+        cap_notes.append(
+            f"{weak_shared_anchor_cap_reason}:{weak_shared_anchor_cap:.2f}"
+        )
+        scoring_path = "TEXT_WEAK_SHARED_LOW_PROTECTABILITY_ANCHOR"
+
+    short_acronym_subset_cap = short_acronym_subset_guard.get("score_cap")
+    short_acronym_subset_effective_cap = short_acronym_subset_guard.get(
+        "calibrated_score_cap"
+    )
+    short_acronym_subset_cap_reason = short_acronym_subset_guard.get("cap_reason")
+    if short_acronym_subset_guard.get("applies") and short_acronym_subset_cap_reason:
+        score = min(
+            score,
+            short_acronym_subset_effective_cap or short_acronym_subset_cap,
+        )
+        cap_notes.append(
+            f"{short_acronym_subset_cap_reason}:{short_acronym_subset_cap:.2f}"
+        )
+        scoring_path = "TEXT_SHORT_ACRONYM_SUBSET"
 
     anchor_quality_cap = anchor_quality_guard.get("score_cap")
     anchor_quality_effective_cap = anchor_quality_guard.get("calibrated_score_cap")
@@ -2134,11 +2590,17 @@ def _score_textual_path_v2(
     breakdown["phonetic_support_score"] = round(phonetic_support_score, 4)
     breakdown["dominant_core_score"] = round(dominant_core_score, 4)
     breakdown["added_matter_breakdown"] = added_matter_breakdown
+    breakdown["weak_shared_anchor_guard"] = weak_shared_anchor_guard
+    breakdown["short_acronym_subset_guard"] = short_acronym_subset_guard
     breakdown["anchor_quality_guard"] = anchor_quality_guard
     breakdown["fuzzy_anchor_guard"] = anchor_quality_guard
     breakdown["calibration_breakdown"] = (
         anchor_quality_guard.get("calibration_breakdown")
         if anchor_quality_guard.get("applies")
+        else weak_shared_anchor_guard.get("calibration_breakdown")
+        if weak_shared_anchor_guard.get("applies")
+        else short_acronym_subset_guard.get("calibration_breakdown")
+        if short_acronym_subset_guard.get("applies")
         else added_matter_breakdown.get("calibration_breakdown", {})
     )
     breakdown["dominant_anchor_guard"] = dominant_anchor_guard
@@ -2232,13 +2694,58 @@ def _cap_collapsed_translation_path(
 
     if original_compact == translated_compact:
         capped_score = round(min(path_b_score, path_a_score), 4)
-        if capped_score >= path_b_score:
-            return path_b_score, [], None
-        return capped_score, ["translation_duplicate_original"], path_a_score
+        cap_value = path_a_score if capped_score < path_b_score else None
+        return capped_score, ["translation_duplicate_original"], cap_value
 
-    path_b_exactish = bool(breakdown_b.get("exact_match")) or path_b_score >= 0.90
+    path_b_short_subset = bool(
+        (breakdown_b.get("short_acronym_subset_guard") or {}).get("applies")
+    )
+    path_b_exactish = (
+        bool(breakdown_b.get("exact_match"))
+        or path_b_score >= 0.90
+        or path_b_short_subset
+    )
     if not path_b_exactish:
         return path_b_score, [], None
+
+    translated_tokens = re.findall(r"[a-z0-9]+", normalize_turkish(candidate_name_tr or ""))
+    short_collapsed_translation = False
+    if len(translated_tokens) == 1:
+        translated_token = translated_tokens[0]
+        exact_short_translation_match = any(
+            match.get("match_type") == "exact"
+            and match.get("score", 0.0) >= 0.98
+            and match.get("target_word") == translated_token
+            for match in breakdown_b.get("matched_words") or []
+        )
+        original_near_short_translation = (
+            translated_compact in original_compact
+            or (
+                len(original_compact) <= 4
+                and SequenceMatcher(None, original_compact, translated_compact).ratio()
+                >= 0.72
+            )
+        )
+        short_collapsed_translation = (
+            0 < len(translated_token) <= 3
+            and original_compact != translated_compact
+            and len(original_compact) > len(translated_compact)
+            and exact_short_translation_match
+            and original_near_short_translation
+        )
+
+    if short_collapsed_translation:
+        cap = round(max(path_a_score, 0.45), 4)
+        capped_score = round(min(path_b_score, cap), 4)
+        if capped_score < path_b_score:
+            return (
+                capped_score,
+                [
+                    "short_collapsed_candidate_translation",
+                    "translation_short_anchor_subset_cap",
+                ],
+                cap,
+            )
 
     original_contains_translation = (
         len(translated_compact) >= 4
@@ -3157,12 +3664,16 @@ def score_pair(
             breakdown_b["translation_duplicate_original"] = (
                 "translation_duplicate_original" in translation_quality_flags
             )
+            breakdown_b["short_collapsed_candidate_translation"] = (
+                "short_collapsed_candidate_translation" in translation_quality_flags
+            )
             if translation_path_b_cap is not None:
-                translation_cap_note = (
-                    "translation_duplicate_original_cap"
-                    if breakdown_b["translation_duplicate_original"]
-                    else "collapsed_translation_cap"
-                )
+                if breakdown_b["translation_duplicate_original"]:
+                    translation_cap_note = "translation_duplicate_original_cap"
+                elif breakdown_b["short_collapsed_candidate_translation"]:
+                    translation_cap_note = "translation_short_anchor_subset_cap"
+                else:
+                    translation_cap_note = "collapsed_translation_cap"
                 breakdown_b.setdefault("caps_applied", []).append(
                     f"{translation_cap_note}:{translation_path_b_cap:.2f}"
                 )
@@ -3178,6 +3689,31 @@ def score_pair(
         selected_source = "ORIGINAL"
         selected_text_score = path_a_score
         selected_breakdown = breakdown_a
+
+    direct_text_similarity = round(
+        _clamp_score(breakdown_a.get("text_similarity", text_sim_a)),
+        4,
+    )
+    direct_semantic_similarity = round(
+        _clamp_score(breakdown_a.get("semantic_similarity", semantic_sim)),
+        4,
+    )
+    direct_phonetic_similarity = round(
+        _clamp_score(breakdown_a.get("phonetic_similarity", phonetic_sim)),
+        4,
+    )
+    selected_path_text_similarity = round(
+        _clamp_score(selected_breakdown.get("text_similarity", selected_text_score)),
+        4,
+    )
+    selected_path_semantic_similarity = round(
+        _clamp_score(selected_breakdown.get("semantic_similarity", semantic_sim)),
+        4,
+    )
+    selected_path_phonetic_similarity = round(
+        _clamp_score(selected_breakdown.get("phonetic_similarity", phonetic_sim)),
+        4,
+    )
 
     weak_text_cap_active = _has_weak_text_cap(selected_breakdown)
     limited_text_cap_active = _has_limited_text_cap(selected_breakdown)
@@ -3241,12 +3777,30 @@ def score_pair(
     breakdown["score_version"] = SCORE_VERSION
     breakdown["total"] = round(final_total, 4)
     breakdown["text_idf_score"] = selected_text_score
+    breakdown["text_similarity"] = direct_text_similarity
+    breakdown["semantic_similarity"] = direct_semantic_similarity
+    breakdown["phonetic_similarity"] = direct_phonetic_similarity
+    breakdown["direct_text_similarity"] = direct_text_similarity
+    breakdown["direct_semantic_similarity"] = direct_semantic_similarity
+    breakdown["direct_phonetic_similarity"] = direct_phonetic_similarity
+    breakdown["selected_path_text_similarity"] = selected_path_text_similarity
+    breakdown["selected_path_semantic_similarity"] = selected_path_semantic_similarity
+    breakdown["selected_path_phonetic_similarity"] = selected_path_phonetic_similarity
+    breakdown["selected_text_similarity"] = selected_path_text_similarity
+    breakdown["selected_semantic_similarity"] = selected_path_semantic_similarity
+    breakdown["selected_phonetic_similarity"] = selected_path_phonetic_similarity
     breakdown["dynamic_weights"] = combined["dynamic_weights"]
     breakdown["scoring_path_source"] = selected_source
     breakdown["visual_similarity"] = round(visual_sim, 4)
     breakdown["path_a_score"] = path_a_score
     breakdown["path_b_score"] = path_b_score
-    breakdown["translation_similarity"] = path_b_score
+    meaningful_translation_similarity = (
+        0.0
+        if "translation_duplicate_original" in translation_quality_flags
+        else path_b_score
+    )
+    breakdown["translation_similarity"] = meaningful_translation_similarity
+    breakdown["translation_path_similarity"] = path_b_score
     text_visual_guard = {
         "weak_text_cap_active": weak_text_cap_active,
         "limited_text_cap_active": limited_text_cap_active,
@@ -3277,12 +3831,17 @@ def score_pair(
         "selected_text_score": selected_text_score,
         "path_a_score": path_a_score,
         "path_b_score": path_b_score,
+        "translation_similarity": meaningful_translation_similarity,
+        "translation_path_similarity": path_b_score,
         "path_a": path_a_diag,
         "path_b": path_b_diag,
         "translation_quality_flags": translation_quality_flags,
         "translation_path_b_cap": translation_path_b_cap,
         "translation_duplicate_original": (
             "translation_duplicate_original" in translation_quality_flags
+        ),
+        "short_collapsed_candidate_translation": (
+            "short_collapsed_candidate_translation" in translation_quality_flags
         ),
         "text_visual_guard": text_visual_guard,
     }

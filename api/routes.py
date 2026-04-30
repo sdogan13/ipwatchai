@@ -1,5 +1,5 @@
 ﻿"""
-API Routes â€” Router registry
+API Routes - Router registry
 Imports domain routers from focused modules and re-exports them
 for backward compatibility with main.py and tests.
 """

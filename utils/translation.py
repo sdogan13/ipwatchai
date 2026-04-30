@@ -1,9 +1,10 @@
 """
 Translation layer for trademark name handling.
 
-Live query translation stays on NLLB by default. MADLAD is the default
-pipeline/offline translation backend for name_tr generation and refresh.
-FastText remains the canonical language detector.
+Live query translation now defaults to MADLAD so search-time Turkish
+translation stays aligned with the refreshed `name_tr` corpus. NLLB remains
+available as an override/fallback backend. FastText remains the canonical
+language detector.
 """
 
 from __future__ import annotations
@@ -40,7 +41,7 @@ try:
     MADLAD_TRANSLATE_BATCH_SIZE = _app_settings.ai.madlad_translate_batch_size
     DEFAULT_DEVICE = _app_settings.ai.translation_device
 except Exception:
-    TRANSLATION_BACKEND = TRANSLATION_BACKEND_NLLB
+    TRANSLATION_BACKEND = TRANSLATION_BACKEND_MADLAD
     PIPELINE_TRANSLATION_BACKEND = TRANSLATION_BACKEND_MADLAD
     OFFLINE_TRANSLATION_BACKEND = TRANSLATION_BACKEND_MADLAD
     MODEL_NAME = "facebook/nllb-200-distilled-600M"
@@ -119,15 +120,15 @@ LANG_NAMES = {
 }
 
 LANG_DISPLAY_NAMES = {
-    "tr": "TÃ¼rkÃ§e",
-    "en": "Ä°ngilizce",
-    "ku": "KÃ¼rtÃ§e",
-    "fa": "FarsÃ§a",
-    "ar": "ArapÃ§a",
+    "tr": "Türkçe",
+    "en": "İngilizce",
+    "ku": "Kürtçe",
+    "fa": "Farsça",
+    "ar": "Arapça",
     "de": "Almanca",
-    "fr": "FransÄ±zca",
-    "ru": "RusÃ§a",
-    "zh": "Ã‡ince",
+    "fr": "Fransızca",
+    "ru": "Rusça",
+    "zh": "Çince",
 }
 
 TARGET_LANGUAGES = ["tr"]
@@ -850,6 +851,8 @@ def get_translations(text: str, backend: Optional[str] = None) -> Dict[str, Opti
         translation = translate(text, "en", "tr", backend=normalized)
     if translation:
         result["tr"] = turkish_lower(translation)
+    elif normalized == TRANSLATION_BACKEND_MADLAD:
+        result["tr"] = turkish_lower(text)
     return result
 
 
@@ -1006,13 +1009,13 @@ if __name__ == "__main__":
 
     detection_tests = [
         ("APPLE", "en"),
-        ("Ä°STANBUL", "tr"),
-        ("SÃªv", "ku"),
-        ("Ø³ÛŒØ¨", "fa"),
-        ("ØªÙØ§Ø­", "ar"),
-        ("Ã„pfel", "de"),
-        ("Ð¯Ð±Ð»Ð¾ÐºÐ¾", "ru"),
-        ("è‹¹æžœ", "zh"),
+        ("İSTANBUL", "tr"),
+        ("Sêv", "ku"),
+        ("سیب", "fa"),
+        ("تفاح", "ar"),
+        ("Äpfel", "de"),
+        ("Яблоко", "ru"),
+        ("苹果", "zh"),
     ]
 
     print("\nLanguage Detection (FastText):")

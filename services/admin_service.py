@@ -393,7 +393,7 @@ async def refund_admin_payment_data(
         if not item_transactions:
             raise HTTPException(
                 status_code=400,
-                detail="No transaction ID found in iyzico response â€” cannot refund",
+                detail="No transaction ID found in iyzico response - cannot refund",
             )
         payment_transaction_id = item_transactions[0].get("paymentTransactionId", "")
         if not payment_transaction_id:

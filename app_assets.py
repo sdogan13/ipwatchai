@@ -50,6 +50,15 @@ def _get_public_plans():
 def register_asset_routes(app, templates, static_dir):
     """Register service-worker and page routes next to their asset setup."""
 
+    @app.get("/favicon.ico", tags=["Root"], include_in_schema=False)
+    async def serve_favicon():
+        """Serve the browser favicon fallback from the current logo asset."""
+        return FileResponse(
+            static_dir / "icons" / "favicon.ico",
+            media_type="image/x-icon",
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+        )
+
     @app.get("/static/sw.js", tags=["Root"], include_in_schema=False)
     async def serve_service_worker():
         """Serve SW with no-cache headers so browsers always check for updates."""
@@ -78,7 +87,9 @@ def register_asset_routes(app, templates, static_dir):
     @app.get("/admin", response_class=HTMLResponse, tags=["Root"])
     async def serve_admin(request: Request):
         """Serve admin panel. Full auth enforced client-side + API-side."""
-        return templates.TemplateResponse(request=request, name="admin/page.html")
+        response = templates.TemplateResponse(request=request, name="admin/page.html")
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        return response
 
     @app.get("/pricing", response_class=HTMLResponse, tags=["Root"])
     async def serve_pricing(request: Request):

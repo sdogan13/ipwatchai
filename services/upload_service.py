@@ -11,6 +11,7 @@ from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
 from database.crud import Database
+from services.watchlist_service import get_default_watchlist_alert_threshold
 
 
 logger = logging.getLogger(__name__)
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 COLUMN_ALIASES = {
     "trademark_name": [
-        "marka adÄ±",
+        "marka adı",
         "marka",
         "name",
         "brand",
@@ -29,8 +30,8 @@ COLUMN_ALIASES = {
         "marka adi",
     ],
     "nice_classes": [
-        "sÄ±nÄ±flar",
-        "sÄ±nÄ±f",
+        "sınıflar",
+        "sınıf",
         "classes",
         "class",
         "nice",
@@ -40,8 +41,8 @@ COLUMN_ALIASES = {
         "siniflar",
     ],
     "application_no": [
-        "baÅŸvuru no",
-        "baÅŸvuru numarasÄ±",
+        "başvuru no",
+        "başvuru numarası",
         "application number",
         "app no",
         "basvuru no",
@@ -53,11 +54,11 @@ COLUMN_ALIASES = {
         "owner",
         "holder",
         "applicant",
-        "baÅŸvurucu",
+        "başvurucu",
         "basvurucu",
     ],
     "status": ["durum", "status", "state"],
-    "description": ["aciklama", "aÃ§Ä±klama", "description", "notes", "notlar"],
+    "description": ["aciklama", "açıklama", "description", "notes", "notlar"],
 }
 
 
@@ -137,6 +138,7 @@ async def process_trademark_upload(
 ):
     """Validate, parse, and optionally add uploaded trademarks to watchlist."""
     _ = run_analysis
+    _ = alert_threshold
     filename = (file.filename or "").lower()
     if not filename.endswith((".xlsx", ".xls", ".csv")):
         raise HTTPException(
@@ -177,7 +179,7 @@ async def process_trademark_upload(
                 except UnicodeDecodeError:
                     raise HTTPException(
                         status_code=400,
-                        detail="Gecersiz CSV dosyasi. Metin kodlamasi tanÄ±namadi.",
+                        detail="Gecersiz CSV dosyasi. Metin kodlamasi taninamadi.",
                     )
 
         max_upload_size = 50 * 1024 * 1024
@@ -290,6 +292,9 @@ async def process_trademark_upload(
         if add_to_watchlist:
             with db_factory() as db:
                 cur = db.cursor()
+                default_threshold = get_default_watchlist_alert_threshold(
+                    db, current_user.organization_id
+                )
 
                 for tm in trademarks:
                     try:
@@ -332,7 +337,7 @@ async def process_trademark_upload(
                                 tm["classes"],
                                 tm.get("description")
                                 or f"Dosyadan eklendi: {file.filename}",
-                                alert_threshold,
+                                default_threshold,
                                 tm.get("application_no"),
                             ),
                         )

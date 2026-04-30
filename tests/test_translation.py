@@ -177,10 +177,12 @@ class TestLanguageDetection:
 # ============================================================
 
 class TestTranslateToTurkish:
-    """Test translate_to_turkish() with mocked NLLB model."""
+    """Test translate_to_turkish() with mocked translation backends."""
 
+    @patch("utils.translation.TRANSLATION_BACKEND", "nllb")
+    @patch("utils.translation.translate")
     @patch("utils.translation._load_fasttext_langid")
-    def test_already_turkish_returns_lowercase(self, mock_load):
+    def test_explicit_nllb_backend_preserves_detected_turkish(self, mock_load, mock_translate):
         """Turkish text → lowercase, no model call."""
         mock_model = MagicMock()
         mock_model.predict = lambda t: (["__label__tur_Latn"], [0.95])
@@ -239,6 +241,47 @@ class TestTranslateToTurkish:
         translate_to_turkish.cache_clear()
         result = translate_to_turkish("APPLE", backend="madlad")
         assert result == "elma"
+        assert mock_translate.call_args.kwargs["backend"] == "madlad"
+
+    @patch("utils.translation._load_fasttext_langid")
+    @patch("utils.translation.translate", return_value="elma")
+    def test_default_live_backend_translates_with_madlad(self, mock_translate, mock_load):
+        mock_model = MagicMock()
+        mock_model.predict = lambda t: (["__label__eng_Latn"], [0.95])
+        mock_load.return_value = mock_model
+        translate_to_turkish.cache_clear()
+        result = translate_to_turkish("APPLE")
+        assert result == "elma"
+        assert mock_translate.call_args.kwargs["backend"] == "madlad"
+
+    @patch("utils.translation._load_fasttext_langid")
+    @patch("utils.translation.translate", return_value=None)
+    def test_madlad_failure_falls_back_to_original_text(self, mock_translate, mock_load):
+        mock_model = MagicMock()
+        mock_model.predict = lambda t: (["__label__eng_Latn"], [0.90])
+        mock_load.return_value = mock_model
+        translate_to_turkish.cache_clear()
+        result = translate_to_turkish("BRANDX")
+        assert result == "brandx"
+        assert mock_translate.call_args.kwargs["backend"] == "madlad"
+
+    @patch("utils.translation._load_fasttext_langid")
+    @patch("utils.translation.translate", return_value=None)
+    def test_explicit_nllb_failure_fallback(self, mock_translate, mock_load):
+        mock_model = MagicMock()
+        mock_model.predict = lambda t: (["__label__eng_Latn"], [0.90])
+        mock_load.return_value = mock_model
+        translate_to_turkish.cache_clear()
+        result = translate_to_turkish("BRANDX", backend="nllb")
+        assert result == "brandx"
+        assert mock_translate.call_args.kwargs["backend"] == "nllb"
+
+    @patch("utils.translation.detect_language_fasttext", return_value=("tr", "tur_Latn", 0.99))
+    @patch("utils.translation.translate", return_value="translated")
+    def test_default_live_backend_still_calls_model_for_detected_turkish(self, mock_translate, mock_detect):
+        translate_to_turkish.cache_clear()
+        result = translate_to_turkish("SEKER")
+        assert result == "translated"
         assert mock_translate.call_args.kwargs["backend"] == "madlad"
 
     @patch("utils.translation.detect_language_fasttext", return_value=("tr", "tur_Latn", 0.99))
@@ -347,10 +390,14 @@ def test_resolve_fasttext_langid_model_path_prefers_cached_file(monkeypatch):
     )
 
 
-def test_backend_info_defaults_to_nllb():
+def test_backend_info_defaults_to_madlad():
     info = get_translation_backend_info()
-    assert info["backend"] == "nllb"
-    assert "nllb" in info["model_name"]
+    assert info["backend"] == "madlad"
+    assert "madlad400-3b-mt" in info["model_name"]
+
+
+def test_get_default_translation_backend_is_madlad_for_live():
+    assert translation.get_default_translation_backend("live") == "madlad"
 
 
 def test_backend_info_for_madlad():
@@ -383,6 +430,15 @@ def test_ai_settings_pipeline_translation_backend_defaults_to_madlad(monkeypatch
     assert ai_settings.madlad_translate_batch_size == 16
 
 
+def test_ai_settings_translation_backend_defaults_to_madlad(monkeypatch):
+    monkeypatch.delenv("TRANSLATION_BACKEND", raising=False)
+
+    from config.settings import AISettings
+
+    ai_settings = AISettings(_env_file=None)
+    assert ai_settings.translation_backend == "madlad"
+
+
 def test_batch_translate_to_turkish_madlad_forwards_batch_size():
     with patch.object(translation, "detect_language_fasttext", return_value=("en", "eng_Latn", 0.99)), \
          patch.object(translation, "batch_translate", return_value=["elma"]) as mock_batch_translate:
@@ -390,6 +446,33 @@ def test_batch_translate_to_turkish_madlad_forwards_batch_size():
 
     assert results == [("elma", "en")]
     assert mock_batch_translate.call_args.kwargs["batch_size"] == 7
+
+
+@patch("utils.translation.detect_language_fasttext", return_value=("en", "eng_Latn", 0.99))
+@patch("utils.translation.translate", return_value="elma")
+def test_get_translations_defaults_to_live_madlad(mock_translate, mock_detect):
+    result = get_translations("APPLE")
+
+    assert result["tr"] == "elma"
+    assert mock_translate.call_args.kwargs["backend"] == "madlad"
+
+
+@patch("utils.translation.detect_language_fasttext", return_value=("en", "eng_Latn", 0.99))
+@patch("utils.translation.translate", return_value=None)
+def test_get_translations_madlad_failure_preserves_original_text(mock_translate, mock_detect):
+    result = get_translations("APPLE")
+
+    assert result["tr"] == "apple"
+    assert mock_translate.call_args.kwargs["backend"] == "madlad"
+
+
+@patch("utils.translation.detect_language_fasttext", return_value=("en", "eng_Latn", 0.99))
+@patch("utils.translation.translate", return_value="elma")
+def test_get_search_variants_uses_live_madlad_default(mock_translate, mock_detect):
+    variants = set(get_search_variants("APPLE"))
+
+    assert variants == {"apple", "elma"}
+    assert mock_translate.call_args.kwargs["backend"] == "madlad"
 
 
 # ============================================================

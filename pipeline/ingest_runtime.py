@@ -52,11 +52,14 @@ _canonicalize_db_status = _rules._canonicalize_db_status
 parse_date = _rules.parse_date
 calculate_expiration_status = _rules.calculate_expiration_status
 extract_bulletin_info = _rules.extract_bulletin_info
+_explicit_db_status_from_text = _rules._explicit_db_status_from_text
 _determine_db_status_raw = _rules._determine_db_status_raw
 determine_db_status = _rules.determine_db_status
 determine_status = _rules.determine_status
 get_status_rank = _rules.get_status_rank
 get_source_rank = _rules.get_source_rank
+clean_name = _rules.clean_name
+_name_cleans_to_empty = _rules._name_cleans_to_empty
 _SHARED_FIELDS = _rules._SHARED_FIELDS
 _SUSPICIOUS_SIX_FIELDS = _rules._SUSPICIOUS_SIX_FIELDS
 _BLT_OWNED_FIELDS = _rules._BLT_OWNED_FIELDS
@@ -69,14 +72,6 @@ _build_update_sql = _rules._build_update_sql
 check_and_migrate_schema = _bootstrap.check_and_migrate_schema
 load_nice_classes = _bootstrap.load_nice_classes
 
-
-def clean_name(raw_name):
-    if not raw_name:
-        return None
-    name = str(raw_name)
-    name = re.sub(r"(?i)(?:\+\s*)?\b(?:şekil|sekil)\b", "", name)
-    name = " ".join(name.split())
-    return name if name else None
 
 _INSERT_COLUMNS = [
     "application_no",
@@ -277,7 +272,7 @@ def process_file_batch(conn, file_path, force=False):
         if all_app_nos:
             cur.execute(
                 """
-                SELECT application_no, id, last_event_date, current_status, expiry_date, status_source
+                SELECT application_no, id, last_event_date, current_status, expiry_date, status_source, name
                 FROM trademarks
                 WHERE application_no = ANY(%s)
                 """,
@@ -290,6 +285,7 @@ def process_file_batch(conn, file_path, force=False):
                     "status": _canonicalize_db_status(row[3]),
                     "expiry": row[4],
                     "status_source": row[5],
+                    "name": row[6],
                 }
 
         new_inserts = []
@@ -303,7 +299,8 @@ def process_file_batch(conn, file_path, force=False):
                 continue
 
             tm = rec.get("TRADEMARK", {})
-            tm_name = clean_name(tm.get("NAME", ""))
+            raw_tm_name = tm.get("NAME", "")
+            tm_name = clean_name(raw_tm_name)
             if tm_name and len(tm_name) > 2000:
                 skipped_count += 1
                 continue
@@ -311,6 +308,7 @@ def process_file_batch(conn, file_path, force=False):
             status_raw = rec.get("STATUS", "")
             reg_no_val = tm.get("REGISTERNO")
             db_status = determine_db_status(folder_name, status_raw, reg_no_val)
+            explicit_status = _explicit_db_status_from_text(status_raw)
 
             app_date = parse_date(tm.get("APPLICATIONDATE"))
             reg_date = parse_date(tm.get("REGISTERDATE"))
@@ -435,24 +433,27 @@ def process_file_batch(conn, file_path, force=False):
             curr_status = existing["status"]
             existing_source = existing.get("status_source") or "BLT"
             old_source_rank = {"APP": 3, "GZ": 2}.get(existing_source, 1)
+            clear_name = (
+                _name_cleans_to_empty(raw_tm_name)
+                and _name_cleans_to_empty(existing.get("name"))
+            )
             should_update = force
             next_status = db_status
 
-            if new_source_rank >= old_source_rank:
+            if (
+                existing_source == "APP"
+                and curr_status == DB_STATUS_APPLIED
+                and not is_app_source
+                and db_status != DB_STATUS_APPLIED
+            ):
                 should_update = True
-                if is_app_source and db_status == DB_STATUS_APPLIED:
-                    strong_statuses = [
-                        DB_STATUS_REGISTERED,
-                        DB_STATUS_REFUSED,
-                        DB_STATUS_OPPOSED,
-                        DB_STATUS_WITHDRAWN,
-                        DB_STATUS_CANCELLED,
-                        DB_STATUS_EXPIRED,
-                        DB_STATUS_PARTIAL_REFUSAL,
-                        DB_STATUS_RENEWED,
-                    ]
-                    if curr_status in strong_statuses:
-                        next_status = curr_status
+                next_status = db_status
+            elif new_source_rank >= old_source_rank:
+                should_update = True
+                if is_app_source and (
+                    db_status == DB_STATUS_APPLIED or explicit_status is None
+                ):
+                    next_status = curr_status
             else:
                 should_update = True
                 next_status = curr_status
@@ -471,6 +472,7 @@ def process_file_batch(conn, file_path, force=False):
             updates.append(
                 (
                     sanitize(tm_name),
+                    clear_name,
                     next_status,
                     clean_classes_list or None,
                     Json(extracted_goods_data) if extracted_goods_data else None,
@@ -641,6 +643,56 @@ def _process_metadata_files(conn, metadata_files, force=False):
     return summary
 
 
+def cleanup_sekil_names(conn, batch_size: int = 5000) -> int:
+    """Remove placeholder-only 'sekil' values and clean mixed name variants."""
+    cur = conn.cursor()
+    cleaned_total = 0
+    cur.execute(
+        """
+        SELECT id, name
+        FROM trademarks
+        WHERE name IS NOT NULL
+          AND (
+              lower(name) LIKE '%sekil%'
+              OR name ~* '(s|ş)ek(i|ı|İ)l'
+          )
+        """
+    )
+
+    rows = cur.fetchall()
+    for start in range(0, len(rows), batch_size):
+        batch = rows[start:start + batch_size]
+        updates = []
+        for tm_id, current_name in batch:
+            cleaned = clean_name(current_name)
+            if cleaned != current_name:
+                updates.append((str(tm_id), sanitize(cleaned)))
+
+        if updates:
+            execute_values(
+                cur,
+                """
+                UPDATE trademarks AS tm
+                SET name = v.name::text,
+                    updated_at = NOW()
+                FROM (VALUES %s) AS v(id, name)
+                WHERE tm.id = v.id::uuid
+                """,
+                updates,
+            )
+            cleaned_total += len(updates)
+            conn.commit()
+
+    return cleaned_total
+
+
+def cleanup_applied_publication_statuses(conn) -> int:
+    """Compatibility wrapper for the standalone post-ingest status repair."""
+    from pipeline.status_repair import run_status_repair
+
+    return run_status_repair(conn=conn).get("repaired", 0)
+
+
 def _run_ingest(force=False, root_dir: Path | None = None, folder_name: str | None = None, descending: bool = True):
     if root_dir is not None:
         set_root_dir(root_dir)
@@ -656,8 +708,11 @@ def _run_ingest(force=False, root_dir: Path | None = None, folder_name: str | No
         metadata_files = _collect_metadata_files(ROOT_DIR, folder_name=folder_name, descending=descending)
         logging.info(f"Found {len(metadata_files)} files.")
         result = _process_metadata_files(conn, metadata_files, force=force)
+        result["name_cleaned"] = cleanup_sekil_names(conn)
         duration = time.time() - started
         _print_repair_summary(repair_stats)
+        if result["name_cleaned"]:
+            logging.info("Cleaned %s trademark name placeholder(s)", result["name_cleaned"])
         logging.info(f"Ingestion complete in {duration:.1f}s")
         result.update(
             {
@@ -701,6 +756,7 @@ __all__ = [
     "_trunc",
     "embedding_to_halfvec",
     "clean_name",
+    "_name_cleans_to_empty",
     "extract_tpe_id",
     "_build_file_index",
     "_resolve_image_path",
@@ -726,6 +782,7 @@ __all__ = [
     "parse_date",
     "calculate_expiration_status",
     "extract_bulletin_info",
+    "_explicit_db_status_from_text",
     "_determine_db_status_raw",
     "determine_db_status",
     "determine_status",
@@ -748,6 +805,8 @@ __all__ = [
     "process_file_batch",
     "_collect_metadata_files",
     "_process_metadata_files",
+    "cleanup_sekil_names",
+    "cleanup_applied_publication_statuses",
     "_run_ingest",
     "run_ingest",
     "run_ingest_cli",

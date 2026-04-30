@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import os
 from dataclasses import dataclass
 
@@ -9,11 +10,17 @@ DEFAULT_EMAIL = "mobiletest@test.com"
 DEFAULT_PASSWORD = "Test1234!"
 DEFAULT_TIMEOUT = 45
 
-PNG_1X1 = (
-    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
-    b"\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00"
-    b"\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00\x05\x18"
-    b"\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
+# Historical export name; use a minimally realistic 64x64 logo fixture because
+# 1x1 images can crash native visual/OCR model code in live GPU runs.
+PNG_1X1 = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAABiUlEQVR4nO3aP4rCQBQG8G8+p7WW"
+    "Le0CClaCDMYDeAqPoN7IWi9hI5Mo2CvYiF5AiIjFLGzAat1dWCX53P1VQzIMebw3+fOICSFAGSGO"
+    "EEeII8QR4ghxhDh774QxBiUTPntkyWeAeNUSuin8XcN8WczyGSDEEeIIcYQ4QhwhjhBHiCPEEeII"
+    "cYQ4PmqhwWAwnU7zcavVGo1G+Xg4HM5mM5Q/AOfccrkEcDqdrLVJkuTHkySJ4xgSAaxWKwDe+36/"
+    "n2XZ5XK5Xq9ZltVqNRT4QfNDjUZjt9uFEBaLRRzHx+NxvV5XKpV2u41nso9ayBgTRdFms0nTdDwe"
+    "7/d77721ttfrQeUu5JxL0/R8PlerVeec9/7ZGwAPD2AymTSbTQBRFG2328PhUK/XoRJAp9OZz+fd"
+    "bjevqLcPeDJzr+lw6wWUpysR/htbZUSII8QR4ghxhDhCHCGOEEeII8QR4ghxhDhCHCGOEEeII8TZ"
+    "b2eU8LeVl8oAIc4U3vb56xkgxBHiCHGEOBZ9Ab/1Dk4ScGnmRqguAAAAAElFTkSuQmCC"
 )
 
 

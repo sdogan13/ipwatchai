@@ -58,6 +58,10 @@ Set at least:
 - `TORCH_HOME`
 - `WORKERS=1` unless you have explicitly revalidated multi-worker search stability
 
+AI Studio:
+- set `CREATIVE_GOOGLE_API_KEY` before enabling the AI Studio feature flag
+- `GET /api/v1/tools/status` should report Name Lab and Logo Studio as available before exposing the dashboard tab to users
+
 Start the stack:
 
 ```powershell
@@ -137,6 +141,7 @@ curl http://127.0.0.1:8080/health
 - the backend container runs `uvicorn main:app`
 - pipeline trigger routes and `workers/pipeline_scheduler.py` now spawn detached `python -m workers.pipeline_worker` child processes, so the backend or scheduler runtime must be allowed to launch child Python processes from the repo root
 - detached pipeline workers survive parent web or scheduler process exits, but they do not survive a full host or container restart
+- `/api/v1/pipeline/trigger-step?step=repair` can launch the repair step as a detached worker; live repair progress is resumable through `repair_live_trademark_checks`
 - `data_collection.py` incremental mode now verifies recent issues by canonical issue-folder completeness instead of raw file presence; an issue only counts as present when its `BLT_...` or `GZ_...` folder contains both `metadata.json` and `events.json`
 - raw collector downloads now use the canonical issue stem, for example `BLT_490_2026-04-13.pdf` or `GZ_500_2026-03-31.zip`
 - extraction accepts those canonical raw BLT/GZ filenames alongside the older legacy raw filenames

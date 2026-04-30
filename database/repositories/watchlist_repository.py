@@ -9,12 +9,21 @@ from uuid import UUID, uuid4
 from models.schemas import WatchlistItemCreate, WatchlistItemUpdate
 
 from database.repositories.organization_repository import OrganizationCRUD
+from utils.watchlist_filters import same_holder_alert_exclusion_sql
 
 if TYPE_CHECKING:
     from database.crud import Database
 
 
 logger = logging.getLogger(__name__)
+
+
+def _visible_alert_condition(
+    alert_alias: str = "a",
+    conflict_alias: str = "t",
+    watched_alias: str = "my_tm",
+) -> str:
+    return same_holder_alert_exclusion_sql(alert_alias, conflict_alias, watched_alias)
 
 
 class WatchlistCRUD:
@@ -175,7 +184,15 @@ class WatchlistCRUD:
         """Get watchlist item by ID, scoped to organization (tenant isolation)."""
         cur = db.cursor()
         cur.execute(
-            "SELECT * FROM watchlist_mt WHERE id = %s AND organization_id = %s",
+            """
+            SELECT w.*,
+                   my_tm.holder_tpe_client_id AS watched_holder_tpe_client_id,
+                   my_tm.holder_id::text AS watched_holder_id,
+                   my_tm.holder_name AS watched_holder_name
+            FROM watchlist_mt w
+            LEFT JOIN trademarks my_tm ON w.customer_application_no = my_tm.application_no
+            WHERE w.id = %s AND w.organization_id = %s
+            """,
             (str(item_id), str(org_id)),
         )
         row = cur.fetchone()
@@ -186,7 +203,15 @@ class WatchlistCRUD:
         """Get watchlist item by ID without tenant filter (trusted backend use only)."""
         cur = db.cursor()
         cur.execute(
-            "SELECT * FROM watchlist_mt WHERE id = %s",
+            """
+            SELECT w.*,
+                   my_tm.holder_tpe_client_id AS watched_holder_tpe_client_id,
+                   my_tm.holder_id::text AS watched_holder_id,
+                   my_tm.holder_name AS watched_holder_name
+            FROM watchlist_mt w
+            LEFT JOIN trademarks my_tm ON w.customer_application_no = my_tm.application_no
+            WHERE w.id = %s
+            """,
             (str(item_id),),
         )
         row = cur.fetchone()
@@ -234,19 +259,21 @@ class WatchlistCRUD:
         if appeals_only:
             if status_filter in ("new", "acknowledged"):
                 where_parts.append(
-                    """EXISTS (
+                    f"""EXISTS (
                     SELECT 1 FROM alerts_mt a2
                     JOIN trademarks t2 ON a2.conflicting_trademark_id = t2.id
+                    LEFT JOIN trademarks my_tm2 ON w.customer_application_no = my_tm2.application_no
                     WHERE a2.watchlist_item_id = w.id
                       AND a2.status = %s
                       AND t2.appeal_deadline IS NOT NULL
                       AND t2.appeal_deadline >= CURRENT_DATE
+                      AND {_visible_alert_condition('a2', 't2', 'my_tm2')}
                 )"""
                 )
                 params.append(status_filter)
             elif status_filter in ("resolved", "dismissed"):
                 where_parts.append(
-                    """EXISTS (
+                    f"""EXISTS (
                     SELECT 1 FROM alerts_mt a2
                     WHERE a2.watchlist_item_id = w.id
                       AND a2.status = %s
@@ -258,10 +285,12 @@ class WatchlistCRUD:
                     """EXISTS (
                     SELECT 1 FROM alerts_mt a2
                     JOIN trademarks t2 ON a2.conflicting_trademark_id = t2.id
+                    LEFT JOIN trademarks my_tm2 ON w.customer_application_no = my_tm2.application_no
                     WHERE a2.watchlist_item_id = w.id
                       AND a2.status NOT IN ('dismissed', 'resolved')
                       AND t2.appeal_deadline IS NOT NULL
                       AND t2.appeal_deadline >= CURRENT_DATE
+                      AND {_visible_alert_condition('a2', 't2', 'my_tm2')}
                 )"""
                 )
         if renewal_only and status_filter:
@@ -326,13 +355,14 @@ class WatchlistCRUD:
                 "  WHERE a.status NOT IN ('dismissed', 'resolved')"
                 "  AND (t.appeal_deadline IS NULL OR t.appeal_deadline >= CURRENT_DATE)"
                 f"  AND a.overall_risk_score >= {float(threshold)}"
+                f"  AND {_visible_alert_condition()}"
                 ") DESC NULLS LAST, w.created_at DESC"
             )
         elif renewal_only and sort_by not in sort_map:
             order_by = "MAX(my_tm.application_date) ASC NULLS LAST"
         elif appeals_only and sort_by not in sort_map:
             if status_filter in ("resolved", "dismissed"):
-                order_by = """(
+                order_by = f"""(
                     SELECT MAX(a2.updated_at)
                     FROM alerts_mt a2
                     WHERE a2.watchlist_item_id = w.id
@@ -343,27 +373,35 @@ class WatchlistCRUD:
                     SELECT MIN(t2.appeal_deadline)
                     FROM alerts_mt a2
                     JOIN trademarks t2 ON a2.conflicting_trademark_id = t2.id
+                    LEFT JOIN trademarks my_tm2 ON w.customer_application_no = my_tm2.application_no
                     WHERE a2.watchlist_item_id = w.id
                       AND a2.status NOT IN ('dismissed', 'resolved')
                       AND t2.appeal_deadline >= CURRENT_DATE
+                      AND {_visible_alert_condition('a2', 't2', 'my_tm2')}
                 ) ASC NULLS LAST"""
         else:
             order_by = sort_map.get(sort_by, "w.created_at DESC")
 
+        visible_alert_condition = _visible_alert_condition()
         query = f"""
             SELECT w.*,
                    COUNT(a.id) FILTER (
                        WHERE a.status = 'new'
                        AND a.overall_risk_score >= {float(threshold)}
+                       AND {visible_alert_condition}
                    ) AS new_alerts_count,
                    COUNT(a.id) FILTER (
                        WHERE a.status NOT IN ('dismissed', 'resolved')
                        AND (t.appeal_deadline IS NULL OR t.appeal_deadline >= CURRENT_DATE)
                        AND a.overall_risk_score >= {float(threshold)}
+                       AND {visible_alert_condition}
                    ) AS total_alerts_count,
                    MAX(my_tm.application_date) AS true_application_date,
                    MAX(my_tm.image_path) AS trademark_image_path,
-                   MAX(my_tm.final_status) AS trademark_status
+                   MAX(my_tm.final_status) AS trademark_status,
+                   MAX(my_tm.holder_tpe_client_id) AS watched_holder_tpe_client_id,
+                   MAX(my_tm.holder_id::text) AS watched_holder_id,
+                   MAX(my_tm.holder_name) AS watched_holder_name
             FROM watchlist_mt w
             LEFT JOIN alerts_mt a ON w.id = a.watchlist_item_id
             LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
@@ -385,9 +423,13 @@ class WatchlistCRUD:
         cur = db.cursor()
         cur.execute(
             """
-            SELECT w.*, o.name as org_name
+            SELECT w.*, o.name as org_name,
+                   my_tm.holder_tpe_client_id AS watched_holder_tpe_client_id,
+                   my_tm.holder_id::text AS watched_holder_id,
+                   my_tm.holder_name AS watched_holder_name
             FROM watchlist_mt w
             JOIN organizations o ON w.organization_id = o.id
+            LEFT JOIN trademarks my_tm ON w.customer_application_no = my_tm.application_no
             WHERE w.is_active = TRUE AND o.is_active = TRUE
             ORDER BY w.organization_id, w.id
         """
@@ -490,7 +532,7 @@ class WatchlistCRUD:
     def update_logo(
         db: Database,
         item_id: UUID,
-        logo_path: str,
+        logo_path: Optional[str],
         logo_embedding: Optional[List[float]] = None,
         dino_embedding: Optional[List[float]] = None,
         color_histogram: Optional[List[float]] = None,

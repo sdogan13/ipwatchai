@@ -45,6 +45,7 @@ MIN_SIMILARITY_SCORE = RISK_THRESHOLDS["medium"]  # 0.50 — minimum to be a con
 BATCH_SIZE = 50                  # Trademarks to process per batch
 MAX_CONFLICTS_PER_MARK = 20      # Max conflicts to store per new trademark
 QUEUE_POLL_INTERVAL = 30         # Seconds between queue checks (daemon mode)
+DEFAULT_CANDIDATE_LIMIT = int(os.getenv('UNIVERSAL_SCANNER_CANDIDATE_LIMIT', '150'))
 
 # Statuses considered "active" in the registered database
 ACTIVE_STATUSES = {'Tescil Edildi', 'Yayında', 'Yenilendi'}
@@ -87,16 +88,32 @@ class UniversalScanner:
     pre_screen_candidates + calculate_hybrid_risk pipeline as the search engine.
     """
 
-    def __init__(self, conn=None, dry_run: bool = False):
+    def __init__(self, conn=None, dry_run: bool = False, candidate_limit: Optional[int] = None):
         self.conn = conn or get_db_connection()
         self.dry_run = dry_run
+        self.candidate_limit = max(
+            MAX_CONFLICTS_PER_MARK,
+            candidate_limit or DEFAULT_CANDIDATE_LIMIT,
+        )
         self._risk_engine = None
+        self._suppress_risk_logs = (
+            os.getenv('UNIVERSAL_SCANNER_VERBOSE_RISK_LOGS', '').lower()
+            not in {'1', 'true', 'yes'}
+        )
+        self._apply_log_policy()
+
+    def _apply_log_policy(self) -> None:
+        if self._suppress_risk_logs:
+            # Pair-level scoring logs are useful during search debugging, but make
+            # bulletin-wide scans dramatically slower and noisy.
+            logging.getLogger('risk_engine').disabled = True
 
     @property
     def risk_engine(self):
         if self._risk_engine is None:
             from risk_engine import RiskEngine
             self._risk_engine = RiskEngine(existing_conn=self.conn)
+            self._apply_log_policy()
         return self._risk_engine
 
     def get_within_deadline_trademarks(self) -> List[Dict]:
@@ -117,7 +134,42 @@ class UniversalScanner:
             logger.info(f"Within-deadline pool: {len(results)} trademarks")
             return results
 
-    def scan_trademark(self, trademark_id: str, limit: int = MAX_CONFLICTS_PER_MARK) -> List[Dict]:
+    def _scan_queue_exists(self) -> bool:
+        """Return whether the optional resumable scan queue table exists."""
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("SELECT to_regclass('public.universal_scan_queue') IS NOT NULL")
+                return bool(cur.fetchone()[0])
+        except Exception:
+            self.conn.rollback()
+            return False
+
+    def _mark_queue_item(self, trademark_id: str, status: str, error_message: Optional[str] = None) -> None:
+        """Mark a queued item so bulletin scans can resume without rescanning."""
+        try:
+            with self.conn.cursor() as cur:
+                if status == 'completed':
+                    cur.execute("""
+                        UPDATE universal_scan_queue
+                        SET status = 'completed', completed_at = NOW(), error_message = NULL
+                        WHERE trademark_id = %s::uuid
+                    """, (trademark_id,))
+                else:
+                    cur.execute("""
+                        UPDATE universal_scan_queue
+                        SET status = %s, error_message = %s, last_attempt_at = NOW(), attempts = attempts + 1
+                        WHERE trademark_id = %s::uuid
+                    """, (status, error_message, trademark_id))
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+
+    def scan_trademark(
+        self,
+        trademark_id: str,
+        limit: int = MAX_CONFLICTS_PER_MARK,
+        candidate_limit: Optional[int] = None,
+    ) -> List[Dict]:
         """
         Scan a single within-deadline trademark against the registered database
         using the same pipeline as the search engine.
@@ -150,7 +202,7 @@ class UniversalScanner:
 
         # Pre-screen candidates using same 6-stage pipeline as search engine
         raw_candidates = self.risk_engine.pre_screen_candidates(
-            name, target_classes, limit=500,
+            name, target_classes, limit=candidate_limit or self.candidate_limit,
             q_img_vec=q_img_vec, q_dino_vec=q_dino_vec, q_ocr_text=q_ocr_text
         )
         logger.info(f"  Pre-screened: {len(raw_candidates)} candidates")
@@ -388,7 +440,7 @@ class UniversalScanner:
                 logger.error(f"Daemon error: {e}")
                 time.sleep(poll_interval)
 
-    def scan_bulletin(self, bulletin_no: str, limit: int = None) -> Dict:
+    def scan_bulletin(self, bulletin_no: str, limit: int = None, skip_completed: bool = True) -> Dict:
         """
         Scan all trademarks from a specific bulletin.
 
@@ -400,17 +452,39 @@ class UniversalScanner:
             Summary of processing
         """
         logger.info(f"Scanning bulletin: {bulletin_no}")
+        has_queue = self._scan_queue_exists()
 
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             # Get trademarks from bulletin (skip NULL names — can't produce conflicts)
             query = """
-                SELECT id, name, application_no
-                FROM trademarks
-                WHERE bulletin_no = %s
-                  AND name IS NOT NULL AND length(name) >= 2
-                ORDER BY application_no
+                SELECT t.id, t.name, t.application_no
+                FROM trademarks t
+                WHERE t.bulletin_no = %s
+                  AND t.name IS NOT NULL AND length(t.name) >= 2
+                  AND t.status_source = 'BLT'
+                  AND t.current_status::text = 'Yayında'
             """
             params: list = [bulletin_no]
+
+            if skip_completed:
+                query += """
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM universal_conflicts uc
+                      WHERE uc.new_mark_id = t.id
+                  )
+                """
+                if has_queue:
+                    query += """
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM universal_scan_queue q
+                      WHERE q.trademark_id = t.id
+                        AND q.status = 'completed'
+                  )
+                """
+
+            query += " ORDER BY t.application_no"
 
             if limit:
                 query += " LIMIT %s"
@@ -429,6 +503,8 @@ class UniversalScanner:
                 try:
                     conflicts = self.scan_trademark(str(tm['id']))
                     total_conflicts += len(conflicts)
+                    if has_queue and not self.dry_run:
+                        self._mark_queue_item(str(tm['id']), 'completed')
                 except Exception as e:
                     logger.error(f"  Error scanning {tm['id']}: {e}")
                     errors += 1
@@ -436,6 +512,8 @@ class UniversalScanner:
                         self.conn.rollback()
                     except Exception:
                         pass
+                    if has_queue and not self.dry_run:
+                        self._mark_queue_item(str(tm['id']), 'failed', str(e))
 
             return {
                 'bulletin_no': bulletin_no,
@@ -484,12 +562,16 @@ Examples:
                         help='Limit number of trademarks to process')
     parser.add_argument('--dry-run', action='store_true',
                         help='Dry run (no database writes)')
+    parser.add_argument('--candidate-limit', type=int, default=None,
+                        help=f'Candidate pre-screen cap per trademark (default: {DEFAULT_CANDIDATE_LIMIT})')
+    parser.add_argument('--rescan-completed', action='store_true',
+                        help='Rescan trademarks that already have conflicts or completed queue entries')
     parser.add_argument('--poll-interval', type=int, default=QUEUE_POLL_INTERVAL,
                         help=f'Queue poll interval in seconds (default: {QUEUE_POLL_INTERVAL})')
 
     args = parser.parse_args()
 
-    scanner = UniversalScanner(dry_run=args.dry_run)
+    scanner = UniversalScanner(dry_run=args.dry_run, candidate_limit=args.candidate_limit)
 
     try:
         if args.daemon:
@@ -502,7 +584,11 @@ Examples:
                 print(f"  - {c['existing_mark_name']} ({c['similarity_score']:.1%}) [{c['risk_level']}]")
 
         elif args.bulletin:
-            result = scanner.scan_bulletin(args.bulletin, limit=args.limit)
+            result = scanner.scan_bulletin(
+                args.bulletin,
+                limit=args.limit,
+                skip_completed=not args.rescan_completed,
+            )
             print(f"\n{'='*50}")
             print(f"Bulletin: {result['bulletin_no']}")
             print(f"Scanned: {result['trademarks_scanned']} trademarks")

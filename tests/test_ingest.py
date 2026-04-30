@@ -58,6 +58,7 @@ from pipeline.ingest import (
 
 UPDATE_ROW_KEYS = [
     "name",
+    "clear_name",
     "status",
     "nice_classes",
     "goods",
@@ -199,7 +200,7 @@ class FakeCursor:
             entry.update({"status": "failed", "error_log": error_log})
             return
 
-        if sql_text.startswith("SELECT application_no, id, last_event_date, current_status, expiry_date, status_source FROM trademarks"):
+        if sql_text.startswith("SELECT application_no, id, last_event_date, current_status, expiry_date, status_source, name FROM trademarks"):
             app_nos = params[0]
             rows = []
             for app_no in app_nos:
@@ -213,6 +214,7 @@ class FakeCursor:
                             existing.get("current_status"),
                             existing.get("expiry_date"),
                             existing.get("status_source"),
+                            existing.get("name"),
                         )
                     )
             self._fetchall = rows
@@ -661,6 +663,15 @@ class TestCoalesceDirection:
             assert "attorney_no," in sql, \
                 f"{source_type} UPDATE must include attorney_no in VALUES aliases"
 
+    def test_update_sql_supports_clearing_shape_only_names(self):
+        """UPDATE rows carry an explicit clear_name flag for safe name nulling."""
+        from pipeline.ingest import _build_update_sql
+
+        for source_type in ['APP', 'GZ', 'BLT']:
+            sql = _build_update_sql(source_type)
+            assert "name, clear_name, status" in sql
+            assert "name = CASE WHEN v.clear_name THEN NULL ELSE" in sql
+
     def test_insert_sql_has_attorney_columns(self):
         """INSERT SQL must include attorney_name and attorney_no columns."""
         insert_sql = ingest._build_insert_sql()
@@ -679,6 +690,10 @@ class TestCoalesceDirection:
 # ============================================================
 
 class TestDetermineStatus:
+    @staticmethod
+    def mojibake(text: str) -> str:
+        return text.encode("utf-8").decode("latin1")
+
     """Verify Turkish status keyword matching."""
 
     def test_registered_keyword(self):
@@ -718,7 +733,7 @@ class TestDetermineStatus:
         assert determine_status("BLT_119", "", reg_no_val="None") == "Published"
 
     def test_mojibake_keyword_is_repaired(self):
-        assert determine_status("BLT_119", "yayÄ±nlandÄ±") == "Published"
+        assert determine_status("BLT_119", self.mojibake("yayınlandı")) == "Published"
 
     def test_status_text_wins_over_blt_default(self):
         assert determine_status("BLT_119", "tescil edildi") == "Registered"
@@ -733,15 +748,19 @@ class TestDetermineStatus:
         assert determine_status("GZ_315", "feragat edildi", reg_no_val="12345") == "Withdrawn"
 
     def test_mojibake_conflict_text_still_wins(self):
-        assert determine_status("GZ_315", "yayÄ±nlandÄ±", reg_no_val="12345") == "Published"
+        assert determine_status("GZ_315", self.mojibake("yayınlandı"), reg_no_val="12345") == "Published"
 
 
 class TestDetermineDbStatus:
+    @staticmethod
+    def mojibake(text: str) -> str:
+        return text.encode("utf-8").decode("latin1")
+
     def test_returns_canonical_published_enum(self):
         assert determine_db_status("BLT_119", "Application/Published") == "Yayında"
 
     def test_repairs_mojibake_before_matching(self):
-        assert determine_db_status("BLT_119", "yayÄ±nlandÄ±") == "Yayında"
+        assert determine_db_status("BLT_119", self.mojibake("yayınlandı")) == "Yayında"
 
     def test_returns_canonical_withdrawn_enum(self):
         assert determine_db_status("GZ_315", "feragat edildi") == "Geri Çekildi"
@@ -768,7 +787,7 @@ class TestDetermineDbStatus:
         assert determine_db_status("GZ_315", "geri çekildi", reg_no_val="12345") == "Geri Çekildi"
 
     def test_mojibake_conflict_text_beats_folder_family(self):
-        assert determine_db_status("GZ_315", "yayÄ±nlandÄ±", reg_no_val="12345") == "Yayında"
+        assert determine_db_status("GZ_315", self.mojibake("yayınlandı"), reg_no_val="12345") == "Yayında"
 
 
 # ============================================================
@@ -894,6 +913,13 @@ class TestCleanName:
 
     def test_preserves_non_suffix_text(self):
         assert clean_name("ŞEKİL OFİS") == "OFİS"
+
+    def test_strips_descriptor_only_name_to_none(self):
+        assert clean_name("+ ŞEKİL") is None
+        assert clean_name("sekil") is None
+
+    def test_preserves_embedded_sekil_text(self):
+        assert clean_name("aksekili") == "aksekili"
 
 
 class TestExtractBulletinInfo:
@@ -1199,6 +1225,254 @@ class TestProcessFileBatchBehavior:
         assert reconcile_calls == [["2024/001"]]
         assert watchlist_calls == []
         assert queue_calls == []
+
+    def test_app_blank_status_preserves_existing_blt_published_status(self):
+        with temp_dir() as tmp:
+            record = make_metadata_record(folder_status="")
+            metadata_path = write_metadata_file(tmp, "APP_1", records=[record])
+            conn = FakeConnection(
+                existing_trademarks={
+                    "2024/001": {
+                        "id": 100,
+                        "current_status": ingest.DB_STATUS_PUBLISHED,
+                        "expiry_date": date(2034, 7, 17),
+                        "status_source": "BLT",
+                    }
+                }
+            )
+
+            result, reconcile_calls, watchlist_calls, queue_calls = self._run_batch(metadata_path, conn)
+
+        updated = update_row_dict(conn.updated_rows[0])
+        assert result["updated"] == 1
+        assert updated["status"] == ingest.DB_STATUS_PUBLISHED
+        assert updated["src_tag"] == "BLT"
+        assert conn.history_rows == []
+        assert reconcile_calls == [["2024/001"]]
+        assert watchlist_calls == []
+        assert queue_calls == []
+
+    def test_app_blank_status_with_register_no_preserves_existing_source_status(self):
+        with temp_dir() as tmp:
+            record = make_metadata_record(folder_status="", register_no="12345")
+            metadata_path = write_metadata_file(tmp, "APP_1", records=[record])
+            conn = FakeConnection(
+                existing_trademarks={
+                    "2024/001": {
+                        "id": 101,
+                        "current_status": ingest.DB_STATUS_PUBLISHED,
+                        "expiry_date": date(2034, 7, 17),
+                        "status_source": "BLT",
+                    }
+                }
+            )
+
+            result, reconcile_calls, watchlist_calls, queue_calls = self._run_batch(metadata_path, conn)
+
+        updated = update_row_dict(conn.updated_rows[0])
+        assert result["updated"] == 1
+        assert updated["status"] == ingest.DB_STATUS_PUBLISHED
+        assert updated["src_tag"] == "BLT"
+        assert conn.history_rows == []
+        assert reconcile_calls == [["2024/001"]]
+        assert watchlist_calls == []
+        assert queue_calls == []
+
+    def test_app_explicit_non_applied_status_overwrites_existing_status(self):
+        with temp_dir() as tmp:
+            record = make_metadata_record(folder_status="tescil edildi")
+            metadata_path = write_metadata_file(tmp, "APP_1", records=[record])
+            conn = FakeConnection(
+                existing_trademarks={
+                    "2024/001": {
+                        "id": 102,
+                        "current_status": ingest.DB_STATUS_PUBLISHED,
+                        "expiry_date": date(2034, 7, 17),
+                        "status_source": "BLT",
+                    }
+                }
+            )
+
+            result, reconcile_calls, watchlist_calls, queue_calls = self._run_batch(metadata_path, conn)
+
+        updated = update_row_dict(conn.updated_rows[0])
+        history_row = conn.history_rows[0]
+        assert result["updated"] == 1
+        assert updated["status"] == ingest.DB_STATUS_REGISTERED
+        assert updated["src_tag"] == "APP"
+        assert history_row[0] == 102
+        assert history_row[2] == "STATUS_CHANGE"
+        assert f"{ingest.DB_STATUS_PUBLISHED} -> {ingest.DB_STATUS_REGISTERED}" in history_row[4]
+        assert reconcile_calls == [["2024/001"]]
+        assert watchlist_calls == []
+        assert queue_calls == []
+
+    def test_app_only_insert_still_defaults_to_applied(self):
+        with temp_dir() as tmp:
+            record = make_metadata_record(folder_status="")
+            metadata_path = write_metadata_file(tmp, "APP_1", records=[record])
+            conn = FakeConnection()
+
+            result, reconcile_calls, watchlist_calls, queue_calls = self._run_batch(metadata_path, conn)
+
+        inserted = insert_row_dict(conn.inserted_rows[0])
+        assert result["inserted"] == 1
+        assert inserted["current_status"] == ingest.DB_STATUS_APPLIED
+        assert inserted["status_source"] == "APP"
+        assert reconcile_calls == [["2024/001"]]
+        assert watchlist_calls[0]["source_type"] == "application"
+        assert queue_calls == []
+
+    def test_forced_blt_repairs_existing_app_applied_pollution(self):
+        with temp_dir() as tmp:
+            record = make_metadata_record(folder_status="")
+            metadata_path = write_metadata_file(tmp, "BLT_490_2026-04-13", records=[record])
+            conn = FakeConnection(
+                existing_trademarks={
+                    "2024/001": {
+                        "id": 103,
+                        "current_status": ingest.DB_STATUS_APPLIED,
+                        "expiry_date": date(2034, 7, 17),
+                        "status_source": "APP",
+                        "name": "TEST MARK",
+                    }
+                }
+            )
+
+            result, reconcile_calls, watchlist_calls, queue_calls = self._run_batch(
+                metadata_path,
+                conn,
+                force=True,
+            )
+
+        updated = update_row_dict(conn.updated_rows[0])
+        history_row = conn.history_rows[0]
+        assert result["updated"] == 1
+        assert updated["status"] == ingest.DB_STATUS_PUBLISHED
+        assert updated["src_tag"] == "BLT"
+        assert history_row[0] == 103
+        assert history_row[2] == "STATUS_CHANGE"
+        assert f"{ingest.DB_STATUS_APPLIED} -> {ingest.DB_STATUS_PUBLISHED}" in history_row[4]
+        assert reconcile_calls == [["2024/001"]]
+        assert watchlist_calls == []
+        assert queue_calls == []
+
+    def test_forced_gz_repairs_existing_app_applied_pollution(self):
+        with temp_dir() as tmp:
+            record = make_metadata_record(
+                folder_status="",
+                register_no="12345",
+                register_date="2026-03-31",
+                gazette_no="500",
+                gazette_date="2026-03-31",
+            )
+            metadata_path = write_metadata_file(tmp, "GZ_500_2026-03-31", records=[record])
+            conn = FakeConnection(
+                existing_trademarks={
+                    "2024/001": {
+                        "id": 104,
+                        "current_status": ingest.DB_STATUS_APPLIED,
+                        "expiry_date": date(2034, 7, 17),
+                        "status_source": "APP",
+                        "name": "TEST MARK",
+                    }
+                }
+            )
+
+            result, reconcile_calls, watchlist_calls, queue_calls = self._run_batch(
+                metadata_path,
+                conn,
+                force=True,
+            )
+
+        updated = update_row_dict(conn.updated_rows[0])
+        history_row = conn.history_rows[0]
+        assert result["updated"] == 1
+        assert updated["status"] == ingest.DB_STATUS_REGISTERED
+        assert updated["src_tag"] == "GZ"
+        assert history_row[0] == 104
+        assert history_row[2] == "STATUS_CHANGE"
+        assert f"{ingest.DB_STATUS_APPLIED} -> {ingest.DB_STATUS_REGISTERED}" in history_row[4]
+        assert reconcile_calls == [["2024/001"]]
+        assert watchlist_calls == []
+        assert queue_calls == []
+
+    def test_blt_does_not_downgrade_existing_app_non_applied_status(self):
+        with temp_dir() as tmp:
+            record = make_metadata_record(folder_status="")
+            metadata_path = write_metadata_file(tmp, "BLT_490_2026-04-13", records=[record])
+            conn = FakeConnection(
+                existing_trademarks={
+                    "2024/001": {
+                        "id": 105,
+                        "current_status": ingest.DB_STATUS_REGISTERED,
+                        "expiry_date": date(2034, 7, 17),
+                        "status_source": "APP",
+                        "name": "TEST MARK",
+                    }
+                }
+            )
+
+            result, reconcile_calls, watchlist_calls, queue_calls = self._run_batch(
+                metadata_path,
+                conn,
+                force=True,
+            )
+
+        updated = update_row_dict(conn.updated_rows[0])
+        assert result["updated"] == 1
+        assert updated["status"] == ingest.DB_STATUS_REGISTERED
+        assert updated["src_tag"] == "APP"
+        assert conn.history_rows == []
+        assert reconcile_calls == [["2024/001"]]
+        assert watchlist_calls == []
+        assert queue_calls == []
+
+    def test_forced_ingest_can_clear_existing_shape_only_name(self):
+        with temp_dir() as tmp:
+            record = make_metadata_record(trademark_name="SEKIL")
+            metadata_path = write_metadata_file(tmp, "BLT_490_2026-04-13", records=[record])
+            conn = FakeConnection(
+                existing_trademarks={
+                    "2024/001": {
+                        "id": 106,
+                        "current_status": ingest.DB_STATUS_PUBLISHED,
+                        "expiry_date": date(2034, 7, 17),
+                        "status_source": "BLT",
+                        "name": "sekil",
+                    }
+                }
+            )
+
+            result, _, _, _ = self._run_batch(metadata_path, conn, force=True)
+
+        updated = update_row_dict(conn.updated_rows[0])
+        assert result["updated"] == 1
+        assert updated["name"] is None
+        assert updated["clear_name"] is True
+
+    def test_shape_only_source_name_does_not_clear_real_existing_name(self):
+        with temp_dir() as tmp:
+            record = make_metadata_record(trademark_name="SEKIL")
+            metadata_path = write_metadata_file(tmp, "BLT_490_2026-04-13", records=[record])
+            conn = FakeConnection(
+                existing_trademarks={
+                    "2024/001": {
+                        "id": 107,
+                        "current_status": ingest.DB_STATUS_PUBLISHED,
+                        "expiry_date": date(2034, 7, 17),
+                        "status_source": "BLT",
+                        "name": "AKSEKILI",
+                    }
+                }
+            )
+
+            result, _, _, _ = self._run_batch(metadata_path, conn, force=True)
+
+        updated = update_row_dict(conn.updated_rows[0])
+        assert result["updated"] == 1
+        assert updated["name"] is None
+        assert updated["clear_name"] is False
 
 
 class TestGetStatusRank:
@@ -1623,15 +1897,18 @@ class TestPreScanAndRepair:
              patch("pipeline.ingest_runtime._bootstrap.assert_ingest_runtime_ready") as mock_ready, \
              patch("pipeline.ingest_runtime.pre_scan_and_repair", return_value={"repaired": [], "unrecoverable": [], "regen_failed": []}) as mock_scan, \
              patch("pipeline.ingest_runtime._collect_metadata_files", return_value=[]), \
-             patch("pipeline.ingest_runtime._process_metadata_files", return_value={"inserted": 2, "updated": 3, "skipped": 4, "processed_files": 1, "failed_files": 0, "file_results": []}):
+             patch("pipeline.ingest_runtime._process_metadata_files", return_value={"inserted": 2, "updated": 3, "skipped": 4, "processed_files": 1, "failed_files": 0, "file_results": []}), \
+             patch("pipeline.ingest_runtime.cleanup_sekil_names", return_value=5) as mock_cleanup:
             result = ingest.run_ingest()
 
         mock_ready.assert_called_once_with(fake_conn)
         mock_scan.assert_called_once()
+        mock_cleanup.assert_called_once_with(fake_conn)
         mock_release.assert_called_once_with(fake_conn)
         assert result["inserted"] == 2
         assert result["updated"] == 3
         assert result["skipped"] == 4
+        assert result["name_cleaned"] == 5
 
     def test_main_calls_pre_scan(self):
         """main() must delegate to the CLI runtime entrypoint."""
@@ -1648,6 +1925,105 @@ class TestPreScanAndRepair:
              pytest.raises(RuntimeError, match="setup required"):
             ingest.run_ingest()
         mock_release.assert_called_once_with(fake_conn)
+
+
+class TestPipelineWorkerForceIngest:
+    def test_run_step_ingest_passes_force_to_packaged_ingest(self, monkeypatch):
+        from workers.pipeline_worker import PipelineWorker
+
+        calls = []
+
+        def run_ingest_stub(*, force=False, settings=None):
+            calls.append({"force": force, "settings": settings})
+            return {"inserted": 2, "updated": 3, "skipped": 4}
+
+        monkeypatch.setattr("pipeline.ingest.run_ingest", run_ingest_stub)
+        worker = PipelineWorker()
+
+        result = worker.run_step_ingest(force=True)
+
+        assert result.status == "success"
+        assert result.processed == 5
+        assert result.skipped == 4
+        assert calls == [{"force": True, "settings": worker.pipeline_settings}]
+
+    @pytest.mark.asyncio
+    async def test_full_pipeline_passes_force_ingest_to_ingest_step(self, monkeypatch):
+        from workers.pipeline_worker import PipelineWorker, StepResult
+
+        worker = PipelineWorker()
+        calls = []
+
+        def tracking_unavailable():
+            raise RuntimeError("tracking unavailable")
+
+        def run_step_ingest_stub(*, force=False):
+            calls.append(force)
+            return StepResult(step_name="ingest", status="success", processed=1)
+
+        monkeypatch.setattr("workers.pipeline_worker._get_db_connection", tracking_unavailable)
+        monkeypatch.setattr(worker, "run_step_ingest", run_step_ingest_stub)
+
+        result = await worker.run_full_pipeline(
+            single_step="ingest",
+            triggered_by="manual",
+            force_ingest=True,
+        )
+
+        assert result.status == "success"
+        assert calls == [True]
+
+
+class TestPipelineWorkerRepair:
+    def test_run_step_repair_calls_packaged_repair(self, monkeypatch):
+        from workers.pipeline_worker import PipelineWorker
+
+        calls = []
+
+        def run_repair_stub(*, root_dir=None):
+            calls.append(root_dir)
+            return {
+                "repaired": 7,
+                "candidates": 9,
+                "decisions": 7,
+                "routines": {
+                    "status": {"repaired": 4},
+                    "name": {"repaired": 3},
+                },
+            }
+
+        monkeypatch.setattr("pipeline.repair.run_repair", run_repair_stub)
+        worker = PipelineWorker()
+
+        result = worker.run_step_repair()
+
+        assert result.status == "success"
+        assert result.step_name == "repair"
+        assert result.processed == 7
+        assert result.skipped == 2
+        assert calls == [Path(worker.pipeline_settings.bulletins_root)]
+
+    @pytest.mark.asyncio
+    async def test_full_pipeline_can_run_repair_as_single_step(self, monkeypatch):
+        from workers.pipeline_worker import PipelineWorker, StepResult
+
+        worker = PipelineWorker()
+        calls = []
+
+        def tracking_unavailable():
+            raise RuntimeError("tracking unavailable")
+
+        def run_step_repair_stub():
+            calls.append(True)
+            return StepResult(step_name="repair", status="success", processed=3)
+
+        monkeypatch.setattr("workers.pipeline_worker._get_db_connection", tracking_unavailable)
+        monkeypatch.setattr(worker, "run_step_repair", run_step_repair_stub)
+
+        result = await worker.run_full_pipeline(single_step="repair")
+
+        assert result.status == "success"
+        assert calls == [True]
 
 
 class TestExtractTpeId:
@@ -1907,12 +2283,12 @@ class TestSourceAuthorityDecision:
         source = inspect.getsource(ingest.process_file_batch)
         assert "get_status_rank" not in source
 
-    def test_app_preserves_strong_status(self):
-        """When APP overwrites with 'Applied', existing strong statuses should be kept."""
+    def test_app_applied_fallback_preserves_existing_status(self):
+        """When APP resolves through fallback status only, existing statuses are kept."""
         import inspect
         source = inspect.getsource(ingest.process_file_batch)
-        assert "strong_statuses" in source
-        assert "DB_STATUS_REGISTERED" in source
+        assert "_explicit_db_status_from_text" in source
+        assert "explicit_status is None" in source
         assert "DB_STATUS_APPLIED" in source
 
 
