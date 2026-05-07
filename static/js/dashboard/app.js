@@ -712,49 +712,77 @@ function dashboard() {
         },
 
         async generateRiskReport() {
-            if (!this.searchResults || this.searchResults.length === 0) {
-                showToast(this.t('search.risk_report_no_results'), 'warning');
+            var query = (this.searchQuery || '').trim();
+            if (!query && !this.selectedImage) {
+                showToast(this.t('search.live_search_name_required'), 'warning');
                 return;
             }
 
             this.riskReportLoading = true;
+            this.searchLoading = true;
+            this.searchType = 'intelligent';
+            this.searchResults = [];
+            this.expandedResult = null;
+            this.searchError = '';
             this.riskReportError = '';
             this.riskReport = null;
+            agenticSearchAborted = false;
+            _agenticAbortController = new AbortController();
+            showAgenticLoadingModal();
+
             var token = getAuthToken();
-            var visibleResults = this.sortedResults.slice(0, DASHBOARD_SEARCH_RESULT_LIMIT);
-            var payload = {
-                query: (this.searchQuery || '').trim(),
-                selected_classes: this.selectedClasses || [],
-                language: this.getRiskReportLanguage(),
-                image_used: !!(this.selectedImage || (this.searchMeta && this.searchMeta.image_used)),
-                results: visibleResults.map(this.buildRiskReportCandidate.bind(this))
-            };
-            var headers = { 'Authorization': 'Bearer ' + token };
-            var body;
+            var language = this.getRiskReportLanguage();
+            var classes = this.selectedClasses || [];
+            var signal = _agenticAbortController ? _agenticAbortController.signal : undefined;
+
+            var body = new FormData();
+            if (query) body.append('query', query);
+            if (classes.length) body.append('classes', classes.join(','));
+            body.append('language', language);
             if (this.selectedImage) {
-                body = new FormData();
-                body.append('payload', JSON.stringify(payload));
-                body.append('query_image', this.selectedImage, this.selectedImage.name || 'query-logo');
-            } else {
-                headers['Content-Type'] = 'application/json';
-                body = JSON.stringify(payload);
+                body.append('image', this.selectedImage, this.selectedImage.name || 'query-logo');
             }
 
             try {
-                var res = await fetch('/api/v1/search/risk-report', {
+                var res = await fetch('/api/v1/search/intelligent-risk-report', {
                     method: 'POST',
-                    headers: headers,
-                    body: body
+                    headers: { 'Authorization': 'Bearer ' + token },
+                    body: body,
+                    signal: signal,
                 });
+                if (agenticSearchAborted) return;
                 var data = await res.json().catch(function () { return {}; });
-                if (res.status === 401) { showToast(this.t('auth.session_expired'), 'error'); return; }
-                if (res.status === 402 || res.status === 403) { showUpgradeModal(data.detail || data, 'reports'); return; }
+
+                if (res.status === 401) { hideAgenticLoadingModal(); showToast(this.t('auth.session_expired'), 'error'); return; }
+                if (res.status === 402 || res.status === 403) { hideAgenticLoadingModal(); showUpgradeModal(data.detail || data, 'reports'); return; }
                 if (!res.ok) {
                     var detail = data.detail || data;
-                    var lang = this.getRiskReportLanguage();
-                    throw new Error((detail && (detail['message_' + lang] || detail.message)) || this.t('search.risk_report_failed'));
+                    throw new Error((detail && (detail['message_' + language] || detail.message)) || this.t('search.risk_report_failed'));
                 }
-                this.applyRiskReportOrdering(data, visibleResults);
+
+                hideAgenticLoadingModal();
+
+                // Cancellation came back as a 200 with cancelled flag — bail without populating state.
+                if (data && data.cancelled) {
+                    return;
+                }
+
+                // Populate the search panel from the bundled agentic search results.
+                var searchPayload = data.search || {};
+                var resultsArray = (searchPayload.results || []).slice(0, DASHBOARD_SEARCH_RESULT_LIMIT);
+                this.searchResults = resultsArray;
+                this.searchMeta = {
+                    total: Math.min(searchPayload.total || resultsArray.length, DASHBOARD_SEARCH_RESULT_LIMIT),
+                    scrape_triggered: !!searchPayload.scrape_triggered,
+                    image_used: !!searchPayload.image_used,
+                    elapsed_seconds: searchPayload.elapsed_seconds || null,
+                    source: searchPayload.scrape_triggered ? 'live' : 'database',
+                };
+                this.expandedResult = null;
+                this.sortResults();
+
+                // The combined endpoint nests the report fields at the top level alongside `search`.
+                this.applyRiskReportOrdering(data, resultsArray);
                 this.riskReport = data;
                 this.loadUsageData({ 'Authorization': 'Bearer ' + token });
                 window._reportsInitialized = false;
@@ -763,11 +791,17 @@ function dashboard() {
                     loadReportsTab();
                 }
                 this.showRiskReportReadyNotification(data);
+                this.saveSearchQuery(query);
+                this.showSearchHistory = false;
             } catch (e) {
-                console.error('Risk report error:', e);
-                this.riskReportError = e.message || this.t('search.risk_report_failed');
+                if (!agenticSearchAborted) {
+                    hideAgenticLoadingModal();
+                    console.error('Risk report error:', e);
+                    this.riskReportError = e.message || this.t('search.risk_report_failed');
+                }
             } finally {
                 this.riskReportLoading = false;
+                this.searchLoading = false;
             }
         },
 

@@ -1921,32 +1921,28 @@ function landing() {
         },
 
         generateRiskReport: function () {
-            if (!this.searchResults || this.searchResults.length === 0) {
-                this.searchError = this.t('search.risk_report_no_results');
+            var query = (this.searchQuery || '').trim();
+            if (!query && !this.selectedImage) {
+                this.searchError = this.t('search.live_search_name_required');
                 return;
             }
 
             var token = this.getAuthToken();
-            var endpoint = token ? '/api/v1/search/risk-report' : '/api/v1/search/risk-report/public';
+            var endpoint = token
+                ? '/api/v1/search/intelligent-risk-report'
+                : '/api/v1/search/intelligent-risk-report/public';
             var language = this.getRiskReportLanguage();
-            var visibleResults = this.searchResults.slice(0, 20);
-            var payload = {
-                query: (this.searchQuery || '').trim(),
-                selected_classes: this.selectedClasses || [],
-                language: language,
-                image_used: !!this.selectedImage,
-                results: visibleResults.map(this.buildRiskReportCandidate.bind(this))
-            };
-            var headers = token ? this.getAuthHeaders() : {};
-            var body;
+            var classes = this.selectedClasses || [];
+
+            var body = new FormData();
+            if (query) body.append('query', query);
+            if (classes.length) body.append('classes', classes.join(','));
+            body.append('language', language);
             if (this.selectedImage) {
-                body = new FormData();
-                body.append('payload', JSON.stringify(payload));
-                body.append('query_image', this.selectedImage, this.selectedImage.name || 'query-logo');
-            } else {
-                headers = Object.assign({ 'Content-Type': 'application/json' }, headers);
-                body = JSON.stringify(payload);
+                body.append('image', this.selectedImage, this.selectedImage.name || 'query-logo');
             }
+
+            var headers = token ? this.getAuthHeaders() : {};
             var self = this;
             var messageFromDetail = function (detail) {
                 if (!detail) return '';
@@ -1958,6 +1954,7 @@ function landing() {
             this.riskReportError = '';
             this.riskReport = null;
             this.searchError = '';
+            this.searchResults = [];
 
             fetch(endpoint, {
                 method: 'POST',
@@ -1978,6 +1975,9 @@ function landing() {
                             }
                             throw new Error(messageFromDetail(detail) || self.t('search.risk_report_failed'));
                         }
+                        if (res.status === 429) {
+                            throw new Error(messageFromDetail(data.detail || data) || self.t('search.search_failed'));
+                        }
                         if (!res.ok) {
                             throw new Error(messageFromDetail(data.detail || data) || self.t('search.risk_report_failed'));
                         }
@@ -1986,7 +1986,16 @@ function landing() {
                 })
                 .then(function (data) {
                     if (!data) return;
-                    self.applyRiskReportOrdering(data, visibleResults);
+                    if (data.cancelled) return;
+
+                    var searchPayload = data.search || {};
+                    var resultsArray = (searchPayload.results || []).slice(0, 20).map(function (r) {
+                        r._showGoods = false;
+                        return r;
+                    });
+                    self.searchResults = resultsArray;
+
+                    self.applyRiskReportOrdering(data, resultsArray);
                     self.riskReport = data;
                     self.showRiskReportReadyNotification(data);
                 })

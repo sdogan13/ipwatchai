@@ -1465,3 +1465,170 @@ def test_search_risk_report_route_rejects_more_than_twenty_results(client):
     )
 
     assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Combined intelligent-risk-report endpoints
+# ---------------------------------------------------------------------------
+
+
+def _agentic_search_result():
+    return {
+        "source": "combined",
+        "scrape_triggered": True,
+        "scraped_count": 4,
+        "ingested_count": 4,
+        "results": [
+            {
+                "trademark_name": "wosen",
+                "application_no": "TR-1",
+                "nice_classes": [25],
+                "status": "Yayinda",
+                "status_code": "published",
+                "text_similarity": 0.9,
+                "visual_similarity": 0.0,
+                "phonetic_similarity": 0.85,
+                "translation_similarity": 0.0,
+                "scores": {"total": 0.9},
+            }
+        ],
+        "total": 1,
+        "image_used": False,
+        "elapsed_seconds": 12.3,
+    }
+
+
+def _eligibility(eligible=True, used=1, limit=30):
+    return {
+        "eligible": eligible,
+        "reports_used": used,
+        "reports_limit": limit,
+        "reports_remaining": max(0, limit - used),
+        "saved_reports": used,
+        "inline_reports": 0,
+        "can_export": True,
+        "reason": None if eligible else "quota",
+    }
+
+
+def _report_response_payload():
+    """Match SearchRiskReportResponse so FastAPI's response_model validation passes."""
+    return {
+        "query": "wosen",
+        "selected_classes": [25],
+        "image_used": False,
+        "summary": "Advisory report",
+        "overall_risk_score": 42.0,
+        "highest_risk_application_no": None,
+        "results": [
+            {
+                "input_index": 1,
+                "name": "wosen",
+                "application_no": "TR-1",
+                "image_url": None,
+                "llm_risk_score": 42.0,
+                "risk_level": "medium",
+                "reasons": ["Exact token"],
+                "key_factors": ["class overlap"],
+                "uncertainty": "low",
+            }
+        ],
+        "model": "qwen:test",
+        "generated_at": "2026-05-07T12:00:00",
+        "report_usage": {"reports_used": 2, "reports_limit": 30, "reports_remaining": 28},
+        "report_id": "rpt-1",
+        "report_download_url": "/api/v1/reports/rpt-1/download",
+        "credits_remaining": None,
+    }
+
+
+def test_intelligent_risk_report_happy_path_charges_only_report(client):
+    """Auth combined endpoint runs agentic + report; live-search credit is NOT charged."""
+    with patch("agentic_search.is_feature_enabled", return_value=True), \
+         patch("agentic_search.Database", return_value=_DbContext()), \
+         patch("agentic_search.get_user_plan", return_value={"plan_name": "professional", "display_name": "Pro"}), \
+         patch("agentic_search.check_report_eligibility", return_value=_eligibility()), \
+         patch("agentic_search._run_search_sync", return_value=_agentic_search_result()) as mock_search, \
+         patch("agentic_search._normalize_search_results"), \
+         patch("agentic_search.generate_search_risk_report_data", new_callable=AsyncMock) as mock_gen, \
+         patch("agentic_search.increment_live_search_usage") as mock_inc_live:
+        mock_gen.return_value = SearchRiskReportResponse(**_report_response_payload())
+
+        resp = client.post(
+            "/api/v1/search/intelligent-risk-report",
+            data={"query": "wosen", "classes": "25", "language": "en"},
+        )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "search" in body and body["search"]["scrape_triggered"] is True
+    assert body["summary"] == "Advisory report"
+    assert mock_search.call_count == 1
+    assert mock_gen.await_count == 1
+    assert mock_inc_live.call_count == 0, "live-search credit must not be charged when bundled with a report"
+
+
+def test_intelligent_risk_report_cancelled_mid_search_consumes_no_quota(client):
+    """If the agentic search returns source=cancelled, the report pipeline never runs."""
+    with patch("agentic_search.is_feature_enabled", return_value=True), \
+         patch("agentic_search.Database", return_value=_DbContext()), \
+         patch("agentic_search.get_user_plan", return_value={"plan_name": "professional"}), \
+         patch("agentic_search.check_report_eligibility", return_value=_eligibility()), \
+         patch("agentic_search._run_search_sync", return_value={"source": "cancelled", "scrape_triggered": False, "results": []}), \
+         patch("agentic_search._normalize_search_results"), \
+         patch("agentic_search.generate_search_risk_report_data", new_callable=AsyncMock) as mock_gen:
+
+        resp = client.post(
+            "/api/v1/search/intelligent-risk-report",
+            data={"query": "wosen", "language": "tr"},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body.get("cancelled") is True
+    assert mock_gen.await_count == 0
+
+
+def test_intelligent_risk_report_quota_exhausted_short_circuits_before_scrape(client):
+    """403 must fire before the agentic scrape kicks off."""
+    with patch("agentic_search.is_feature_enabled", return_value=True), \
+         patch("agentic_search.Database", return_value=_DbContext()), \
+         patch("agentic_search.get_user_plan", return_value={"plan_name": "free"}), \
+         patch("agentic_search.check_report_eligibility", return_value=_eligibility(eligible=False, used=1, limit=1)), \
+         patch("agentic_search._run_search_sync") as mock_search:
+
+        resp = client.post(
+            "/api/v1/search/intelligent-risk-report",
+            data={"query": "wosen", "language": "tr"},
+        )
+
+    assert resp.status_code == 403
+    assert mock_search.call_count == 0, "agentic search must not run when quota is exhausted"
+
+
+def test_public_intelligent_risk_report_returns_pending_with_claim_token(client):
+    """Unauthenticated combined endpoint returns a pending report and passes user_id=None to agentic."""
+    pending_payload = _report_response_payload()
+    pending_payload["is_pending"] = True
+    pending_payload["claim_token"] = "abc-token-123"
+    pending_payload["report_id"] = None
+    pending_payload["report_download_url"] = None
+
+    with patch("agentic_search.is_feature_enabled", return_value=True), \
+         patch("agentic_search._run_search_sync", return_value=_agentic_search_result()) as mock_search, \
+         patch("agentic_search._normalize_search_results"), \
+         patch("agentic_search.generate_pending_search_risk_report_data", new_callable=AsyncMock) as mock_pending:
+        mock_pending.return_value = SearchRiskReportResponse(**pending_payload)
+
+        resp = client.post(
+            "/api/v1/search/intelligent-risk-report/public",
+            data={"query": "wosen", "classes": "25", "language": "en"},
+        )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["is_pending"] is True
+    assert body["claim_token"] == "abc-token-123"
+    assert "search" in body
+    assert mock_pending.await_count == 1
+    assert mock_search.call_args.kwargs.get("user_id") is None, "public flow must not push Redis progress events"

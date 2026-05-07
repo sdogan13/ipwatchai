@@ -137,6 +137,37 @@ bulletin_no,
 
 ---
 
+### 1.3a Intelligent Risk Report (Agentic search + LLM report in one call)
+
+- **Path:** `POST /api/v1/search/intelligent-risk-report`
+- **Auth:** JWT required, plan with `monthly_reports` quota
+- **Content-Type:** `multipart/form-data`
+- **Params:** `query` (required), `image` (UploadFile, optional), `classes`, `attorney_no`, `language` (`tr|en|ar`)
+- **Feature flag:** `live_scraping_enabled` (503 if disabled)
+
+**Behavior:**
+- Pre-flight `check_report_eligibility` — 403 immediately if `monthly_reports` quota exhausted (no scrape wasted).
+- Runs an agentic TurkPatent search (scrape → embed → ingest → score, with DB fallback on failure). The bundled search **does not consume a live-search credit**.
+- Builds a `SearchRiskReportRequest` from the agentic results (top 20) and calls the LLM report pipeline, which charges 1 `monthly_reports` atomically.
+- Response shape: standard `SearchRiskReportResponse` with an extra `search` field containing the full agentic search response so the dashboard can render the result list and the report-ready card off the same payload.
+- Cancellation (via `/api/v1/search/cancel`): the in-flight agentic search aborts and the endpoint returns `{cancelled: true, search: <cancelled response>}` with no quota consumed.
+- Progress events (Redis-backed under the user's id) are emitted by the bundled agentic search exactly as for `/api/v1/search/intelligent`.
+
+**HTTP Status Codes:** 200, 401, 402, 403 (report quota), 429, 503 (live scraping disabled)
+
+---
+
+### 1.3b Intelligent Risk Report (public landing-page variant)
+
+- **Path:** `POST /api/v1/search/intelligent-risk-report/public`
+- **Auth:** none
+- **Rate limit:** `rate_limit.public_intelligent_risk_report` (default `1/minute` per IP — tighter than the LLM-only public variant because every call drives a real TurkPatent scrape)
+- **Params:** `query` (required), `image` (UploadFile, optional), `classes`, `language`
+- **Behavior:** identical pipeline to the auth variant, but calls the pending-report pipeline. Returns `is_pending: true` plus a short-lived `claim_token`; the user's `monthly_reports` quota is only charged when they log in and call `/api/v1/search/risk-report/claim`. No Redis progress events.
+- **Notes:** anonymous TurkPatent scrape per call — IP rate limit is the only abuse defense.
+
+---
+
 ### 1.4 Watchlist - List Items
 
 - **Path:** `GET /api/v1/watchlist`

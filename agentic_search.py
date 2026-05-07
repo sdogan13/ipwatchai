@@ -30,7 +30,7 @@ import asyncio
 import threading
 import psycopg2
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from datetime import datetime
 from dotenv import load_dotenv
 from config.settings import settings
@@ -723,6 +723,7 @@ from database.crud import Database
 from models.schemas import SearchRiskReportClaimRequest, SearchRiskReportRequest, SearchRiskReportResponse
 from services.search_risk_report_service import (
     RISK_REPORT_IMAGE_MAX_BYTES,
+    _report_limit_detail,
     claim_pending_search_risk_report_data,
     generate_pending_search_risk_report_data,
     generate_search_risk_report_data,
@@ -732,6 +733,7 @@ from utils.feature_flags import is_feature_enabled
 from utils.subscription import (
     check_live_search_eligibility,
     check_quick_search_eligibility,
+    check_report_eligibility,
     increment_live_search_usage,
     increment_quick_search_usage,
     get_user_plan,
@@ -809,6 +811,48 @@ def _normalize_search_results(result: dict) -> None:
         r["translation_similarity"] = round(_display_translation_similarity(r, scores), 3)
         r["phonetic_similarity"] = round(scores.get("phonetic_similarity", 0), 3)
         r["status_code"] = _local_get_status_code(r.get("status"))
+
+
+def _build_report_request_from_search_results(
+    *,
+    query: str,
+    nice_classes: List[int],
+    language: str,
+    image_used: bool,
+    search_results: List[Dict],
+) -> SearchRiskReportRequest:
+    """Backend equivalent of the JS buildRiskReportCandidate — converts agentic
+    search results into the SearchRiskReportRequest the LLM report service expects."""
+    candidates: List[Dict[str, Any]] = []
+    for r in (search_results or [])[:20]:
+        name = r.get("trademark_name") or r.get("name") or ""
+        if not name and r.get("application_no"):
+            name = f"#{r['application_no']}"
+        if not name:
+            continue
+        candidates.append({
+            "name": name,
+            "application_no": r.get("application_no") or None,
+            "status": r.get("status") or None,
+            "status_code": r.get("status_code") or None,
+            "nice_classes": r.get("nice_classes") or r.get("classes") or [],
+            "owner": r.get("owner") or r.get("holder_name") or None,
+            "attorney": r.get("attorney") or r.get("attorney_name") or None,
+            "image_url": r.get("image_url") or r.get("image_path") or None,
+            "text_similarity": r.get("text_similarity"),
+            "visual_similarity": r.get("visual_similarity"),
+            "phonetic_similarity": r.get("phonetic_similarity"),
+            "translation_similarity": r.get("translation_similarity"),
+            "scores": r.get("scores"),
+        })
+    lang = language if language in ("tr", "en", "ar") else "tr"
+    return SearchRiskReportRequest(
+        query=(query or "").strip()[:300],
+        selected_classes=nice_classes or [],
+        language=lang,
+        image_used=image_used,
+        results=candidates,
+    )
 
 
 class SearchRequest(BaseModel):
@@ -971,6 +1015,198 @@ async def search_risk_report(
         query_image_bytes=query_image_bytes,
         query_image_mime=query_image_mime,
     )
+
+
+async def _read_report_image_upload(image: Optional[UploadFile]):
+    """Read an uploaded logo image from a multipart form, validating size + mime."""
+    if image is None or not image.filename:
+        return None, None, None
+    mime = getattr(image, "content_type", None) or "application/octet-stream"
+    if not mime.startswith("image/"):
+        raise HTTPException(status_code=422, detail="Risk report query image must be an image file")
+    image_bytes = await image.read()
+    if image_bytes and len(image_bytes) > RISK_REPORT_IMAGE_MAX_BYTES:
+        raise HTTPException(status_code=422, detail="Risk report query image is too large")
+    if not image_bytes:
+        return None, None, None
+    suffix = os.path.splitext(image.filename)[1] or ".png"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix, dir=tempfile.gettempdir()) as tmp:
+        tmp.write(image_bytes)
+        tmp_path = tmp.name
+    return image_bytes, mime, tmp_path
+
+
+def _parse_classes_csv(classes: Optional[str]) -> List[int]:
+    if not classes:
+        return []
+    return [int(c.strip()) for c in classes.split(",") if c.strip().isdigit()]
+
+
+@router.post("/intelligent-risk-report")
+@_search_limiter.limit(lambda: get_rate_limit_value("rate_limit.intelligent_search", "10/minute"))
+async def intelligent_risk_report(
+    request: Request,
+    query: str = Form(..., description="Trademark name to search"),
+    image: Optional[UploadFile] = File(None, description="Optional logo image for visual scoring"),
+    classes: Optional[str] = Form(None, description="Nice classes (comma-separated)"),
+    attorney_no: Optional[str] = Form(None, description="Filter by attorney number"),
+    language: Optional[str] = Form("tr", description="Report language (tr|en|ar)"),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Run an agentic TurkPatent search and generate an advisory LLM risk report
+    on the freshly scored results, in one call.
+
+    Charges only the monthly_reports quota — the bundled agentic search does
+    not consume a live-search credit. If the scrape fails or returns no
+    records, the agentic pipeline falls back to a DB-only assessment and the
+    report is still generated on those candidates.
+
+    Returns:
+    - 200: SearchRiskReportResponse with search context attached.
+    - 401: missing/invalid auth.
+    - 403: monthly_reports quota exhausted.
+    - 503: live scraping disabled (kill switch).
+    """
+    # Feature flag kill switch
+    if not is_feature_enabled("live_scraping_enabled"):
+        raise HTTPException(status_code=503, detail="Live scraping is temporarily disabled")
+
+    # Pre-flight quota check so we don't waste a scrape on a quota-exhausted user.
+    user_id = str(current_user.id)
+    org_id = str(current_user.organization_id)
+    with Database() as db:
+        plan = get_user_plan(db, user_id)
+        eligibility = check_report_eligibility(db, plan["plan_name"], org_id)
+        if not eligibility["eligible"]:
+            raise HTTPException(status_code=403, detail=_report_limit_detail(plan, eligibility))
+
+    nice_classes = _parse_classes_csv(classes)
+    image_bytes, image_mime, image_path = await _read_report_image_upload(image)
+    image_used = image_path is not None
+
+    try:
+        # 1) Run the agentic search (no live-search credit charged here).
+        search_result = await asyncio.to_thread(
+            _run_search_sync,
+            auto_scrape=True,
+            query=query,
+            nice_classes=nice_classes,
+            image_path=image_path,
+            attorney_no=attorney_no,
+            user_id=user_id,
+        )
+        _normalize_search_results(search_result)
+
+        # 2) Cancelled mid-search → return early with no quota consumed.
+        if search_result.get("source") == "cancelled":
+            return {
+                "search": search_result,
+                "report": None,
+                "cancelled": True,
+            }
+
+        # 3) Build the report request from the agentic results and run the LLM.
+        report_request = _build_report_request_from_search_results(
+            query=query,
+            nice_classes=nice_classes,
+            language=language or "tr",
+            image_used=image_used,
+            search_results=search_result.get("results") or [],
+        )
+        report_response = await generate_search_risk_report_data(
+            request=report_request,
+            current_user=current_user,
+            query_image_bytes=image_bytes,
+            query_image_mime=image_mime,
+        )
+
+        # 4) Attach the search response so the dashboard can render results.
+        report_dict = (
+            report_response.dict() if hasattr(report_response, "dict") else dict(report_response)
+        )
+        report_dict["search"] = search_result
+        return report_dict
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Intelligent risk report failed: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+    finally:
+        if image_path and os.path.exists(image_path):
+            try:
+                os.unlink(image_path)
+            except OSError:
+                pass
+
+
+@router.post("/intelligent-risk-report/public")
+@_search_limiter.limit(lambda: get_rate_limit_value("rate_limit.public_intelligent_risk_report", "1/minute"))
+async def public_intelligent_risk_report(
+    request: Request,
+    query: str = Form(..., description="Trademark name to search"),
+    image: Optional[UploadFile] = File(None, description="Optional logo image for visual scoring"),
+    classes: Optional[str] = Form(None, description="Nice classes (comma-separated)"),
+    language: Optional[str] = Form("tr", description="Report language (tr|en|ar)"),
+):
+    """
+    Landing-page combined flow: agentic TurkPatent search + claimable pending
+    risk report, no auth required.
+
+    Tightly rate-limited per IP (default 1/min). The pending report carries a
+    short-lived claim_token; charging the user's monthly_reports quota only
+    happens when they log in and claim via /risk-report/claim.
+    """
+    # Feature flag kill switch
+    if not is_feature_enabled("live_scraping_enabled"):
+        raise HTTPException(status_code=503, detail="Live scraping is temporarily disabled")
+
+    nice_classes = _parse_classes_csv(classes)
+    image_bytes, image_mime, image_path = await _read_report_image_upload(image)
+    image_used = image_path is not None
+
+    try:
+        # Public flow has no user_id → no Redis progress events emitted.
+        search_result = await asyncio.to_thread(
+            _run_search_sync,
+            auto_scrape=True,
+            query=query,
+            nice_classes=nice_classes,
+            image_path=image_path,
+            attorney_no=None,
+            user_id=None,
+        )
+        _normalize_search_results(search_result)
+
+        report_request = _build_report_request_from_search_results(
+            query=query,
+            nice_classes=nice_classes,
+            language=language or "tr",
+            image_used=image_used,
+            search_results=search_result.get("results") or [],
+        )
+        report_response = await generate_pending_search_risk_report_data(
+            request=report_request,
+            query_image_bytes=image_bytes,
+            query_image_mime=image_mime,
+        )
+
+        report_dict = (
+            report_response.dict() if hasattr(report_response, "dict") else dict(report_response)
+        )
+        report_dict["search"] = search_result
+        return report_dict
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Public intelligent risk report failed: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+    finally:
+        if image_path and os.path.exists(image_path):
+            try:
+                os.unlink(image_path)
+            except OSError:
+                pass
 
 
 @router.get("/quick")
