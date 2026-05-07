@@ -73,7 +73,18 @@ window.AppComponents.renderNameCard = function(name, index) {
 // B) Logo result card
 // ============================================
 window.AppComponents.renderLogoCard = function(logo) {
-    var simPct = Math.round(logo.similarity_score || 0);
+    function normalizeLogoPct(value, fallback) {
+        var raw = value;
+        if (raw === undefined || raw === null || raw === '') raw = fallback;
+        var n = Number(raw || 0);
+        if (!isFinite(n)) n = 0;
+        if (n > 0 && n <= 1) n = n * 100;
+        return Math.round(n);
+    }
+    var simPct = normalizeLogoPct(
+        logo.llm_risk_score != null ? logo.llm_risk_score : logo.similarity_score,
+        logo.similarity_score || 0
+    );
     var isSafe = logo.is_safe;
     var auditStatus = logo.audit_status || 'completed';
     var auditDone = auditStatus === 'completed';
@@ -92,24 +103,33 @@ window.AppComponents.renderLogoCard = function(logo) {
             : '<span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style="' + window.AppComponents.getScoreColor(90) + '">&#x26a0; ' + t('studio.risk_exists') + '</span>';
     }
 
+    var closestMatchName = logo.closest_match_name;
+    var closestMatchUrl = logo.closest_match_image_url;
+    var closestSubtitle = t('studio.relevant_existing_mark');
+
     var closestHtml = '';
-    if (auditDone && logo.closest_match_name) {
+    if (auditDone && closestMatchName) {
         closestHtml = '<div class="text-xs mt-1" style="color:var(--color-text-muted)">'
-            + t('studio.closest_match_full') + ' <span class="font-medium" style="color:var(--color-text-secondary)">' + escapeHtml(logo.closest_match_name) + '</span>'
-            + ' <span style="color:var(--color-text-faint)">(' + t('studio.similarity_pct', { pct: simPct }) + ')</span>'
+            + t('studio.closest_label') + ' <span class="font-medium" style="color:var(--color-text-secondary)">' + escapeHtml(closestMatchName) + '</span>'
             + '</div>';
 
-        // Show closest match image if unsafe (clickable for lightbox)
-        if (!isSafe && logo.closest_match_image_url) {
-            var matchUrl = logo.closest_match_image_url;
-            var matchName = (logo.closest_match_name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-            closestHtml += '<div class="mt-2 flex items-center gap-2 rounded-lg p-2" style="background:var(--color-risk-critical-bg);border:1px solid var(--color-risk-critical-border)">'
-                + '<img src="' + matchUrl + '" alt="' + t('studio.similar_brand') + '" '
-                + 'class="w-10 h-10 object-contain rounded cursor-pointer hover:ring-2 hover:ring-red-300 transition" '
-                + 'style="background:var(--color-bg-card);border:1px solid var(--color-risk-critical-border)" '
-                + 'onclick="window.dispatchEvent(new CustomEvent(\'open-lightbox\', { detail: { src: \'' + matchUrl.replace(/'/g, "\\'") + '\', title: \'' + matchName + '\', subtitle: \'' + t('studio.similar_brand').replace(/'/g, "\\'") + '\' } }))" '
+        // Show the closest match's logo image alongside the name. Render the
+        // panel in red-warning styling for unsafe candidates and in neutral
+        // styling for safe ones (still informational, not alarming).
+        if (closestMatchUrl) {
+            var matchUrl = closestMatchUrl;
+            var matchName = (closestMatchName || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            var panelBg = isSafe ? 'var(--color-bg-muted)' : 'var(--color-risk-critical-bg)';
+            var panelBorder = isSafe ? 'var(--color-border)' : 'var(--color-risk-critical-border)';
+            var labelColor = isSafe ? 'var(--color-text-muted)' : 'var(--color-risk-critical-text)';
+            var hoverRing = isSafe ? 'hover:ring-indigo-200' : 'hover:ring-red-300';
+            closestHtml += '<div class="mt-2 flex items-center gap-2 rounded-lg p-2" style="background:' + panelBg + ';border:1px solid ' + panelBorder + '">'
+                + '<img src="' + matchUrl + '" alt="' + closestSubtitle + '" '
+                + 'class="w-10 h-10 object-contain rounded cursor-pointer hover:ring-2 ' + hoverRing + ' transition" '
+                + 'style="background:var(--color-bg-card);border:1px solid ' + panelBorder + '" '
+                + 'onclick="window.dispatchEvent(new CustomEvent(\'open-lightbox\', { detail: { src: \'' + matchUrl.replace(/'/g, "\\'") + '\', title: \'' + matchName + '\', subtitle: \'' + closestSubtitle.replace(/'/g, "\\'") + '\' } }))" '
                 + 'onerror="this.style.display=\'none\'">'
-                + '<span class="text-xs" style="color:var(--color-risk-critical-text)">' + t('studio.similar_brand') + '</span>'
+                + '<span class="text-xs" style="color:' + labelColor + '">' + closestSubtitle + '</span>'
                 + '</div>';
         }
     }
@@ -119,10 +139,9 @@ window.AppComponents.renderLogoCard = function(logo) {
 
     var simColor = simPct >= 70 ? 'var(--color-risk-critical-text)' : simPct >= 50 ? 'var(--color-risk-medium-text)' : 'var(--color-risk-low-text)';
     var scoreHtml = auditDone
-        ? '<span class="text-sm font-bold" style="color:' + simColor + '">' + simPct + '%</span>'
+        ? '<span class="text-right leading-tight" style="color:' + simColor + '"><span class="block text-xs font-medium">' + t('studio.ai_risk_score_short') + '</span><span class="text-sm font-bold">' + simPct + '%</span></span>'
         : '<span class="text-xs font-semibold" style="color:var(--color-text-muted)">' + t(auditPending ? 'studio.audit_preview_only' : 'studio.audit_failed_short') + '</span>';
     var cardClasses = 'studio-logo-card';
-    if (logo.is_selected) cardClasses += ' is-selected';
     if (logo.is_revision_target) cardClasses += ' is-revision-target';
     var actions = '';
     if (auditPending) {
@@ -132,7 +151,6 @@ window.AppComponents.renderLogoCard = function(logo) {
     } else {
         actions = '<button onclick="chooseLogoForRevision(\'' + escapeHtml(logo.image_id) + '\')" class="studio-logo-action-button btn-press">' + t('studio.revise_btn') + '</button>';
         if (canDownload) {
-            actions += '<button onclick="selectFinalLogoCandidate(\'' + escapeHtml(logo.image_id) + '\')" class="studio-logo-action-button btn-press">' + (logo.is_selected ? t('studio.selected_badge') : t('studio.select_logo')) + '</button>';
             actions += '<button onclick="downloadLogo(\'' + escapeHtml(logo.image_id) + '\')" class="studio-logo-action-button is-primary btn-press">'
                 + '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>'
                 + t('studio.download_png') + '</button>';
@@ -142,6 +160,15 @@ window.AppComponents.renderLogoCard = function(logo) {
         actions += '<button onclick="toggleLogoDetail(\'' + escapeHtml(logo.image_id) + '\')" class="studio-logo-action-button btn-press">' + t('studio.detail_btn') + '</button>';
     }
 
+    // Style badge — shows which canonical style this candidate represents
+    // (Modern / Classic / Bold / Playful). Only renders for new logos that
+    // have a style stored; legacy rows without one degrade gracefully.
+    var styleBadge = '';
+    if (logo.style) {
+        var styleKey = 'studio.style_' + String(logo.style).toLowerCase();
+        styleBadge = '<span class="studio-style-badge">' + escapeHtml(t(styleKey)) + '</span>';
+    }
+
     var html = '<div data-studio-logo-card="true" class="' + cardClasses + '">'
         // Logo image area — loaded via JS fetch for auth
         + '<div id="' + imgPlaceholderId + '" class="studio-logo-image-frame">'
@@ -149,8 +176,8 @@ window.AppComponents.renderLogoCard = function(logo) {
         + '</div>'
         // Info area
         + '<div class="studio-logo-card-body">'
-        + '<div class="flex items-center justify-between mb-1">'
-        + safetyBadge
+        + '<div class="flex items-center justify-between mb-1 gap-2 flex-wrap">'
+        + '<div class="flex items-center gap-1.5 flex-wrap">' + safetyBadge + styleBadge + '</div>'
         + scoreHtml
         + '</div>'
         + closestHtml

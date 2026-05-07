@@ -28,6 +28,15 @@ function populateNiceClassOptions(selectEl) {
     }
 }
 
+function getEffectiveTextScoreForResult(result) {
+    if (window.AppComponents && window.AppComponents.getOriginalTextScore) {
+        return window.AppComponents.getOriginalTextScore(result);
+    }
+    var scores = result && result.scores ? result.scores : (result || {});
+    if (scores.path_a_score !== undefined && scores.path_a_score !== null) return scores.path_a_score;
+    return scores.text_similarity || 0;
+}
+
 // ============================================
 // GLOBAL STATE
 // ============================================
@@ -48,6 +57,7 @@ var studioActiveLogoProjectId = null;
 var studioSelectedLogoImageId = null;
 var studioLogoPollTimer = null;
 var LEADS_PER_PAGE = 20;
+var DASHBOARD_SEARCH_RESULT_LIMIT = 20;
 var currentHolderTpeId = null;
 var _storedSearchResults = [];
 var _lastSearchBannerHtml = '';
@@ -85,6 +95,9 @@ function dashboard() {
         expandedResult: null,
         lightboxImage: '',
         sortMode: 'risk_desc',
+        riskReportLoading: false,
+        riskReportError: '',
+        riskReport: null,
 
         // ===== Search history state =====
         searchHistory: [],
@@ -224,6 +237,7 @@ function dashboard() {
             this.selectedImage = file;
             this.imageName = file.name;
             this.searchError = '';
+            this.clearRiskReportState();
             var self = this;
             var reader = new FileReader();
             reader.onload = function (e) {
@@ -236,6 +250,7 @@ function dashboard() {
             this.selectedImage = null;
             this.imagePreview = '';
             this.imageName = '';
+            this.clearRiskReportState();
             if (this.$refs.dashImageInput) {
                 this.$refs.dashImageInput.value = '';
             }
@@ -436,6 +451,7 @@ function dashboard() {
             this.searchType = 'quick';
             this.searchResults = [];
             this.expandedResult = null;
+            this.clearRiskReportState();
 
             var classes = this.selectedClasses;
             var token = getAuthToken();
@@ -479,9 +495,9 @@ function dashboard() {
                 if (!res.ok) throw new Error(this.t('search.search_failed'));
 
                 var data = await res.json();
-                this.searchResults = (data.results || []).slice(0, 30);
+                this.searchResults = (data.results || []).slice(0, DASHBOARD_SEARCH_RESULT_LIMIT);
                 this.searchMeta = {
-                    total: Math.min(data.total || 0, 30),
+                    total: Math.min(data.total || 0, DASHBOARD_SEARCH_RESULT_LIMIT),
                     scrape_triggered: false,
                     image_used: data.image_used || false,
                     elapsed_seconds: data.elapsed_seconds || null,
@@ -495,7 +511,7 @@ function dashboard() {
 
                 this.saveSearchQuery(query);
                 this.showSearchHistory = false;
-                showToast(this.t('search.results_found_db', { count: Math.min(data.total || 0, 30) }), 'success');
+                showToast(this.t('search.results_found_db', { count: Math.min(data.total || 0, DASHBOARD_SEARCH_RESULT_LIMIT) }), 'success');
             } catch (e) {
                 console.error('Quick search error:', e);
                 this.searchError = e.message || this.t('search.search_failed');
@@ -516,6 +532,7 @@ function dashboard() {
             this.searchType = 'intelligent';
             this.searchResults = [];
             this.expandedResult = null;
+            this.clearRiskReportState();
             agenticSearchAborted = false;
             _agenticAbortController = new AbortController();
             showAgenticLoadingModal();
@@ -552,15 +569,15 @@ function dashboard() {
                 var data = await res.json();
 
                 if (res.status === 403) { hideAgenticLoadingModal(); showUpgradeModal(data.detail || data, 'live_search'); return; }
-                if (res.status === 402) { hideAgenticLoadingModal(); showCreditsModal(data.detail); return; }
+                if (res.status === 402) { hideAgenticLoadingModal(); showUpgradeModal(data.detail || data, 'live_search'); return; }
                 if (res.status === 401) { hideAgenticLoadingModal(); showToast(this.t('auth.session_expired'), 'error'); return; }
                 if (!res.ok) throw new Error((data.detail && data.detail.message) || data.detail || this.t('search.search_failed'));
 
                 hideAgenticLoadingModal();
 
-                this.searchResults = (data.results || []).slice(0, 30);
+                this.searchResults = (data.results || []).slice(0, DASHBOARD_SEARCH_RESULT_LIMIT);
                 this.searchMeta = {
-                    total: Math.min(data.total || 0, 30),
+                    total: Math.min(data.total || 0, DASHBOARD_SEARCH_RESULT_LIMIT),
                     scrape_triggered: data.scrape_triggered || false,
                     image_used: data.image_used || false,
                     elapsed_seconds: data.elapsed_seconds || null,
@@ -580,17 +597,177 @@ function dashboard() {
                     ? this.t('search.credits_remaining', { count: data.credits_remaining })
                     : this.t('search.from_database');
                 var resultMsg = data.image_used
-                    ? this.t('search.results_found_image', { count: Math.min(data.total || 0, 30), credits: creditsMsg })
-                    : this.t('search.results_found', { count: Math.min(data.total || 0, 30) }) + '. ' + creditsMsg;
+                    ? this.t('search.results_found_image', { count: Math.min(data.total || 0, DASHBOARD_SEARCH_RESULT_LIMIT), credits: creditsMsg })
+                    : this.t('search.results_found', { count: Math.min(data.total || 0, DASHBOARD_SEARCH_RESULT_LIMIT) }) + '. ' + creditsMsg;
                 showToast(resultMsg, 'success');
             } catch (e) {
                 if (!agenticSearchAborted) {
                     hideAgenticLoadingModal();
-                    console.error('Live search error:', e);
+                    console.error('Agentic Search error:', e);
                     this.searchError = e.message || this.t('search.search_failed');
                 }
             } finally {
                 this.searchLoading = false;
+            }
+        },
+
+        buildRiskReportCandidate(r) {
+            return {
+                name: getTrademarkDisplayName(r) || r.name || r.trademark_name || '',
+                application_no: r.application_no || null,
+                status: r.status || null,
+                status_code: r.status_code || null,
+                nice_classes: r.nice_classes || r.classes || [],
+                owner: r.owner || r.holder_name || null,
+                attorney: r.attorney || r.attorney_name || null,
+                image_url: r.image_url || r.image_path || null
+            };
+        },
+
+        getRiskReportLanguage() {
+            var locale = window.AppI18n && window.AppI18n.getLocale
+                ? window.AppI18n.getLocale()
+                : (this.currentLang || this.lang_code || 'tr');
+            return ['tr', 'en', 'ar'].indexOf(locale) !== -1 ? locale : 'tr';
+        },
+
+        clearRiskReportOrdering() {
+            if (this.searchResults && this.searchResults.length) {
+                this.searchResults.forEach(function (result) {
+                    delete result._riskReportScore;
+                    delete result._riskReportRank;
+                    delete result._riskReportApplicationNo;
+                });
+                this.searchResults = this.searchResults.slice();
+            }
+            if (this.sortMode === 'risk_report_desc') {
+                this.sortMode = 'risk_desc';
+            }
+        },
+
+        clearRiskReportState() {
+            this.riskReport = null;
+            this.riskReportError = '';
+            this.clearRiskReportOrdering();
+        },
+
+        applyRiskReportOrdering(report, visibleResults) {
+            if (!report || !Array.isArray(report.results)) return;
+            this.clearRiskReportOrdering();
+            report.results.forEach(function (candidate, index) {
+                var source = visibleResults[candidate.input_index - 1] || null;
+                if (!source && candidate.application_no) {
+                    source = this.searchResults.find(function (result) {
+                        return result.application_no === candidate.application_no;
+                    }) || null;
+                }
+                if (!source) return;
+                source._riskReportScore = candidate.llm_risk_score;
+                source._riskReportRank = index + 1;
+                source._riskReportApplicationNo = candidate.application_no || source.application_no || null;
+            }, this);
+            this.sortMode = 'risk_report_desc';
+            this.searchResults = this.searchResults.slice();
+        },
+
+        openRiskReportPdf(report) {
+            var reportId = report && report.report_id;
+            if (!reportId) {
+                showToast(this.t('search.risk_report_failed'), 'error');
+                return;
+            }
+            var viewer = window.open('', '_blank');
+            if (viewer) viewer.opener = null;
+            var downloadFn = typeof downloadReportAPI === 'function'
+                ? downloadReportAPI
+                : (window.AppAPI && window.AppAPI.downloadReport);
+            if (typeof downloadFn !== 'function') {
+                if (viewer) viewer.close();
+                showToast(this.t('reports.download_failed'), 'error');
+                return;
+            }
+            downloadFn(reportId).then(function (blob) {
+                var url = window.URL.createObjectURL(blob);
+                if (viewer) {
+                    viewer.location.href = url;
+                } else {
+                    window.open(url, '_blank', 'noopener');
+                }
+                setTimeout(function () { window.URL.revokeObjectURL(url); }, 60000);
+            }).catch(function (err) {
+                if (viewer) viewer.close();
+                showToast(t('reports.download_failed') + ': ' + ((err && err.message) || ''), 'error');
+            });
+        },
+
+        showRiskReportReadyNotification(report) {
+            var self = this;
+            showToast(this.t('search.risk_report_ready_view'), 'success', {
+                actionLabel: this.t('search.risk_report_open'),
+                duration: 9000,
+                onAction: function () {
+                    self.openRiskReportPdf(report);
+                }
+            });
+        },
+
+        async generateRiskReport() {
+            if (!this.searchResults || this.searchResults.length === 0) {
+                showToast(this.t('search.risk_report_no_results'), 'warning');
+                return;
+            }
+
+            this.riskReportLoading = true;
+            this.riskReportError = '';
+            this.riskReport = null;
+            var token = getAuthToken();
+            var visibleResults = this.sortedResults.slice(0, DASHBOARD_SEARCH_RESULT_LIMIT);
+            var payload = {
+                query: (this.searchQuery || '').trim(),
+                selected_classes: this.selectedClasses || [],
+                language: this.getRiskReportLanguage(),
+                image_used: !!(this.selectedImage || (this.searchMeta && this.searchMeta.image_used)),
+                results: visibleResults.map(this.buildRiskReportCandidate.bind(this))
+            };
+            var headers = { 'Authorization': 'Bearer ' + token };
+            var body;
+            if (this.selectedImage) {
+                body = new FormData();
+                body.append('payload', JSON.stringify(payload));
+                body.append('query_image', this.selectedImage, this.selectedImage.name || 'query-logo');
+            } else {
+                headers['Content-Type'] = 'application/json';
+                body = JSON.stringify(payload);
+            }
+
+            try {
+                var res = await fetch('/api/v1/search/risk-report', {
+                    method: 'POST',
+                    headers: headers,
+                    body: body
+                });
+                var data = await res.json().catch(function () { return {}; });
+                if (res.status === 401) { showToast(this.t('auth.session_expired'), 'error'); return; }
+                if (res.status === 402 || res.status === 403) { showUpgradeModal(data.detail || data, 'reports'); return; }
+                if (!res.ok) {
+                    var detail = data.detail || data;
+                    var lang = this.getRiskReportLanguage();
+                    throw new Error((detail && (detail['message_' + lang] || detail.message)) || this.t('search.risk_report_failed'));
+                }
+                this.applyRiskReportOrdering(data, visibleResults);
+                this.riskReport = data;
+                this.loadUsageData({ 'Authorization': 'Bearer ' + token });
+                window._reportsInitialized = false;
+                var reportsPanel = document.getElementById('tab-content-reports');
+                if (reportsPanel && !reportsPanel.classList.contains('hidden') && typeof loadReportsTab === 'function') {
+                    loadReportsTab();
+                }
+                this.showRiskReportReadyNotification(data);
+            } catch (e) {
+                console.error('Risk report error:', e);
+                this.riskReportError = e.message || this.t('search.risk_report_failed');
+            } finally {
+                this.riskReportLoading = false;
             }
         },
 
@@ -609,6 +786,13 @@ function dashboard() {
                 sorted.sort(function (a, b) { return (getResultScore(b) || 0) - (getResultScore(a) || 0); });
             } else if (mode === 'risk_asc') {
                 sorted.sort(function (a, b) { return (getResultScore(a) || 0) - (getResultScore(b) || 0); });
+            } else if (mode === 'risk_report_desc') {
+                sorted.sort(function (a, b) {
+                    var rankA = a._riskReportRank || 999999;
+                    var rankB = b._riskReportRank || 999999;
+                    if (rankA !== rankB) return rankA - rankB;
+                    return (getResultScore(b) || 0) - (getResultScore(a) || 0);
+                });
             } else if (mode === 'date_desc') {
                 sorted.sort(function (a, b) { return parseResultDate(b.application_date) - parseResultDate(a.application_date); });
             } else if (mode === 'date_asc') {
@@ -624,6 +808,10 @@ function dashboard() {
             if (r.scores && r.scores.total !== undefined && r.scores.total !== null) return r.scores.total;
             if (r.risk_score !== undefined && r.risk_score !== null) return r.risk_score;
             return null;
+        },
+
+        getTextScore(r) {
+            return getEffectiveTextScoreForResult(r);
         },
 
         hasHighRisk() {
@@ -663,6 +851,12 @@ function dashboard() {
             if (score >= 0.7) return 'var(--color-risk-high-text)';
             if (score >= 0.5) return 'var(--color-risk-medium-text)';
             return 'var(--color-risk-low-text)';
+        },
+
+        getRiskReportScoreFraction(score) {
+            var numeric = parseFloat(score);
+            if (isNaN(numeric)) return 0;
+            return Math.max(0, Math.min(100, numeric)) / 100;
         },
 
         getStatusColor(status) {
@@ -733,10 +927,32 @@ function dashboard() {
             var id = this._portfolioEntityId;
             var type = this.portfolioType;
             if (!id || !type) return;
+            var self = this;
+            var token = getAuthToken();
+            if (!token) {
+                this.showLoginModal = false;
+                showUpgradeModal({
+                    error: 'upgrade_required',
+                    current_plan: 'free',
+                    upgrade_context: 'portfolio_download',
+                    message: this.t('upgrade.portfolio_download_description')
+                }, 'portfolio_download');
+                return;
+            }
             var param = type === 'holder' ? 'holder_id' : 'attorney_no';
             var csvUrl = '/api/v1/portfolio/public/csv?' + param + '=' + encodeURIComponent(id);
-            fetch(csvUrl)
+            fetch(csvUrl, { headers: { 'Authorization': 'Bearer ' + token } })
                 .then(function (res) {
+                    if (res.status === 401) {
+                        self.showLoginModal = true;
+                        throw { handled: true };
+                    }
+                    if (res.status === 403) {
+                        return res.json().catch(function () { return {}; }).then(function (data) {
+                            showUpgradeModal((data && data.detail) || data || {}, 'portfolio_download');
+                            throw { handled: true };
+                        });
+                    }
                     if (!res.ok) throw new Error('CSV export failed');
                     return res.blob();
                 })
@@ -750,7 +966,8 @@ function dashboard() {
                     document.body.removeChild(a);
                     URL.revokeObjectURL(url);
                 })
-                .catch(function () {
+                .catch(function (err) {
+                    if (err && err.handled) return;
                     if (window.AppToast) AppToast.show('CSV indirilemedi', 'error');
                 });
         },
@@ -952,6 +1169,8 @@ function dashboard() {
             var modal = document.getElementById('opposition-modal');
             var content = document.getElementById('opposition-content');
             if (!modal || !content) return;
+            var displayConflictingBrand = getTrademarkDisplayName(deadline.conflicting_brand);
+            var displayWatchedBrand = getTrademarkDisplayName(deadline.brand_watched);
 
             var urgencyStyle = deadline.days_left < 10
                 ? 'color:var(--color-risk-critical-text)'
@@ -960,13 +1179,13 @@ function dashboard() {
                 ? 'background:var(--color-risk-critical-bg);border-color:var(--color-risk-critical-border)'
                 : 'background:var(--color-risk-high-bg);border-color:var(--color-risk-high-border)';
 
-            var subject = encodeURIComponent(t('opposition.email_subject', { brand: deadline.conflicting_brand || '' }));
+            var subject = encodeURIComponent(t('opposition.email_subject', { brand: displayConflictingBrand || '' }));
             var body = encodeURIComponent(
                 t('opposition.email_greeting') + '\n\n'
                 + t('opposition.email_body_intro') + '\n\n'
-                + t('opposition.email_conflicting') + ' ' + (deadline.conflicting_brand || t('common.na')) + '\n'
+                + t('opposition.email_conflicting') + ' ' + (displayConflictingBrand || t('common.na')) + '\n'
                 + t('opposition.email_app_no') + ' ' + (deadline.app_no || t('common.na')) + '\n'
-                + t('opposition.email_watched') + ' ' + (deadline.brand_watched || t('common.na')) + '\n'
+                + t('opposition.email_watched') + ' ' + (displayWatchedBrand || t('common.na')) + '\n'
                 + t('opposition.email_deadline') + ' ' + (deadline.appeal_deadline || t('common.na')) + '\n'
                 + t('opposition.email_risk') + ' %' + (deadline.risk_score || 0) + '\n\n'
                 + t('opposition.email_closing') + '\n'
@@ -979,10 +1198,10 @@ function dashboard() {
                 + '<div class="text-xs mt-1" style="color:var(--color-text-faint)">' + t('opposition.last_date', { date: escapeHtml(deadline.appeal_deadline || '') }) + '</div></div>'
                 + '<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">'
                 + '<div class="rounded-lg p-3 border" style="background:var(--color-bg-muted);border-color:var(--color-border)"><div class="text-xs mb-1" style="color:var(--color-text-muted)">' + t('opposition.conflicting_brand') + '</div>'
-                + '<div class="font-semibold" style="color:var(--color-text-primary)">' + escapeHtml(deadline.conflicting_brand || t('common.na')) + '</div>'
+                + '<div class="font-semibold" style="color:var(--color-text-primary)">' + escapeHtml(displayConflictingBrand || t('common.na')) + '</div>'
                 + '<div class="text-xs font-mono-id" style="color:var(--color-text-faint)">' + escapeHtml(deadline.app_no || '') + '</div></div>'
                 + '<div class="rounded-lg p-3 border" style="background:var(--color-bg-muted);border-color:var(--color-border)"><div class="text-xs mb-1" style="color:var(--color-text-muted)">' + t('opposition.watched_brand') + '</div>'
-                + '<div class="font-semibold" style="color:var(--color-text-primary)">' + escapeHtml(deadline.brand_watched || t('common.na')) + '</div>'
+                + '<div class="font-semibold" style="color:var(--color-text-primary)">' + escapeHtml(displayWatchedBrand || t('common.na')) + '</div>'
                 + '<div class="text-xs" style="color:var(--color-text-faint)">' + t('opposition.risk_label', { score: deadline.risk_score || 0 }) + '</div></div></div>'
                 + '<div class="border rounded-xl p-4 text-sm" style="background:var(--color-risk-medium-bg);border-color:var(--color-risk-medium-border)">'
                 + '<div class="font-semibold mb-2" style="color:var(--color-risk-medium-text)">' + t('opposition.about_process') + '</div>'
@@ -1056,7 +1275,7 @@ function dashboard() {
                     + '<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">'
                     + '<div class="rounded-xl p-4 border" style="background:rgba(79,70,229,0.05);border-color:rgba(79,70,229,0.15)">'
                     + '<div class="text-indigo-600 font-semibold text-sm mb-2">' + t('alerts.watched_brand') + '</div>'
-                    + '<div class="font-medium" style="color:var(--color-text-primary)">' + escapeHtml(alert.watched_brand_name || 'N/A') + '</div>'
+                    + '<div class="font-medium" style="color:var(--color-text-primary)">' + escapeHtml(getTrademarkDisplayName(alert.watched_brand_name)) + '</div>'
                     + (alert.watchlist_application_no ? window.AppComponents.renderTurkpatentButton(alert.watchlist_application_no) : '')
                     + (alert.watchlist_bulletin_no ? '<div class="text-xs mt-0.5" style="color:var(--color-text-faint)">' + t('common.bulletin_label') + ' ' + escapeHtml(alert.watchlist_bulletin_no) + '</div>' : '')
                     + (alert.watchlist_classes && alert.watchlist_classes.length > 0
@@ -1067,7 +1286,7 @@ function dashboard() {
                     + '<div class="rounded-xl p-4 border" style="background:var(--color-risk-critical-bg);border-color:var(--color-risk-critical-border)">'
                     + '<div class="font-semibold text-sm mb-2" style="color:var(--color-risk-critical-text)">' + t('alerts.conflicting_brand') + '</div>'
                     + '<div class="flex items-center gap-3">' + imageHtml
-                    + '<div><div class="font-medium flex items-center gap-2" style="color:var(--color-text-primary)">' + escapeHtml(c.name || 'N/A')
+                    + '<div><div class="font-medium flex items-center gap-2" style="color:var(--color-text-primary)">' + escapeHtml(getTrademarkDisplayName(c.name))
                     + (c.status ? ' <span class="text-xs px-2 py-0.5 rounded-full font-medium" style="color:' + getStatusColor(c.status) + ';background:' + getStatusBg(c.status) + '">' + escapeHtml(translateStatus(c.status)) + '</span>' : '')
                     + '</div>'
                     + window.AppComponents.renderTurkpatentButton(c.application_no)
@@ -1181,7 +1400,7 @@ function dashboard() {
                     if (qsBar && qs.limit) qsBar.style.width = _fmtPct(qs.used || 0, qs.limit) + '%';
                     if (qsRing && qs.limit) qsRing.innerHTML = window.AppComponents.renderUsageRing(qs.used || 0, qs.limit >= 999999 ? 1 : qs.limit, 'var(--color-primary)');
 
-                    // Live searches
+                    // Agentic Search credits
                     var ls = usage.monthly_live_searches || {};
                     var lsEl = document.getElementById('usage-live-text');
                     var lsBar = document.getElementById('usage-live-bar');
@@ -1199,22 +1418,34 @@ function dashboard() {
                     if (wlBar && wl.limit) wlBar.style.width = _fmtPct(wl.used || 0, wl.limit) + '%';
                     if (wlRing && wl.limit) wlRing.innerHTML = window.AppComponents.renderUsageRing(wl.used || 0, wl.limit >= 999999 ? 1 : wl.limit, '#22c55e');
 
-                    // C3: Unified AI Credits (name gen + logo gen share a pool)
+                    // Reports (saved reports + inline search risk reports)
+                    var reports = usage.monthly_reports || {};
+                    var reportsEl = document.getElementById('usage-reports-text');
+                    var reportsBar = document.getElementById('usage-reports-bar');
+                    var reportsRing = document.getElementById('usage-reports-ring');
+                    if (reportsEl) reportsEl.textContent = (reports.used || 0) + ' / ' + _fmtLimit(reports.limit || 0);
+                    if (reportsBar && reports.limit) reportsBar.style.width = _fmtPct(reports.used || 0, reports.limit) + '%';
+                    if (reportsRing && reports.limit) reportsRing.innerHTML = window.AppComponents.renderUsageRing(reports.used || 0, reports.limit >= 999999 ? 1 : reports.limit, '#10b981');
+
+                    // C3: Unified AI Credits (name gen + logo gen share a pool).
+                    // Prefer the API's explicit `used` count (cost-weighted, accurate for
+                    // every plan including superadmin); fall back to limit - remaining.
                     var ai = usage.monthly_ai_credits || {};
                     if (ai.limit && ai.limit > 0) {
                         var aiCard = document.getElementById('usage-ai-card');
                         var aiEl = document.getElementById('usage-ai-text');
                         var aiBar = document.getElementById('usage-ai-bar');
                         var aiRing = document.getElementById('usage-ai-ring');
+                        var aiUsed = (typeof ai.used === 'number')
+                            ? Math.max(0, ai.used)
+                            : Math.max(0, (ai.limit || 0) - (ai.remaining || 0));
+                        if (aiCard) aiCard.classList.remove('hidden');
                         if (ai.limit >= 999999) {
-                            // Unlimited plan — show remaining as "∞"
-                            if (aiCard) aiCard.classList.remove('hidden');
-                            if (aiEl) aiEl.textContent = '0 / ∞';
+                            // Unlimited plan — show actual used count, denominator as "∞".
+                            if (aiEl) aiEl.textContent = aiUsed + ' / ∞';
                             if (aiBar) aiBar.style.width = '0%';
                             if (aiRing) aiRing.innerHTML = window.AppComponents.renderUsageRing(0, 1, '#8b5cf6');
                         } else {
-                            var aiUsed = Math.max(0, (ai.limit || 0) - (ai.remaining || 0));
-                            if (aiCard) aiCard.classList.remove('hidden');
                             if (aiEl) aiEl.textContent = aiUsed + ' / ' + ai.limit;
                             if (aiBar) aiBar.style.width = _fmtPct(aiUsed, ai.limit) + '%';
                             if (aiRing) aiRing.innerHTML = window.AppComponents.renderUsageRing(aiUsed, ai.limit, '#8b5cf6');
@@ -1227,11 +1458,15 @@ function dashboard() {
                     var credRes = await fetch('/api/v1/search/credits', usageOpts);
                     if (credRes.ok) {
                         var credData = await credRes.json();
-                        // C1: Credit reset date
+                        // C1: Credit reset date — format the month name in the app's
+                        // selected locale, not the browser default (otherwise "May"
+                        // stays English even when the UI is Turkish/Arabic).
                         var resetEl = document.getElementById('credit-reset-date');
                         if (resetEl && credData.resets_on) {
                             var rd = new Date(credData.resets_on);
-                            resetEl.textContent = t('usage.resets') + ' ' + rd.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                            var appLoc = (window.AppI18n && window.AppI18n.getLocale) ? window.AppI18n.getLocale() : 'tr';
+                            var bcp47 = { tr: 'tr-TR', en: 'en-US', ar: 'ar-SA' }[appLoc] || 'tr-TR';
+                            resetEl.textContent = t('usage.resets') + ' ' + rd.toLocaleDateString(bcp47, { month: 'short', day: 'numeric' });
                         }
                         // C2: Plan display name
                         var planBadgeEl = document.getElementById('plan-display-badge');
@@ -1278,23 +1513,6 @@ function dashboard() {
                     }
                 }
 
-                // C5: Organization plan limits
-                try {
-                    var meRes = await fetch('/api/v1/auth/me', usageOpts);
-                    if (meRes.ok) {
-                        var meData = await meRes.json();
-                        var org = meData.organization || {};
-                        var limitsEl = document.getElementById('plan-limits-info');
-                        if (limitsEl) {
-                            var limitsHtml = '';
-                            var _fl = function (v) { return v >= 999999 ? '∞' : v; };
-                            if (org.max_monthly_searches) limitsHtml += '<div class="flex justify-between text-xs"><span style="color:var(--color-text-faint)">' + t('usage.max_searches') + '</span><span style="color:var(--color-text-secondary)">' + _fl(org.max_monthly_searches) + '/mo</span></div>';
-                            if (org.max_watchlist_items) limitsHtml += '<div class="flex justify-between text-xs"><span style="color:var(--color-text-faint)">' + t('usage.max_watchlist') + '</span><span style="color:var(--color-text-secondary)">' + _fl(org.max_watchlist_items) + '</span></div>';
-                            if (org.max_users) limitsHtml += '<div class="flex justify-between text-xs"><span style="color:var(--color-text-faint)">' + t('usage.max_users') + '</span><span style="color:var(--color-text-secondary)">' + _fl(org.max_users) + '</span></div>';
-                            if (limitsHtml) limitsEl.innerHTML = limitsHtml;
-                        }
-                    }
-                } catch (e) { /* non-critical */ }
             } catch (e) {
                 console.error('Usage data load error:', e);
             }
@@ -1350,7 +1568,9 @@ function dashboard() {
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: {
-                        legend: { position: 'right' }
+                        // Bottom legend keeps the doughnut readable in the
+                        // narrower 1/3-width chart column.
+                        legend: { position: 'bottom', labels: { boxWidth: 10, padding: 8, font: { size: 11 } } }
                     },
                     cutout: '70%'
                 }
@@ -2071,6 +2291,7 @@ function redirectToUpgrade() {
 // CREDITS MODAL
 // ============================================
 function showCreditsModal(detail) {
+    if (showUpgradeModal(detail || {}, 'ai_credits')) return;
     var msg = document.getElementById('credits-message');
     if (detail && detail.message) msg.textContent = detail.message;
     document.getElementById('credits-modal').classList.remove('hidden');
@@ -2144,10 +2365,13 @@ function showDashboardTab(tabId) {
         initWatchlistTab();
     }
     if (tabId === 'overview') {
-        // Re-render chart now that the canvas is visible
-        var alpineEl = document.querySelector('[x-data]');
-        if (alpineEl && alpineEl.__x && alpineEl.__x.$data && typeof alpineEl.__x.$data.renderChart === 'function') {
-            setTimeout(function () { alpineEl.__x.$data.renderChart(); }, 50);
+        // Pull fresh stats so any change made elsewhere in the dashboard
+        // (alerts, watchlist, search/report/AI credit usage) is reflected
+        // when the user lands here. Then re-render the chart.
+        var data = _alpineRoot();
+        if (data && typeof data.loadData === 'function') data.loadData();
+        if (data && typeof data.renderChart === 'function') {
+            setTimeout(function () { data.renderChart(); }, 50);
         }
     }
     if (tabId === 'reports') {
@@ -2514,9 +2738,9 @@ function _collectApplicationBody() {
 
 // Global wrapper for showAlertDetail (Alpine method called from innerHTML)
 function showAlertDetail(alertId) {
-    var alpineEl = document.querySelector('[x-data]');
-    if (alpineEl && alpineEl.__x && alpineEl.__x.$data.showAlertDetail) {
-        alpineEl.__x.$data.showAlertDetail(alertId);
+    var data = _alpineRoot();
+    if (data && typeof data.showAlertDetail === 'function') {
+        data.showAlertDetail(alertId);
     }
 }
 
@@ -2686,9 +2910,9 @@ function entityBulkWatchlist() {
     }
     var token = getAuthToken();
     if (!token) {
-        var alpineRoot = document.querySelector('[x-data]');
-        if (alpineRoot && alpineRoot.__x) {
-            alpineRoot.__x.$data.showLoginModal = true;
+        var data = _alpineRoot();
+        if (data) {
+            data.showLoginModal = true;
         } else {
             showToast(t('auth.session_expired'), 'error');
         }
@@ -2760,11 +2984,30 @@ function entityDownloadCsv() {
     var id = _entityPortfolioId;
     if (!type || !id) return;
     var token = getAuthToken();
+    if (!token) {
+        showUpgradeModal({
+            error: 'upgrade_required',
+            current_plan: 'free',
+            upgrade_context: 'portfolio_download',
+            message: t('upgrade.portfolio_download_description')
+        }, 'portfolio_download');
+        return;
+    }
     var csvUrl = type === 'holder'
         ? '/api/v1/holders/' + encodeURIComponent(id) + '/trademarks/csv'
         : '/api/v1/attorneys/' + encodeURIComponent(id) + '/trademarks/csv';
-    fetch(csvUrl, { headers: token ? { 'Authorization': 'Bearer ' + token } : {} })
+    fetch(csvUrl, { headers: { 'Authorization': 'Bearer ' + token } })
         .then(function (res) {
+            if (res.status === 401) {
+                showToast(t('auth.session_expired'), 'error');
+                throw { handled: true };
+            }
+            if (res.status === 403) {
+                return res.json().catch(function () { return {}; }).then(function (data) {
+                    showUpgradeModal((data && data.detail) || data || {}, 'portfolio_download');
+                    throw { handled: true };
+                });
+            }
             if (!res.ok) throw new Error('CSV download failed');
             return res.blob();
         })
@@ -2778,7 +3021,10 @@ function entityDownloadCsv() {
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
         })
-        .catch(function () { showToast(t('common.error'), 'error'); });
+        .catch(function (err) {
+            if (err && err.handled) return;
+            showToast(t('common.error'), 'error');
+        });
 }
 
 // ============================================
@@ -2914,12 +3160,13 @@ function buildSortBarHtml(count, data) {
             + data.risk_level + '</span>';
     }
 
-    // Max score
+    // Max score (text category, no percentage)
     var maxHtml = '';
     if (data.max_score !== null && data.max_score !== undefined) {
         var maxPct = Math.round(data.max_score * 100);
+        var maxCategory = window.AppComponents.getSimilarityCategory(maxPct);
         maxHtml = '<span class="text-xs font-medium" style="color:var(--color-text-secondary)">'
-            + t('scores.max_risk') + ' ' + maxPct + '%</span>';
+            + t('scores.max_risk') + ' ' + t('risk_level.' + maxCategory) + '</span>';
     }
 
     // Candidates
@@ -3028,7 +3275,7 @@ function displayAgenticResults(data) {
     }
     html += '</div>';
 
-    var results = (data.results || []).slice(0, 30);
+    var results = (data.results || []).slice(0, DASHBOARD_SEARCH_RESULT_LIMIT);
     // Attach query context to each result for AI Studio CTA
     var searchInput = document.getElementById('search-input');
     var queryName = searchInput ? searchInput.value.trim() : '';
@@ -3043,7 +3290,7 @@ function displayAgenticResults(data) {
         html += '<div class="text-center py-8 text-gray-400"><div class="text-4xl mb-2">&#x1f50d;</div><p>' + t('search.no_results') + '</p></div>';
     } else {
         // Consolidated search stats bar with count, meta, and sort
-        html += buildSortBarHtml(Math.min(data.total || results.length, 30), data);
+        html += buildSortBarHtml(Math.min(data.total || results.length, DASHBOARD_SEARCH_RESULT_LIMIT), data);
         html += '<div id="search-results-cards">';
         results.forEach(function (r) { html += renderResultCard(r); });
         html += '</div>';
@@ -3206,6 +3453,9 @@ function applyStudioAvailability(mode, toolStatus) {
 function translateStudioStatusReason(reason) {
     if (!reason) return '';
     var normalized = String(reason).toLowerCase();
+    if (normalized.indexOf('openai') !== -1 && normalized.indexOf('gemini') !== -1 && (normalized.indexOf('anahtar') !== -1 || normalized.indexOf('api key') !== -1 || normalized.indexOf('key') !== -1)) {
+        return t('studio.reason_logo_providers_not_configured');
+    }
     if (normalized.indexOf('gemini') !== -1 && (normalized.indexOf('anahtar') !== -1 || normalized.indexOf('api key') !== -1 || normalized.indexOf('key') !== -1)) {
         return t('studio.reason_gemini_not_configured');
     }
@@ -3506,6 +3756,7 @@ async function generateNames() {
             studioCredits = normalizeStudioCredits(data.credits_remaining, 1);
             updateStudioCredits();
         }
+        _refreshDashboardUsage();
         loadStudioHistory();
 
     } catch (e) {
@@ -3575,7 +3826,6 @@ async function generateLogos() {
     stopLogoProjectPolling();
 
     var description = (document.getElementById('studio-logo-desc').value || '').trim();
-    var style = document.getElementById('studio-logo-style').value || 'modern';
     var colors = (document.getElementById('studio-logo-colors').value || '').trim();
     var classes = getStudioNiceClasses('studio-logo-classes');
 
@@ -3595,7 +3845,6 @@ async function generateLogos() {
         var data = await generateLogosAPI({
             brand_name: brandName,
             description: description,
-            style: style,
             color_preferences: colors,
             nice_classes: classes
         });
@@ -3613,6 +3862,7 @@ async function generateLogos() {
             updateStudioCredits();
             updateLogoCreditsFromData(data.credits_remaining);
         }
+        _refreshDashboardUsage();
         loadStudioHistory();
 
     } catch (e) {
@@ -3635,7 +3885,6 @@ function getLogoFormPayload(extra) {
     var payload = {
         brand_name: (document.getElementById('studio-logo-name').value || '').trim(),
         description: (document.getElementById('studio-logo-desc').value || '').trim(),
-        style: document.getElementById('studio-logo-style').value || 'modern',
         color_preferences: (document.getElementById('studio-logo-colors').value || '').trim(),
         nice_classes: getStudioNiceClasses('studio-logo-classes')
     };
@@ -3699,10 +3948,21 @@ async function fetchAndRenderLogoProject(projectId, fromPoll) {
 }
 
 async function reviseSelectedLogo() {
-    if (!studioActiveLogoProjectId || !studioSelectedLogoImageId) {
+    var revisionTargetId = studioSelectedLogoImageId
+        || (studioLastLogoResult && studioLastLogoResult.selected_image_id)
+        || null;
+    if (revisionTargetId && !_studioLogos[revisionTargetId] && studioLastLogoResult && studioLastLogoResult.logos) {
+        var match = studioLastLogoResult.logos.find(function (l) { return l && l.image_id === revisionTargetId; });
+        if (match) _studioLogos[revisionTargetId] = match;
+    }
+    if (!revisionTargetId || !_studioLogos[revisionTargetId]) {
         showToast(t('studio.select_logo_to_revise'), 'error');
         return;
     }
+    studioSelectedLogoImageId = revisionTargetId;
+    var selectedLogo = _studioLogos[revisionTargetId];
+    var projectId = selectedLogo.project_id || studioActiveLogoProjectId || null;
+    if (projectId) studioActiveLogoProjectId = projectId;
     var prompt = (document.getElementById('studio-logo-revision-prompt').value || '').trim();
     if (!prompt) {
         showToast(t('studio.enter_revision_prompt'), 'error');
@@ -3715,7 +3975,7 @@ async function reviseSelectedLogo() {
     if (btn) { btn.disabled = true; btn.classList.add('opacity-50'); }
     try {
         var data = await generateLogosAPI(getLogoFormPayload({
-            project_id: studioActiveLogoProjectId,
+            project_id: projectId,
             parent_image_id: studioSelectedLogoImageId,
             revision_prompt: prompt
         }));
@@ -3725,6 +3985,7 @@ async function reviseSelectedLogo() {
             updateStudioCredits();
             updateLogoCreditsFromData(data.credits_remaining);
         }
+        _refreshDashboardUsage();
         await fetchAndRenderLogoProject(studioActiveLogoProjectId, false);
         startLogoProjectPollingIfNeeded(data);
         showToast(t('studio.revision_started'), 'success');
@@ -3750,6 +4011,7 @@ function chooseLogoForRevision(imageId) {
         return;
     }
     studioSelectedLogoImageId = imageId;
+    if (logo.project_id) studioActiveLogoProjectId = logo.project_id;
     updateLogoRevisionPanel();
     renderStudioLogoResults(studioLastLogoResult);
 }
@@ -3758,25 +4020,6 @@ function clearLogoCandidateSelection() {
     studioSelectedLogoImageId = null;
     updateLogoRevisionPanel();
     renderStudioLogoResults(studioLastLogoResult);
-}
-
-async function selectFinalLogoCandidate(imageId) {
-    var logo = _studioLogos[imageId];
-    if (!logo || !logo.project_id) return;
-    try {
-        var project = await selectLogoCandidateAPI(logo.project_id, imageId);
-        studioActiveLogoProjectId = project.id;
-        studioLastLogoResult = {
-            logos: project.logos || [],
-            project_id: project.id,
-            selected_image_id: project.selected_image_id,
-            project: project
-        };
-        renderStudioLogoResults(studioLastLogoResult);
-        showToast(t('studio.logo_selected'), 'success');
-    } catch (e) {
-        showToast(e.message || t('studio.select_logo_failed'), 'error');
-    }
 }
 
 async function retryLogoAudit(imageId) {
@@ -3796,20 +4039,33 @@ function updateLogoRevisionPanel() {
     var summary = document.getElementById('studio-logo-selected-summary');
     var projectChip = document.getElementById('studio-logo-project-id');
     if (!panel) return;
-    if (!studioActiveLogoProjectId) {
+    var selectedLogo = studioSelectedLogoImageId ? _studioLogos[studioSelectedLogoImageId] : null;
+    var projectId = (selectedLogo && selectedLogo.project_id) || studioActiveLogoProjectId || null;
+    if (!selectedLogo && !projectId) {
         panel.classList.add('hidden');
         return;
     }
     panel.classList.remove('hidden');
-    if (projectChip) projectChip.textContent = t('studio.project_chip', { id: studioActiveLogoProjectId.substring(0, 8) });
+    if (projectChip) {
+        projectChip.textContent = projectId ? t('studio.project_chip', { id: projectId.substring(0, 8) }) : '';
+    }
     if (!summary) return;
     if (!studioSelectedLogoImageId) {
         summary.textContent = t('studio.revision_select_hint');
         return;
     }
-    var logo = _studioLogos[studioSelectedLogoImageId] || {};
+    var logo = selectedLogo || {};
+    var logosList = (studioLastLogoResult && studioLastLogoResult.logos) || [];
+    var idx = logosList.findIndex(function (l) {
+        return l && l.image_id === studioSelectedLogoImageId;
+    });
+    var positionLabel = t('studio.logo_label_position', { n: idx >= 0 ? idx + 1 : 1 });
+    if (idx >= 0 && logosList.length === 2) {
+        var sideKey = idx === 0 ? 'studio.logo_position_side_left' : 'studio.logo_position_side_right';
+        positionLabel = positionLabel + ' (' + t(sideKey) + ')';
+    }
     summary.textContent = t('studio.revision_selected', {
-        id: studioSelectedLogoImageId.substring(0, 8),
+        target: positionLabel,
         status: t('studio.audit_status_' + (logo.audit_status || 'completed'))
     });
 }
@@ -3885,7 +4141,6 @@ function renderStudioLogoResults(data) {
     }
     var cardsHtml = '';
     logos.forEach(function (logo) {
-        logo.is_selected = data.selected_image_id && data.selected_image_id === logo.image_id;
         logo.is_revision_target = studioSelectedLogoImageId && studioSelectedLogoImageId === logo.image_id;
         cardsHtml += renderLogoCard(logo);
     });
@@ -3931,8 +4186,18 @@ function toggleLogoDetail(imageId) {
         return;
     }
 
-    var vb = logo.visual_breakdown || {};
-    var simPct = Math.round(logo.similarity_score || 0);
+    function normalizeLogoDetailPct(value, fallback) {
+        var raw = value;
+        if (raw === undefined || raw === null || raw === '') raw = fallback;
+        var n = Number(raw || 0);
+        if (!isFinite(n)) n = 0;
+        if (n > 0 && n <= 1) n = n * 100;
+        return Math.round(n);
+    }
+    var simPct = normalizeLogoDetailPct(
+        logo.llm_risk_score != null ? logo.llm_risk_score : logo.similarity_score,
+        logo.similarity_score || 0
+    );
 
     function makeBar(label, value) {
         var pct = Math.round((value || 0) * 100);
@@ -3945,21 +4210,18 @@ function toggleLogoDetail(imageId) {
     }
 
     var barsHtml = '';
-    if (vb.clip != null) barsHtml += makeBar('CLIP', vb.clip);
-    if (vb.dino != null) barsHtml += makeBar('DINOv2', vb.dino);
-    if (vb.ocr != null) barsHtml += makeBar('OCR', vb.ocr);
-    if (vb.color != null) barsHtml += makeBar(t('studio.color_label'), vb.color);
+    barsHtml += makeBar(t('studio.ai_risk_score'), simPct / 100);
 
     if (!barsHtml) {
         barsHtml = '<div class="text-xs text-center py-2" style="color:var(--color-text-faint)">' + t('studio.no_visual_data') + '</div>';
     }
 
     var closestHtml = logo.closest_match_name
-        ? '<div class="text-xs mt-2" style="color:var(--color-text-muted)">' + t('studio.closest_label') + ' <span class="font-medium" style="color:var(--color-text-secondary)">' + escapeHtml(logo.closest_match_name) + '</span> (' + simPct + '%)</div>'
+        ? '<div class="text-xs mt-2" style="color:var(--color-text-muted)">' + t('studio.closest_label') + ' <span class="font-medium" style="color:var(--color-text-secondary)">' + escapeHtml(logo.closest_match_name) + '</span></div>'
         : '';
 
     var panelHtml = '<div id="logo-detail-' + imageId + '" class="studio-logo-detail-panel">'
-        + '<div class="text-xs font-semibold mb-2" style="color:var(--color-text-secondary)">' + t('studio.visual_analysis_label') + '</div>'
+        + '<div class="text-xs font-semibold mb-2" style="color:var(--color-text-secondary)">' + t('studio.ai_risk_score') + '</div>'
         + '<div class="space-y-1.5">' + barsHtml + '</div>'
         + closestHtml
         + '</div>';
@@ -3980,8 +4242,7 @@ function toggleLogoDetail(imageId) {
 // LOGO CREDITS EXHAUSTED MODAL
 // ============================================
 function showLogoCreditsExhausted(detail) {
-    var msg = (detail && detail.message) || t('studio.logo_credits_exhausted');
-    showCreditsModal({ message: msg });
+    showUpgradeModal(detail || { error: 'credits_exhausted' }, 'ai_credits');
 }
 
 function refreshStudioDynamicTranslations() {
@@ -4025,6 +4286,7 @@ async function loadStudioHistory(featureType) {
             if (emptyEl) emptyEl.classList.remove('hidden');
             return;
         }
+        storeStudioHistoryItems(items);
         listEl.innerHTML = items.map(renderStudioHistoryItem).join('');
         loadStudioHistoryImages(items);
     } catch (e) {
@@ -4034,6 +4296,31 @@ async function loadStudioHistory(featureType) {
             emptyEl.textContent = t('studio.history_failed');
         }
     }
+}
+
+var _studioHistoryItems = {};
+var _studioHistoryImages = {};
+
+function getCurrentStudioHistoryFeatureType() {
+    return studioHistoryFilter === 'logo' ? 'LOGO' : (studioHistoryFilter === 'name' ? 'NAME' : undefined);
+}
+
+function storeStudioHistoryItems(items) {
+    _studioHistoryItems = {};
+    _studioHistoryImages = {};
+    (items || []).forEach(function (item) {
+        if (item.id) _studioHistoryItems[item.id] = item;
+        if (item.feature_type === 'LOGO' && item.images) {
+            item.images.forEach(function (image) {
+                if (!image.image_id) return;
+                _studioHistoryImages[image.image_id] = {
+                    image: image,
+                    item: item
+                };
+                _studioLogos[image.image_id] = image;
+            });
+        }
+    });
 }
 
 function setStudioHistoryFilter(filter) {
@@ -4069,12 +4356,26 @@ function renderStudioHistoryItem(item) {
     if (isLogo && item.images && item.images.length) {
         imagesHtml = '<div class="studio-history-thumbs">'
             + item.images.map(function (image) {
-                return '<div id="studio-history-img-' + escapeHtml(image.image_id) + '" class="studio-history-thumb" title="' + t('studio.audit_status_' + (image.audit_status || 'completed')) + '">'
+                return '<button type="button" id="studio-history-img-' + escapeHtml(image.image_id) + '" class="studio-history-thumb" '
+                    + 'onclick="openStudioHistoryLogo(\'' + escapeHtml(image.image_id) + '\')" '
+                    + 'title="' + t('studio.history_view_logo') + ' - ' + t('studio.audit_status_' + (image.audit_status || 'completed')) + '">'
                     + t('common.loading')
-                    + '</div>';
+                    + '</button>';
             }).join('')
             + '</div>';
     }
+    var canOpen = !isLogo || ((item.images || []).length > 0);
+    var openActionHtml = canOpen
+        ? '<button type="button" onclick="openStudioHistoryItem(\'' + escapeHtml(item.id) + '\')" class="studio-history-action-button">'
+            + t(isLogo ? 'studio.history_open_logos' : 'studio.history_open_names')
+            + '</button>'
+        : '';
+    var actionsHtml = '<div class="studio-history-actions">'
+        + openActionHtml
+        + '<button type="button" onclick="deleteStudioHistoryItem(\'' + escapeHtml(item.id) + '\')" class="studio-history-action-button is-danger">'
+        + t('common.delete')
+        + '</button>'
+        + '</div>';
 
     return '<div class="studio-history-item">'
         + '<div class="studio-history-item-header">'
@@ -4089,6 +4390,7 @@ function renderStudioHistoryItem(item) {
         + '</div>'
         + '</div>'
         + imagesHtml
+        + actionsHtml
         + '</div>';
 }
 
@@ -4112,6 +4414,163 @@ function loadStudioHistoryImages(items) {
             });
         });
     });
+}
+
+async function openStudioHistoryLogo(imageId) {
+    var ref = _studioHistoryImages[imageId] || {};
+    var image = ref.image || _studioLogos[imageId];
+    if (!image || !image.image_url) {
+        showToast(t('studio.logo_data_not_found'), 'error');
+        return;
+    }
+    var el = document.getElementById('studio-history-img-' + imageId);
+    var blobUrl = el && el.dataset ? el.dataset.blobUrl : '';
+    if (!blobUrl) {
+        try {
+            var res = await fetch(image.image_url, {
+                headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+            });
+            if (!res.ok) throw new Error('Failed');
+            var blob = await res.blob();
+            blobUrl = window.URL.createObjectURL(blob);
+            if (el && el.dataset) el.dataset.blobUrl = blobUrl;
+        } catch (e) {
+            showToast(t('dashboard.load_failed_short'), 'error');
+            return;
+        }
+    }
+    var item = ref.item || {};
+    var params = item.input_params || {};
+    window.dispatchEvent(new CustomEvent('open-lightbox', {
+        detail: {
+            src: blobUrl,
+            title: params.brand_name || t('studio.logo_studio'),
+            subtitle: t('studio.audit_status_' + (image.audit_status || 'completed'))
+        }
+    }));
+}
+
+function applyNameHistoryToForm(item) {
+    var params = item.input_params || {};
+    if (document.getElementById('studio-name-query')) document.getElementById('studio-name-query').value = params.query || '';
+    if (document.getElementById('studio-name-industry')) document.getElementById('studio-name-industry').value = params.industry || '';
+    if (document.getElementById('studio-name-style') && params.style) document.getElementById('studio-name-style').value = params.style;
+    setStudioSelectValues('studio-name-classes', params.nice_classes || []);
+}
+
+function applyLogoHistoryToForm(item) {
+    var params = item.input_params || {};
+    if (document.getElementById('studio-logo-name')) document.getElementById('studio-logo-name').value = params.brand_name || '';
+    if (document.getElementById('studio-logo-desc')) document.getElementById('studio-logo-desc').value = params.description || '';
+    if (document.getElementById('studio-logo-style') && params.style) document.getElementById('studio-logo-style').value = params.style;
+    if (document.getElementById('studio-logo-colors')) document.getElementById('studio-logo-colors').value = params.color_preferences || '';
+    setStudioSelectValues('studio-logo-classes', params.nice_classes || []);
+    refreshStudioColorSwatches();
+}
+
+function historyNameToCard(name) {
+    if (typeof name === 'string') {
+        return {
+            name: name,
+            risk_score: 0,
+            llm_risk_score: 0,
+            text_similarity: 0,
+            semantic_similarity: 0,
+            phonetic_match: false,
+            is_safe: true,
+            risk_level: 'low'
+        };
+    }
+    var riskScore = name.risk_score != null ? name.risk_score : (name.llm_risk_score != null ? name.llm_risk_score : 0);
+    return {
+        name: name.name,
+        risk_score: riskScore,
+        llm_risk_score: name.llm_risk_score != null ? name.llm_risk_score : riskScore,
+        text_similarity: name.text_similarity || 0,
+        semantic_similarity: name.semantic_similarity || 0,
+        phonetic_match: !!name.phonetic_match,
+        closest_match: name.closest_match || null,
+        is_safe: name.is_safe !== false,
+        risk_level: name.risk_level || window.AppComponents.getScoreRiskLevel(Math.round(riskScore || 0))
+    };
+}
+
+async function openStudioHistoryItem(historyId) {
+    var item = _studioHistoryItems[historyId];
+    if (!item) {
+        showToast(t('studio.history_item_missing'), 'error');
+        return;
+    }
+    if (item.feature_type === 'LOGO') {
+        switchStudioMode('logo');
+        applyLogoHistoryToForm(item);
+        document.getElementById('studio-logo-idle').classList.add('hidden');
+        document.getElementById('studio-logo-loading').classList.add('hidden');
+        document.getElementById('studio-logo-error').classList.add('hidden');
+        document.getElementById('studio-logo-empty').classList.add('hidden');
+        var images = item.images || [];
+        if (!images.length) {
+            showToast(t('studio.no_logos'), 'error');
+            return;
+        }
+        var projectId = images.length ? images[0].project_id : null;
+        if (projectId) {
+            var project = await fetchAndRenderLogoProject(projectId, false);
+            if (!project) return;
+        } else {
+            studioActiveLogoProjectId = null;
+            studioLastLogoResult = { logos: images, project_id: null, selected_image_id: null };
+            renderStudioLogoResults(studioLastLogoResult);
+        }
+        showToast(t('studio.history_loaded'), 'success');
+        return;
+    }
+
+    switchStudioMode('name');
+    applyNameHistoryToForm(item);
+    document.getElementById('studio-name-idle').classList.add('hidden');
+    document.getElementById('studio-name-loading').classList.add('hidden');
+    document.getElementById('studio-name-error').classList.add('hidden');
+    document.getElementById('studio-name-empty').classList.add('hidden');
+    var output = item.output_data || {};
+    var scored = (output.scored_names || []).filter(function (name) { return name && name.is_safe !== false; });
+    var safeNames = scored.length ? scored.map(historyNameToCard) : (output.safe_names || []).map(historyNameToCard);
+    studioLastNameResult = {
+        safe_names: safeNames,
+        total_generated: output.total_generated || safeNames.length,
+        filtered_count: output.filtered_count || 0,
+        cached: false
+    };
+    renderStudioNameResults(studioLastNameResult);
+    showToast(t('studio.history_loaded'), 'success');
+}
+
+async function deleteStudioHistoryItem(historyId) {
+    if (!window.confirm(t('studio.history_delete_confirm'))) return;
+    try {
+        await deleteGenerationHistoryItemAPI(historyId);
+        showToast(t('studio.history_deleted'), 'success');
+        loadStudioHistory();
+    } catch (e) {
+        showToast(e.message || t('studio.history_delete_failed'), 'error');
+    }
+}
+
+async function clearStudioHistory() {
+    var featureType = getCurrentStudioHistoryFeatureType();
+    var confirmKey = featureType === 'LOGO'
+        ? 'studio.history_clear_logos_confirm'
+        : featureType === 'NAME'
+            ? 'studio.history_clear_names_confirm'
+            : 'studio.history_clear_all_confirm';
+    if (!window.confirm(t(confirmKey))) return;
+    try {
+        var result = await clearGenerationHistoryAPI(featureType);
+        showToast(t('studio.history_cleared', { count: result.deleted || 0 }), 'success');
+        loadStudioHistory();
+    } catch (e) {
+        showToast(e.message || t('studio.history_delete_failed'), 'error');
+    }
 }
 
 // ============================================
@@ -4384,19 +4843,27 @@ function _syncWatchlistThresholdControl() {
 }
 
 var _activeThreshold = _loadWatchlistThresholdPct() / 100; // single source of truth for display filter (0.0-1.0 decimal)
-var _wlView = 'appeals'; // 'all' | 'renewal' | 'appeals'
+var _wlView = 'all'; // 'all' | 'renewal' | 'appeals'
 var _wlStatusFilter = '';
 var _wlTmStatusFilter = ''; // trademark final_status filter (e.g. 'Tescil Edildi')
 var _wlTotalCount = 0; // total active watchlist items (used for scan time estimate)
 var _wlLoadRequestSeq = 0;
 var _wlSilentRefresh = false;
 
+function _normalizeWatchlistView(view) {
+    return ['all', 'appeals', 'renewal'].indexOf(view) >= 0 ? view : 'all';
+}
+
+function _syncWatchlistViewControl() {
+    var sel = document.getElementById('wl-view-select');
+    if (sel) sel.value = _wlView;
+}
+
 function initWatchlistTab() {
     if (watchlistTabInitialized) return;
     watchlistTabInitialized = true;
     _syncWatchlistThresholdControl();
-    // Apply default active tab style
-    setWatchlistView('appeals');
+    setWatchlistView(_wlView);
     loadWatchlistStats();
     _initScanButtonState(); // restore scan-in-progress state if page was refreshed mid-scan
 }
@@ -4429,14 +4896,30 @@ function refreshAllStats() {
     }).catch(function () { });
 }
 
+// Alpine v3 root accessor. Alpine v3 removed `el.__x`; `Alpine.$data(el)` is the
+// supported accessor. Returns the reactive proxy for the dashboard root, or null.
+function _alpineRoot() {
+    var el = document.querySelector('[x-data]');
+    if (!el || typeof window.Alpine === 'undefined' || typeof window.Alpine.$data !== 'function') return null;
+    try { return window.Alpine.$data(el); } catch (e) { return null; }
+}
+
+// Pulls fresh /api/v1/usage/summary into the overview's KPI/usage rings.
+// Called from mutating actions (AI generation, etc.) so the overview reflects
+// the new state immediately, without waiting for a tab switch.
+function _refreshDashboardUsage() {
+    var data = _alpineRoot();
+    if (!data || typeof data.loadUsageData !== 'function') return;
+    var token = getAuthToken();
+    data.loadUsageData(token ? { 'Authorization': 'Bearer ' + token } : {});
+}
+
 function refreshWatchlistAndStats() {
     loadWatchlistStats();
     loadPortfolio();
-    // Refresh stats (total_watched, usage rings, etc.)
-    var alpineEl = document.querySelector('[x-data]');
-    if (alpineEl && alpineEl.__x && alpineEl.__x.$data && typeof alpineEl.__x.$data.loadData === 'function') {
-        alpineEl.__x.$data.loadData();
-    }
+    // Refresh stats (total_watched, usage rings, etc.).
+    var data = _alpineRoot();
+    if (data && typeof data.loadData === 'function') data.loadData();
 }
 
 // ============================================
@@ -4455,6 +4938,12 @@ function loadPortfolio() {
         var total = data.total || items.length;
         var totalPages = data.total_pages || 1;
         _wlTotalCount = data.total || 0; // keep for scan time estimate
+        if (_wlTotalCount === 0 && typeof _getScanState === 'function' && typeof _clearScanInProgress === 'function') {
+            var scanState = _getScanState();
+            if (scanState && scanState.active) {
+                _clearScanInProgress(false);
+            }
+        }
         var countEl = document.getElementById('portfolio-count');
         if (countEl) countEl.textContent = t('holder.trademarks_count', { count: total });
         userWatchlistAppNos = {};
@@ -4506,6 +4995,11 @@ function onWatchlistSortChange() {
     _wlCurrentSort = sel ? sel.value : 'date_desc';
     _wlCurrentPage = 1;
     loadPortfolio();
+}
+
+function onWatchlistViewFilterChange() {
+    var sel = document.getElementById('wl-view-select');
+    setWatchlistView(sel ? sel.value : 'all');
 }
 
 function onWatchlistStatusChange() {
@@ -4631,11 +5125,11 @@ function loadAggregateAlerts() {
                 + '<div class="flex-1 min-w-0">'
                 + '<div class="flex items-center gap-2">'
                 + (riskPct ? '<span class="text-xs font-bold px-1.5 py-0.5 rounded" style="background:' + sevColor + '20;color:' + sevColor + '">' + riskPct + '</span>' : '')
-                + '<span class="text-sm font-medium truncate" style="color:var(--color-text-primary)">' + esc(a.conflicting_brand_name || '-') + '</span>'
+                + '<span class="text-sm font-medium truncate" style="color:var(--color-text-primary)">' + esc(getTrademarkDisplayName(a.conflicting_brand_name)) + '</span>'
                 + '</div>'
                 + '<div class="text-xs mt-0.5" style="color:var(--color-text-muted)">'
                 + '<span style="color:var(--color-text-faint)">' + t('alerts.watched_brand') + ':</span> '
-                + esc(a.watched_brand_name || '-')
+                + esc(getTrademarkDisplayName(a.watched_brand_name))
                 + '</div>'
                 + (a.overlapping_classes ? '<div class="text-xs mt-0.5" style="color:var(--color-text-faint)">' + t('alerts.overlapping_classes') + ' ' + a.overlapping_classes + '</div>' : '')
                 + '</div>'
@@ -4865,10 +5359,10 @@ function clearWatchlistFilters() {
 }
 
 function setWatchlistView(view) {
-    // Toggle off if already active (returns to all-items view)
-    if (_wlView === view) view = 'all';
+    view = _normalizeWatchlistView(view);
     _wlView = view;
     _wlCurrentPage = 1;
+    _syncWatchlistViewControl();
     // Per-tab colour palette
     var tabColors = {
         appeals: { solid: '#dc2626', tintBg: 'rgba(220,38,38,0.07)', tintBorder: 'rgba(220,38,38,0.3)' },
@@ -5160,13 +5654,14 @@ async function loadInlineAlerts(watchlistItemId, panel) {
             var c = a.conflicting || {};
             var sc = a.scores || {};
             var risk = Math.round((sc.total || 0) * 100);
-            var textSim = sc.text_similarity || 0;
+            var textSim = getEffectiveTextScoreForResult(sc);
             var semanticSim = sc.semantic_similarity || 0;
             var phoneticMatch = sc.phonetic_match || false;
             var visualSim = sc.visual_similarity || 0;
-            var transSim = sc.translation_similarity || 0;
-            // Combined text score = max of text sub-scores
-            var textCombined = Math.max(textSim, semanticSim);
+            var transSim = sc.path_b_score !== undefined && sc.path_b_score !== null
+                ? parseFloat(sc.path_b_score)
+                : (sc.translation_similarity || 0);
+            if (isNaN(transSim)) transSim = 0;
             var scoreStyle = window.AppComponents && window.AppComponents.getScoreColorStyle
                 ? window.AppComponents.getScoreColorStyle(sc.total || 0)
                 : 'background:#fee2e2;color:#991b1b';
@@ -5209,7 +5704,7 @@ async function loadInlineAlerts(watchlistItemId, panel) {
                 // TEXT column — text, semantic, phonetic
                 + '<div class="p-1.5 rounded" style="background:var(--color-bg-card)">'
                 + '<div class="text-[9px] uppercase tracking-wide text-center mb-1" style="color:var(--color-text-muted)">' + t('landing.detail_text') + '</div>'
-                + '<div class="text-xs font-bold text-center" style="color:' + _inlineRiskColor(textCombined) + '">' + Math.round(textCombined * 100) + '%</div>'
+                + '<div class="text-xs font-bold text-center" style="color:' + _inlineRiskColor(textSim) + '">' + Math.round(textSim * 100) + '%</div>'
                 + '<div class="mt-1 space-y-0.5">'
                 + '<div class="flex justify-between text-[10px]"><span style="color:var(--color-text-faint)">' + t('watchlist.score_text') + '</span><span style="color:' + _inlineRiskColor(textSim) + '">' + Math.round(textSim * 100) + '%</span></div>'
                 + '<div class="flex justify-between text-[10px]"><span style="color:var(--color-text-faint)">' + t('watchlist.score_semantic') + '</span><span style="color:' + _inlineRiskColor(semanticSim) + '">' + Math.round(semanticSim * 100) + '%</span></div>'
@@ -5365,9 +5860,9 @@ async function loadFilteredAlerts(watchlistItemId) {
         });
 
         // Update the Alpine component's alerts (watchlist tab threats section)
-        var alpineEl = document.querySelector('[x-data]');
-        if (alpineEl && alpineEl.__x) {
-            alpineEl.__x.$data.alerts = mapped;
+        var data = _alpineRoot();
+        if (data) {
+            data.alerts = mapped;
         }
 
         // Filter out expired appeals (deadline already passed) — only show appealable conflicts
@@ -5415,9 +5910,9 @@ function clearAlertFilter() {
     var filtersEl = document.getElementById('alert-filters');
     if (filtersEl) filtersEl.classList.add('hidden');
     // Reload all alerts by refreshing the Alpine component
-    var alpineEl = document.querySelector('[x-data]');
-    if (alpineEl && alpineEl.__x) {
-        alpineEl.__x.$data.loadData();
+    var data = _alpineRoot();
+    if (data && typeof data.loadData === 'function') {
+        data.loadData();
     }
 }
 
@@ -5486,7 +5981,7 @@ function renderWatchlistAlerts(alerts) {
             + '<div class="flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center font-bold text-sm border" style="' + scoreStyle + '">'
             + a.risk_score + '%</div>'
             + '<div class="flex-1 min-w-0">'
-            + '<div class="font-semibold text-sm truncate" style="color:var(--color-text-primary)">' + escapeHtml(a.conflicting_brand) + '</div>'
+            + '<div class="font-semibold text-sm truncate" style="color:var(--color-text-primary)">' + escapeHtml(getTrademarkDisplayName(a.conflicting_brand)) + '</div>'
             + '<div class="text-xs" style="color:var(--color-text-faint)">' + escapeHtml(a.conflicting_app_no) + '</div>'
             + deadlineHtml
             + '</div>'
@@ -5624,6 +6119,32 @@ function _getScanDurationMs(count) {
     count = parseInt(count, 10);
     if (!count || count < 1) count = 1;
     return Math.max(count * 15000, 60000); // background scan duration varies; keep the visible session generous
+}
+
+function _coerceQueuedScanCount(data, fallbackCount) {
+    var hasQueuedScans = data && Object.prototype.hasOwnProperty.call(data, 'queued_scans');
+    var hasScanCount = data && Object.prototype.hasOwnProperty.call(data, 'scan_count');
+    var count = 0;
+    if (hasQueuedScans) count = Number(data.queued_scans);
+    else if (hasScanCount) count = Number(data.scan_count);
+    else if (fallbackCount !== undefined) count = Number(fallbackCount);
+    if (!isFinite(count) || count < 0) return 0;
+    return Math.floor(count);
+}
+
+function _extractScanCountFromResponse(data, fallbackCount) {
+    var hasExplicitCount = data && (
+        Object.prototype.hasOwnProperty.call(data, 'queued_scans') ||
+        Object.prototype.hasOwnProperty.call(data, 'scan_count')
+    );
+    var count = _coerceQueuedScanCount(data, undefined);
+    if (hasExplicitCount) return count > 0 ? Math.floor(count) : 0;
+    if (!count && data && data.message) {
+        var match = String(data.message).match(/^\s*(\d+)\s+/);
+        if (match) count = parseInt(match[1], 10) || 0;
+    }
+    if (!count && fallbackCount !== undefined) count = Number(fallbackCount) || 0;
+    return count > 0 ? Math.floor(count) : 0;
 }
 
 function _getScanEstimate(count) {
@@ -5822,7 +6343,6 @@ function _initScanButtonState() {
 function scanAllWatchlist() {
     var count = _wlTotalCount || 0;
     var estStr = _getScanEstimate(count);
-    var estimatedMs = _getScanDurationMs(count);
 
     // Build inline confirmation modal
     var overlay = document.createElement('div');
@@ -5865,13 +6385,18 @@ function scanAllWatchlist() {
 
     document.getElementById('scan-confirm-ok').addEventListener('click', function () {
         removeOverlay();
-        _setScanInProgress(estimatedMs, 'all');
         showToast(t('watchlist.scan_all_started') || 'Toplu tarama başlatılıyor...', 'info');
 
         AppAPI.scanAllWatchlist().then(function (res) {
             var msg = (res && res.message) ? res.message : t('watchlist.scan_all_queued');
+            var queuedScans = _extractScanCountFromResponse(res);
+            if (queuedScans > 0) {
+                _setScanInProgress(_getScanDurationMs(queuedScans), 'all');
+                _scheduleScanPolling(true);
+            } else {
+                _clearScanInProgress(false);
+            }
             showToast(msg, 'success');
-            _scheduleScanPolling(true);
         }).catch(function (e) {
             _clearScanInProgress(false);
             showToast((t('common.error') || 'Hata') + ': ' + e.message, 'error');
@@ -6293,8 +6818,9 @@ function submitBulkUpload() {
             + '</div>';
         document.getElementById('upload-wl-step-2').classList.add('hidden');
         resultEl.classList.remove('hidden');
-        if ((s.added || 0) > 0 && typeof _setScanInProgress === 'function' && typeof _getScanDurationMs === 'function') {
-            _setScanInProgress(_getScanDurationMs(s.added || 1), 'bulk');
+        var queuedScans = _coerceQueuedScanCount(data, s.added || 0);
+        if (queuedScans > 0 && typeof _setScanInProgress === 'function' && typeof _getScanDurationMs === 'function') {
+            _setScanInProgress(_getScanDurationMs(queuedScans), 'bulk');
         }
         refreshWatchlistAndStats();
     }).catch(function (e) {
@@ -6320,6 +6846,46 @@ function submitBulkUpload() {
 // ============================================
 window._reportsInitialized = false;
 var _reportsCurrentPage = 1;
+window._pendingRiskReportClaims = window._pendingRiskReportClaims || {};
+
+function claimPendingRiskReport(claimToken) {
+    if (!claimToken || window._pendingRiskReportClaims[claimToken]) return;
+    window._pendingRiskReportClaims[claimToken] = true;
+    if (typeof showDashboardTab === 'function') {
+        showDashboardTab('reports');
+    }
+
+    var claimFn = typeof claimRiskReportAPI === 'function'
+        ? claimRiskReportAPI
+        : (window.AppAPI && window.AppAPI.claimRiskReport);
+    if (typeof claimFn !== 'function') {
+        showToast(t('search.risk_report_failed'), 'error');
+        delete window._pendingRiskReportClaims[claimToken];
+        return;
+    }
+
+    claimFn(claimToken).then(function () {
+        showToast(t('search.risk_report_ready_view'), 'success');
+        window._reportsInitialized = false;
+        _reportsCurrentPage = 1;
+        loadReportsTab();
+    }).catch(function (err) {
+        var detail = err && err.data && (err.data.detail || err.data);
+        if (err && (err.status === 402 || err.status === 403)) {
+            showUpgradeModal(detail || err, 'reports');
+            return;
+        }
+        if (err && err.status === 409) {
+            showToast((detail && detail.message) || t('search.risk_report_ready'), 'success');
+            window._reportsInitialized = false;
+            loadReportsTab();
+            return;
+        }
+        showToast(t('search.risk_report_failed') + ': ' + ((detail && detail.message) || (err && err.message) || ''), 'error');
+    }).finally(function () {
+        delete window._pendingRiskReportClaims[claimToken];
+    });
+}
 
 function loadReportsTab() {
     var loading = document.getElementById('reports-loading');
@@ -6337,14 +6903,6 @@ function loadReportsTab() {
     loadReportsAPI(1).then(function (data) {
         loading.classList.add('hidden');
         _reportsCurrentPage = data.page || 1;
-
-        // Update usage counter
-        if (data.usage) {
-            var usageEl = document.getElementById('reports-usage-count');
-            if (usageEl) {
-                usageEl.textContent = t('reports.usage_count', { remaining: data.usage.reports_limit - data.usage.reports_used, limit: data.usage.reports_limit });
-            }
-        }
 
         renderReportsList(data);
     }).catch(function (err) {
@@ -6388,10 +6946,19 @@ function renderReportsList(data) {
     reports.forEach(function (report) {
         var typeLabel = typeLabels[report.report_type] || report.report_type;
         var title = escapeHtml(report.title || typeLabel);
+        var encodedId = encodeURIComponent(report.id || '');
+        var encodedTitle = encodeURIComponent(report.title || typeLabel || '');
         var dateStr = report.created_at ? formatReportDate(report.created_at) : '-';
 
         var statusBadge = '';
         var downloadBtn = '';
+        var deleteBtn = '<button onclick="deleteReport(decodeURIComponent(\'' + encodedId + '\'), decodeURIComponent(\'' + encodedTitle + '\'))" '
+            + 'title="' + escapeHtml(t('reports.delete_report')) + '" '
+            + 'class="p-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg transition-colors flex items-center justify-center" '
+            + 'aria-label="' + escapeHtml(t('reports.delete_report')) + '">'
+            + '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">'
+            + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3m-9 0h10"/>'
+            + '</svg></button>';
         if (report.status === 'completed') {
             statusBadge = '<span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">' + t('reports.status_completed') + '</span>';
             downloadBtn = '<button onclick="handleReportDownload(\'' + report.id + '\')" '
@@ -6422,6 +6989,7 @@ function renderReportsList(data) {
             + '<div class="flex items-center gap-3 flex-shrink-0">'
             + statusBadge
             + downloadBtn
+            + deleteBtn
             + '</div></div>';
     });
 
@@ -6483,6 +7051,47 @@ function formatFileSize(bytes) {
     return (bytes / 1048576).toFixed(1) + ' MB';
 }
 
+function deleteReport(reportId, reportTitle) {
+    if (!reportId) return;
+    var title = reportTitle || t('reports.untitled');
+    if (!window.confirm(t('reports.delete_confirm', { title: title }))) return;
+
+    var deleteFn = typeof deleteReportAPI === 'function'
+        ? deleteReportAPI
+        : (window.AppAPI && window.AppAPI.deleteReport);
+    if (typeof deleteFn !== 'function') {
+        showToast(t('reports.delete_failed'), 'error');
+        return;
+    }
+
+    deleteFn(reportId).then(function () {
+        showToast(t('reports.delete_success'), 'success');
+        loadReportsTab();
+    }).catch(function (err) {
+        showToast(t('reports.delete_failed') + ': ' + ((err && err.message) || ''), 'error');
+    });
+}
+
+function deleteAllReports() {
+    if (!window.confirm(t('reports.delete_all_confirm'))) return;
+
+    var deleteFn = typeof deleteAllReportsAPI === 'function'
+        ? deleteAllReportsAPI
+        : (window.AppAPI && window.AppAPI.deleteAllReports);
+    if (typeof deleteFn !== 'function') {
+        showToast(t('reports.delete_all_failed'), 'error');
+        return;
+    }
+
+    deleteFn().then(function (data) {
+        showToast(t('reports.delete_all_success', { count: data.deleted_count || 0 }), 'success');
+        _reportsCurrentPage = 1;
+        loadReportsTab();
+    }).catch(function (err) {
+        showToast(t('reports.delete_all_failed') + ': ' + ((err && err.message) || ''), 'error');
+    });
+}
+
 // ============================================
 // REPORT GENERATION MODAL
 // ============================================
@@ -6537,9 +7146,7 @@ function submitReportGeneration() {
         window._reportsInitialized = false;
         loadReportsTab();
     }).catch(function (err) {
-        if (err.status === 402) {
-            showCreditsModal();
-        } else if (err.status === 403) {
+        if (err.status === 402 || err.status === 403) {
             showUpgradeModal(err, 'reports');
         } else {
             showToast(t('reports.generate_failed') + ': ' + err.message, 'error');
@@ -6565,11 +7172,7 @@ function handleReportDownload(reportId) {
         a.remove();
         window.URL.revokeObjectURL(url);
     }).catch(function (err) {
-        if (err.status === 403) {
-            showUpgradeModal(err, 'report_export');
-        } else {
-            showToast(t('reports.download_failed') + ': ' + err.message, 'error');
-        }
+        showToast(t('reports.download_failed') + ': ' + err.message, 'error');
     });
 }
 

@@ -24,7 +24,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 
     <!-- Design Tokens (load before Tailwind so vars are available) -->
-    <link rel="stylesheet" href="/static/css/tokens.css?v=24">
+    <link rel="stylesheet" href="/static/css/tokens.css?v=30">
 
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -230,36 +230,37 @@
     </script>
 
     <!-- i18n (must load first, before other scripts use t()) -->
-    <script src="/static/js/utils/i18n.js?v=42"></script>
+    <script src="/static/js/utils/i18n.js?v=51"></script>
 
     <!-- Utilities first -->
-    <script src="/static/js/utils/helpers.js?v=33"></script>
-    <script src="/static/js/utils/auth.js?v=31"></script>
-    <script src="/static/js/utils/toast.js?v=30"></script>
-<script src="/static/js/utils/upgrade-modal.js?v=4"></script>
+    <script src="/static/js/utils/helpers.js?v=34"></script>
+    <script src="/static/js/utils/auth.js?v=32"></script>
+    <script src="/static/js/utils/toast.js?v=32"></script>
+<script src="/static/js/utils/upgrade-modal.js?v=8"></script>
 
     <!-- Components -->
-    <script src="/static/js/components/score-badge.js?v=30"></script>
+    <script src="/static/js/components/score-badge.js?v=33"></script>
     <script src="/static/js/components/opposition-timeline.js?v=30"></script>
-    <script src="/static/js/components/result-card.js?v=34"></script>
+    <script src="/static/js/components/result-card.js?v=35"></script>
     <script src="/static/js/components/lead-card.js?v=30"></script>
-    <script src="/static/js/components/studio-card.js?v=33"></script>
+    <script src="/static/js/components/studio-card.js?v=37"></script>
 
     <!-- API layer -->
-    <script src="/static/js/api.js?v=35"></script>
+    <script src="/static/js/api.js?v=39"></script>
 
     <!-- App init last -->
-<script src="/static/js/dashboard/app.js?v=64"></script>
+    <script src="/static/js/dashboard/app.js?v=89"></script>
 
     <!-- Handle deep-link from landing page (e.g. ?tab=ai-studio&studio_mode=name&studio_query=nike) -->
     <script>
         (function() {
         var params = new URLSearchParams(window.location.search);
         var tab = params.get('tab');
-        if (tab) {
+        var claimRiskReport = params.get('claim_risk_report');
+        if (tab || claimRiskReport) {
             setTimeout(function () {
                 if (typeof showDashboardTab === 'function') {
-                    showDashboardTab(tab);
+                    showDashboardTab(tab || 'reports');
                 }
                 var mode = params.get('studio_mode');
                 var query = params.get('studio_query');
@@ -318,6 +319,21 @@
                             }
                         }, 300);
                     }
+                }
+                // Handle claimable risk report generated on the landing page
+                if (claimRiskReport) {
+                    if (typeof showDashboardTab === 'function') {
+                        showDashboardTab('reports');
+                    }
+                    (function claimRiskReportWhenReady(attemptsLeft) {
+                        if (typeof claimPendingRiskReport === 'function') {
+                            claimPendingRiskReport(claimRiskReport);
+                            return;
+                        }
+                        if (attemptsLeft > 0) {
+                            setTimeout(function () { claimRiskReportWhenReady(attemptsLeft - 1); }, 100);
+                        }
+                    })(20);
                 }
                 // Clean URL
                 window.history.replaceState({}, '', '/dashboard');

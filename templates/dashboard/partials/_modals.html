@@ -535,8 +535,13 @@
                 });
                 if (res.status === 401) {
                     this.open = false;
-                    var alpineRoot = document.querySelector('[x-data]');
-                    if (alpineRoot && alpineRoot.__x) alpineRoot.__x.$data.showLoginModal = true;
+                    if (typeof window.Alpine !== 'undefined' && typeof window.Alpine.$data === 'function') {
+                        var rootEl = document.querySelector('[x-data]');
+                        if (rootEl) {
+                            var rootData = window.Alpine.$data(rootEl);
+                            if (rootData) rootData.showLoginModal = true;
+                        }
+                    }
                     return;
                 }
                 if (res.status === 403) {
@@ -572,8 +577,11 @@
                     this.open = false;
                     _showBulkResultBanner(0, data.total, 'info', 0);
                 }
-                if (data.created > 0 && typeof _setScanInProgress === 'function' && typeof _getScanDurationMs === 'function') {
-                    _setScanInProgress(_getScanDurationMs(data.created), 'bulk');
+                var queuedScans = typeof _coerceQueuedScanCount === 'function'
+                    ? _coerceQueuedScanCount(data, data.created || 0)
+                    : (data.queued_scans || data.created || 0);
+                if (queuedScans > 0 && typeof _setScanInProgress === 'function' && typeof _getScanDurationMs === 'function') {
+                    _setScanInProgress(_getScanDurationMs(queuedScans), 'bulk');
                 }
                 if (typeof refreshWatchlistAndStats === 'function') refreshWatchlistAndStats();
                 else if (typeof loadWatchlistCache === 'function') loadWatchlistCache();

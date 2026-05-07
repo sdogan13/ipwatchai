@@ -85,12 +85,13 @@ window.AppComponents.renderResultCard = function(r) {
     var pct = Math.round(score * 100);
     var riskLevel = window.AppComponents.getScoreRiskLevel(pct);
 
-    // Use score ring instead of flat badge
-    var scoreRing = window.AppComponents.renderScoreRing(pct, 44);
-    var breakdownHtml = window.AppComponents.renderSimilarityBadges(r.scores);
+    // Similarity category badge (4-bucket text label) replaces the numeric score ring.
+    var scoreRing = window.AppComponents.renderSimilarityCategoryBadge(pct, { size: 'lg' });
+    var breakdownHtml = window.AppComponents.renderSimilarityCategoryBreakdown(r.scores);
     var scoringPathHtml = window.AppComponents.renderScoringPathBadge(r.scores);
     var weightsHtml = window.AppComponents.renderDynamicWeights(r.scores);
-    var thumbnail = window.AppComponents.renderThumbnail(r.image_path, r.name, r.application_no);
+    var displayName = getTrademarkDisplayName(r);
+    var thumbnail = window.AppComponents.renderThumbnail(r.image_path, displayName, r.application_no);
 
     // Exact match badge
     var exactMatchHtml = '';
@@ -205,7 +206,7 @@ window.AppComponents.renderResultCard = function(r) {
         + '<div class="flex items-start gap-3 flex-1 min-w-0">'
         + thumbnail
         + '<div class="flex-1 min-w-0">'
-        + '<div class="font-semibold truncate" style="color:var(--color-text-primary)">' + highlightMatches(r.name || 'N/A', r.scores && r.scores.matched_words) + '</div>'
+        + '<div class="font-semibold truncate" style="color:var(--color-text-primary)">' + highlightMatches(displayName, r.scores && r.scores.matched_words) + '</div>'
         + (r.name_tr && r.name_tr.toLowerCase() !== (r.name || '').toLowerCase() ? '<div class="text-xs mt-0.5" style="color:var(--color-text-faint)">TR: ' + escapeHtml(r.name_tr) + '</div>' : '')
         + '<div class="mt-0.5"><span class="text-xs px-2 py-0.5 rounded-full font-medium" style="color:' + getStatusColor(r.status) + ';background:' + getStatusBg(r.status) + '">' + getStatusText(r.status) + '</span></div>'
         + (r.application_date ? '<div class="text-xs" style="color:var(--color-text-faint)">' + t('common.application_date') + ' ' + formatDateTRShort(r.application_date) + '</div>' : '')

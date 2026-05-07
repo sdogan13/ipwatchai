@@ -116,7 +116,7 @@ window.AppAuth.updatePlanBadges = function () {
         }
     }
 
-    // Live search badge: show monthly remaining
+    // Agentic Search badge: show monthly remaining
     var liveBadge = document.getElementById('live-search-credits-badge');
     if (liveBadge && usage.monthly_live_searches) {
         var ls = usage.monthly_live_searches;
@@ -132,11 +132,6 @@ window.AppAuth.updatePlanBadges = function () {
         holderBadges.forEach(function(el) { el.classList.remove('hidden'); });
     }
 
-    // CSV export: show Enterprise badge for non-enterprise
-    var csvBadge = document.getElementById('csv-enterprise-badge');
-    if (csvBadge && plan !== 'enterprise') {
-        csvBadge.classList.remove('hidden');
-    }
 };
 
 // Expose as globals for inline onclick handlers

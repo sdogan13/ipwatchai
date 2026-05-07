@@ -4,8 +4,9 @@
  */
 window.AppToast = window.AppToast || {};
 
-window.AppToast.showToast = function(message, type) {
+window.AppToast.showToast = function(message, type, options) {
     type = type || 'info';
+    options = options || {};
     var icons = {
         success: '<svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
         error: '<svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
@@ -24,7 +25,33 @@ window.AppToast.showToast = function(message, type) {
     toast.className = 'fixed px-5 py-3 rounded-xl text-white text-sm shadow-lg ' + (colors[type] || colors.info) + ' flex items-center gap-2.5'
         + (isMobile ? ' left-4 right-4 bottom-20' : ' top-4 right-4 max-w-sm');
     toast.style.cssText = 'z-index:var(--z-toast,80);transform:translateY(' + (isMobile ? '8px' : '-8px') + ');opacity:0;transition:transform 0.3s ease, opacity 0.3s ease';
-    toast.innerHTML = (icons[type] || icons.info) + '<span>' + message + '</span>';
+    var icon = document.createElement('span');
+    icon.innerHTML = icons[type] || icons.info;
+    toast.appendChild(icon);
+    var text = document.createElement('span');
+    text.className = 'min-w-0 flex-1';
+    text.textContent = message;
+    toast.appendChild(text);
+    var removeTimer = null;
+    var dismiss = function() {
+        toast.style.transform = 'translateY(-8px)';
+        toast.style.opacity = '0';
+        setTimeout(function() { toast.remove(); }, 300);
+    };
+    if (options.actionLabel && typeof options.onAction === 'function') {
+        var action = document.createElement('button');
+        action.type = 'button';
+        action.className = 'ml-1 px-2 py-1 rounded-lg bg-white/20 hover:bg-white/30 text-white text-xs font-semibold flex-shrink-0 transition-colors';
+        action.textContent = options.actionLabel;
+        action.addEventListener('click', function(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (removeTimer) clearTimeout(removeTimer);
+            dismiss();
+            options.onAction();
+        });
+        toast.appendChild(action);
+    }
     document.body.appendChild(toast);
 
     // Animate in
@@ -34,11 +61,7 @@ window.AppToast.showToast = function(message, type) {
     });
 
     // Animate out after delay
-    setTimeout(function() {
-        toast.style.transform = 'translateY(-8px)';
-        toast.style.opacity = '0';
-        setTimeout(function() { toast.remove(); }, 300);
-    }, 4000);
+    removeTimer = setTimeout(dismiss, options.duration || 4000);
 };
 
 window.AppToast.show = window.AppToast.showToast;

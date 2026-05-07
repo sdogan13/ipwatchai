@@ -10,6 +10,57 @@ window.AppUtils.escapeHtml = function(text) {
     return div.innerHTML;
 };
 
+window.AppUtils._foldTrademarkDisplayName = function(value) {
+    var text = String(value === undefined || value === null ? '' : value).trim().toLowerCase();
+    if (text.normalize) {
+        text = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    }
+    return text
+        .replace(/ı/g, 'i')
+        .replace(/ş/g, 's')
+        .replace(/ğ/g, 'g')
+        .replace(/ü/g, 'u')
+        .replace(/ö/g, 'o')
+        .replace(/ç/g, 'c');
+};
+
+window.AppUtils.isLogoOnlyTrademarkName = function(value) {
+    if (value === undefined || value === null) return true;
+    var raw = String(value).trim();
+    if (!raw) return true;
+    if (raw === '-' || raw === '—' || raw === '–') return true;
+
+    var folded = window.AppUtils._foldTrademarkDisplayName(raw);
+    var noWhitespace = folded.replace(/\s+/g, '');
+    var alnumOnly = folded.replace(/[^a-z0-9]+/g, '');
+
+    return noWhitespace === 'n/a'
+        || noWhitespace === 'n.a.'
+        || alnumOnly === 'sekil';
+};
+
+window.AppUtils.getLogoOnlyMarkLabel = function() {
+    var label = (typeof t === 'function') ? t('common.logo_only_mark') : '';
+    return (!label || label === 'common.logo_only_mark') ? 'Logo' : label;
+};
+
+window.AppUtils.getTrademarkDisplayName = function(record) {
+    var candidates = [];
+    if (record && typeof record === 'object') {
+        candidates.push(record.trademark_name);
+        candidates.push(record.name);
+    } else {
+        candidates.push(record);
+    }
+
+    for (var i = 0; i < candidates.length; i++) {
+        if (!window.AppUtils.isLogoOnlyTrademarkName(candidates[i])) {
+            return String(candidates[i]).trim();
+        }
+    }
+    return window.AppUtils.getLogoOnlyMarkLabel();
+};
+
 window.AppUtils.getSelectedNiceClasses = function() {
     var select = document.getElementById('nice-class-select');
     if (!select) return [];
@@ -186,3 +237,5 @@ var getStatusColor = window.AppUtils.getStatusColor;
 var getStatusBg = window.AppUtils.getStatusBg;
 var getStatusText = window.AppUtils.getStatusText;
 var formatHolderDate = window.AppUtils.formatHolderDate;
+var isLogoOnlyTrademarkName = window.AppUtils.isLogoOnlyTrademarkName;
+var getTrademarkDisplayName = window.AppUtils.getTrademarkDisplayName;

@@ -3,7 +3,7 @@
 <!-- ============================================ -->
 <div id="upgrade-modal" role="dialog" aria-modal="true"
     class="hidden fixed inset-0 flex items-center justify-center modal-mobile-fullscreen"
-    style="background:var(--color-bg-overlay);z-index:var(--z-modal-backdrop)">
+    style="background:var(--color-bg-overlay);z-index:calc(var(--z-modal) + 20)">
     <div class="bg-gray-900 rounded-2xl p-8 max-w-md w-full mx-4 border border-purple-500/30 shadow-2xl">
         <div class="text-center">
             <div class="w-20 h-20 bg-purple-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -41,7 +41,7 @@
                     </li>
                     <li class="flex items-center gap-2">
                         <span class="text-green-400">&#x2713;</span>
-                        <span x-text="t('pricing.f_live_monthly', {n: 10})">10 live searches/month</span>
+                        <span x-text="t('pricing.f_live_monthly', {n: 10})">10 Agentic Searches/month</span>
                     </li>
                 </ul>
                 <span id="upgrade-plan-code" class="sr-only">starter</span>

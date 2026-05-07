@@ -6,6 +6,41 @@
 window.AppComponents = window.AppComponents || {};
 
 // ============================================
+// A0) Similarity category — 4-bucket scheme used by Opposition Radar and search results.
+//     very_high >= 90, high 70-89, medium 50-69, low < 50.
+//     Kept separate from getScoreRiskLevel (5-bucket) to give a simpler text-only UI.
+//     The top bucket is 'very_high' (not 'critical') so radar urgency badges that use
+//     risk_level.critical for "deadline <=7 days" stay visually distinct.
+// ============================================
+window.AppComponents.getSimilarityCategory = function(pct) {
+    if (pct >= 90) return 'very_high';
+    if (pct >= 70) return 'high';
+    if (pct >= 50) return 'medium';
+    return 'low';
+};
+
+window.AppComponents.renderSimilarityCategoryBadge = function(pct, opts) {
+    opts = opts || {};
+    var category = window.AppComponents.getSimilarityCategory(pct);
+    var styleMap = {
+        very_high: 'background:var(--color-risk-critical-bg);color:var(--color-risk-critical-text);border-color:var(--color-risk-critical-border)',
+        high: 'background:var(--color-risk-high-bg);color:var(--color-risk-high-text);border-color:var(--color-risk-high-border)',
+        medium: 'background:var(--color-risk-elevated-bg);color:var(--color-risk-elevated-text);border-color:var(--color-risk-elevated-border)',
+        low: 'background:var(--color-risk-low-bg);color:var(--color-risk-low-text);border-color:var(--color-risk-low-border)'
+    };
+    var size = opts.size || 'md';
+    var sizeClass = size === 'sm'
+        ? 'text-xs px-2 py-0.5'
+        : size === 'lg'
+            ? 'text-sm px-3 py-1.5'
+            : 'text-xs px-2.5 py-1';
+    return '<span class="inline-flex items-center rounded-full font-semibold border whitespace-nowrap ' + sizeClass + '" '
+        + 'style="' + styleMap[category] + '">'
+        + t('risk_level.' + category)
+        + '</span>';
+};
+
+// ============================================
 // A) getScoreColor - Returns inline style string for risk level
 //    Uses CSS variables so dark mode works automatically.
 //    Matches backend RISK_THRESHOLDS exactly (5 levels):
@@ -109,6 +144,34 @@ window.AppComponents.renderScoreBadge = function(score, label) {
     return html;
 };
 
+window.AppComponents.getOriginalTextScore = function(data) {
+    var scores = data && data.scores ? data.scores : (data || {});
+    var textualBreakdown = scores.textual_breakdown || {};
+    var selectedSource = scores.scoring_path_source || textualBreakdown.selected_path || '';
+    var candidates = [
+        scores.path_a_score,
+        textualBreakdown.path_a_score,
+        scores.original_text_score,
+        scores.direct_text_similarity,
+        scores.text_similarity
+    ];
+
+    if (String(selectedSource).toUpperCase() !== 'TRANSLATED') {
+        candidates.push(scores.text_idf_score);
+        candidates.push(textualBreakdown.selected_text_score);
+    }
+
+    for (var i = 0; i < candidates.length; i++) {
+        if (candidates[i] !== undefined && candidates[i] !== null && candidates[i] !== '') {
+            var n = parseFloat(candidates[i]);
+            if (!isNaN(n)) return Math.max(0, Math.min(1, n));
+        }
+    }
+    return 0;
+};
+
+window.AppComponents.getEffectiveTextScore = window.AppComponents.getOriginalTextScore;
+
 // ============================================
 // D) renderSimilarityBadges - Multi-dimension score breakdown with mini progress bars
 //    Shows all non-zero scoring dimensions from the backend
@@ -117,7 +180,7 @@ window.AppComponents.renderSimilarityBadges = function(data) {
     if (!data) return '';
     var scores = data.scores || data;
 
-    var textScore = scores.text_similarity || 0;
+    var textScore = window.AppComponents.getOriginalTextScore(scores);
     var visualScore = scores.visual_similarity || 0;
     var translationScore = scores.translation_similarity || 0;
     var phoneticScore = scores.phonetic_similarity || 0;
@@ -175,6 +238,61 @@ window.AppComponents.renderSimilarityBadges = function(data) {
     if (tokenOverlapScore > 0.3 && tokenOverlapScore < 1.0 && Math.abs(tokenOverlapScore - textScore) > 0.1) {
         html += miniBar(t('scores.token_overlap'), tokenOverlapScore);
         hasBadge = true;
+    }
+
+    html += '</div>';
+    return hasBadge ? html : '';
+};
+
+// ============================================
+// D1b) renderSimilarityCategoryBreakdown - Per-component category badges
+//      Same dimensions as renderSimilarityBadges but emits text categories
+//      (Critical / High / Medium / Low) instead of numeric percentages.
+// ============================================
+window.AppComponents.renderSimilarityCategoryBreakdown = function(data) {
+    if (!data) return '';
+    var scores = data.scores || data;
+
+    var textScore = window.AppComponents.getOriginalTextScore(scores);
+    var visualScore = scores.visual_similarity || 0;
+    var translationScore = scores.translation_similarity || 0;
+    var phoneticScore = scores.phonetic_similarity || 0;
+    var semanticScore = scores.semantic_similarity || 0;
+    var containmentScore = scores.containment || 0;
+
+    function chip(label, value) {
+        var pct = Math.round(value * 100);
+        var category = window.AppComponents.getSimilarityCategory(pct);
+        var colorMap = {
+            very_high: 'var(--color-risk-critical-text)',
+            high: 'var(--color-risk-high-text)',
+            medium: 'var(--color-risk-medium-text)',
+            low: 'var(--color-risk-low-text)'
+        };
+        return '<span class="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-md" style="background:var(--color-bg-muted);color:var(--color-text-secondary)">'
+            + '<span>' + label + ':</span>'
+            + '<span class="font-semibold" style="color:' + colorMap[category] + '">' + t('risk_level.' + category) + '</span>'
+            + '</span>';
+    }
+
+    var html = '<div class="flex gap-2 mt-1.5 flex-wrap">';
+    var hasBadge = false;
+
+    if (textScore > 0.3) { html += chip(t('scores.text'), textScore); hasBadge = true; }
+    if (visualScore > 0.3) { html += chip(t('scores.visual'), visualScore); hasBadge = true; }
+    if (translationScore > 0.3) { html += chip(t('scores.translation'), translationScore); hasBadge = true; }
+    if (phoneticScore > 0.3 && Math.abs(phoneticScore - textScore) > 0.05) {
+        html += chip(t('scores.phonetic'), phoneticScore); hasBadge = true;
+    }
+    if (semanticScore > 0.3 && Math.abs(semanticScore - textScore) > 0.1) {
+        html += chip(t('scores.semantic'), semanticScore); hasBadge = true;
+    }
+    if (containmentScore > 0.3 && containmentScore < 1.0 && Math.abs(containmentScore - textScore) > 0.1) {
+        html += chip(t('scores.containment'), containmentScore); hasBadge = true;
+    }
+    var tokenOverlapScore = scores.token_overlap || 0;
+    if (tokenOverlapScore > 0.3 && tokenOverlapScore < 1.0 && Math.abs(tokenOverlapScore - textScore) > 0.1) {
+        html += chip(t('scores.token_overlap'), tokenOverlapScore); hasBadge = true;
     }
 
     html += '</div>';
@@ -387,13 +505,15 @@ window.AppComponents.renderVsComparison = function(opts) {
     var leftCard = buildPartyCard(opts.newMark || {}, 'rgba(239,68,68,0.4)', 'rgba(239,68,68,0.05)', 'leads.new_application');
     var rightCard = buildPartyCard(opts.existingMark || {}, 'rgba(34,197,94,0.4)', 'rgba(34,197,94,0.05)', 'leads.potential_client');
 
-    // Score ring in center
-    var ringHtml = window.AppComponents.renderScoreRing(scorePercent, ringSize);
+    // Center: caller-supplied HTML (e.g. category badge) or default score ring
+    var centerHtml = opts.centerHtml != null
+        ? opts.centerHtml
+        : window.AppComponents.renderScoreRing(scorePercent, ringSize);
 
     return '<div class="vs-comparison w-full flex items-stretch justify-between gap-0">'
         + '<div class="flex-1 min-w-0">' + leftCard + '</div>'
         + '<div class="flex flex-col items-center justify-center mx-2 flex-shrink-0">'
-        + '<div class="mb-1">' + ringHtml + '</div>'
+        + '<div class="mb-1">' + centerHtml + '</div>'
         + '<span class="text-xs font-bold" style="color:var(--color-text-faint)">VS</span>'
         + '</div>'
         + '<div class="flex-1 min-w-0">' + rightCard + '</div>'

@@ -85,6 +85,7 @@
                         </div>
 
                         <div class="studio-action-cell">
+                            <div class="studio-brush-divider" aria-hidden="true"></div>
                             <button onclick="generateNames()" id="studio-name-btn" class="studio-primary-button">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
                                 <span x-text="t('studio.generate_safe')">Generate Safe Alternatives</span>
@@ -133,21 +134,10 @@
                 <!-- MODE B: Logo Studio -->
                 <div id="studio-logo-panel" class="studio-tool-panel hidden">
                     <div class="studio-form-grid">
-                        <div class="studio-field">
+                        <div class="studio-field md:col-span-2">
                             <label for="studio-logo-name" x-text="t('studio.brand_name')">Brand Name</label>
                             <input id="studio-logo-name" type="text" :placeholder="t('studio.brand_name_placeholder')"
                                    class="studio-input">
-                        </div>
-
-                        <div class="studio-field">
-                            <label for="studio-logo-style" x-text="t('studio.style')">Style</label>
-                            <select id="studio-logo-style" class="studio-input">
-                                <option value="modern" x-text="t('studio.style_modern')">Modern</option>
-                                <option value="classic" x-text="t('studio.style_classic')">Classic</option>
-                                <option value="minimal" x-text="t('studio.style_minimal')">Minimal</option>
-                                <option value="bold" x-text="t('studio.style_bold')">Bold</option>
-                                <option value="playful" x-text="t('studio.style_playful')">Playful</option>
-                            </select>
                         </div>
 
                         <div class="studio-field md:col-span-2">
@@ -158,6 +148,10 @@
 
                         <div class="studio-field">
                             <label for="studio-logo-colors" x-text="t('studio.color_preference')">Color Preference (Optional)</label>
+                            <div class="studio-section-eyebrow" aria-hidden="true">
+                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"/></svg>
+                                <span x-text="t('studio.palette_section_title')">Paint palette</span>
+                            </div>
                             <div id="studio-logo-color-swatches" class="studio-color-swatches" role="group" :aria-label="t('studio.palette_label')">
                                 <button type="button" class="studio-color-swatch" data-value="navy, sky blue and white" data-i18n-value="studio.palette_blue_value" onclick="selectStudioColorPalette(this)" :title="t('studio.palette_blue')">
                                     <span style="background:linear-gradient(135deg,#0f172a 0%,#2563eb 50%,#e0f2fe 100%)"></span>
@@ -174,6 +168,22 @@
                                 <button type="button" class="studio-color-swatch" data-value="indigo, violet and cyan" data-i18n-value="studio.palette_signal_value" onclick="selectStudioColorPalette(this)" :title="t('studio.palette_signal')">
                                     <span style="background:linear-gradient(135deg,#4338ca 0%,#7c3aed 50%,#06b6d4 100%)"></span>
                                     <small x-text="t('studio.palette_signal')">Signal</small>
+                                </button>
+                                <button type="button" class="studio-color-swatch" data-value="gold, amber and cream" data-i18n-value="studio.palette_gold_value" onclick="selectStudioColorPalette(this)" :title="t('studio.palette_gold')">
+                                    <span style="background:linear-gradient(135deg,#854d0e 0%,#ca8a04 50%,#fef9c3 100%)"></span>
+                                    <small x-text="t('studio.palette_gold')">Gold</small>
+                                </button>
+                                <button type="button" class="studio-color-swatch" data-value="terracotta, ochre and cream" data-i18n-value="studio.palette_earth_value" onclick="selectStudioColorPalette(this)" :title="t('studio.palette_earth')">
+                                    <span style="background:linear-gradient(135deg,#78350f 0%,#b45309 50%,#fde68a 100%)"></span>
+                                    <small x-text="t('studio.palette_earth')">Earth</small>
+                                </button>
+                                <button type="button" class="studio-color-swatch" data-value="burgundy, wine and ivory" data-i18n-value="studio.palette_royal_value" onclick="selectStudioColorPalette(this)" :title="t('studio.palette_royal')">
+                                    <span style="background:linear-gradient(135deg,#4c0519 0%,#9f1239 50%,#ffe4e6 100%)"></span>
+                                    <small x-text="t('studio.palette_royal')">Royal</small>
+                                </button>
+                                <button type="button" class="studio-color-swatch" data-value="coral, orange and peach" data-i18n-value="studio.palette_sunset_value" onclick="selectStudioColorPalette(this)" :title="t('studio.palette_sunset')">
+                                    <span style="background:linear-gradient(135deg,#be185d 0%,#f97316 50%,#fed7aa 100%)"></span>
+                                    <small x-text="t('studio.palette_sunset')">Sunset</small>
                                 </button>
                             </div>
                             <input id="studio-logo-colors" type="text" :placeholder="t('studio.color_placeholder')"
@@ -200,6 +210,7 @@
                         </div>
                     </div>
 
+                    <div class="studio-brush-divider" aria-hidden="true"></div>
                     <div class="studio-logo-action-row">
                         <div id="studio-logo-credit-info" class="studio-credit-note"></div>
                         <button onclick="generateLogos()" id="studio-logo-btn" class="studio-primary-button studio-logo-submit">
@@ -222,8 +233,6 @@
                         <div class="studio-logo-skeleton-grid">
                             <div class="studio-logo-skeleton"><div class="skeleton aspect-square"></div><div class="p-4 space-y-2"><div class="skeleton h-4 w-2/3"></div><div class="skeleton h-3 w-1/2"></div></div></div>
                             <div class="studio-logo-skeleton"><div class="skeleton aspect-square"></div><div class="p-4 space-y-2"><div class="skeleton h-4 w-3/4"></div><div class="skeleton h-3 w-1/3"></div></div></div>
-                            <div class="studio-logo-skeleton"><div class="skeleton aspect-square"></div><div class="p-4 space-y-2"><div class="skeleton h-4 w-1/2"></div><div class="skeleton h-3 w-2/3"></div></div></div>
-                            <div class="studio-logo-skeleton"><div class="skeleton aspect-square"></div><div class="p-4 space-y-2"><div class="skeleton h-4 w-2/3"></div><div class="skeleton h-3 w-1/2"></div></div></div>
                         </div>
                         <p class="studio-state-note" x-text="t('studio.logo_loading')">AI is generating logo variations...</p>
                     </div>
@@ -275,9 +284,14 @@
                         <h3 x-text="t('studio.history_title')">Generation history</h3>
                         <p x-text="t('studio.history_subtitle')">Your recent AI Studio runs</p>
                     </div>
-                    <button type="button" onclick="loadStudioHistory()" class="studio-icon-button" :title="t('studio.refresh_history')" :aria-label="t('studio.refresh_history')">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582M20 20v-5h-.581M5.635 16.365A8 8 0 0018.364 17.1M18.365 7.635A8 8 0 005.636 6.9"/></svg>
-                    </button>
+                    <div class="studio-history-header-actions">
+                        <button type="button" onclick="loadStudioHistory()" class="studio-icon-button" :title="t('studio.refresh_history')" :aria-label="t('studio.refresh_history')">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582M20 20v-5h-.581M5.635 16.365A8 8 0 0018.364 17.1M18.365 7.635A8 8 0 005.636 6.9"/></svg>
+                        </button>
+                        <button type="button" onclick="clearStudioHistory()" class="studio-icon-button is-danger" :title="t('studio.history_clear')" :aria-label="t('studio.history_clear')">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3m-7 0h8m-11 0h14"/></svg>
+                        </button>
+                    </div>
                 </div>
                 <div class="studio-history-filters" role="group" :aria-label="t('studio.history_filter_label')">
                     <button type="button" class="studio-history-filter is-active" data-studio-history-filter="all" onclick="setStudioHistoryFilter('all')" x-text="t('studio.history_filter_all')">All</button>

@@ -34,7 +34,7 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
             monthly_ai_credits: 10,
             monthly_applications: 1,
             can_track_logos: true,
-            can_download_portfolio: false,
+            can_download_portfolio: true,
             can_export_csv_leads: true,
             can_use_live_scraping: true,
             max_users: 3,
@@ -96,7 +96,7 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
         ai_credits: { feature: 'monthly_ai_credits', kind: 'numeric' },
         name_suggestions: { feature: 'name_suggestions_per_session', kind: 'numeric' },
         leads: { feature: 'daily_lead_views', kind: 'numeric' },
-        csv_export: { feature: 'api_access', kind: 'boolean', allowedPlans: ['enterprise'] },
+        csv_export: { feature: 'can_export_csv_leads', kind: 'boolean' },
         auto_scan: { feature: 'auto_scan_max_items', kind: 'numeric' },
         portfolio_download: { feature: 'can_download_portfolio', kind: 'boolean' },
         api_access: { feature: 'api_access', kind: 'boolean' }
@@ -107,15 +107,15 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
         live_search: ['monthly_live_searches', 'max_daily_quick_searches', 'monthly_reports'],
         watchlist_items: ['max_watchlist_items', 'auto_scan_max_items', 'monthly_reports'],
         watchlist_logo: ['can_track_logos', 'max_watchlist_items', 'monthly_live_searches'],
-        reports: ['monthly_reports', 'can_export_reports', 'monthly_live_searches'],
-        report_export: ['can_export_reports', 'monthly_reports', 'monthly_live_searches'],
+        reports: ['monthly_reports', 'monthly_live_searches', 'max_daily_quick_searches'],
+        report_export: ['can_export_reports', 'monthly_live_searches', 'can_download_portfolio'],
         applications: ['monthly_applications', 'monthly_ai_credits', 'can_track_logos'],
         ai_credits: ['monthly_ai_credits', 'name_suggestions_per_session', 'can_track_logos'],
         name_suggestions: ['name_suggestions_per_session', 'monthly_ai_credits', 'can_track_logos'],
         leads: ['daily_lead_views', 'can_export_csv_leads', 'can_download_portfolio'],
         csv_export: ['api_access', 'daily_lead_views', 'can_download_portfolio'],
         auto_scan: ['auto_scan_max_items', 'max_watchlist_items', 'monthly_live_searches'],
-        portfolio_download: ['can_download_portfolio', 'daily_lead_views', 'can_export_csv_leads'],
+        portfolio_download: ['can_download_portfolio', 'max_watchlist_items', 'max_daily_quick_searches'],
         api_access: ['api_access', 'priority_support', 'dedicated_account_manager']
     };
     var CONTEXT_COPY = {
@@ -286,6 +286,9 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
     function mergeDetail(detail, fallbackContext) {
         var normalized = extractDetail(detail);
         if (!normalized.upgrade_context && fallbackContext) normalized.upgrade_context = fallbackContext;
+        if (!normalized.upgrade_context && normalized.error === 'credits_exhausted') {
+            normalized.upgrade_context = 'ai_credits';
+        }
         if (!normalized.current_plan && window.AppAuth && window.AppAuth.currentUserPlan) {
             normalized.current_plan = window.AppAuth.currentUserPlan;
         }
@@ -381,10 +384,11 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
                     ? t('pricing.f_unlimited_live')
                     : t('pricing.f_live_monthly', { n: plan.monthly_live_searches });
             case 'monthly_reports':
-            case 'can_export_reports':
                 return isUnlimited(plan.monthly_reports)
                     ? t('pricing.f_unlimited_reports')
-                    : t('pricing.f_reports_export', { n: plan.monthly_reports });
+                    : t('pricing.f_reports', { n: plan.monthly_reports });
+            case 'can_export_reports':
+                return t('upgrade.report_export_eyebrow');
             case 'monthly_applications':
                 return isUnlimited(plan.monthly_applications)
                     ? t('pricing.f_unlimited_applications')
@@ -428,6 +432,7 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
             if (label && unique.indexOf(label) === -1) unique.push(label);
             if (unique.length >= 3) break;
         }
+        if (context === 'portfolio_download') return unique;
         if (unique.length < 3) {
             ['max_daily_quick_searches', 'max_watchlist_items', 'monthly_live_searches'].forEach(function (featureKey) {
                 var label = featureLabel(planName, featureKey);
@@ -514,6 +519,7 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
         var modal = document.getElementById('upgrade-modal');
         if (!modal) return null;
         var offer = render(detail, fallbackContext);
+        modal.style.zIndex = 'calc(var(--z-modal) + 20)';
         modal.classList.remove('hidden');
         if (typeof lockBodyScroll === 'function') lockBodyScroll();
         return offer;
@@ -536,7 +542,7 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
     function shouldHandle(detail, fallbackContext) {
         var normalized = mergeDetail(detail, fallbackContext);
         if (normalized.recommended_plan) return true;
-        return ['upgrade_required', 'limit_exceeded', 'daily_limit_exceeded', 'monthly_limit_exceeded'].indexOf(normalized.error || '') >= 0;
+        return ['upgrade_required', 'limit_exceeded', 'daily_limit_exceeded', 'monthly_limit_exceeded', 'credits_exhausted'].indexOf(normalized.error || '') >= 0;
     }
 
     function maybeHandle(detail, fallbackContext) {

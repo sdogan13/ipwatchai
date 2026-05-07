@@ -4,12 +4,13 @@
  */
 window.AppComponents = window.AppComponents || {};
 
+// Radar uses the shared 4-bucket similarity category from score-badge.js.
+
 window.AppComponents.renderLeadCard = function(lead) {
     var scorePercent = Math.round(lead.similarity_score * 100);
-    var riskLevel = window.AppComponents.getScoreRiskLevel(scorePercent);
+    var category = window.AppComponents.getSimilarityCategory(scorePercent);
 
-    // Use score ring instead of flat badge
-    var scoreRing = window.AppComponents.renderScoreRing(scorePercent, 40);
+    var categoryBadge = window.AppComponents.renderSimilarityCategoryBadge(scorePercent, { size: 'md' });
 
     var urgencyHtml = '';
     if (lead.urgency_level === 'critical') urgencyHtml = '<span class="text-xs px-2 py-0.5 rounded-full font-medium" style="' + window.AppComponents.getScoreColor(90) + '">' + t('risk_level.critical') + '</span>';
@@ -25,15 +26,6 @@ window.AppComponents.renderLeadCard = function(lead) {
     // Thumbnails for both parties (same approach as search result cards)
     var newMarkThumb = window.AppComponents.renderThumbnail(lead.new_mark_image, lead.new_mark_name, lead.new_mark_app_no, 'w-14 h-14');
     var existMarkThumb = window.AppComponents.renderThumbnail(lead.existing_mark_image, lead.existing_mark_name, lead.existing_mark_app_no, 'w-14 h-14');
-
-    // 4-component score breakdown
-    var breakdownScores = {
-        text_similarity: lead.text_similarity,
-        semantic_similarity: lead.semantic_similarity,
-        visual_similarity: lead.visual_similarity,
-        translation_similarity: lead.translation_similarity
-    };
-    var breakdownHtml = window.AppComponents.renderSimilarityBadges(breakdownScores);
 
     // Extracted goods indicators
     var newMarkEgHtml = '';
@@ -61,11 +53,10 @@ window.AppComponents.renderLeadCard = function(lead) {
 
     var inner = '<div class="flex items-start justify-between mb-3">'
         + '<div class="flex items-center gap-2 flex-wrap">' + urgencyHtml + statusHtml + '</div>'
-        + scoreRing
+        + categoryBadge
         + '</div>'
         + (timelineBarHtml ? '<div class="mb-3">' + timelineBarHtml + '</div>'
            : timelineHtml ? '<div class="mb-3">' + timelineHtml + '</div>' : '')
-        + (breakdownHtml ? '<div class="mb-3">' + breakdownHtml + '</div>' : '')
         + '<div class="grid grid-cols-1 md:grid-cols-2 gap-3">'
         + '<div class="rounded-lg p-3 border" style="background:rgba(239,68,68,0.05);border-color:rgba(239,68,68,0.15)">'
         + '<div class="text-xs font-semibold mb-1" style="color:var(--color-risk-critical-text)">' + t('leads.new_application').toUpperCase() + '</div>'
@@ -101,7 +92,7 @@ window.AppComponents.renderLeadCard = function(lead) {
         + (lead.created_at ? '<span class="text-xs" style="color:var(--color-text-faint)">' + t('leads.detected') + ': ' + timeAgo(lead.created_at) + '</span>' : '')
         + '</div>';
 
-    return window.AppComponents.renderCardShell(inner, { onclick: "showLeadDetail('" + lead.id + "')", riskLevel: riskLevel });
+    return window.AppComponents.renderCardShell(inner, { onclick: "showLeadDetail('" + lead.id + "')", riskLevel: category });
 };
 
 /**
@@ -110,6 +101,7 @@ window.AppComponents.renderLeadCard = function(lead) {
  */
 window.AppComponents.renderLeadRow = function(lead) {
     var scorePercent = Math.round(lead.similarity_score * 100);
+    var categoryBadge = window.AppComponents.renderSimilarityCategoryBadge(scorePercent, { size: 'sm' });
 
     // Urgency badge (compact)
     var urgencyHtml = '';
@@ -126,9 +118,6 @@ window.AppComponents.renderLeadRow = function(lead) {
     } else {
         urgencyHtml = '<span class="text-xs whitespace-nowrap" style="color:var(--color-text-faint)">' + lead.days_until_deadline + t('leads.days_short', {n:''}).trim() + '</span>';
     }
-
-    // Score ring (small)
-    var scoreRing = window.AppComponents.renderScoreRing(scorePercent, 32);
 
     // Thumbnails (same approach as search result cards)
     var newThumb = window.AppComponents.renderThumbnail(lead.new_mark_image, lead.new_mark_name, lead.new_mark_app_no, 'w-12 h-12');
@@ -154,7 +143,7 @@ window.AppComponents.renderLeadRow = function(lead) {
         + 'style="border-bottom:1px solid var(--color-border)" '
         + 'onclick="showLeadDetail(\'' + lead.id + '\')">'
         + '<td class="px-3 py-2 text-center">' + urgencyHtml + '</td>'
-        + '<td class="px-3 py-2 text-center">' + scoreRing + '</td>'
+        + '<td class="px-3 py-2 text-center">' + categoryBadge + '</td>'
         + '<td class="px-3 py-2">'
         +   '<div class="flex items-center gap-2">'
         +     '<div onclick="event.stopPropagation()">' + newThumb + '</div>'
@@ -184,7 +173,7 @@ window.AppComponents.renderLeadRow = function(lead) {
  */
 window.AppComponents.renderLeadMobileCard = function(lead) {
     var scorePercent = Math.round(lead.similarity_score * 100);
-    var scoreRing = window.AppComponents.renderScoreRing(scorePercent, 28);
+    var categoryBadge = window.AppComponents.renderSimilarityCategoryBadge(scorePercent, { size: 'sm' });
     var newThumb = window.AppComponents.renderThumbnail(lead.new_mark_image, lead.new_mark_name, lead.new_mark_app_no, 'w-12 h-12');
     var existThumb = window.AppComponents.renderThumbnail(lead.existing_mark_image, lead.existing_mark_name, lead.existing_mark_app_no, 'w-12 h-12');
 
@@ -202,9 +191,9 @@ window.AppComponents.renderLeadMobileCard = function(lead) {
 
     return '<div class="px-3 py-2.5 cursor-pointer active:bg-black/5" style="border-color:var(--color-border)" '
         + 'onclick="showLeadDetail(\'' + lead.id + '\')">'
-        // Row 1: urgency + score + deadline
+        // Row 1: urgency + similarity category + deadline
         + '<div class="flex items-center justify-between mb-1.5">'
-        +   '<div class="flex items-center gap-2">' + urgencyHtml + scoreRing + '</div>'
+        +   '<div class="flex items-center gap-2">' + urgencyHtml + categoryBadge + '</div>'
         +   '<span class="text-xs" style="color:var(--color-text-faint)">' + deadlineStr + '</span>'
         + '</div>'
         // Row 2: new mark vs existing mark

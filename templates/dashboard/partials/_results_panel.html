@@ -141,10 +141,13 @@
     </div>
 
     <!-- Plan Usage & Credits Row -->
-    <div id="plan-usage-row" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+    <div id="plan-usage-row" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
         <!-- Quick Search Credits -->
         <div class="rounded-xl shadow-sm p-4 border" style="background:var(--color-bg-card);border-color:var(--color-border)">
-            <div class="text-xs font-medium" style="color:var(--color-text-muted)" x-text="t('dashboard.quick_searches')">Quick Searches</div>
+            <div class="flex items-center justify-between gap-2">
+                <div class="text-xs font-medium truncate" style="color:var(--color-text-muted)" x-text="t('dashboard.quick_searches')">Quick Searches</div>
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide flex-shrink-0" style="background:var(--color-bg-muted);color:var(--color-text-faint)" x-text="t('dashboard.period_daily')">Daily</span>
+            </div>
             <div class="flex items-center justify-between mt-1">
                 <span id="usage-quick-text" class="text-lg font-bold" style="color:var(--color-text-primary)">-</span>
                 <div id="usage-quick-ring" class="flex-shrink-0"></div>
@@ -155,7 +158,10 @@
         </div>
         <!-- Live Search Credits -->
         <div class="rounded-xl shadow-sm p-4 border" style="background:var(--color-bg-card);border-color:var(--color-border)">
-            <div class="text-xs font-medium" style="color:var(--color-text-muted)" x-text="t('dashboard.live_searches')">Live Searches</div>
+            <div class="flex items-center justify-between gap-2">
+                <div class="text-xs font-medium truncate" style="color:var(--color-text-muted)" x-text="t('dashboard.live_searches')">Live Searches</div>
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide flex-shrink-0" style="background:var(--color-bg-muted);color:var(--color-text-faint)" x-text="t('dashboard.period_monthly')">Monthly</span>
+            </div>
             <div class="flex items-center justify-between mt-1">
                 <span id="usage-live-text" class="text-lg font-bold" style="color:var(--color-text-primary)">-</span>
                 <div id="usage-live-ring" class="flex-shrink-0"></div>
@@ -166,7 +172,10 @@
         </div>
         <!-- Watchlist Usage -->
         <div class="rounded-xl shadow-sm p-4 border" style="background:var(--color-bg-card);border-color:var(--color-border)">
-            <div class="text-xs font-medium" style="color:var(--color-text-muted)" x-text="t('dashboard.watchlist_used')">Watchlist</div>
+            <div class="flex items-center justify-between gap-2">
+                <div class="text-xs font-medium truncate" style="color:var(--color-text-muted)" x-text="t('dashboard.watchlist_used')">Watchlist</div>
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide flex-shrink-0" style="background:var(--color-bg-muted);color:var(--color-text-faint)" x-text="t('dashboard.period_total')">Total</span>
+            </div>
             <div class="flex items-center justify-between mt-1">
                 <span id="usage-watchlist-text" class="text-lg font-bold" style="color:var(--color-text-primary)">-</span>
                 <div id="usage-watchlist-ring" class="flex-shrink-0"></div>
@@ -175,9 +184,26 @@
                 <div id="usage-watchlist-bar" class="h-full rounded-full transition-all" style="background:#22c55e;width:0%"></div>
             </div>
         </div>
+        <!-- Report Usage -->
+        <div class="rounded-xl shadow-sm p-4 border" style="background:var(--color-bg-card);border-color:var(--color-border)">
+            <div class="flex items-center justify-between gap-2">
+                <div class="text-xs font-medium truncate" style="color:var(--color-text-muted)" x-text="t('search.risk_report_title')">Risk Raporu</div>
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide flex-shrink-0" style="background:var(--color-bg-muted);color:var(--color-text-faint)" x-text="t('dashboard.period_monthly')">Monthly</span>
+            </div>
+            <div class="flex items-center justify-between mt-1">
+                <span id="usage-reports-text" class="text-lg font-bold" style="color:var(--color-text-primary)">-</span>
+                <div id="usage-reports-ring" class="flex-shrink-0"></div>
+            </div>
+            <div class="w-full h-1.5 rounded-full mt-2" style="background:var(--color-border)">
+                <div id="usage-reports-bar" class="h-full rounded-full transition-all" style="background:#10b981;width:0%"></div>
+            </div>
+        </div>
         <!-- AI Credits (unified pool: name gen + logo gen) -->
         <div id="usage-ai-card" class="rounded-xl shadow-sm p-4 border hidden" style="background:var(--color-bg-card);border-color:var(--color-border)">
-            <div class="text-xs font-medium" style="color:var(--color-text-muted)" x-text="t('dashboard.ai_credits')">AI Credits</div>
+            <div class="flex items-center justify-between gap-2">
+                <div class="text-xs font-medium truncate" style="color:var(--color-text-muted)" x-text="t('dashboard.ai_credits')">AI Credits</div>
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide flex-shrink-0" style="background:var(--color-bg-muted);color:var(--color-text-faint)" x-text="t('dashboard.period_monthly')">Monthly</span>
+            </div>
             <div class="flex items-center justify-between mt-1">
                 <span id="usage-ai-text" class="text-lg font-bold" style="color:var(--color-text-primary)">-</span>
                 <div id="usage-ai-ring" class="flex-shrink-0"></div>
@@ -207,7 +233,6 @@
                 </div>
                 <div id="auto-scan-badge" class="mt-1"></div>
                 <div id="credit-reset-date" class="text-xs mt-1" style="color:var(--color-text-faint)"></div>
-                <div id="plan-limits-info" class="mt-2 pt-2 space-y-1" style="border-top:1px solid var(--color-border)"></div>
             </div>
         </div>
     </div>
@@ -223,19 +248,19 @@
     <!-- Chart + Aksiyon Gerekli -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
 
-        <!-- Left: Chart (original size) -->
-        <div class="lg:col-span-2">
+        <!-- Left: Chart (compact — 1/3 width to give Action Required more room) -->
+        <div class="lg:col-span-1">
             <div class="shadow-sm rounded-xl p-6 border" style="background:var(--color-bg-card);border-color:var(--color-border)">
                 <h3 class="text-lg font-semibold mb-4" style="color:var(--color-text-primary)" x-text="t('dashboard.risk_distribution')">Risk Distribution</h3>
-                <div class="relative h-64 w-full">
+                <div class="relative h-56 w-full">
                     <canvas id="riskChart"></canvas>
                 </div>
                 <div id="alert-status-breakdown" class="flex flex-wrap gap-2 mt-3 hidden"></div>
             </div>
         </div>
 
-        <!-- Right: Aksiyon Gerekli cards -->
-        <div class="flex flex-col gap-6">
+        <!-- Right: Aksiyon Gerekli cards (now 2/3 width) -->
+        <div class="lg:col-span-2 flex flex-col gap-6">
             <!-- Yenileme (Renewal) Deadlines Card -->
             <div class="shadow-sm rounded-xl border overflow-hidden flex-1" style="background:var(--color-bg-card);border-color:var(--color-border)">
                 <div class="px-6 py-4 border-b flex justify-between items-center" style="background:#fefce8;border-color:#fef08a">
@@ -284,7 +309,7 @@
                              :class="d.days_left < 10 ? 'border-red-500 bg-red-50' : 'border-orange-300'">
                             <div class="flex justify-between items-start">
                                 <div>
-                                    <p class="font-semibold text-sm" style="color:var(--color-text-primary)" x-text="d.conflicting_brand"></p>
+                                    <p class="font-semibold text-sm" style="color:var(--color-text-primary)" x-text="getTrademarkDisplayName(d.conflicting_brand)"></p>
                                     <p class="text-xs" style="color:var(--color-text-muted)"><span x-text="t('common.app_no_label')">Basvuru No:</span> <span x-text="d.app_no"></span></p>
                                 </div>
                                 <div class="text-right ml-2 flex-shrink-0">

@@ -8,25 +8,6 @@
             <p class="text-sm mt-1" style="color:var(--color-text-muted)" x-text="t('watchlist.monitoring_active')">Monitoring</p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
-            <!-- View Tabs: İtiraz (left, red) + Yenileme (right, amber) -->
-            <button id="wl-view-tab-appeals" onclick="setWatchlistView('appeals')"
-                    class="px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
-                    style="background:rgba(220,38,38,0.07);color:#dc2626;border:1px solid rgba(220,38,38,0.3)">
-                <!-- Gavel / legal objection -->
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9"/></svg>
-                <span x-text="t('watchlist.view_appeals')">İtiraz</span>
-            </button>
-            <button id="wl-view-tab-renewal" onclick="setWatchlistView('renewal')"
-                    class="px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
-                    style="background:rgba(217,119,6,0.07);color:#d97706;border:1px solid rgba(217,119,6,0.3)">
-                <!-- Calendar / renewal deadline -->
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-                <span x-text="t('watchlist.view_renewal')">Yenileme</span>
-            </button>
-
-            <!-- Separator -->
-            <div class="self-stretch w-px mx-1" style="background:var(--color-border)"></div>
-
             <!-- Risk Eşiği + Tümünü Tara (grouped together) -->
             <div class="flex items-center gap-1.5">
                 <label class="text-xs font-medium whitespace-nowrap" style="color:var(--color-text-muted)" x-text="t('watchlist.filter_threshold')"></label>
@@ -94,7 +75,7 @@
         </div>
     </div>
 
-    <!-- Search + Sort Bar -->
+    <!-- Search + Filters Bar -->
     <div class="flex flex-wrap items-center gap-3 mb-4">
         <!-- Search -->
         <div class="relative flex-1 min-w-[200px] max-w-sm">
@@ -103,6 +84,16 @@
             <button id="wl-search-clear" onclick="clearWatchlistSearch()" class="absolute right-2 top-1/2 -translate-y-1/2 hidden p-1 rounded-full hover:bg-gray-200" style="color:var(--color-text-faint)">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
             </button>
+        </div>
+
+        <!-- View Filter -->
+        <div class="flex items-center gap-1.5">
+            <label class="text-xs font-medium whitespace-nowrap" style="color:var(--color-text-muted)" x-text="t('watchlist.filter_view')">View</label>
+            <select id="wl-view-select" onchange="onWatchlistViewFilterChange()" class="text-xs px-2 py-1.5 rounded-lg" style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
+                <option value="all" selected x-text="t('watchlist.view_all')">All</option>
+                <option value="appeals" x-text="t('watchlist.view_appeals')">Appeals</option>
+                <option value="renewal" x-text="t('watchlist.view_renewal')">Renewal</option>
+            </select>
         </div>
 
         <!-- Sort Dropdown -->

@@ -178,6 +178,14 @@
             .modal-mobile-fullscreen { align-items: stretch !important; padding: 0 !important; }
             .modal-mobile-fullscreen > div { max-width: 100% !important; border-radius: 0 !important; max-height: 100vh !important; height: 100vh; }
         }
+        .pricing-feature-list > li {
+            min-height: 1.5rem;
+            align-items: flex-start;
+        }
+        .pricing-feature-list > li > span:last-child {
+            min-width: 0;
+            line-height: 1.25rem;
+        }
     </style>
 
     <!-- Dark mode init (IIFE before body paint) -->
@@ -352,7 +360,7 @@
                     @keydown.enter="showSearchHistory = false; publicSearch()"
                     @keydown.escape="showSearchHistory = false"
                     @click="if(searchHistory.length) showSearchHistory = true"
-                    @input="showSearchHistory = (searchQuery.trim().length > 0 && filteredSearchHistory().length > 0); if(!searchQuery.trim() && !selectedImage) { searchResults = []; searchError = ''; expandedResult = null; }"
+                    @input="showSearchHistory = (searchQuery.trim().length > 0 && filteredSearchHistory().length > 0); clearRiskReportState(); if(!searchQuery.trim() && !selectedImage) { searchResults = []; searchError = ''; expandedResult = null; }"
                     :placeholder="t('landing.search_placeholder')"
                     class="flex-1 px-4 py-4 text-base outline-none min-w-0"
                     style="background:transparent;color:var(--color-text-primary)"
@@ -360,7 +368,7 @@
                     maxlength="100"
                 >
                 <button x-show="searchQuery.trim()" x-cloak type="button"
-                        @click="searchQuery = ''; if(!selectedImage) { searchResults = []; searchError = ''; expandedResult = null; }"
+                        @click="searchQuery = ''; clearRiskReportState(); if(!selectedImage) { searchResults = []; searchError = ''; expandedResult = null; }"
                         class="pr-4" style="color:var(--color-text-faint)">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
@@ -566,17 +574,70 @@
             </div>
         </div>
 
-        <!-- Ara Button (unified for text + image + classes) -->
+        <!-- Search Buttons (unified for text + image + classes) -->
         <div class="max-w-2xl mx-auto mb-4">
-            <button
-                @click="publicSearch()"
-                :disabled="searchLoading || (!searchQuery.trim() && !selectedImage)"
-                class="w-full py-3.5 rounded-xl font-medium text-white flex items-center justify-center gap-2.5 disabled:opacity-50 transition-all text-base"
-                style="background:var(--color-primary);box-shadow:0 4px 14px rgba(99,102,241,0.3)">
-                <svg x-show="!searchLoading" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                <svg x-show="searchLoading" x-cloak class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                <span x-text="t('search.button')">Ara</span>
-            </button>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button
+                    @click="publicSearch()"
+                    :disabled="searchLoading || (!searchQuery.trim() && !selectedImage)"
+                    class="w-full py-3.5 rounded-xl font-medium text-white flex items-center justify-center gap-2.5 disabled:opacity-50 transition-all text-base"
+                    style="background:var(--color-primary);box-shadow:0 4px 14px rgba(99,102,241,0.3)">
+                    <svg x-show="!searchLoading" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                    <svg x-show="searchLoading" x-cloak class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                    <span x-text="t('search.button')">Ara</span>
+                </button>
+                <button
+                    id="landing-risk-report-btn"
+                    @click="generateRiskReport()"
+                    :disabled="searchLoading || riskReportLoading || searchResults.length === 0"
+                    class="w-full py-3.5 px-3 rounded-xl font-medium flex items-center justify-center gap-2.5 disabled:opacity-50 transition-all text-sm sm:text-base"
+                    style="background:linear-gradient(135deg, #22c55e, #16a34a);color:white;border:1px solid #16a34a;box-shadow:0 4px 14px rgba(34,197,94,0.25)"
+                    :title="t('search.risk_report_button')">
+                    <svg x-show="!riskReportLoading" class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414A1 1 0 0119 9.414V19a2 2 0 01-2 2z"/>
+                    </svg>
+                    <svg x-show="riskReportLoading" x-cloak class="w-5 h-5 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                    </svg>
+                    <span class="truncate" x-text="riskReportLoading ? t('search.risk_report_loading') : t('search.risk_report_button')">Risk Raporu Oluştur</span>
+                </button>
+            </div>
+            <div x-show="riskReport && !riskReportLoading && !riskReportError" x-cloak
+                 data-testid="landing-risk-report-ready-card"
+                 class="mt-3 rounded-xl p-4 text-left cursor-pointer transition-all hover:opacity-95"
+                 style="background:rgba(34,197,94,0.10);border:1px solid rgba(34,197,94,0.35);box-shadow:var(--shadow-card)"
+                 @click="openRiskReportPdf(riskReport)">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
+                         style="background:rgba(34,197,94,0.18);color:#16a34a">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414A1 1 0 0119 9.414V19a2 2 0 01-2 2z"/>
+                        </svg>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <h3 class="text-sm font-bold" style="color:var(--color-text-primary)"
+                            x-text="t('search.risk_report_ready_view')"></h3>
+                        <p class="text-xs mt-0.5" style="color:var(--color-text-muted)"
+                           x-text="t('search.risk_report_advisory')"></p>
+                    </div>
+                    <button type="button" @click.stop="openRiskReportPdf(riskReport)"
+                            data-testid="landing-risk-report-open-button"
+                            class="px-3 py-2 rounded-lg text-sm font-semibold flex-shrink-0"
+                            style="background:#16a34a;color:white"
+                            x-text="t('search.risk_report_open')"></button>
+                    <button type="button" @click.stop="riskReport = null; riskReportError = ''"
+                            class="p-1.5 rounded-lg hover:opacity-70 flex-shrink-0"
+                            style="color:var(--color-text-faint)"
+                            :aria-label="t('search.risk_report_dismiss')">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
             <p x-show="!searchLoading" class="mt-2 text-center text-sm px-1" style="color:var(--color-text-muted)" x-text="t('landing.search_hint')"></p>
             <div x-show="searchLoading" x-cloak class="mt-2 flex items-center justify-center gap-2 text-sm font-medium" style="color:var(--color-primary)">
                 <span class="animate-pulse">&#9203;</span>
@@ -592,6 +653,133 @@
         <!-- Search Results (scrollable) -->
         <div x-show="searchResults.length > 0" x-cloak class="max-w-2xl mx-auto text-left mb-6">
             <div class="mb-3 text-sm font-medium" style="color:var(--color-text-secondary)" x-text="t('landing.top_matches', { count: searchResults.length })"></div>
+
+            <!-- Advisory risk report -->
+            <div x-show="riskReportLoading || riskReportError" x-cloak
+                 class="rounded-xl p-4 mb-3"
+                 style="background:var(--color-bg-card);border:1px solid var(--color-border);box-shadow:var(--shadow-card)">
+                <div class="flex items-start gap-3">
+                    <div class="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
+                         style="background:rgba(79,70,229,0.12);color:var(--color-primary)">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414A1 1 0 0119 9.414V19a2 2 0 01-2 2z"/>
+                        </svg>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-start gap-2">
+                            <div class="flex-1 min-w-0">
+                                <h3 class="text-sm font-bold" style="color:var(--color-text-primary)"
+                                    x-text="t('search.risk_report_title')"></h3>
+                                <p class="text-xs mt-0.5" style="color:var(--color-text-muted)"
+                                   x-text="t('search.risk_report_advisory')"></p>
+                            </div>
+                            <button @click="riskReport = null; riskReportError = ''"
+                                    class="p-1.5 rounded-lg hover:opacity-70 flex-shrink-0"
+                                    style="color:var(--color-text-faint)"
+                                    :aria-label="t('search.risk_report_dismiss')">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                          d="M6 18L18 6M6 6l12 12"/>
+                                </svg>
+                            </button>
+                        </div>
+
+                        <div x-show="riskReportLoading" x-cloak
+                             class="mt-4 flex items-center gap-2 text-sm font-medium"
+                             style="color:var(--color-primary)">
+                            <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"
+                                        stroke-width="4"/>
+                                <path class="opacity-75" fill="currentColor"
+                                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                            </svg>
+                            <span x-text="t('search.risk_report_loading')"></span>
+                        </div>
+
+                        <div x-show="riskReportError" x-cloak class="mt-4 px-3 py-2 rounded-lg text-sm"
+                             style="background:var(--color-risk-critical-bg);color:var(--color-risk-critical-text)">
+                            <span x-text="riskReportError"></span>
+                        </div>
+
+                        <template x-if="riskReport && !riskReportLoading">
+                            <div class="mt-4">
+                                <p class="text-sm leading-relaxed" style="color:var(--color-text-secondary)"
+                                   x-text="riskReport.summary"></p>
+
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
+                                    <div class="rounded-lg p-3" style="background:var(--color-bg-muted)">
+                                        <div class="text-[10px] uppercase tracking-wide mb-1"
+                                             style="color:var(--color-text-muted)"
+                                             x-text="t('search.risk_report_overall')"></div>
+                                        <div class="text-lg font-bold"
+                                             :style="'color:' + getRiskColor(getRiskReportScoreFraction(riskReport.overall_risk_score))"
+                                             x-text="Math.round(riskReport.overall_risk_score) + '%'"></div>
+                                    </div>
+                                    <div class="rounded-lg p-3" style="background:var(--color-bg-muted)">
+                                        <div class="text-[10px] uppercase tracking-wide mb-1"
+                                             style="color:var(--color-text-muted)"
+                                             x-text="t('search.risk_report_highest')"></div>
+                                        <div class="text-sm font-semibold truncate" style="color:var(--color-text-primary)"
+                                             x-text="riskReport.highest_risk_application_no || '-'"></div>
+                                    </div>
+                                </div>
+
+                                <div class="mt-3 overflow-x-auto">
+                                    <div class="min-w-[620px] space-y-2">
+                                        <div class="grid grid-cols-[1.4fr_90px_90px_2fr] gap-2 text-[10px] uppercase tracking-wide px-2"
+                                             style="color:var(--color-text-muted)">
+                                            <div x-text="t('search.risk_report_candidate')"></div>
+                                            <div x-text="t('search.risk_report_llm_score')"></div>
+                                            <div x-text="t('search.risk_report_uncertainty')"></div>
+                                            <div x-text="t('search.risk_report_reasons')"></div>
+                                        </div>
+                                        <template x-for="candidate in riskReport.results" :key="candidate.input_index">
+                                            <div class="grid grid-cols-[1.4fr_90px_90px_2fr] gap-2 items-start rounded-lg p-2 text-xs"
+                                                 style="background:var(--color-bg-muted)">
+                                                <div class="min-w-0 flex items-start gap-2">
+                                                    <div class="w-9 h-9 rounded-md flex-shrink-0 flex items-center justify-center overflow-hidden"
+                                                         :class="candidate.image_url ? 'cursor-pointer hover:ring-2 hover:ring-[var(--color-primary)] transition-shadow' : ''"
+                                                         style="background:var(--color-bg-card);border:1px solid var(--color-border)"
+                                                         @click.stop="if(candidate.image_url) lightboxImage = candidate.image_url">
+                                                        <template x-if="candidate.image_url">
+                                                            <img :src="candidate.image_url" class="w-full h-full object-contain" alt="" loading="lazy">
+                                                        </template>
+                                                        <template x-if="!candidate.image_url">
+                                                            <svg class="w-4 h-4" style="color:var(--color-text-faint)" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                                                        </template>
+                                                    </div>
+                                                    <div class="min-w-0">
+                                                        <div class="font-semibold truncate" style="color:var(--color-text-primary)"
+                                                             x-text="candidate.name"></div>
+                                                        <div class="mt-0.5" style="color:var(--color-text-faint)"
+                                                             x-text="candidate.application_no || ''"></div>
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <span class="inline-flex px-2 py-1 rounded-full font-bold"
+                                                          :style="'background:' + getRiskBg(getRiskReportScoreFraction(candidate.llm_risk_score)) + ';color:' + getRiskColor(getRiskReportScoreFraction(candidate.llm_risk_score))"
+                                                          x-text="Math.round(candidate.llm_risk_score) + '%'"></span>
+                                                    <div class="mt-1" style="color:var(--color-text-faint)"
+                                                         x-text="t('search.risk_report_level_' + candidate.risk_level)"></div>
+                                                </div>
+                                                <div style="color:var(--color-text-secondary)"
+                                                     x-text="t('search.risk_report_uncertainty_' + candidate.uncertainty)"></div>
+                                                <div class="space-y-1" style="color:var(--color-text-secondary)">
+                                                    <div x-text="candidate.reasons && candidate.reasons.length ? candidate.reasons[0] : t('search.risk_report_no_reason')"></div>
+                                                    <div x-show="candidate.key_factors && candidate.key_factors.length"
+                                                         class="text-[11px]" style="color:var(--color-text-muted)"
+                                                         x-text="candidate.key_factors.join(', ')"></div>
+                                                </div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
 
             <!-- Bookmarklet tip (dismissible) -->
             <div id="bkm-tip-landing" class="rounded-xl p-3 mb-3 flex items-start gap-3"
@@ -641,7 +829,7 @@
                                 </div>
                                 <!-- Name + meta -->
                                 <div class="flex-1 min-w-0">
-                                    <div class="font-semibold truncate" style="color:var(--color-text-primary)" x-text="r.trademark_name || '\u2014'"></div>
+                                    <div class="font-semibold truncate" style="color:var(--color-text-primary)" x-text="getTrademarkDisplayName(r)"></div>
                                     <div class="flex flex-wrap items-center gap-1.5 mt-1 text-xs" style="color:var(--color-text-muted)">
                                         <span x-show="r.application_no" x-text="'#' + r.application_no"></span>
                                         <span x-show="r.status" class="px-1.5 py-0.5 rounded-full text-[10px] font-semibold"
@@ -653,7 +841,7 @@
                                 <div class="flex items-center gap-2 flex-shrink-0">
                                     <div x-show="r.risk_score != null" class="text-xs font-bold px-2.5 py-1 rounded-full"
                                          :style="'background:' + getRiskBg(r.risk_score) + ';color:' + getRiskColor(r.risk_score)"
-                                         x-text="Math.round(r.risk_score * 100) + '%'"></div>
+                                         x-text="t('risk_level.' + window.AppComponents.getSimilarityCategory(Math.round(r.risk_score * 100)))"></div>
                                     <svg class="w-4 h-4 transition-transform" :class="expandedResult === i ? 'rotate-180' : ''" style="color:var(--color-text-muted)" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
                                 </div>
                             </div>
@@ -667,15 +855,15 @@
                                     <div class="grid grid-cols-3 gap-2 mb-3">
                                         <div class="text-center p-2 rounded-lg" style="background:var(--color-bg-muted)">
                                             <div class="text-[10px] uppercase tracking-wide mb-1" style="color:var(--color-text-muted)" x-text="t('landing.detail_text')">Metin</div>
-                                            <div class="text-sm font-bold" :style="'color:' + getRiskColor(Math.max(r.text_similarity || 0, r.phonetic_similarity || 0))" x-text="Math.round(Math.max(r.text_similarity || 0, r.phonetic_similarity || 0) * 100) + '%'"></div>
+                                            <div class="text-sm font-bold" :style="'color:' + getRiskColor(Math.max(getTextScore(r), r.phonetic_similarity || 0))" x-text="t('risk_level.' + window.AppComponents.getSimilarityCategory(Math.round(Math.max(getTextScore(r), r.phonetic_similarity || 0) * 100)))"></div>
                                         </div>
                                         <div class="text-center p-2 rounded-lg" style="background:var(--color-bg-muted)">
                                             <div class="text-[10px] uppercase tracking-wide mb-1" style="color:var(--color-text-muted)" x-text="t('landing.detail_visual')">Gorsel</div>
-                                            <div class="text-sm font-bold" :style="'color:' + getRiskColor(r.visual_similarity)" x-text="Math.round((r.visual_similarity || 0) * 100) + '%'"></div>
+                                            <div class="text-sm font-bold" :style="'color:' + getRiskColor(r.visual_similarity)" x-text="t('risk_level.' + window.AppComponents.getSimilarityCategory(Math.round((r.visual_similarity || 0) * 100)))"></div>
                                         </div>
                                         <div class="text-center p-2 rounded-lg" style="background:var(--color-bg-muted)">
                                             <div class="text-[10px] uppercase tracking-wide mb-1" style="color:var(--color-text-muted)" x-text="t('landing.detail_translation')">Ceviri</div>
-                                            <div class="text-sm font-bold" :style="'color:' + getRiskColor(r.translation_similarity)" x-text="Math.round((r.translation_similarity || 0) * 100) + '%'"></div>
+                                            <div class="text-sm font-bold" :style="'color:' + getRiskColor(r.translation_similarity)" x-text="t('risk_level.' + window.AppComponents.getSimilarityCategory(Math.round((r.translation_similarity || 0) * 100)))"></div>
                                         </div>
                                     </div>
 
@@ -824,7 +1012,7 @@
         </div>
 
         <!-- Portfolio Modal -->
-        <div x-show="showPortfolio" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center p-4" style="background:rgba(0,0,0,0.5)" @click.self="closePortfolio()">
+        <div x-show="showPortfolio" x-cloak x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center p-4" style="background:rgba(0,0,0,0.5)" @click.self="closePortfolio()">
             <div class="w-full max-w-2xl rounded-2xl shadow-2xl max-h-[80vh] flex flex-col" style="background:var(--color-bg-card)" @click.stop>
                 <!-- Header -->
                 <div class="flex items-center justify-between p-4 border-b" style="border-color:var(--color-border)">
@@ -854,7 +1042,7 @@
                             <!-- Info -->
                             <div class="min-w-0 flex-1">
                                 <div class="flex items-center gap-2">
-                                    <span class="text-sm font-semibold truncate" style="color:var(--color-text-primary)" x-text="tm.trademark_name"></span>
+                                    <span class="text-sm font-semibold truncate" style="color:var(--color-text-primary)" x-text="getTrademarkDisplayName(tm)"></span>
                                     <span x-show="tm.status" class="text-[10px] px-1.5 py-0.5 rounded-full shrink-0"
                                           :style="'background:' + (tm.status === 'Tescil' ? 'var(--color-risk-low-bg);color:var(--color-risk-low-text)' : 'var(--color-bg-card);color:var(--color-text-muted)')"
                                           x-text="tm.status"></span>
@@ -919,7 +1107,7 @@
             <!-- Step 2 -->
             <div class="text-center">
                 <div class="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center text-white text-2xl font-bold" style="background:#7c3aed">2</div>
-                <h3 class="font-semibold mb-2" style="color:var(--color-text-primary)" x-text="t('landing.step2_title')">AI Risk Analizi</h3>
+                <h3 class="font-semibold mb-2" style="color:var(--color-text-primary)" x-text="t('landing.step2_title')">Risk Analizi</h3>
                 <p class="text-sm" style="color:var(--color-text-secondary)" x-text="t('landing.step2_desc')">5 farkli AI modeli ile metin, gorsel, fonetik, anlamsal ve ceviri benzerlik analizi yapilir.</p>
             </div>
             <!-- Step 3 -->
@@ -945,7 +1133,7 @@
                     <svg class="w-6 h-6" style="color:var(--color-primary)" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                 </div>
                 <h3 class="font-semibold mb-2" style="color:var(--color-text-primary)" x-text="t('landing.feature_search_title')">Akilli Arama</h3>
-                <p class="text-sm" style="color:var(--color-text-secondary)" x-text="t('landing.feature_search_desc')">Veritabani ve canli TURKPATENT taramasi ile kapsamli marka arastirmasi.</p>
+                <p class="text-sm" style="color:var(--color-text-secondary)" x-text="t('landing.feature_search_desc')">Veritabani ve Agentik TURKPATENT taramasi ile kapsamli marka arastirmasi.</p>
             </div>
             <!-- Radar -->
             <div class="feature-card p-6 rounded-xl" style="background:var(--color-bg-card);border:1px solid var(--color-border);box-shadow:var(--shadow-card)">
@@ -1028,7 +1216,7 @@
                 <div class="mb-3"></div>
                 {% set chk = '<svg class="w-4 h-4 flex-shrink-0" style="color:#22c55e" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>' %}
                 {% set cross = '<svg class="w-4 h-4 flex-shrink-0" style="color:#d1d5db" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>' %}
-                <ul class="space-y-2 mb-6 text-sm" style="color:var(--color-text-secondary)">
+                <ul class="pricing-feature-list space-y-2 mb-6 text-sm" style="color:var(--color-text-secondary)">
                     {# === ALL PLANS: always enabled === #}
                     <!-- 1. Daily searches -->
                     <li class="flex items-center gap-2">{{ chk|safe }}
@@ -1049,11 +1237,11 @@
                     <!-- 3. Reports -->
                     <li class="flex items-center gap-2">{{ chk|safe }}
                         {% if plan.monthly_reports >= 999999 %}
-                        <span x-text="t('pricing.f_unlimited_reports')">Sınırsız rapor + indirme</span>
+                        <span x-text="t('pricing.f_unlimited_reports')">Sınırsız risk raporu</span>
                         {% elif plan.can_export_reports %}
-                        <span x-text="t('pricing.f_reports_export', {n: {{ plan.monthly_reports }}})">Ayda {{ plan.monthly_reports }} rapor + indirme</span>
+                        <span x-text="t('pricing.f_reports_export', {n: {{ plan.monthly_reports }}})">Ayda {{ plan.monthly_reports }} risk raporu</span>
                         {% else %}
-                        <span x-text="t('pricing.f_reports', {n: {{ plan.monthly_reports }}})">Ayda {{ plan.monthly_reports }} rapor</span>
+                        <span x-text="t('pricing.f_reports', {n: {{ plan.monthly_reports }}})">Ayda {{ plan.monthly_reports }} risk raporu</span>
                         {% endif %}
                     </li>
                     <!-- 4. Users -->
@@ -1065,17 +1253,17 @@
                         {% endif %}
                     </li>
                     {# === STARTER+: enabled from starter upward === #}
-                    <!-- 5. Live search -->
+                    <!-- 5. Agentic search -->
                     {% if plan.monthly_live_searches > 0 %}
                     <li class="flex items-center gap-2">{{ chk|safe }}
                         {% if plan.monthly_live_searches >= 999999 %}
-                        <span x-text="t('pricing.f_unlimited_live')">Sınırsız canlı arama</span>
+                        <span x-text="t('pricing.f_unlimited_live')">Sınırsız Agentik Arama</span>
                         {% else %}
-                        <span x-text="t('pricing.f_live_monthly', {n: {{ plan.monthly_live_searches }}})">Ayda {{ plan.monthly_live_searches }} canlı arama</span>
+                        <span x-text="t('pricing.f_live_monthly', {n: {{ plan.monthly_live_searches }}})">Ayda {{ plan.monthly_live_searches }} Agentik Arama</span>
                         {% endif %}
                     </li>
                     {% else %}
-                    <li class="flex items-center gap-2">{{ cross|safe }} <span style="color:#9ca3af" x-text="t('pricing.f_live_search')">Canlı arama</span></li>
+                    <li class="flex items-center gap-2">{{ cross|safe }} <span style="color:#9ca3af" x-text="t('pricing.f_live_search')">Agentik Arama</span></li>
                     {% endif %}
                     <!-- 6. AI credits -->
                     {% if plan.monthly_ai_credits > 0 %}
@@ -1107,11 +1295,11 @@
                     {% else %}
                     <li class="flex items-center gap-2">{{ cross|safe }} <span style="color:#9ca3af" x-text="t('pricing.f_logo_tracking')">Logo izleme</span></li>
                     {% endif %}
-                    <!-- 9. CSV export -->
-                    {% if plan.can_export_csv_leads %}
-                    <li class="flex items-center gap-2">{{ chk|safe }} <span x-text="t('pricing.f_csv_export')">CSV export</span></li>
+                    <!-- 9. Portfolio download -->
+                    {% if plan.can_download_portfolio %}
+                    <li class="flex items-center gap-2">{{ chk|safe }} <span x-text="t('pricing.f_download_portfolio')">Portföy indirme</span></li>
                     {% else %}
-                    <li class="flex items-center gap-2">{{ cross|safe }} <span style="color:#9ca3af" x-text="t('pricing.f_csv_export')">CSV export</span></li>
+                    <li class="flex items-center gap-2">{{ cross|safe }} <span style="color:#9ca3af" x-text="t('pricing.f_download_portfolio')">Portföy indirme</span></li>
                     {% endif %}
                     {# === PRO+: enabled from professional upward === #}
                     <!-- 10. Opposition Radar -->
@@ -1125,31 +1313,6 @@
                     </li>
                     {% else %}
                     <li class="flex items-center gap-2">{{ cross|safe }} <span style="color:#9ca3af" x-text="t('pricing.f_leads_daily', {n: 0})">Opposition Radar</span></li>
-                    {% endif %}
-                    <!-- 11. Portfolio download -->
-                    {% if plan.can_download_portfolio %}
-                    <li class="flex items-center gap-2">{{ chk|safe }} <span x-text="t('pricing.f_download_portfolio')">Portföy indirme</span></li>
-                    {% else %}
-                    <li class="flex items-center gap-2">{{ cross|safe }} <span style="color:#9ca3af" x-text="t('pricing.f_download_portfolio')">Portföy indirme</span></li>
-                    {% endif %}
-                    <!-- 12. Priority support -->
-                    {% if plan.priority_support %}
-                    <li class="flex items-center gap-2">{{ chk|safe }} <span x-text="t('pricing.f_priority_support')">Öncelikli destek</span></li>
-                    {% else %}
-                    <li class="flex items-center gap-2">{{ cross|safe }} <span style="color:#9ca3af" x-text="t('pricing.f_priority_support')">Öncelikli destek</span></li>
-                    {% endif %}
-                    <!-- 13. Dedicated account manager -->
-                    {% if plan.dedicated_account_manager %}
-                    <li class="flex items-center gap-2">{{ chk|safe }} <span x-text="t('pricing.f_dedicated_manager')">Özel müşteri temsilcisi</span></li>
-                    {% else %}
-                    <li class="flex items-center gap-2">{{ cross|safe }} <span style="color:#9ca3af" x-text="t('pricing.f_dedicated_manager')">Özel müşteri temsilcisi</span></li>
-                    {% endif %}
-                    {# === ENTERPRISE ONLY === #}
-                    <!-- 14. API access -->
-                    {% if plan.api_access %}
-                    <li class="flex items-center gap-2">{{ chk|safe }} <span x-text="t('pricing.f_api_access')">API erişimi</span></li>
-                    {% else %}
-                    <li class="flex items-center gap-2">{{ cross|safe }} <span style="color:#9ca3af" x-text="t('pricing.f_api_access')">API erişimi</span></li>
                     {% endif %}
                 </ul>
                 {% if plan_key == 'free' %}
@@ -2180,11 +2343,11 @@
     <script>
         window.SERVER_PLANS = {{ plans | default({}, true) | tojson }};
     </script>
-    <script src="/static/js/utils/i18n.js?v=42"></script>
-<script src="/static/js/utils/helpers.js?v=33"></script>
-<script src="/static/js/utils/toast.js?v=31"></script>
-<script src="/static/js/utils/upgrade-modal.js?v=4"></script>
-<script src="/static/js/components/score-badge.js?v=31"></script>
-<script src="/static/js/marketing/landing.js?v=51"></script>
+    <script src="/static/js/utils/i18n.js?v=51"></script>
+<script src="/static/js/utils/helpers.js?v=34"></script>
+<script src="/static/js/utils/toast.js?v=32"></script>
+<script src="/static/js/utils/upgrade-modal.js?v=8"></script>
+<script src="/static/js/components/score-badge.js?v=33"></script>
+<script src="/static/js/marketing/landing.js?v=64"></script>
 </body>
 </html>

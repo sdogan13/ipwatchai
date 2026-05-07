@@ -687,7 +687,7 @@ function adminAnalytics() {
                             tension: 0.3,
                         },
                         {
-                            label: 'Live Searches',
+                            label: 'Agentic Searches',
                             data: daily.map(function(d) { return d.live_searches || 0; }),
                             borderColor: '#f59e0b',
                             backgroundColor: 'rgba(245,158,11,0.1)',
