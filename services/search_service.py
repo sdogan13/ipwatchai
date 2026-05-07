@@ -325,14 +325,10 @@ async def run_public_search(
         searcher_factory = AgenticTrademarkSearch
 
     try:
-        with searcher_factory(
-            confidence_threshold=0.75,
-            auto_scrape=False,
-        ) as searcher:
+        with searcher_factory(auto_scrape=False) as searcher:
             result = searcher.search(
                 query=query,
                 nice_classes=nice_classes,
-                force_scrape=False,
                 image_path=image_path,
             )
 

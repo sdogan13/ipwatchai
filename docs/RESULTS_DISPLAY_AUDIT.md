@@ -91,8 +91,6 @@ bulletin_no,
   "scrape_triggered": false,
   "scraped_count": 0,
   "ingested_count": 0,
-  "score_before": null,
-  "score_improvement": null,
   "image_used": false,
   "elapsed_seconds": 0.789,
   "timestamp": "2026-02-08T14:30:00Z"
@@ -106,19 +104,18 @@ bulletin_no,
 - **Path:** `GET /api/v1/search/intelligent`
 - **Auth:** JWT required, Professional+ plan
 - **Rate Limit:** 10/min + monthly credit check
-- **Params:** `query`, `classes`, `threshold` (default=0.75), `force_scrape` (bool), `page`, `per_page`
+- **Params:** `query`, `classes`, `attorney_no`, `page`, `per_page`
 - **Feature flag:** `live_scraping_enabled` (503 if disabled)
 
-**Additional behavior vs Quick Search:**
-- May trigger live scraping of turkpatent.gov.tr if DB score < threshold or force_scrape=true
-- If scraping: deducts 1 monthly credit, saves scraped data, generates embeddings, ingests, re-scores
-- Response identical to Quick Search + these extra fields when scrape triggered:
+**Behavior:**
+- Always scrapes turkpatent.gov.tr live (no DB pre-search, no threshold gate).
+- Pipeline: scrape → generate embeddings → ingest → score against DB. Deducts 1 monthly credit per call.
+- Falls back to a DB-only assessment if the scrape fails or returns 0 records (response carries `source: "database"` and may include `scrape_error`).
+- Response on success carries:
   - `scrape_triggered: true`
   - `source: "combined"`
   - `scraped_count: 15`
   - `ingested_count: 12`
-  - `score_before: 0.65`
-  - `score_improvement: 0.27`
   - `credits_used: 1`
   - `credits_remaining: 8`
 
@@ -130,7 +127,7 @@ bulletin_no,
 
 - **Path:** `POST /api/v1/search/intelligent`
 - **Content-Type:** `multipart/form-data`
-- **Params:** `query`, `image` (UploadFile, optional), `classes`, `threshold`, `force_scrape`, `page`, `per_page`
+- **Params:** `query`, `image` (UploadFile, optional), `classes`, `attorney_no`, `page`, `per_page`
 
 **Additional behavior when image provided:**
 - Generates CLIP (512-dim), DINOv2 (768-dim), color histogram, OCR embeddings from uploaded image

@@ -1,19 +1,23 @@
 """
 Agentic Trademark Search Pipeline
 =================================
-Orchestrates: risk_engine → scrapper → ai → ingest → risk_engine
+Orchestrates: scrapper → ai → ingest → risk_engine
 
-Flow:
-1. Search local database (2.3M records)
-2. If confidence < 75%, trigger live scrape
-3. Generate AI embeddings for scraped data
-4. Ingest new data to database
-5. Recalculate risk with complete data
+Flow (auto_scrape=True, the agentic path):
+1. Live scrape TurkPatent
+2. Generate AI embeddings for scraped data
+3. Ingest new data to database
+4. Score against the database (now includes the freshly ingested rows)
+
+If the scrape fails or returns no records, fall back to a single DB-only
+risk assessment so the caller still gets results.
+
+When auto_scrape=False (quick / public search), only the DB scoring runs.
 
 Usage:
     python agentic_search.py "dogan patent"
     python agentic_search.py "nike" --classes 25,35
-    python agentic_search.py "apple" --force-scrape --visible
+    python agentic_search.py "apple" --no-scrape
 """
 
 import os
@@ -155,30 +159,32 @@ def _scrape_queue_position() -> int:
 
 class AgenticTrademarkSearch:
     """
-    Intelligent trademark search with automatic live investigation.
+    Trademark search.
 
-    When database confidence is low, automatically:
-    1. Scrapes TurkPatent for live data
-    2. Generates AI embeddings
-    3. Ingests to database
-    4. Recalculates risk score
+    When auto_scrape=True (agentic path):
+    1. Scrape TurkPatent live for the query
+    2. Generate AI embeddings + translations for the new rows
+    3. Ingest them into the database
+    4. Score the query against the database (now including those rows)
+
+    If the scrape fails or returns 0 rows, fall back to a DB-only assessment.
+
+    When auto_scrape=False (quick / public path):
+    Run a DB-only assessment and return.
     """
 
     def __init__(
         self,
-        confidence_threshold: float = 0.75,
         auto_scrape: bool = True,
         scrape_limit: int = 100,
         headless: bool = True
     ):
         """
         Args:
-            confidence_threshold: Trigger Agentic Search if max score below this
-            auto_scrape: Enable automatic scraping
+            auto_scrape: When True, scrape TurkPatent live. When False, DB-only.
             scrape_limit: Max records to scrape
             headless: Run browser in headless mode
         """
-        self.confidence_threshold = confidence_threshold
         self.auto_scrape = auto_scrape
         self.scrape_limit = scrape_limit
         self.headless = headless
@@ -224,31 +230,35 @@ class AgenticTrademarkSearch:
         self,
         query: str,
         nice_classes: List[int] = None,
-        force_scrape: bool = False,
         image_path: str = None,
         attorney_no: str = None,
         user_id: str = None
     ) -> Dict:
         """
-        Intelligent search with automatic live investigation.
+        Trademark search.
+
+        When auto_scrape=True: scrape TurkPatent live, ingest, then score.
+            On scrape failure or empty scrape, fall back to a DB-only score.
+        When auto_scrape=False: DB-only score.
 
         Args:
             query: Trademark name to search
             nice_classes: Optional Nice class filter
-            force_scrape: Force live scrape regardless of DB results
             image_path: Optional path to logo image for visual scoring
+            attorney_no: Optional attorney filter
+            user_id: If set, progress events are pushed to Redis under this key
 
         Returns:
-            Complete search results with risk assessment
+            Search results with risk assessment
         """
         start_time = time.time()
         nice_classes = nice_classes or []
+        image_used = image_path is not None
 
         logger.info("=" * 60)
         logger.info(f"AGENTIC SEARCH: '{query}'")
         logger.info("=" * 60)
         logger.info(f"   Nice Classes: {nice_classes or 'All'}")
-        logger.info(f"   Confidence Threshold: {self.confidence_threshold:.0%}")
         logger.info(f"   Auto-Scrape: {self.auto_scrape}")
 
         # Helper to push progress if user_id is set
@@ -271,6 +281,19 @@ class AgenticTrademarkSearch:
                 except Exception:
                     pass
 
+        def _db_assess():
+            """Run a DB-only risk assessment and return (max_score, candidates)."""
+            db_result, _ = self.risk_engine.assess_brand_risk(
+                name=query,
+                image_path=image_path,
+                target_classes=nice_classes if nice_classes else None,
+                attorney_no=attorney_no
+            )
+            return (
+                db_result.get("final_risk_score", 0),
+                db_result.get("top_candidates", []),
+            )
+
         # Clear stale cancel flag + progress list from previous search
         _clear_cancel()
         if user_id:
@@ -279,64 +302,14 @@ class AgenticTrademarkSearch:
         _prog("starting", 0, query)
 
         # ============================================
-        # STEP 1: Search Local Database
+        # DB-ONLY PATH (quick / public search)
         # ============================================
-        logger.info("")
-        logger.info("STEP 1/5: Searching local database (2.3M records)...")
-        step1_start = time.time()
-        _prog("db_search", 5, query)
-
-        # Push heartbeat progress events every 5s so the UI doesn't look frozen
-        _db_search_done = threading.Event()
-        def _db_heartbeat():
-            pct = 7
-            while not _db_search_done.wait(5.0):
-                if pct < 14:
-                    _prog("db_searching", pct, query)
-                    pct += 2
-        if user_id:
-            _hb = threading.Thread(target=_db_heartbeat, daemon=True)
-            _hb.start()
-
-        db_result, needs_live = self.risk_engine.assess_brand_risk(
-            name=query,
-            image_path=image_path,
-            target_classes=nice_classes if nice_classes else None,
-            attorney_no=attorney_no
-        )
-        _db_search_done.set()
-
-        db_max_score = db_result.get("final_risk_score", 0)
-        db_candidates = db_result.get("top_candidates", [])
-        image_used = image_path is not None
-
-        logger.info(f"   [OK] Found {len(db_candidates)} candidates")
-        logger.info(f"   [OK] Max score: {db_max_score:.2%}")
-        logger.info(f"   [OK] Time: {time.time() - step1_start:.2f}s")
-        _prog("db_search_done", 15, f"{len(db_candidates)}")
-
-        # Show top 3 from database
-        if db_candidates:
-            logger.info("   Top 3 from database:")
-            for i, c in enumerate(db_candidates[:3]):
-                name = c.get('name', 'N/A')
-                score = c.get('scores', {}).get('total', 0)
-                logger.info(f"      {i+1}. {name[:30]} (score: {score:.3f})")
-
-        # ============================================
-        # STEP 2: Decide if Live Scrape Needed
-        # ============================================
-        needs_live_search = (
-            force_scrape or
-            db_max_score < self.confidence_threshold or
-            len(db_candidates) == 0
-        )
-
-        if not needs_live_search:
+        if not self.auto_scrape:
             logger.info("")
-            logger.info(f"HIGH CONFIDENCE ({db_max_score:.2%} >= {self.confidence_threshold:.0%})")
-            logger.info("No live scrape needed.")
-
+            logger.info("DB-only assessment (auto_scrape=False)")
+            db_max_score, db_candidates = _db_assess()
+            logger.info(f"   [OK] {len(db_candidates)} candidates, max score {db_max_score:.2%}")
+            _prog("complete", 100, f"{len(db_candidates)}")
             return self._build_response(
                 query=query,
                 results=db_candidates,
@@ -347,54 +320,38 @@ class AgenticTrademarkSearch:
                 image_used=image_used,
             )
 
-        if not self.auto_scrape:
-            logger.info("")
-            logger.info(f"LOW CONFIDENCE ({db_max_score:.2%} < {self.confidence_threshold:.0%})")
-            logger.info("Auto-scrape disabled. Returning database results.")
+        # ============================================
+        # AGENTIC PATH — scrape → embed → ingest → score
+        # ============================================
 
-            response = self._build_response(
-                query=query,
-                results=db_candidates,
-                max_score=db_max_score,
-                source="database",
-                scrape_triggered=False,
-                elapsed_time=time.time() - start_time,
-                image_used=image_used,
-            )
-            response["needs_live_investigation"] = True
-            return response
-
-        # ---- Cancel check before STEP 2 ----
+        # ---- Cancel check before STEP 1 ----
         if _is_cancelled():
             logger.info("   [CANCELLED] Search cancelled by user before scraping.")
             _prog("cancelled", 0)
-            return self._build_response(query=query, results=db_candidates, max_score=db_max_score,
-                source="cancelled", scrape_triggered=False, elapsed_time=time.time() - start_time,
-                image_used=image_used)
+            return self._build_response(query=query, results=[], max_score=0,
+                source="cancelled", scrape_triggered=False,
+                elapsed_time=time.time() - start_time, image_used=image_used)
 
         # ============================================
-        # STEP 2: Scrape TurkPatent Live
+        # STEP 1/4: Scrape TurkPatent Live
         # ============================================
         logger.info("")
-        logger.info("STEP 2/5: Live scraping TurkPatent...")
-        if force_scrape:
-            logger.info(f"   Reason: force_scrape=True (score was {db_max_score:.2%})")
-        else:
-            logger.info(f"   Reason: Score {db_max_score:.2%} < Threshold {self.confidence_threshold:.0%}")
-        step2_start = time.time()
-        _prog("scraping", 20, query)
+        logger.info("STEP 1/4: Live scraping TurkPatent...")
+        step1_start = time.time()
+        _prog("scraping", 5, query)
 
         try:
             scraped_records = self._run_scrapper(query, _prog=_prog)
             scraped_count = len(scraped_records) if scraped_records else 0
             logger.info(f"   [OK] Scraped {scraped_count} records")
-            logger.info(f"   [OK] Time: {time.time() - step2_start:.2f}s")
-            _prog("scraping_done", 45, str(scraped_count))
+            logger.info(f"   [OK] Time: {time.time() - step1_start:.2f}s")
+            _prog("scraping_done", 40, str(scraped_count))
         except Exception as e:
             logger.error(f"   [FAIL] Scraping failed: {e}")
-            _prog("scraping_failed", 45, str(e))
+            _prog("scraping_failed", 40, str(e))
+            db_max_score, db_candidates = _db_assess()
             time.sleep(1.2)
-            _prog("complete", 100, "0")
+            _prog("complete", 100, f"{len(db_candidates)}")
             response = self._build_response(
                 query=query,
                 results=db_candidates,
@@ -408,10 +365,11 @@ class AgenticTrademarkSearch:
             return response
 
         if not scraped_records:
-            logger.info("   No new records scraped. Returning database results.")
-            _prog("scrape_no_results", 48, query)
+            logger.info("   No records scraped. Falling back to database results.")
+            _prog("scrape_no_results", 45, query)
+            db_max_score, db_candidates = _db_assess()
             time.sleep(1.2)  # give frontend one poll cycle to display the event
-            _prog("complete", 100, "0")
+            _prog("complete", 100, f"{len(db_candidates)}")
             return self._build_response(
                 query=query,
                 results=db_candidates,
@@ -423,90 +381,79 @@ class AgenticTrademarkSearch:
                 image_used=image_used,
             )
 
-        # ---- Cancel check before STEP 3 ----
+        # ---- Cancel check before STEP 2 ----
         if _is_cancelled():
             logger.info("   [CANCELLED] Search cancelled by user before embeddings.")
             _prog("cancelled", 0)
-            return self._build_response(query=query, results=db_candidates, max_score=db_max_score,
+            return self._build_response(query=query, results=[], max_score=0,
                 source="cancelled", scrape_triggered=True, scraped_count=scraped_count,
                 elapsed_time=time.time() - start_time, image_used=image_used)
 
         # ============================================
-        # STEP 3: Generate AI Embeddings + Translations
+        # STEP 2/4: Generate AI Embeddings + Translations
         # ============================================
         logger.info("")
-        logger.info("STEP 3/5: Generating AI embeddings...")
-        step3_start = time.time()
+        logger.info("STEP 2/4: Generating AI embeddings...")
+        step2_start = time.time()
         _prog("embeddings", 50, str(scraped_count))
 
         try:
             enriched_count = self._generate_embeddings(scraped_records)
             logger.info(f"   [OK] Generated embeddings for {enriched_count} records")
-            logger.info(f"   [OK] Time: {time.time() - step3_start:.2f}s")
+            logger.info(f"   [OK] Time: {time.time() - step2_start:.2f}s")
             _prog("embeddings_done", 60, str(enriched_count))
         except Exception as e:
             logger.warning(f"   [WARN] Embedding generation failed: {e}")
             enriched_count = 0
 
-        # ---- Cancel check before STEP 4 ----
+        # ---- Cancel check before STEP 3 ----
         if _is_cancelled():
             logger.info("   [CANCELLED] Search cancelled by user before ingestion.")
             _prog("cancelled", 0)
-            return self._build_response(query=query, results=db_candidates, max_score=db_max_score,
+            return self._build_response(query=query, results=[], max_score=0,
                 source="cancelled", scrape_triggered=True, scraped_count=scraped_count,
                 elapsed_time=time.time() - start_time, image_used=image_used)
 
         # ============================================
-        # STEP 4: Ingest to Database
+        # STEP 3/4: Ingest to Database
         # ============================================
         logger.info("")
-        logger.info("STEP 4/5: Ingesting to database...")
-        step4_start = time.time()
+        logger.info("STEP 3/4: Ingesting to database...")
+        step3_start = time.time()
         _prog("ingesting", 65, str(scraped_count))
 
         try:
             ingested_count = self._ingest_to_database(scraped_records, query)
             logger.info(f"   [OK] Ingested {ingested_count} records")
-            logger.info(f"   [OK] Time: {time.time() - step4_start:.2f}s")
+            logger.info(f"   [OK] Time: {time.time() - step3_start:.2f}s")
             _prog("ingesting_done", 80, str(ingested_count))
         except Exception as e:
             logger.error(f"   [FAIL] Ingestion failed: {e}")
             ingested_count = 0
 
-        # ---- Cancel check before STEP 5 ----
+        # ---- Cancel check before STEP 4 ----
         if _is_cancelled():
             logger.info("   [CANCELLED] Search cancelled by user before scoring.")
             _prog("cancelled", 0)
-            return self._build_response(query=query, results=db_candidates, max_score=db_max_score,
+            return self._build_response(query=query, results=[], max_score=0,
                 source="cancelled", scrape_triggered=True, scraped_count=scraped_count,
                 ingested_count=ingested_count, elapsed_time=time.time() - start_time,
                 image_used=image_used)
 
         # ============================================
-        # STEP 5: Recalculate Risk Score
+        # STEP 4/4: Score against the database
         # ============================================
         logger.info("")
-        logger.info("STEP 5/5: Recalculating risk score...")
-        step5_start = time.time()
+        logger.info("STEP 4/4: Scoring against database...")
+        step4_start = time.time()
         _prog("scoring", 85)
 
-        final_result, _ = self.risk_engine.assess_brand_risk(
-            name=query,
-            image_path=image_path,
-            target_classes=nice_classes if nice_classes else None,
-            attorney_no=attorney_no
-        )
+        final_max_score, final_candidates = _db_assess()
 
-        final_max_score = final_result.get("final_risk_score", 0)
-        final_candidates = final_result.get("top_candidates", [])
-
-        logger.info(f"   [OK] New max score: {final_max_score:.2%}")
+        logger.info(f"   [OK] Max score: {final_max_score:.2%}")
         logger.info(f"   [OK] Total candidates: {len(final_candidates)}")
-        logger.info(f"   [OK] Time: {time.time() - step5_start:.2f}s")
+        logger.info(f"   [OK] Time: {time.time() - step4_start:.2f}s")
         _prog("complete", 100, f"{len(final_candidates)}")
-
-        # Calculate improvement
-        score_improvement = final_max_score - db_max_score
 
         # ============================================
         # FINAL SUMMARY
@@ -518,10 +465,7 @@ class AgenticTrademarkSearch:
         logger.info("AGENTIC SEARCH COMPLETE")
         logger.info("=" * 60)
         logger.info(f"   Query:            {query}")
-        logger.info(f"   Initial Score:    {db_max_score:.2%}")
         logger.info(f"   Final Score:      {final_max_score:.2%}")
-        sign = '+' if score_improvement >= 0 else ''
-        logger.info(f"   Improvement:      {sign}{score_improvement:.2%}")
         logger.info(f"   Records Scraped:  {scraped_count}")
         logger.info(f"   Records Ingested: {ingested_count}")
         logger.info(f"   Total Candidates: {len(final_candidates)}")
@@ -537,8 +481,6 @@ class AgenticTrademarkSearch:
             scrape_triggered=True,
             scraped_count=scraped_count,
             ingested_count=ingested_count,
-            score_before=db_max_score,
-            score_improvement=score_improvement,
             elapsed_time=total_time,
             image_used=image_used,
         )
@@ -717,8 +659,6 @@ class AgenticTrademarkSearch:
         scrape_triggered: bool,
         scraped_count: int = 0,
         ingested_count: int = 0,
-        score_before: float = None,
-        score_improvement: float = None,
         elapsed_time: float = 0,
         image_used: bool = False,
     ) -> Dict:
@@ -736,8 +676,6 @@ class AgenticTrademarkSearch:
             "scrape_triggered": scrape_triggered,
             "scraped_count": scraped_count,
             "ingested_count": ingested_count,
-            "score_before": score_before,
-            "score_improvement": score_improvement,
             "image_used": image_used,
             "elapsed_seconds": round(elapsed_time, 2),
             "timestamp": datetime.now().isoformat()
@@ -877,8 +815,6 @@ class SearchRequest(BaseModel):
     """Request model for intelligent search."""
     query: str
     nice_classes: Optional[list] = None
-    force_scrape: bool = False
-    confidence_threshold: float = 0.75
     auto_scrape: bool = True
 
 
@@ -898,18 +834,13 @@ async def search_status():
     }
 
 
-def _run_search_sync(confidence_threshold, auto_scrape, query, nice_classes,
-                      force_scrape=False, image_path=None,
-                      attorney_no=None, user_id=None):
+def _run_search_sync(auto_scrape, query, nice_classes,
+                      image_path=None, attorney_no=None, user_id=None):
     """Run AgenticTrademarkSearch synchronously (for use with asyncio.to_thread)."""
-    with AgenticTrademarkSearch(
-        confidence_threshold=confidence_threshold,
-        auto_scrape=auto_scrape
-    ) as searcher:
+    with AgenticTrademarkSearch(auto_scrape=auto_scrape) as searcher:
         return searcher.search(
             query=query,
             nice_classes=nice_classes,
-            force_scrape=force_scrape,
             image_path=image_path,
             attorney_no=attorney_no,
             user_id=user_id
@@ -1069,14 +1000,10 @@ async def quick_search(
         nice_classes = [int(c.strip()) for c in classes.split(",") if c.strip().isdigit()]
 
     try:
-        with AgenticTrademarkSearch(
-            confidence_threshold=0.75,
-            auto_scrape=False  # Quick search = no scraping
-        ) as searcher:
+        with AgenticTrademarkSearch(auto_scrape=False) as searcher:
             result = searcher.search(
                 query=query,
                 nice_classes=nice_classes,
-                force_scrape=False,
                 attorney_no=attorney_no
             )
 
@@ -1148,14 +1075,10 @@ async def quick_search_with_image(
                 image_path = tmp.name
             logger.info(f"Quick search image uploaded: {image.filename} ({len(content)} bytes)")
 
-        with AgenticTrademarkSearch(
-            confidence_threshold=0.75,
-            auto_scrape=False
-        ) as searcher:
+        with AgenticTrademarkSearch(auto_scrape=False) as searcher:
             result = searcher.search(
                 query=query,
                 nice_classes=nice_classes,
-                force_scrape=False,
                 image_path=image_path,
                 attorney_no=attorney_no
             )
@@ -1197,21 +1120,17 @@ async def intelligent_search(
     query: str = Query(..., description="Trademark name to search"),
     classes: Optional[str] = Query(None, description="Nice classes (comma-separated)"),
     attorney_no: Optional[str] = Query(None, description="Filter by attorney number"),
-    threshold: float = Query(0.75, description="Confidence threshold for live scraping"),
-    force_scrape: bool = Query(False, description="Force live scrape regardless of DB results"),
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """
-    Intelligent search with automatic live investigation.
+    Agentic search — always scrapes TurkPatent live.
+
+    Pipeline: scrape TurkPatent → generate AI embeddings → ingest →
+    score against the database. Falls back to a DB-only assessment if the
+    scrape fails or returns no records.
 
     Requires: a plan with Agentic Search access.
-    Deducts 1 credit per live scrape triggered.
-
-    If database confidence is below threshold, automatically:
-    1. Scrapes TurkPatent for live data
-    2. Generates AI embeddings
-    3. Ingests to database
-    4. Recalculates risk score
+    Deducts 1 credit per call.
 
     Returns:
     - 200: Success with results
@@ -1238,14 +1157,11 @@ async def intelligent_search(
 
     try:
         _uid = str(current_user.id)
-        # Agentic Search always scrapes TurkPatent for live data
         result = await asyncio.to_thread(
             _run_search_sync,
-            confidence_threshold=threshold,
             auto_scrape=True,
             query=query,
             nice_classes=nice_classes,
-            force_scrape=True,
             attorney_no=attorney_no,
             user_id=_uid
         )
@@ -1287,15 +1203,14 @@ async def intelligent_search_with_image(
     image: Optional[UploadFile] = File(None, description="Optional logo image for visual scoring"),
     classes: Optional[str] = Form(None, description="Nice classes (comma-separated)"),
     attorney_no: Optional[str] = Form(None, description="Filter by attorney number"),
-    threshold: float = Form(0.75, description="Confidence threshold for live scraping"),
-    force_scrape: bool = Form(False, description="Force live scrape regardless of DB results"),
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """
-    Intelligent search with optional image upload for visual scoring.
+    Agentic search with optional image upload for visual scoring.
 
-    Text query is always required. Image is optional and enhances scoring
-    with CLIP + DINOv2 + color histogram + OCR similarity against DB logos.
+    Always scrapes TurkPatent live. Text query is required; image is optional
+    and enhances scoring with CLIP + DINOv2 + color histogram + OCR similarity
+    against DB logos.
 
     Requires: a plan with Agentic Search access for live scraping.
     """
@@ -1329,14 +1244,11 @@ async def intelligent_search_with_image(
             logger.info(f"Image uploaded: {image.filename} ({len(content)} bytes) -> {image_path}")
 
         _uid = str(current_user.id)
-        # Agentic Search always scrapes TurkPatent for live data
         result = await asyncio.to_thread(
             _run_search_sync,
-            confidence_threshold=threshold,
             auto_scrape=True,
             query=query,
             nice_classes=nice_classes,
-            force_scrape=True,
             image_path=image_path,
             attorney_no=attorney_no,
             user_id=_uid
@@ -1387,7 +1299,7 @@ async def post_search(
     If auto_scrape is True, requires a plan with Agentic Search access.
     """
     # If auto_scrape requested, check plan eligibility
-    if request.auto_scrape or request.force_scrape:
+    if request.auto_scrape:
         with Database() as db:
             can_search, reason, details = check_live_search_eligibility(
                 db, str(current_user.id)
@@ -1401,14 +1313,13 @@ async def post_search(
 
     try:
         _uid = str(current_user.id)
-        # Agentic Search always scrapes TurkPatent for live data
+        # Pre-existing behavior: this endpoint always runs the agentic path,
+        # even if request.auto_scrape=False. Plan eligibility is gated above.
         result = await asyncio.to_thread(
             _run_search_sync,
-            confidence_threshold=request.confidence_threshold,
             auto_scrape=True,
             query=request.query,
             nice_classes=request.nice_classes or [],
-            force_scrape=True,
             user_id=_uid
         )
 
@@ -1448,14 +1359,14 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Agentic Trademark Search - Intelligent search with auto-scraping",
+        description="Agentic Trademark Search - Live TurkPatent scrape + DB scoring",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   python agentic_search.py "dogan patent"
   python agentic_search.py "nike" --classes 25,35
-  python agentic_search.py "apple" --force-scrape --visible
-  python agentic_search.py "coca cola" --no-scrape --threshold 0.80
+  python agentic_search.py "apple" --visible
+  python agentic_search.py "coca cola" --no-scrape
         """
     )
 
@@ -1463,12 +1374,8 @@ Examples:
                         help="Trademark to search")
     parser.add_argument("--classes", "-c", type=str,
                         help="Nice classes (comma-separated)")
-    parser.add_argument("--threshold", "-t", type=float, default=0.75,
-                        help="Confidence threshold (default: 0.75)")
     parser.add_argument("--no-scrape", action="store_true",
-                        help="Disable auto-scraping")
-    parser.add_argument("--force-scrape", "-f", action="store_true",
-                        help="Force live scrape")
+                        help="DB-only search (skip TurkPatent scrape)")
     parser.add_argument("--limit", "-l", type=int, default=100,
                         help="Max records to scrape (default: 100)")
     parser.add_argument("--visible", "-v", action="store_true",
@@ -1483,7 +1390,6 @@ Examples:
 
     # Run search
     with AgenticTrademarkSearch(
-        confidence_threshold=args.threshold,
         auto_scrape=not args.no_scrape,
         scrape_limit=args.limit,
         headless=not args.visible
@@ -1491,7 +1397,6 @@ Examples:
         result = searcher.search(
             query=args.query,
             nice_classes=nice_classes,
-            force_scrape=args.force_scrape
         )
 
     # Print results
@@ -1504,11 +1409,6 @@ Examples:
     print(f"  Max Score:        {result['max_score']:.2%}")
     print(f"  Source:           {result['source']}")
     print(f"  Scrape Triggered: {result['scrape_triggered']}")
-
-    if result.get('score_improvement') is not None:
-        print(f"  Score Before:     {result['score_before']:.2%}")
-        sign = '+' if result['score_improvement'] >= 0 else ''
-        print(f"  Improvement:      {sign}{result['score_improvement']:.2%}")
 
     if result.get('scraped_count', 0) > 0:
         print(f"  Scraped:          {result['scraped_count']} records")
