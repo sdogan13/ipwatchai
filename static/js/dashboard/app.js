@@ -2210,93 +2210,11 @@ function cancelAgenticSearch() {
 }
 
 // ============================================
-// LOADING MODAL — REAL-TIME PROGRESS
+// LOADING MODAL — removed; show/hide are kept as no-ops so existing
+// call sites in dashboardLiveSearch / generateRiskReport keep working.
 // ============================================
-var _agenticPollTimer = null;
-var _agenticNextIndex = 0;
-var _agenticPollInFlight = false;
-
-function showAgenticLoadingModal() {
-    // Clear any previous timer before starting a new one (prevents duplicate polls)
-    _stopAgenticPolling();
-
-    var modal = document.getElementById('agentic-loading-modal');
-    var log = document.getElementById('agentic-log');
-    var progress = document.getElementById('agentic-progress');
-
-    modal.classList.remove('hidden');
-    lockBodyScroll();
-    log.innerHTML = '';
-    progress.style.width = '0%';
-    _agenticNextIndex = 0;
-
-    // Poll backend for real progress every 800ms
-    _agenticPollTimer = setInterval(function () {
-        if (agenticSearchAborted || modal.classList.contains('hidden')) {
-            _stopAgenticPolling();
-            return;
-        }
-        _pollAgenticProgress();
-    }, 800);
-}
-
-function _pollAgenticProgress() {
-    if (_agenticPollInFlight) return; // skip if previous poll still in-flight
-    var token = typeof getAuthToken === 'function' ? getAuthToken() : '';
-    if (!token) return;
-    _agenticPollInFlight = true;
-    fetch('/api/v1/search/progress?after=' + _agenticNextIndex, {
-        headers: { 'Authorization': 'Bearer ' + token }
-    })
-        .then(function (res) { return res.ok ? res.json() : null; })
-        .then(function (data) {
-            _agenticPollInFlight = false;
-            if (!data || !data.events || data.events.length === 0) return;
-            _agenticNextIndex = data.next_index;
-
-            data.events.forEach(function (evt) {
-                // Look up i18n key: agentic.<step>
-                var key = 'agentic.' + evt.step;
-                var msg = t(key, { detail: evt.detail || '' });
-                // If no translation found, show raw step
-                if (msg === key) msg = '> ' + evt.step + (evt.detail ? ' (' + evt.detail + ')' : '');
-
-                addLogLine(msg);
-
-                var progress = document.getElementById('agentic-progress');
-                if (progress) progress.style.width = evt.progress + '%';
-
-                // Stop polling on complete or cancelled
-                if (evt.step === 'complete' || evt.step === 'cancelled') {
-                    _stopAgenticPolling();
-                }
-            });
-        })
-        .catch(function () { _agenticPollInFlight = false; /* ignore polling errors */ });
-}
-
-function _stopAgenticPolling() {
-    if (_agenticPollTimer) {
-        clearInterval(_agenticPollTimer);
-        _agenticPollTimer = null;
-    }
-    _agenticPollInFlight = false;
-}
-
-function hideAgenticLoadingModal() {
-    _stopAgenticPolling();
-    document.getElementById('agentic-loading-modal').classList.add('hidden');
-    unlockBodyScroll();
-}
-
-function addLogLine(text) {
-    var log = document.getElementById('agentic-log');
-    var line = document.createElement('div');
-    line.className = 'log-line';
-    line.textContent = text;
-    log.appendChild(line);
-    log.scrollTop = log.scrollHeight;
-}
+function showAgenticLoadingModal() { /* no-op: progress modal removed */ }
+function hideAgenticLoadingModal() { /* no-op: progress modal removed */ }
 
 // ============================================
 // UPGRADE MODAL

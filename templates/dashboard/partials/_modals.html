@@ -178,33 +178,6 @@
 <!-- ============================================ -->
 <!-- AGENTIC SEARCH LOADING MODAL                -->
 <!-- ============================================ -->
-<div id="agentic-loading-modal" role="dialog" aria-modal="true"
-    class="hidden fixed inset-0 flex items-center justify-center"
-    style="background:var(--color-bg-overlay);z-index:var(--z-modal-backdrop)">
-    <div class="bg-gray-900 rounded-2xl p-6 max-w-lg w-full mx-4 border border-amber-500/30 shadow-2xl">
-        <div class="flex items-center gap-3 mb-4">
-            <div class="animate-pulse text-3xl">&#x1f575;&#xfe0f;</div>
-            <div>
-                <h3 class="text-xl font-bold text-amber-400" x-text="t('agentic.title')">Canli Arastirma</h3>
-                <p class="text-sm text-gray-400" x-text="t('agentic.subtitle')">TurkPatent portali taraniyor...</p>
-            </div>
-        </div>
-        <div id="agentic-log"
-            class="bg-black rounded-xl p-4 font-mono text-sm text-green-400 h-56 overflow-y-auto border border-gray-800">
-        </div>
-        <div class="mt-4 h-1.5 bg-gray-800 rounded-full overflow-hidden">
-            <div id="agentic-progress"
-                class="h-full bg-gradient-to-r from-amber-500 to-orange-500 rounded-full transition-all duration-500"
-                style="width: 0%"></div>
-        </div>
-        <div class="mt-4 text-center">
-            <button onclick="cancelAgenticSearch()"
-                class="text-gray-400 hover:text-white text-sm btn-press min-h-[44px] px-4"
-                x-text="t('agentic.cancel')">Iptal Et</button>
-        </div>
-    </div>
-</div>
-
 {% include 'shared/_upgrade_modal.html' %}
 
 <!-- ============================================ -->
