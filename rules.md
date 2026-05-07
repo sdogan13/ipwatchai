@@ -1,6 +1,6 @@
 # Engineering Rules
 
-Last updated: 2026-04-19
+Last updated: 2026-05-08
 Status: Active
 
 ## Purpose
@@ -195,6 +195,26 @@ If the correct fix is unclear or blocked:
 - prefer clarification over high-risk assumptions
 - do not edit unrelated code just to get past the blocker
 - do not claim success when only part of the real path is fixed
+
+### Document Verification Rule
+
+When work involves parsing or extracting data from a document (PDF, scan, image, or any visual artifact), do not rely on text extraction alone. Visually open and inspect the source before designing or finalizing extraction logic.
+
+Apply this rule:
+- before writing or modifying a parser for a document, render representative pages and inspect them visually: at minimum the legend or table of contents, the first record of each detected section, and at least one edge-case page
+- when the document ships a code legend, INID table, field index, or similar spec page, read that page first; do not infer field semantics from sample data alone
+- when a parser branch decides a section is "skip" or "out of scope", render and inspect those pages before agreeing — what looks like a header in extracted text may be substantive content visually
+- when text extraction returns mojibake, replacement characters, or empty fields, render the page visually before attributing the issue to the source
+- before signing off on extraction quality, visually spot-check at least one parsed record per detected section against its source page
+
+Do not:
+- claim "all codes or fields extracted correctly" based on pattern-matching frequency or sample agreement alone
+- declare data quality meets expectations without visual verification on a real artifact
+- treat regex pattern coverage as a substitute for spec coverage
+
+Verification:
+- include rendered page references in the parser plan and in the verification report
+- when reporting extraction completeness for a new document type or schema, attach or cite visual confirmation of representative pages
 
 ### Verification Reporting Rule
 
