@@ -208,11 +208,7 @@ def _explicit_db_status_from_text(status_raw):
 
 def _determine_db_status_raw(folder_name, status_raw, reg_no_val=None):
     folder_upper = folder_name.upper()
-    has_reg_no = (
-        reg_no_val
-        and str(reg_no_val).strip()
-        and str(reg_no_val).strip().lower() not in ("null", "none", "")
-    )
+    has_reg_no = has_valid_registration_no(reg_no_val)
 
     explicit_status = _explicit_db_status_from_text(status_raw)
     if explicit_status:
@@ -283,12 +279,28 @@ def get_status_rank(status):
 
 
 def get_source_rank(folder_name):
-    folder_upper = folder_name.upper()
-    if folder_upper.startswith("APP_") or "SCRAPED" in folder_upper:
+    if is_app_source_folder(folder_name):
         return 3, "APP"
+    folder_upper = folder_name.upper()
     if folder_upper.startswith("GZ_") or "GAZETE" in folder_upper:
         return 2, "GZ"
     return 1, "BLT"
+
+
+def is_app_source_folder(folder_name):
+    folder_upper = str(folder_name or "").upper()
+    return (
+        folder_upper.startswith("APP_")
+        or folder_upper.startswith("LIVE_")
+        or "SCRAPED" in folder_upper
+    )
+
+
+def has_valid_registration_no(value):
+    if value is None:
+        return False
+    text = _repair_mojibake(str(value)).strip()
+    return bool(text and text.lower() not in {"null", "none", "-", "yok", "n/a", "na"})
 
 
 _SEKIL_WORD_RE = re.compile(
@@ -360,6 +372,15 @@ _GZ_OWNED_FIELDS = [
     ("gazette_date", "v.g_date::date"),
 ]
 
+_NAME_DERIVED_TEXT_FIELDS = {
+    "text_embedding",
+    "name_tr",
+    "detected_lang",
+    "name_tr_backend",
+    "name_tr_model",
+    "name_tr_updated_at",
+}
+
 
 def _priority_coalesce(col, val, source):
     if col == "name":
@@ -367,16 +388,20 @@ def _priority_coalesce(col, val, source):
 
     target_col = f"tm.{col}"
     if source == "APP":
-        return f"{col} = COALESCE({val}, {target_col})"
-    if source == "GZ":
-        return (
-            f"{col} = CASE WHEN COALESCE(tm.status_source, '') = 'APP' "
+        priority_logic = f"COALESCE({val}, {target_col})"
+    elif source == "GZ":
+        priority_logic = (
+            f"CASE WHEN COALESCE(tm.status_source, '') = 'APP' "
             f"THEN COALESCE({target_col}, {val}) ELSE COALESCE({val}, {target_col}) END"
         )
-    return (
-        f"{col} = CASE WHEN COALESCE(tm.status_source, '') IN ('APP', 'GZ') "
-        f"THEN COALESCE({target_col}, {val}) ELSE COALESCE({val}, {target_col}) END"
-    )
+    else:
+        priority_logic = (
+            f"CASE WHEN COALESCE(tm.status_source, '') IN ('APP', 'GZ') "
+            f"THEN COALESCE({target_col}, {val}) ELSE COALESCE({val}, {target_col}) END"
+        )
+    if col in _NAME_DERIVED_TEXT_FIELDS:
+        return f"{col} = CASE WHEN v.clear_text_features THEN NULL ELSE {priority_logic} END"
+    return f"{col} = {priority_logic}"
 
 
 def _priority_name_coalesce(val, source):
@@ -399,6 +424,15 @@ def _priority_name_coalesce(val, source):
 
 def _suspicious_six_coalesce(col, val, source):
     target_col = f"tm.{col}"
+    if source == "APP" and col == "nice_class_numbers":
+        incoming_count = f"COALESCE(cardinality({val}), 0)"
+        target_count = f"COALESCE(cardinality({target_col}), 0)"
+        return (
+            f"{col} = CASE "
+            f"WHEN {target_count} = 0 THEN COALESCE({val}, {target_col}) "
+            f"WHEN {incoming_count} > 6 AND {incoming_count} > {target_count} THEN {val} "
+            f"ELSE {target_col} END"
+        )
     if source == "APP":
         priority_logic = f"COALESCE({val}, {target_col})"
     elif source == "GZ":
@@ -447,7 +481,7 @@ def _build_update_sql(source):
                 SET
                     {_build_update_set(source)}
                 FROM (VALUES %s) AS v(
-                    name, clear_name, status, nice_classes, goods, last_date, appeal, expiry,
+                    name, clear_name, clear_text_features, status, nice_classes, goods, last_date, appeal, expiry,
                     b_no, b_date, g_no, g_date, img_path,
                     app_date, reg_date, img_emb, dino_emb, txt_emb, color_emb,
                     ocr_text,
@@ -486,6 +520,8 @@ __all__ = [
     "determine_status",
     "get_status_rank",
     "get_source_rank",
+    "is_app_source_folder",
+    "has_valid_registration_no",
     "clean_name",
     "_name_cleans_to_empty",
     "_SHARED_FIELDS",

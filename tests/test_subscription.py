@@ -28,8 +28,10 @@ from utils.subscription import (
     check_name_generation_eligibility,
     check_logo_generation_eligibility,
     check_report_eligibility,
+    decrement_report_usage,
     deduct_name_credit,
     deduct_logo_credit,
+    increment_report_usage,
     refund_logo_credit,
 )
 
@@ -314,6 +316,14 @@ class TestCheckReportEligibility:
         result = check_report_eligibility(db, "free", "org1")
         assert result["eligible"] is False
 
+    def test_counts_only_inline_risk_reports(self):
+        db, cursor = _make_db({"saved_reports": 0, "inline_reports": 2, "cnt": 2})
+        result = check_report_eligibility(db, "starter", "org1")
+        assert result["eligible"] is True
+        assert result["reports_used"] == 2
+        assert result["saved_reports"] == 0
+        assert result["inline_reports"] == 2
+
     def test_professional_higher_limit(self):
         db, cursor = _make_db({"cnt": 5})
         result = check_report_eligibility(db, "professional", "org1")
@@ -322,10 +332,17 @@ class TestCheckReportEligibility:
     def test_can_export_by_plan(self):
         db, cursor = _make_db({"cnt": 0})
         free_result = check_report_eligibility(db, "free", "org1")
-        assert free_result["can_export"] is False
+        assert free_result["can_export"] is True
 
         ent_result = check_report_eligibility(db, "enterprise", "org1")
         assert ent_result["can_export"] is True
+
+    def test_increment_and_decrement_inline_report_usage(self):
+        db, cursor = _make_db({"reports_generated": 1})
+        assert increment_report_usage(db, "user1", "org1") is True
+        assert decrement_report_usage(db, "user1", "org1") is True
+        assert cursor.execute.call_count == 2
+        assert db.commit.call_count == 2
 
 
 # ============================================================

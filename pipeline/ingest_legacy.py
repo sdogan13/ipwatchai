@@ -220,7 +220,7 @@ def get_status_rank(status):
 
 def get_source_rank(folder_name):
     fu = folder_name.upper()
-    if fu.startswith("APP_") or "SCRAPED" in fu: return 3, 'APP'
+    if _rules.is_app_source_folder(folder_name): return 3, 'APP'
     if fu.startswith("GZ_") or "GAZETE" in fu: return 2, 'GZ'
     return 1, 'BLT'
 
@@ -327,6 +327,26 @@ def sanitize(val):
     if isinstance(val, list) and len(val) == 0: return None
     if isinstance(val, dict) and len(val) == 0: return None
     return val
+
+_TEXT_EMBEDDING_SOURCE_NAME_KEY = "text_embedding_source_name"
+_TRANSLATION_SOURCE_NAME_KEY = "name_tr_source_name"
+
+
+def _raw_name_was_materially_cleaned(raw_name, cleaned_name) -> bool:
+    raw_text = sanitize(_rules._repair_mojibake(str(raw_name))) if raw_name is not None else None
+    if not raw_text:
+        return False
+    return (cleaned_name or None) != " ".join(str(raw_text).split())
+
+
+def _metadata_text_features_are_from_clean_name(rec: dict, cleaned_name: str | None) -> bool:
+    if not cleaned_name:
+        return False
+    return (
+        rec.get(_TEXT_EMBEDDING_SOURCE_NAME_KEY) == cleaned_name
+        and rec.get(_TRANSLATION_SOURCE_NAME_KEY) == cleaned_name
+    )
+
 
 def _trunc(val, max_len):
     s = sanitize(val)
@@ -698,6 +718,8 @@ determine_db_status = _rules.determine_db_status
 determine_status = _rules.determine_status
 get_status_rank = _rules.get_status_rank
 get_source_rank = _rules.get_source_rank
+is_app_source_folder = _rules.is_app_source_folder
+has_valid_registration_no = _rules.has_valid_registration_no
 _name_cleans_to_empty = _rules._name_cleans_to_empty
 _SHARED_FIELDS = _rules._SHARED_FIELDS
 _SUSPICIOUS_SIX_FIELDS = _rules._SUSPICIOUS_SIX_FIELDS
@@ -710,6 +732,28 @@ _build_update_set = _rules._build_update_set
 _build_update_sql = _rules._build_update_sql
 check_and_migrate_schema = _bootstrap.check_and_migrate_schema
 load_nice_classes = _bootstrap.load_nice_classes
+
+
+def _incoming_status_can_replace_existing(explicit_status, db_status, reg_no_val):
+    if explicit_status not in (None, DB_STATUS_APPLIED, DB_STATUS_PUBLISHED):
+        return True
+    return (
+        explicit_status is None
+        and db_status == DB_STATUS_REGISTERED
+        and has_valid_registration_no(reg_no_val)
+    )
+
+
+def _app_safe_nice_classes_for_update(incoming_classes, existing_classes):
+    if not incoming_classes:
+        return None
+    existing_classes = existing_classes or []
+    if not existing_classes:
+        return incoming_classes
+    if len(incoming_classes) > 6 and len(incoming_classes) > len(existing_classes):
+        return incoming_classes
+    return None
+
 
 # === BATCH PROCESSING LOGIC ===
 
@@ -780,7 +824,7 @@ def process_file_batch(conn, file_path, force=False):
     folder_name = file_path.parent.name
     logging.info(f"Processing Batch: {folder_name}/{filename}")
 
-    is_app_source = folder_name.upper().startswith("APP_") or "scraped" in folder_name.lower()
+    is_app_source = is_app_source_folder(folder_name)
     is_bulletin_source = folder_name.upper().startswith("BLT_") or "BULTEN" in folder_name.upper()
     is_gazette_source = folder_name.upper().startswith("GZ_") or "GAZETE" in folder_name.upper()
     new_source_rank, source_tag = get_source_rank(folder_name)
@@ -857,9 +901,9 @@ def process_file_batch(conn, file_path, force=False):
 
         existing_db_records = {}
         if all_app_nos:
-            cur.execute("SELECT application_no, id, last_event_date, current_status, expiry_date, status_source, name FROM trademarks WHERE application_no = ANY(%s)", (all_app_nos,))
+            cur.execute("SELECT application_no, id, last_event_date, current_status, expiry_date, status_source, name, nice_class_numbers FROM trademarks WHERE application_no = ANY(%s)", (all_app_nos,))
             for row in cur.fetchall():
-                existing_db_records[row[0]] = {"id": row[1], "last_date": row[2], "status": _canonicalize_db_status(row[3]), "expiry": row[4], "status_source": row[5], "name": row[6]}
+                existing_db_records[row[0]] = {"id": row[1], "last_date": row[2], "status": _canonicalize_db_status(row[3]), "expiry": row[4], "status_source": row[5], "name": row[6], "nice_class_numbers": row[7]}
 
         new_inserts = []
         updates = []
@@ -913,13 +957,20 @@ def process_file_batch(conn, file_path, force=False):
 
             img_emb = embedding_to_halfvec(rec.get("image_embedding"), 512)
             dino_emb = embedding_to_halfvec(rec.get("dinov2_embedding"), 768)
-            txt_emb = embedding_to_halfvec(rec.get("text_embedding"), 384)
+            name_features_are_stale = (
+                not tm_name
+                or (
+                    _raw_name_was_materially_cleaned(raw_tm_name, tm_name)
+                    and not _metadata_text_features_are_from_clean_name(rec, tm_name)
+                )
+            )
+            txt_emb = None if name_features_are_stale else embedding_to_halfvec(rec.get("text_embedding"), 384)
             color_emb = embedding_to_halfvec(rec.get("color_histogram"), 512)
             img_path = _resolve_image_path(folder_name, rec.get("IMAGE"), ROOT_DIR)
             ocr_text = rec.get("logo_ocr_text")
 
-            name_tr = _trunc(rec.get("name_tr"), 500)
-            detected_lang = _trunc(rec.get("detected_lang"), 10)
+            name_tr = None if name_features_are_stale else _trunc(rec.get("name_tr"), 500)
+            detected_lang = None if name_features_are_stale else _trunc(rec.get("detected_lang"), 10)
 
             holders_list = rec.get("HOLDERS", [])
             holder_name, holder_tpe_client_id = None, None
@@ -976,11 +1027,20 @@ def process_file_batch(conn, file_path, force=False):
                     _name_cleans_to_empty(raw_tm_name)
                     and _name_cleans_to_empty(existing.get("name"))
                 )
+                clear_text_features = name_features_are_stale and (bool(tm_name) or clear_name)
 
                 should_update = force
                 next_status = db_status
+                status_can_replace = _incoming_status_can_replace_existing(
+                    explicit_status,
+                    db_status,
+                    reg_no_val,
+                )
 
-                if (
+                if existing_source == "LIVE" and not status_can_replace:
+                    should_update = True
+                    next_status = curr_status
+                elif (
                     existing_source == "APP"
                     and curr_status == DB_STATUS_APPLIED
                     and not is_app_source
@@ -990,7 +1050,7 @@ def process_file_batch(conn, file_path, force=False):
                     next_status = db_status
                 elif new_source_rank >= old_source_rank:
                     should_update = True
-                    if is_app_source and (db_status == DB_STATUS_APPLIED or explicit_status is None):
+                    if is_app_source and not status_can_replace:
                         next_status = curr_status
                 else:
                     should_update = True
@@ -1005,9 +1065,15 @@ def process_file_batch(conn, file_path, force=False):
 
                     # If ingest keeps the prior status, keep the prior ingest source tag too.
                     next_source_tag = existing_source if (next_status == curr_status and not is_renewal) else source_tag
+                    update_classes_list = clean_classes_list or None
+                    if is_app_source:
+                        update_classes_list = _app_safe_nice_classes_for_update(
+                            clean_classes_list,
+                            existing.get("nice_class_numbers"),
+                        )
 
                     updates.append((
-                        sanitize(tm_name), clear_name, next_status, clean_classes_list or None,
+                        sanitize(tm_name), clear_name, clear_text_features, next_status, update_classes_list,
                         Json(extracted_goods_data) if extracted_goods_data else None,
                         db_write_date, appeal_dl, new_expiry_date,
                         sanitize(tm.get("BULLETIN_NO")), bulletin_date_val,
@@ -1431,17 +1497,36 @@ def _resolve_image_path(folder_name: str, image_field: str, root_dir: Path) -> s
 
 
 def cleanup_sekil_names(conn, batch_size: int = 5000) -> int:
-    """Remove placeholder-only 'sekil' values and clean mixed name variants."""
+    """Remove placeholder-only 'sekil' values and invalidate stale name-derived text features."""
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT id, name
+        SELECT id, name, name_tr
         FROM trademarks
-        WHERE name IS NOT NULL
+        WHERE (
+            name IS NOT NULL
           AND (
               lower(name) LIKE '%sekil%'
               OR name ~* '(s|ş)ek(i|ı|İ)l'
           )
+        )
+        OR (
+            name_tr IS NOT NULL
+            AND (
+                lower(name_tr) LIKE '%sekil%'
+                OR name_tr ~* '(s|ÅŸ)ek(i|Ä±|Ä°)l'
+            )
+        )
+        OR (
+            COALESCE(NULLIF(BTRIM(name), ''), NULLIF(BTRIM(name_tr), '')) IS NULL
+            AND (
+                text_embedding IS NOT NULL
+                OR detected_lang IS NOT NULL
+                OR name_tr_backend IS NOT NULL
+                OR name_tr_model IS NOT NULL
+                OR name_tr_updated_at IS NOT NULL
+            )
+        )
         """
     )
     rows = cur.fetchall()
@@ -1450,10 +1535,23 @@ def cleanup_sekil_names(conn, batch_size: int = 5000) -> int:
     for start in range(0, len(rows), batch_size):
         batch = rows[start:start + batch_size]
         updates = []
-        for tm_id, current_name in batch:
-            cleaned = _rules.clean_name(current_name)
-            if cleaned != current_name:
-                updates.append((str(tm_id), sanitize(cleaned)))
+        for tm_id, current_name, current_name_tr in batch:
+            cleaned_name = _rules.clean_name(current_name)
+            cleaned_name_tr = _rules.clean_name(current_name_tr)
+            name_changed = cleaned_name != current_name
+            name_tr_changed = cleaned_name_tr != current_name_tr
+            logo_only_after_cleanup = not cleaned_name and not cleaned_name_tr
+            if name_changed or name_tr_changed or logo_only_after_cleanup:
+                clear_translation = name_changed or name_tr_changed or logo_only_after_cleanup
+                updates.append(
+                    (
+                        str(tm_id),
+                        sanitize(cleaned_name),
+                        None if clear_translation else sanitize(cleaned_name_tr),
+                        name_changed or logo_only_after_cleanup,
+                        clear_translation,
+                    )
+                )
 
         if updates:
             execute_values(
@@ -1461,8 +1559,14 @@ def cleanup_sekil_names(conn, batch_size: int = 5000) -> int:
                 """
                 UPDATE trademarks AS tm
                 SET name = v.name::text,
+                    text_embedding = CASE WHEN v.clear_text_embedding THEN NULL ELSE tm.text_embedding END,
+                    name_tr = v.name_tr::text,
+                    detected_lang = CASE WHEN v.clear_translation THEN NULL ELSE tm.detected_lang END,
+                    name_tr_backend = CASE WHEN v.clear_translation THEN NULL ELSE tm.name_tr_backend END,
+                    name_tr_model = CASE WHEN v.clear_translation THEN NULL ELSE tm.name_tr_model END,
+                    name_tr_updated_at = CASE WHEN v.clear_translation THEN NULL ELSE tm.name_tr_updated_at END,
                     updated_at = NOW()
-                FROM (VALUES %s) AS v(id, name)
+                FROM (VALUES %s) AS v(id, name, name_tr, clear_text_embedding, clear_translation)
                 WHERE tm.id = v.id::uuid
                 """,
                 updates,

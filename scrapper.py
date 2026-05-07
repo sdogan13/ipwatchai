@@ -3,14 +3,16 @@ import logging
 import json
 import os
 import re
+import random
 import requests
 import html
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_exponential
 
 _LOCAL_PROJECT_ROOT = Path(__file__).resolve().parent
 _LOCAL_DEFAULT_BULLETINS_ROOT = _LOCAL_PROJECT_ROOT / "bulletins" / "Marka"
@@ -114,14 +116,387 @@ logging.basicConfig(
     format='%(asctime)s - [SCRAPER] - %(levelname)s - %(message)s'
 )
 
+
+def _env_bool(name: str, default: bool = True) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _env_float(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _resolve_project_path(value: str | None, default: Path) -> Path:
+    if not value:
+        return default.resolve()
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = _LOCAL_PROJECT_ROOT / path
+    return path.resolve()
+
+
+def _epoch_to_iso(value: float | int | None) -> str | None:
+    if not value:
+        return None
+    return datetime.fromtimestamp(float(value), tz=timezone.utc).isoformat()
+
+
+def _utc_day_key(now: float) -> str:
+    return datetime.fromtimestamp(now, tz=timezone.utc).strftime("%Y-%m-%d")
+
+
+def _next_utc_midnight(now: float) -> float:
+    current = datetime.fromtimestamp(now, tz=timezone.utc)
+    midnight = datetime(current.year, current.month, current.day, tzinfo=timezone.utc)
+    return (midnight + timedelta(days=1)).timestamp()
+
+
+def _looks_like_blocking_content(text: str | None) -> bool:
+    if not text:
+        return False
+    normalized = html.unescape(text).lower()
+    replacements = {
+        "\u00e7": "c",
+        "\u011f": "g",
+        "\u0131": "i",
+        "\u00f6": "o",
+        "\u015f": "s",
+        "\u00fc": "u",
+    }
+    for src, dst in replacements.items():
+        normalized = normalized.replace(src, dst)
+    block_tokens = (
+        "captcha",
+        "guvenlik",
+        "dogrulama",
+        "cok fazla",
+        "too many",
+        "rate limit",
+        "access denied",
+        "erisim engellendi",
+        "izin verilmiyor",
+        "robot",
+        "otomatik",
+        "blocked",
+        "yasak",
+    )
+    return any(token in normalized for token in block_tokens)
+
+
+class ScraperSafetyStop(Exception):
+    """Raised internally when the scraper should soft-stop before more live traffic."""
+
+    def __init__(self, event: dict):
+        self.event = event
+        super().__init__(event.get("message") or event.get("reason") or "scraper safety stop")
+
+
+@dataclass
+class ScraperSafetyPolicy:
+    enabled: bool = True
+    state_path: Path = _LOCAL_PROJECT_ROOT / "artifacts" / "scraper_safety" / "turkpatent_state.json"
+    min_interval_seconds: float = 60.0
+    jitter_min_seconds: float = 10.0
+    jitter_max_seconds: float = 30.0
+    hourly_budget: int = 100
+    daily_budget: int = 1000
+    block_cooldown_seconds: float = 24 * 60 * 60
+    max_wait_seconds: float = 120.0
+    stale_lock_seconds: float = 120.0
+
+    @classmethod
+    def from_env(cls) -> "ScraperSafetyPolicy":
+        jitter_min = _env_float("SCRAPER_SAFETY_JITTER_MIN_SECONDS", 10.0)
+        jitter_max = _env_float("SCRAPER_SAFETY_JITTER_MAX_SECONDS", 30.0)
+        if jitter_max < jitter_min:
+            jitter_max = jitter_min
+        return cls(
+            enabled=_env_bool("SCRAPER_SAFETY_ENABLED", True),
+            state_path=_resolve_project_path(
+                os.environ.get("SCRAPER_SAFETY_STATE_PATH"),
+                _LOCAL_PROJECT_ROOT / "artifacts" / "scraper_safety" / "turkpatent_state.json",
+            ),
+            min_interval_seconds=_env_float("SCRAPER_SAFETY_MIN_INTERVAL_SECONDS", 60.0),
+            jitter_min_seconds=jitter_min,
+            jitter_max_seconds=jitter_max,
+            hourly_budget=_env_int("SCRAPER_SAFETY_HOURLY_BUDGET", 100),
+            daily_budget=_env_int("SCRAPER_SAFETY_DAILY_BUDGET", 1000),
+            block_cooldown_seconds=_env_float("SCRAPER_SAFETY_BLOCK_COOLDOWN_SECONDS", 24 * 60 * 60),
+            max_wait_seconds=_env_float("SCRAPER_SAFETY_MAX_WAIT_SECONDS", 120.0),
+            stale_lock_seconds=_env_float("SCRAPER_SAFETY_STALE_LOCK_SECONDS", 120.0),
+        )
+
+
+class ScraperSafetyGuard:
+    def __init__(self, policy: ScraperSafetyPolicy | None = None, *, now_fn=None, sleep_fn=None):
+        self.policy = policy or ScraperSafetyPolicy.from_env()
+        self._now = now_fn or time.time
+        self._sleep = sleep_fn or time.sleep
+
+    def request_permission(self, *, operation: str, query: str | None = None) -> dict:
+        if not self.policy.enabled:
+            return self._event(
+                safety_stop=False,
+                reason=None,
+                operation=operation,
+                query=query,
+                message="Scraper safety disabled.",
+            )
+
+        while True:
+            event = self._evaluate_permission(operation=operation, query=query)
+            if event.get("safety_stop") or not event.get("wait_seconds"):
+                return event
+            wait_seconds = float(event["wait_seconds"])
+            logging.info("   [SAFETY] Waiting %.1fs before TurkPatent request.", wait_seconds)
+            self._sleep(wait_seconds)
+
+    def record_block(self, *, reason: str, operation: str | None = None, query: str | None = None) -> dict:
+        if not self.policy.enabled:
+            return self._event(
+                safety_stop=False,
+                reason=None,
+                operation=operation,
+                query=query,
+                message="Scraper safety disabled.",
+            )
+
+        now = self._now()
+        blocked_until = now + max(float(self.policy.block_cooldown_seconds), 0.0)
+
+        def mutate(state: dict) -> dict:
+            state["blocked_until"] = blocked_until
+            state["block_reason"] = reason
+            state["updated_at"] = now
+            return state
+
+        self._mutate_state(mutate)
+        return self._event(
+            safety_stop=True,
+            reason="safety_blocked",
+            operation=operation,
+            query=query,
+            next_allowed_at=blocked_until,
+            message=f"TurkPatent block signal detected ({reason}); cooldown active.",
+        )
+
+    def _evaluate_permission(self, *, operation: str, query: str | None = None) -> dict:
+        now = self._now()
+
+        def mutate(state: dict) -> tuple[dict, dict]:
+            state = self._normalize_windows(state, now)
+            blocked_until = float(state.get("blocked_until") or 0)
+            if blocked_until > now:
+                return state, self._event(
+                    safety_stop=True,
+                    reason="safety_blocked",
+                    operation=operation,
+                    query=query,
+                    next_allowed_at=blocked_until,
+                    message="TurkPatent scraper is cooling down after a block signal.",
+                )
+
+            hour_count = int(state.get("hour_count") or 0)
+            day_count = int(state.get("day_count") or 0)
+            if self.policy.hourly_budget >= 0 and hour_count >= self.policy.hourly_budget:
+                next_allowed = float(state.get("hour_window_start") or now) + 3600
+                return state, self._event(
+                    safety_stop=True,
+                    reason="safety_rate_limited",
+                    operation=operation,
+                    query=query,
+                    next_allowed_at=next_allowed,
+                    message="TurkPatent hourly scraper budget exhausted.",
+                )
+            if self.policy.daily_budget >= 0 and day_count >= self.policy.daily_budget:
+                next_allowed = _next_utc_midnight(now)
+                return state, self._event(
+                    safety_stop=True,
+                    reason="safety_rate_limited",
+                    operation=operation,
+                    query=query,
+                    next_allowed_at=next_allowed,
+                    message="TurkPatent daily scraper budget exhausted.",
+                )
+
+            next_allowed_at = float(state.get("next_allowed_at") or 0)
+            if next_allowed_at > now:
+                wait_seconds = next_allowed_at - now
+                if wait_seconds > self.policy.max_wait_seconds:
+                    return state, self._event(
+                        safety_stop=True,
+                        reason="safety_rate_limited",
+                        operation=operation,
+                        query=query,
+                        wait_seconds=wait_seconds,
+                        next_allowed_at=next_allowed_at,
+                        message="TurkPatent scraper wait exceeds configured maximum.",
+                    )
+                return state, self._event(
+                    safety_stop=False,
+                    reason=None,
+                    operation=operation,
+                    query=query,
+                    wait_seconds=wait_seconds,
+                    next_allowed_at=next_allowed_at,
+                    message="TurkPatent scraper request is waiting for pacing.",
+                )
+
+            jitter = random.uniform(
+                max(self.policy.jitter_min_seconds, 0.0),
+                max(self.policy.jitter_max_seconds, self.policy.jitter_min_seconds, 0.0),
+            )
+            state["hour_count"] = hour_count + 1
+            state["day_count"] = day_count + 1
+            state["last_request_at"] = now
+            state["next_allowed_at"] = now + max(self.policy.min_interval_seconds, 0.0) + jitter
+            state["updated_at"] = now
+            return state, self._event(
+                safety_stop=False,
+                reason=None,
+                operation=operation,
+                query=query,
+                next_allowed_at=state["next_allowed_at"],
+                message="TurkPatent scraper request allowed.",
+            )
+
+        return self._mutate_state(mutate, returns_event=True)
+
+    def _normalize_windows(self, state: dict, now: float) -> dict:
+        hour_start = float(state.get("hour_window_start") or now)
+        if now - hour_start >= 3600:
+            state["hour_window_start"] = now
+            state["hour_count"] = 0
+        else:
+            state["hour_window_start"] = hour_start
+            state["hour_count"] = int(state.get("hour_count") or 0)
+
+        day_key = _utc_day_key(now)
+        if state.get("day_key") != day_key:
+            state["day_key"] = day_key
+            state["day_count"] = 0
+        else:
+            state["day_count"] = int(state.get("day_count") or 0)
+        return state
+
+    def _event(
+        self,
+        *,
+        safety_stop: bool,
+        reason: str | None,
+        operation: str | None,
+        query: str | None,
+        wait_seconds: float | None = None,
+        next_allowed_at: float | None = None,
+        message: str | None = None,
+    ) -> dict:
+        return {
+            "safety_stop": safety_stop,
+            "reason": reason,
+            "operation": operation,
+            "query": query,
+            "wait_seconds": wait_seconds,
+            "next_allowed_at": _epoch_to_iso(next_allowed_at),
+            "message": message,
+        }
+
+    def _mutate_state(self, mutator, *, returns_event: bool = False):
+        self.policy.state_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = self.policy.state_path.with_suffix(self.policy.state_path.suffix + ".lock")
+        fd = self._acquire_lock(lock_path)
+        try:
+            state = self._load_state()
+            result = mutator(state)
+            if returns_event:
+                state, event = result
+            else:
+                state = result
+                event = None
+            self._save_state(state)
+            return event if returns_event else None
+        finally:
+            try:
+                os.close(fd)
+            except Exception:
+                pass
+            try:
+                lock_path.unlink()
+            except FileNotFoundError:
+                pass
+
+    def _acquire_lock(self, lock_path: Path) -> int:
+        deadline = time.monotonic() + max(self.policy.max_wait_seconds, 1.0)
+        while True:
+            try:
+                fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, f"{os.getpid()} {self._now()}".encode("ascii", errors="ignore"))
+                return fd
+            except FileExistsError:
+                try:
+                    if self._now() - lock_path.stat().st_mtime > self.policy.stale_lock_seconds:
+                        lock_path.unlink()
+                        continue
+                except FileNotFoundError:
+                    continue
+                if time.monotonic() >= deadline:
+                    raise ScraperSafetyStop(
+                        self._event(
+                            safety_stop=True,
+                            reason="safety_rate_limited",
+                            operation="state_lock",
+                            query=None,
+                            message="Could not acquire scraper safety state lock.",
+                        )
+                    )
+                self._sleep(0.25)
+
+    def _load_state(self) -> dict:
+        try:
+            with self.policy.state_path.open("r", encoding="utf-8") as handle:
+                data = json.load(handle)
+            return data if isinstance(data, dict) else {}
+        except FileNotFoundError:
+            return {}
+        except Exception:
+            return {}
+
+    def _save_state(self, state: dict) -> None:
+        tmp_path = self.policy.state_path.with_suffix(self.policy.state_path.suffix + ".tmp")
+        with tmp_path.open("w", encoding="utf-8") as handle:
+            json.dump(state, handle, ensure_ascii=False, indent=2, sort_keys=True)
+        tmp_path.replace(self.policy.state_path)
+
+
 class TurkPatentScraper:
-    def __init__(self, headless: bool = True):
+    def __init__(self, headless: bool = True, safety_policy: ScraperSafetyPolicy | None = None):
         self.pw = None
         self.browser = None
         self.context = None
         self.page = None
         self.headless = headless
         self.url = "https://www.turkpatent.gov.tr/arastirma-yap?form=trademark"
+        self.safety_policy = safety_policy or ScraperSafetyPolicy.from_env()
+        self.safety = ScraperSafetyGuard(self.safety_policy)
+        self.last_safety_event: dict | None = None
+        self.last_save_info: dict | None = None
         
         # Dynamic storage management
         self.active_data_dir: Path = None
@@ -204,7 +579,6 @@ class TurkPatentScraper:
 
     def _rotate_user_agent(self):
         """Recreate browser context with a rotated user agent for fallback search."""
-        import random
         new_ua = random.choice(FALLBACK_USER_AGENTS)
         logging.info(f"   [UA] Rotating user agent for Turkish character fallback")
         try:
@@ -222,13 +596,70 @@ class TurkPatentScraper:
             stealth_sync(self.page)
         self.page.set_default_timeout(60000)
 
+    def _ensure_request_allowed(self, *, operation: str, query: str | None = None) -> dict:
+        event = self.safety.request_permission(operation=operation, query=query)
+        if event.get("safety_stop"):
+            self.last_safety_event = event
+            logging.warning("   [SAFETY] Soft-stopping TurkPatent request: %s", event.get("message"))
+            raise ScraperSafetyStop(event)
+        return event
+
+    def _record_block_and_stop(self, *, reason: str, operation: str | None = None, query: str | None = None):
+        event = self.safety.record_block(reason=reason, operation=operation, query=query)
+        self.last_safety_event = event
+        logging.warning("   [SAFETY] TurkPatent block signal: %s", reason)
+        raise ScraperSafetyStop(event)
+
+    def _current_page_text(self) -> str:
+        try:
+            return self.page.evaluate("() => document.body ? document.body.innerText : ''") or ""
+        except Exception:
+            try:
+                return self.page.content() or ""
+            except Exception:
+                return ""
+
+    def _safety_stop_evidence(self, application_no: str, trademark_name: str, event: dict) -> dict:
+        reason = event.get("reason") or "safety_rate_limited"
+        return {
+            "application_no": application_no,
+            "query": trademark_name,
+            "matched": False,
+            "status_text": "",
+            "registration_no": "",
+            "nice_classes": [],
+            "artifact_dir": None,
+            "artifact_error": reason,
+            "safety_stop": True,
+            "safety_reason": reason,
+            "next_allowed_at": event.get("next_allowed_at"),
+            "safety_message": event.get("message"),
+        }
+
     # --- COMPONENT LOGIC ---
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-    def _safe_goto(self, url: str):
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_not_exception_type(ScraperSafetyStop),
+    )
+    def _safe_goto(
+        self,
+        url: str,
+        *,
+        safety_checked: bool = False,
+        operation: str = "goto",
+        query: str | None = None,
+    ):
         """Navigates to a URL with exponential backoff retries."""
+        if not safety_checked:
+            self._ensure_request_allowed(operation=operation, query=query or url)
         logging.info(f"   [NETWORK] Attempting to load {url}...")
-        self.page.goto(url, wait_until="domcontentloaded")
+        response = self.page.goto(url, wait_until="domcontentloaded")
+        status = getattr(response, "status", None)
+        if status in {403, 429}:
+            self._record_block_and_stop(reason=f"http_{status}", operation=operation, query=query or url)
+        return response
 
     def _close_popups(self):
         """Identifies and closes common cookie banners and announcement (Duyuru) modals."""
@@ -558,6 +989,10 @@ class TurkPatentScraper:
         return row[6].strip() if len(row) > 6 and row[6] else ""
 
     @staticmethod
+    def _row_registration_no(row: List[str]) -> str:
+        return row[5].strip() if len(row) > 5 and row[5] else ""
+
+    @staticmethod
     def parse_detail_nice_classes(detail_text: str) -> List[int]:
         """Extract Nice classes from DETAY -> Marka Bilgileri -> Nice Sınıfları."""
         if not detail_text:
@@ -826,10 +1261,15 @@ class TurkPatentScraper:
 
         This method does not persist APP metadata. It is intended for repair/audit flows.
         """
+        self.last_safety_event = None
         if not self.page:
             self.start_browser()
 
-        rows = self._do_search(trademark_name, min(max(limit, 1), MAX_SCRAPE_LIMIT), max_scroll_seconds)
+        try:
+            rows = self._do_search(trademark_name, min(max(limit, 1), MAX_SCRAPE_LIMIT), max_scroll_seconds)
+        except ScraperSafetyStop as exc:
+            return self._safety_stop_evidence(application_no, trademark_name, exc.event)
+
         matched_row = next((row for row in rows if self._row_application_no(row) == application_no), None)
         if matched_row is None:
             return {
@@ -837,6 +1277,7 @@ class TurkPatentScraper:
                 "query": trademark_name,
                 "matched": False,
                 "status_text": "",
+                "registration_no": "",
                 "nice_classes": [],
                 "artifact_dir": None,
                 "artifact_error": None,
@@ -850,6 +1291,7 @@ class TurkPatentScraper:
                 "matched": True,
                 "detail_opened": False,
                 "status_text": self._row_status(matched_row),
+                "registration_no": self._row_registration_no(matched_row),
                 "nice_classes": [],
                 "artifact_dir": None,
                 "artifact_error": "detail_button_not_found",
@@ -884,6 +1326,7 @@ class TurkPatentScraper:
             "matched": True,
             "detail_opened": True,
             "status_text": self._row_status(matched_row),
+            "registration_no": self._row_registration_no(matched_row),
             "nice_classes": self.parse_detail_nice_classes(detail_text),
             "artifact_dir": artifact.get("artifact_dir"),
             "artifact_error": artifact.get("error"),
@@ -891,7 +1334,56 @@ class TurkPatentScraper:
             "artifact_pdf_saved": artifact.get("pdf_saved", False),
         }
 
-    def save_to_json(self, data: List[List[str]]):
+    def fetch_live_grid_evidence(
+        self,
+        application_no: str,
+        trademark_name: str,
+        *,
+        limit: int = 200,
+        max_scroll_seconds: int = 90,
+    ) -> dict:
+        """
+        Search TURKPATENT, exact-match application_no, and return grid-only evidence.
+
+        Status repair uses this path because Durumu and Tescil No are available in
+        the search grid; full Nice-class repair still opens DETAY.
+        """
+        self.last_safety_event = None
+        if not self.page:
+            self.start_browser()
+
+        try:
+            rows = self._do_search(trademark_name, min(max(limit, 1), MAX_SCRAPE_LIMIT), max_scroll_seconds)
+        except ScraperSafetyStop as exc:
+            return self._safety_stop_evidence(application_no, trademark_name, exc.event)
+
+        matched_row = next((row for row in rows if self._row_application_no(row) == application_no), None)
+        if matched_row is None:
+            return {
+                "application_no": application_no,
+                "query": trademark_name,
+                "matched": False,
+                "detail_opened": False,
+                "status_text": "",
+                "registration_no": "",
+                "nice_classes": [],
+                "artifact_dir": None,
+                "artifact_error": None,
+            }
+
+        return {
+            "application_no": application_no,
+            "query": trademark_name,
+            "matched": True,
+            "detail_opened": False,
+            "status_text": self._row_status(matched_row),
+            "registration_no": self._row_registration_no(matched_row),
+            "nice_classes": [],
+            "artifact_dir": None,
+            "artifact_error": None,
+        }
+
+    def _save_to_json_legacy_unused(self, data: List[List[str]]):
         """Saves the captured data to a JSON file following the specified schema."""
         if not data:
             logging.warning("No data to save.")
@@ -985,6 +1477,173 @@ class TurkPatentScraper:
 
         logging.info(f"   💾 Saved to {target_file.parent.name}/{target_file.name}: Added {new_count} new records (Total: {len(existing_items)})")
 
+    @staticmethod
+    def _metadata_item_from_row(row):
+        if isinstance(row, dict):
+            return json.loads(json.dumps(row, ensure_ascii=False))
+
+        app_no = row[1].strip() if len(row) > 1 and row[1] else ""
+        name = row[2].strip() if len(row) > 2 and row[2] else ""
+        holders_raw = row[3].strip() if len(row) > 3 and row[3] else ""
+        app_date = row[4].strip() if len(row) > 4 and row[4] else ""
+        reg_no = row[5].strip() if len(row) > 5 and row[5] else ""
+        status = row[6].strip() if len(row) > 6 and row[6] else ""
+        classes_raw = row[7].strip() if len(row) > 7 and row[7] else ""
+
+        nice_classes_list = []
+        if classes_raw:
+            nice_classes_list = re.findall(r'\d+', classes_raw)
+            classes_raw = ", ".join(nice_classes_list)
+
+        return {
+            "APPLICATIONNO": app_no,
+            "STATUS": status,
+            "IMAGE": app_no.replace('/', '_'),
+            "TRADEMARK": {
+                "APPLICATIONDATE": app_date,
+                "REGISTERNO": reg_no,
+                "REGISTERDATE": "",
+                "INTREGNO": "",
+                "NAME": name,
+                "NICECLASSES_RAW": classes_raw,
+                "NICECLASSES_LIST": nice_classes_list,
+                "TM_TYPE_CODE": "",
+                "VIENNACLASSES_RAW": "",
+                "VIENNACLASSES_LIST": [],
+                "BULLETIN_NO": "",
+                "BULLETIN_DATE": "",
+                "EXTRA_COL_11": "",
+                "EXTRA_COL_12": ""
+            },
+            "HOLDERS": [
+                {
+                    "TPECLIENTID": "",
+                    "TITLE": holders_raw,
+                    "ADDRESS": "",
+                    "TOWN_DISTRICT": "",
+                    "POSTALCODE": "",
+                    "CITY_PROVINCE": "",
+                    "COUNTRY": "TÜRKİYE"
+                }
+            ],
+            "ATTORNEYS": [],
+            "GOODS": [],
+            "EXTRACTEDGOODS": []
+        }
+
+    @staticmethod
+    def _has_save_value(value):
+        return value is not None and value != "" and value != [] and value != {}
+
+    @classmethod
+    def _merge_metadata_item(cls, existing, incoming):
+        merged = dict(existing or {})
+        for key, value in incoming.items():
+            if key == "TRADEMARK" and isinstance(value, dict):
+                trademark = dict(merged.get("TRADEMARK") or {})
+                for subkey, subvalue in value.items():
+                    if cls._has_save_value(subvalue):
+                        trademark[subkey] = subvalue
+                merged["TRADEMARK"] = trademark
+            elif key == "STATUS":
+                merged[key] = "" if value is None else value
+            elif cls._has_save_value(value):
+                merged[key] = value
+        return merged
+
+    def save_to_json(self, data: List[List[str]], target_file: Path | str | None = None):
+        """Upsert captured data into the canonical APP metadata file."""
+        self.last_save_info = None
+        if not data:
+            logging.warning("No data to save.")
+            return {
+                "metadata_path": None,
+                "folder_name": None,
+                "saved_application_numbers": [],
+                "saved_records": [],
+                "added_count": 0,
+                "updated_count": 0,
+                "skipped_count": 0,
+            }
+
+        if target_file is None:
+            self._resolve_storage_path()
+            target_file = self.active_metadata_file
+        else:
+            target_file = Path(target_file)
+            self.active_data_dir = target_file.parent
+            self.active_metadata_file = target_file
+
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+
+        existing_items = []
+        if target_file.exists():
+            try:
+                with open(target_file, 'r', encoding='utf-8') as f:
+                    existing_items = json.load(f)
+            except Exception:
+                pass
+        if not isinstance(existing_items, list):
+            existing_items = []
+
+        existing_by_app_no = {
+            item.get("APPLICATIONNO"): index
+            for index, item in enumerate(existing_items)
+            if isinstance(item, dict) and item.get("APPLICATIONNO")
+        }
+        added_count = 0
+        updated_count = 0
+        skipped_count = 0
+        saved_records = []
+        saved_app_nos = []
+
+        for row in data:
+            item = self._metadata_item_from_row(row)
+            app_no = item.get("APPLICATIONNO")
+            if not app_no:
+                skipped_count += 1
+                continue
+
+            if app_no in existing_by_app_no:
+                index = existing_by_app_no[app_no]
+                merged = self._merge_metadata_item(existing_items[index], item)
+                if merged == existing_items[index]:
+                    skipped_count += 1
+                else:
+                    existing_items[index] = merged
+                    updated_count += 1
+                    saved_records.append(merged)
+                    saved_app_nos.append(app_no)
+            else:
+                existing_by_app_no[app_no] = len(existing_items)
+                existing_items.append(item)
+                added_count += 1
+                saved_records.append(item)
+                saved_app_nos.append(app_no)
+
+        with open(target_file, 'w', encoding='utf-8') as f:
+            json.dump(existing_items, f, indent=2, ensure_ascii=False)
+
+        self.last_save_info = {
+            "metadata_path": str(target_file),
+            "folder_name": target_file.parent.name,
+            "saved_application_numbers": saved_app_nos,
+            "saved_records": saved_records,
+            "added_count": added_count,
+            "updated_count": updated_count,
+            "skipped_count": skipped_count,
+        }
+        logging.info(
+            "   Saved to %s/%s: Added %s, Updated %s, Skipped %s (Total: %s)",
+            target_file.parent.name,
+            target_file.name,
+            added_count,
+            updated_count,
+            skipped_count,
+            len(existing_items),
+        )
+        return self.last_save_info
+
     # --- MAIN WORKFLOW (EXACT scroll_and_capture LOGIC FROM tescil_test.py) ---
 
     def _click_sorgula(self):
@@ -1010,7 +1669,8 @@ class TurkPatentScraper:
         Returns empty list if no records found. Raises on hard failures.
         """
         logging.info(f"🔎 Searching TurkPatent for: '{trademark_name}' (max {effective_limit} records)")
-        self._safe_goto(self.url)
+        self._ensure_request_allowed(operation="search", query=trademark_name)
+        self._safe_goto(self.url, safety_checked=True, operation="search", query=trademark_name)
         self._close_popups()
         self._ensure_marka_arastirma_tab()
 
@@ -1035,6 +1695,13 @@ class TurkPatentScraper:
         try:
             self.page.wait_for_selector(row_sel, timeout=20000)
         except Exception:
+            page_text = self._current_page_text()
+            if _looks_like_blocking_content(page_text):
+                self._record_block_and_stop(
+                    reason="blocking_page_content",
+                    operation="search",
+                    query=trademark_name,
+                )
             if "bulunamadı" in self.page.content().lower() or "bulunamadi" in self.page.content().lower():
                 logging.info("   ℹ️ No records found.")
                 return []
@@ -1137,6 +1804,8 @@ class TurkPatentScraper:
            - Retry with Turkish character substitutions applied
         """
         # ===================== SKIP CHECK =====================
+        self.last_safety_event = None
+        self.last_save_info = None
         term_lower = trademark_name.lower().strip()
         term_normalized = term_lower.replace(' ', '')
 
@@ -1162,7 +1831,12 @@ class TurkPatentScraper:
             self.start_browser()
 
         # ===================== PRIMARY SEARCH =====================
-        primary_rows = self._do_search(trademark_name, effective_limit, max_scroll_seconds)
+        try:
+            primary_rows = self._do_search(trademark_name, effective_limit, max_scroll_seconds)
+        except ScraperSafetyStop as exc:
+            self.last_safety_event = exc.event
+            logging.warning("   [SAFETY] Search soft-stopped before APP metadata write.")
+            return []
 
         if primary_rows:
             logging.info(f"   ✅ Primary search returned {len(primary_rows)} records.")
@@ -1189,7 +1863,12 @@ class TurkPatentScraper:
         # Rotate user agent before the second request
         self._rotate_user_agent()
 
-        fallback_rows = self._do_search(fallback_query, effective_limit, max_scroll_seconds)
+        try:
+            fallback_rows = self._do_search(fallback_query, effective_limit, max_scroll_seconds)
+        except ScraperSafetyStop as exc:
+            self.last_safety_event = exc.event
+            logging.warning("   [SAFETY] Fallback search soft-stopped before APP metadata write.")
+            return []
         logging.info(f"   {'✅' if fallback_rows else 'ℹ️'} Fallback returned {len(fallback_rows)} records.")
 
         all_rows = fallback_rows  # fallback result is canonical when primary was 0

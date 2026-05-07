@@ -18,8 +18,10 @@ from database.crud import (
 )
 from services.scoring_service import (
     _calculate_visual_breakdown,
+    build_logo_image_profile,
     calculate_comprehensive_score,
     extract_ocr_text,
+    resolve_logo_image_path,
 )
 from utils.idf_scoring import (
     normalize_turkish,
@@ -29,6 +31,7 @@ from utils.class_utils import (
     GLOBAL_CLASS,
     get_overlapping_classes,
 )
+from utils.deadline import active_appeal_deadline_sql
 from utils.watchlist_filters import is_same_holder_conflict
 from pipeline import ai  # Shared AI models (loaded once at app startup)
 from risk_engine import score_pair  # Centralized scoring
@@ -460,7 +463,11 @@ class WatchlistScanner:
             'translation_similarity': score_breakdown.get('translation_similarity', 0),
             'phonetic_match': phonetic_sim >= 0.5,
             'text_idf_score': score_breakdown.get('text_idf_score', 0),
+            'path_a_score': score_breakdown.get('path_a_score', 0),
+            'path_b_score': score_breakdown.get('path_b_score', 0),
             'scoring_path': score_breakdown.get('scoring_path', ''),
+            'scoring_path_source': score_breakdown.get('scoring_path_source', ''),
+            'score_details': score_breakdown,
             'overlapping_classes': list(overlapping_classes),
             'has_global_class': has_global_class,
         }
@@ -533,6 +540,17 @@ class WatchlistScanner:
         # OCR text from BOTH logos — never use brand name here
         tm_ocr = trademark.get('logo_ocr_text') or ''
         wl_ocr = watchlist_item.get('logo_ocr_text') or ''
+        tm_profile = None
+        tm_profile_path = resolve_logo_image_path(
+            trademark.get('image_path') or '',
+            roots=[settings.paths.data_root, settings.pipeline.bulletins_root],
+        )
+        if tm_profile_path:
+            tm_profile = build_logo_image_profile(tm_profile_path, tm_ocr)
+        wl_profile = None
+        wl_profile_path = resolve_logo_image_path(watchlist_item.get('logo_path') or '')
+        if wl_profile_path:
+            wl_profile = build_logo_image_profile(wl_profile_path, wl_ocr)
 
         score, breakdown = _calculate_visual_breakdown(
             clip_sim=clip_sim,
@@ -540,6 +558,8 @@ class WatchlistScanner:
             color_sim=color_sim,
             ocr_text_a=wl_ocr,
             ocr_text_b=tm_ocr,
+            logo_profile_a=wl_profile,
+            logo_profile_b=tm_profile,
         )
         breakdown["source"] = "watchlist_visual_components"
         return score, breakdown
@@ -559,12 +579,11 @@ class WatchlistScanner:
         # Convert UUIDs to strings
         id_strings = [str(id) for id in trademark_ids]
 
-        cur.execute("""
+        cur.execute(f"""
             SELECT t.*
             FROM trademarks t
             WHERE t.id = ANY(%s::uuid[])
-              AND t.appeal_deadline IS NOT NULL
-              AND t.appeal_deadline >= CURRENT_DATE
+              AND {active_appeal_deadline_sql("t")}
         """, (id_strings,))
 
         return [dict(row) for row in cur.fetchall()]
@@ -576,12 +595,10 @@ class WatchlistScanner:
         no pre-screening by name similarity, class, or score.
         """
         cur = self.db.cursor()
-        cur.execute("""
+        cur.execute(f"""
             SELECT t.*
             FROM trademarks t
-            WHERE t.appeal_deadline IS NOT NULL
-              AND t.appeal_deadline >= CURRENT_DATE
-              AND t.final_status NOT IN ('Reddedildi', 'Geri Çekildi', 'Süresi Doldu')
+            WHERE {active_appeal_deadline_sql("t")}
         """)
         results = [dict(row) for row in cur.fetchall()]
         logger.info(f"  Within-deadline pool: {len(results)} trademarks")
@@ -870,7 +887,9 @@ if __name__ == "__main__":
     elif args.full_rescan:
         # Get all trademark IDs
         cur = scanner.db.cursor()
-        cur.execute("SELECT id FROM trademarks WHERE appeal_deadline IS NOT NULL AND appeal_deadline >= CURRENT_DATE AND final_status NOT IN ('Reddedildi', 'Geri Çekildi', 'Süresi Doldu')")
+        cur.execute(
+            f"SELECT id FROM trademarks t WHERE {active_appeal_deadline_sql('t')}"
+        )
         ids = [UUID(row['id']) for row in cur.fetchall()]
         scanner.scan_new_trademarks(ids, "full_rescan", f"manual_{datetime.utcnow().date()}")
     else:

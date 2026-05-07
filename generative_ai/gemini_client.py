@@ -13,10 +13,11 @@ Usage:
         logos = await client.generate_logos("BrandX", "modern tech logo", count=4)
 """
 import asyncio
+import io
 import json
 import re
 import threading
-from typing import Optional
+from typing import Any, Optional
 
 import structlog
 
@@ -74,6 +75,25 @@ Requirements:
 - Professional quality, suitable for business use
 - The design should be distinctive and unique"""
 
+GEMINI_LOGO_PANEL_PROMPT = """\
+Create one image containing exactly four distinct professional logo options for the brand "{brand_name}".
+
+Layout requirements:
+- Use a clean 2x2 grid: top-left, top-right, bottom-left, bottom-right
+- Each panel must contain one complete standalone logo option
+- Use equal-size panels with clear white gutters or spacing between panels
+- Do not add panel labels, numbers, captions, mockups, packaging, devices, or presentation boards
+- Do not add extra text beyond the brand text that belongs inside the logo
+
+Logo requirements for every panel:
+- The text "{brand_name}" MUST be clearly visible and legible
+- Style: {style}
+- Description: {description}
+- Use clean, vector-style graphics suitable for trademark registration
+- White or transparent background
+- Professional quality, suitable for business use
+- Each panel should use a different visual direction"""
+
 LOGO_REVISION_PROMPT = """\
 Revise the provided logo candidate for the brand "{brand_name}".
 
@@ -91,6 +111,29 @@ Requirements:
 - White or transparent background
 - Preserve the useful direction from the reference image while making a distinct revised option"""
 
+GEMINI_LOGO_REVISION_PANEL_PROMPT = """\
+Revise the provided logo candidate for the brand "{brand_name}" and create exactly four distinct revised logo options in one image.
+
+Layout requirements:
+- Use a clean 2x2 grid: top-left, top-right, bottom-left, bottom-right
+- Each panel must contain one complete standalone revised logo option
+- Use equal-size panels with clear white gutters or spacing between panels
+- Do not add panel labels, numbers, captions, mockups, packaging, devices, or presentation boards
+- Do not add extra text beyond the brand text that belongs inside the logo
+
+Keep for every panel:
+- The text "{brand_name}" clearly visible and legible
+- Style direction: {style}
+- Original visual brief: {description}
+
+Apply this user revision request:
+{revision_prompt}
+
+Requirements:
+- Preserve the useful direction from the reference image while making four distinct revised options
+- Use clean vector-style graphics suitable for trademark registration
+- White or transparent background"""
+
 
 # Retryable HTTP status codes
 _RETRYABLE_CODES = {429, 500, 503}
@@ -102,6 +145,8 @@ _RETRYABLE_CODES = {429, 500, 503}
 
 class GeminiClient:
     """Unified client for Gemini text and image generation."""
+
+    provider_name = "gemini"
 
     def __init__(self, settings=None):
         """
@@ -120,6 +165,8 @@ class GeminiClient:
         self.image_model: str = settings.gemini_image_model
         self.timeout: int = settings.gemini_timeout
         self.max_retries: int = settings.gemini_max_retries
+        self.source_layout: str | None = None
+        self.provider_call_count: int = 0
 
         self._client = None
         self._initialized = False
@@ -182,6 +229,78 @@ class GeminiClient:
 
         return self._parse_name_list(raw_text, count)
 
+    async def generate_json(
+        self,
+        prompt: str,
+        max_output_tokens: int = 4096,
+        temperature: float = 0.2,
+        system_prompt: str | None = None,
+        user_prompt: str | None = None,
+        model: str | None = None,
+    ) -> dict[str, Any]:
+        """Generate a JSON object using the text model."""
+        if not self.is_available():
+            raise GeminiError("Gemini API key not configured", status_code=None)
+
+        from google.genai import types
+
+        if system_prompt or user_prompt:
+            user_content = user_prompt if user_prompt is not None else prompt
+            prompt = "\n\n".join(part for part in [system_prompt, user_content] if part)
+
+        config = types.GenerateContentConfig(
+            temperature=temperature,
+            max_output_tokens=max_output_tokens,
+            response_mime_type="application/json",
+        )
+
+        raw_text = await self._call_with_retry(
+            model=model or self.text_model,
+            contents=prompt,
+            config=config,
+        )
+
+        return self._parse_json_object(raw_text)
+
+    async def generate_multimodal_json(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        images: list[dict[str, Any]],
+        max_output_tokens: int = 4096,
+        temperature: float = 0.2,
+    ) -> dict[str, Any]:
+        """Generate a JSON object using the text model with labelled image parts."""
+        if not self.is_available():
+            raise GeminiError("Gemini API key not configured", status_code=None)
+
+        from google.genai import types
+
+        contents: list[Any] = ["\n\n".join(part for part in [system_prompt, user_prompt] if part)]
+        for image in images:
+            label = str(image.get("label") or "image")
+            image_bytes = image.get("bytes")
+            mime_type = image.get("mime_type") or "image/jpeg"
+            if not image_bytes:
+                continue
+            contents.append(f"Attached image: {label}")
+            contents.append(types.Part.from_bytes(data=image_bytes, mime_type=mime_type))
+
+        config = types.GenerateContentConfig(
+            temperature=temperature,
+            max_output_tokens=max_output_tokens,
+            response_mime_type="application/json",
+        )
+
+        raw_text = await self._call_with_retry(
+            model=self.text_model,
+            contents=contents,
+            config=config,
+        )
+
+        return self._parse_json_object(raw_text)
+
     def build_name_prompt(
         self,
         concept: str = "",
@@ -234,7 +353,7 @@ class GeminiClient:
 
         from google.genai import types
 
-        prompt = LOGO_GENERATION_PROMPT.format(
+        prompt = GEMINI_LOGO_PANEL_PROMPT.format(
             brand_name=brand_name,
             style=style,
             description=description or f"Professional logo for {brand_name}",
@@ -244,23 +363,12 @@ class GeminiClient:
             response_modalities=["IMAGE"],
         )
 
-        images: list[bytes] = []
-        # Generate one at a time since image generation typically returns 1 image
-        for i in range(count):
-            try:
-                image_bytes = await self._generate_single_logo(prompt, config)
-                if image_bytes:
-                    images.append(image_bytes)
-            except GeminiError:
-                # If a single variation fails, continue with others
-                if i == 0:
-                    raise  # If the first one fails, propagate
-                logger.warning("logo_variation_failed", variation=i + 1, total=count)
-                continue
-
-        if not images:
-            raise GeminiError("No logo images were generated", retries_attempted=self.max_retries)
-
+        panel_bytes = await self._generate_single_logo(prompt, config)
+        if not panel_bytes:
+            raise GeminiError("No logo panel image was generated", retries_attempted=self.max_retries)
+        images = self._split_logo_panel(panel_bytes, count=count)
+        self.source_layout = "panel_2x2_split"
+        self.provider_call_count = 1
         return images
 
     async def generate_logo_revisions(
@@ -278,7 +386,7 @@ class GeminiClient:
 
         from google.genai import types
 
-        prompt = LOGO_REVISION_PROMPT.format(
+        prompt = GEMINI_LOGO_REVISION_PANEL_PROMPT.format(
             brand_name=brand_name,
             style=style,
             description=description or f"Professional logo for {brand_name}",
@@ -303,21 +411,12 @@ class GeminiClient:
                 logger.warning("logo_revision_reference_part_failed")
                 contents = prompt
 
-        images: list[bytes] = []
-        for i in range(count):
-            try:
-                image_bytes = await self._generate_single_logo(contents, config)
-                if image_bytes:
-                    images.append(image_bytes)
-            except GeminiError:
-                if i == 0:
-                    raise
-                logger.warning("logo_revision_variation_failed", variation=i + 1, total=count)
-                continue
-
-        if not images:
-            raise GeminiError("No revised logo images were generated", retries_attempted=self.max_retries)
-
+        panel_bytes = await self._generate_single_logo(contents, config)
+        if not panel_bytes:
+            raise GeminiError("No revised logo panel image was generated", retries_attempted=self.max_retries)
+        images = self._split_logo_panel(panel_bytes, count=count)
+        self.source_layout = "panel_2x2_split"
+        self.provider_call_count = 1
         return images
 
     async def _generate_single_logo(self, prompt, config) -> Optional[bytes]:
@@ -339,6 +438,101 @@ class GeminiClient:
                             return part.inline_data.data
 
         return None
+
+    @staticmethod
+    def _split_logo_panel(panel_bytes: bytes, count: int = 4) -> list[bytes]:
+        """Split a Gemini 2x2 logo panel into standalone square PNG images."""
+        try:
+            from PIL import Image, ImageChops
+        except Exception as exc:  # pragma: no cover - dependency is present in runtime/tests
+            raise GeminiError(f"Logo panel splitting requires Pillow: {exc}") from exc
+
+        requested_count = max(1, int(count or 1))
+        if requested_count > 4:
+            raise GeminiError("Gemini panel splitting supports up to 4 logo options")
+
+        try:
+            panel = Image.open(io.BytesIO(panel_bytes))
+            panel.load()
+        except Exception as exc:
+            raise GeminiError(f"Gemini returned an invalid logo panel image: {exc}") from exc
+
+        if panel.width < 256 or panel.height < 256:
+            raise GeminiError("Gemini logo panel image is too small to split")
+
+        panel = panel.convert("RGBA")
+        mid_x = panel.width // 2
+        mid_y = panel.height // 2
+        boxes = [
+            (0, 0, mid_x, mid_y),
+            (mid_x, 0, panel.width, mid_y),
+            (0, mid_y, mid_x, panel.height),
+            (mid_x, mid_y, panel.width, panel.height),
+        ]
+
+        outputs: list[bytes] = []
+        for index, box in enumerate(boxes[:requested_count], start=1):
+            crop = panel.crop(box)
+            if crop.width < 128 or crop.height < 128:
+                raise GeminiError(f"Gemini logo panel crop {index} is too small")
+            normalized = GeminiClient._normalize_logo_crop(crop)
+            if GeminiClient._looks_blank(normalized):
+                raise GeminiError(f"Gemini logo panel crop {index} appears blank")
+            output = io.BytesIO()
+            normalized.save(output, format="PNG")
+            outputs.append(output.getvalue())
+
+        if len(set(outputs)) != len(outputs):
+            raise GeminiError("Gemini logo panel contained duplicate logo crops")
+        return outputs
+
+    @staticmethod
+    def _normalize_logo_crop(crop) -> Any:
+        """Trim white gutters and center a crop on a square white canvas."""
+        from PIL import Image, ImageChops
+
+        rgba = crop.convert("RGBA")
+        white = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+        flattened = Image.alpha_composite(white, rgba)
+
+        diff = ImageChops.difference(flattened.convert("RGB"), Image.new("RGB", flattened.size, "white"))
+        mask = diff.convert("L").point(lambda value: 255 if value > 12 else 0)
+        bbox = mask.getbbox()
+        if bbox:
+            content_area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+            crop_area = max(1, flattened.width * flattened.height)
+            touches_edge = (
+                bbox[0] <= 2
+                or bbox[1] <= 2
+                or bbox[2] >= flattened.width - 2
+                or bbox[3] >= flattened.height - 2
+            )
+            if content_area >= crop_area * 0.01 and not (touches_edge and content_area < crop_area * 0.08):
+                flattened = flattened.crop(bbox)
+
+        side = max(flattened.width, flattened.height)
+        padding = max(12, int(side * 0.12))
+        canvas_side = side + padding * 2
+        canvas = Image.new("RGBA", (canvas_side, canvas_side), (255, 255, 255, 255))
+        x = (canvas_side - flattened.width) // 2
+        y = (canvas_side - flattened.height) // 2
+        canvas.alpha_composite(flattened.convert("RGBA"), (x, y))
+        return canvas.convert("RGB")
+
+    @staticmethod
+    def _looks_blank(image) -> bool:
+        from PIL import Image, ImageChops
+
+        rgb = image.convert("RGB")
+        width, height = rgb.size
+        border = max(4, int(min(width, height) * 0.16))
+        if width > border * 2 and height > border * 2:
+            rgb = rgb.crop((border, border, width - border, height - border))
+
+        diff = ImageChops.difference(rgb, Image.new("RGB", rgb.size, "white"))
+        mask = diff.convert("L").point(lambda value: 255 if value > 16 else 0)
+        non_white = mask.histogram()[255]
+        return (non_white / max(1, rgb.width * rgb.height)) < 0.005
 
     # ----------------------------------------------------------
     # Retry logic
@@ -478,6 +672,30 @@ class GeminiClient:
                 unique_names.append(name)
 
         return unique_names[:max_count]
+
+    @staticmethod
+    def _parse_json_object(raw_text: str) -> dict[str, Any]:
+        """Parse a JSON object from a Gemini text response."""
+        if not raw_text:
+            raise GeminiError("Gemini returned an empty response")
+
+        try:
+            parsed = json.loads(raw_text.strip())
+            if isinstance(parsed, dict):
+                return parsed
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+        if json_match:
+            try:
+                parsed = json.loads(json_match.group())
+                if isinstance(parsed, dict):
+                    return parsed
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        raise GeminiError("Gemini response was not a JSON object")
 
 
 # ============================================================

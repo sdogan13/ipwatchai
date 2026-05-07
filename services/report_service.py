@@ -1,11 +1,13 @@
 """Report service helpers used by HTTP route modules."""
 
 import os
+from pathlib import Path
 
 from fastapi import HTTPException
 from fastapi.responses import FileResponse
 from psycopg2.extras import RealDictCursor
 
+from config.settings import settings
 from database.crud import Database
 from models.schemas import ReportType
 
@@ -40,6 +42,45 @@ def _serialize_report_row(row, include_detail_fields=False):
     return payload
 
 
+def _safe_report_file_path(file_path, report_dir=None):
+    """Return a resolved report file path only when it stays inside report_dir."""
+    if not file_path:
+        return None
+
+    try:
+        base_dir = Path(report_dir or settings.paths.report_dir).expanduser().resolve()
+        raw_path = Path(str(file_path)).expanduser()
+        resolved_path = (
+            raw_path.resolve()
+            if raw_path.is_absolute()
+            else (base_dir / raw_path).resolve()
+        )
+        resolved_path.relative_to(base_dir)
+        return resolved_path
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+
+def _delete_report_file(
+    file_path,
+    report_dir=None,
+    file_exists=os.path.isfile,
+    file_remover=os.remove,
+):
+    safe_path = _safe_report_file_path(file_path, report_dir=report_dir)
+    if not safe_path:
+        return "skipped"
+
+    safe_path_str = str(safe_path)
+    try:
+        if not file_exists(safe_path_str):
+            return "missing"
+        file_remover(safe_path_str)
+        return "deleted"
+    except OSError:
+        return "failed"
+
+
 async def generate_report_data(
     request,
     current_user,
@@ -50,16 +91,6 @@ async def generate_report_data(
     cursor_factory=RealDictCursor,
 ):
     """Generate a report and return the API payload."""
-    if user_plan_getter is None:
-        from utils.subscription import get_user_plan
-
-        user_plan_getter = get_user_plan
-
-    if report_eligibility_checker is None:
-        from utils.subscription import check_report_eligibility
-
-        report_eligibility_checker = check_report_eligibility
-
     if generator_factory is None:
         from reports.generator import ReportGenerator
 
@@ -67,24 +98,6 @@ async def generate_report_data(
             return ReportGenerator(db=db)
 
     with database_factory() as db:
-        plan = user_plan_getter(db, str(current_user.id))
-        plan_name = plan["plan_name"]
-
-        eligibility = report_eligibility_checker(
-            db, plan_name, str(current_user.organization_id)
-        )
-
-        if not eligibility["eligible"]:
-            raise HTTPException(
-                status_code=403,
-                detail={
-                    "error": "limit_exceeded",
-                    "message": eligibility["reason"],
-                    "reports_used": eligibility["reports_used"],
-                    "reports_limit": eligibility["reports_limit"],
-                },
-            )
-
         generator_type = REPORT_TYPE_MAP.get(request.report_type, "weekly_digest")
 
         parameters = {}
@@ -155,16 +168,7 @@ async def list_reports_data(
     report_eligibility_checker=None,
     cursor_factory=RealDictCursor,
 ):
-    """List organization reports with usage metadata."""
-    if user_plan_getter is None:
-        from utils.subscription import get_user_plan
-
-        user_plan_getter = get_user_plan
-
-    if report_eligibility_checker is None:
-        from utils.subscription import check_report_eligibility
-
-        report_eligibility_checker = check_report_eligibility
+    """List organization reports."""
 
     with database_factory() as db:
         cur = db.cursor(cursor_factory=cursor_factory)
@@ -190,9 +194,6 @@ async def list_reports_data(
         rows = cur.fetchall()
         total_pages = (total + page_size - 1) // page_size if total > 0 else 1
 
-        plan = user_plan_getter(db, str(current_user.id))
-        eligibility = report_eligibility_checker(db, plan["plan_name"], org_id)
-
         return {
             "reports": [_serialize_report_row(row) for row in rows],
             "total": total,
@@ -200,9 +201,9 @@ async def list_reports_data(
             "page_size": page_size,
             "total_pages": total_pages,
             "usage": {
-                "reports_used": eligibility["reports_used"],
-                "reports_limit": eligibility["reports_limit"],
-                "can_export": eligibility["can_export"],
+                "reports_used": 0,
+                "reports_limit": None,
+                "can_export": True,
             },
         }
 
@@ -228,27 +229,100 @@ async def get_report_data(
         return _serialize_report_row(row, include_detail_fields=True)
 
 
+async def delete_report_data(
+    report_id,
+    current_user,
+    database_factory=Database,
+    cursor_factory=RealDictCursor,
+    report_dir=None,
+    file_exists=os.path.isfile,
+    file_remover=os.remove,
+):
+    """Delete one report row for the current organization and clean its file."""
+    with database_factory() as db:
+        cur = db.cursor(cursor_factory=cursor_factory)
+        cur.execute("SELECT * FROM reports WHERE id = %s", (report_id,))
+        row = cur.fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Rapor bulunamadi")
+
+        if str(row["organization_id"]) != str(current_user.organization_id):
+            raise HTTPException(status_code=403, detail="Bu rapora erisiminiz yok")
+
+        cur.execute(
+            "DELETE FROM reports WHERE id = %s AND organization_id = %s",
+            (report_id, str(current_user.organization_id)),
+        )
+        db.commit()
+
+        file_delete_status = _delete_report_file(
+            row.get("file_path"),
+            report_dir=report_dir,
+            file_exists=file_exists,
+            file_remover=file_remover,
+        )
+
+        return {
+            "message": "Rapor silindi",
+            "report_id": str(report_id),
+            "deleted_count": 1,
+            "file_delete_status": file_delete_status,
+        }
+
+
+async def delete_all_reports_data(
+    current_user,
+    database_factory=Database,
+    cursor_factory=RealDictCursor,
+    report_dir=None,
+    file_exists=os.path.isfile,
+    file_remover=os.remove,
+):
+    """Delete all report rows for the current organization and clean their files."""
+    org_id = str(current_user.organization_id)
+    with database_factory() as db:
+        cur = db.cursor(cursor_factory=cursor_factory)
+        cur.execute(
+            "SELECT id, file_path FROM reports WHERE organization_id = %s",
+            (org_id,),
+        )
+        rows = cur.fetchall()
+
+        cur.execute("DELETE FROM reports WHERE organization_id = %s", (org_id,))
+        db.commit()
+
+        file_status_counts = {
+            "deleted": 0,
+            "missing": 0,
+            "skipped": 0,
+            "failed": 0,
+        }
+        for row in rows:
+            status = _delete_report_file(
+                row.get("file_path"),
+                report_dir=report_dir,
+                file_exists=file_exists,
+                file_remover=file_remover,
+            )
+            file_status_counts[status] = file_status_counts.get(status, 0) + 1
+
+        return {
+            "message": "Raporlar silindi",
+            "deleted_count": len(rows),
+            "file_delete_status": file_status_counts,
+        }
+
+
 async def build_report_download_response(
     report_id,
     current_user,
     database_factory=Database,
-    user_plan_getter=None,
-    plan_limit_getter=None,
     file_exists=None,
     file_response_factory=FileResponse,
     cursor_factory=RealDictCursor,
 ):
     """Build the downloadable report response for the current organization."""
-    if user_plan_getter is None:
-        from utils.subscription import get_user_plan
-
-        user_plan_getter = get_user_plan
-
-    if plan_limit_getter is None:
-        from utils.subscription import get_plan_limit
-
-        plan_limit_getter = get_plan_limit
-
     if file_exists is None:
         file_exists = os.path.isfile
 
@@ -262,17 +336,6 @@ async def build_report_download_response(
 
         if str(row["organization_id"]) != str(current_user.organization_id):
             raise HTTPException(status_code=403, detail="Bu rapora erisiminiz yok")
-
-        plan = user_plan_getter(db, str(current_user.id))
-        can_export = plan_limit_getter(plan["plan_name"], "can_export_reports")
-        if not can_export:
-            raise HTTPException(
-                status_code=403,
-                detail={
-                    "error": "export_not_allowed",
-                    "message": "Rapor indirme icin planinizi yukseltin",
-                },
-            )
 
         if row["status"] != "completed":
             raise HTTPException(

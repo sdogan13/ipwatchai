@@ -8,6 +8,8 @@ POST /api/v1/tools/logo-projects/{project_id}/select
 POST /api/v1/tools/generated-image/{image_id}/audit-retry
 GET  /api/v1/tools/generated-image/{image_id}
 GET  /api/v1/tools/generation-history
+DELETE /api/v1/tools/generation-history
+DELETE /api/v1/tools/generation-history/{history_id}
 GET  /api/v1/tools/status
 """
 
@@ -30,7 +32,9 @@ from models.schemas import (
 )
 from services.creative_service import (
     audit_generated_logo_image,
+    clear_generation_history_data,
     creative_suite_status_data,
+    delete_generation_history_item_data,
     generate_logo_data,
     get_generated_image_response,
     get_generation_history_data,
@@ -210,6 +214,28 @@ async def get_generation_history(
         page=page,
         per_page=per_page,
         feature_type=feature_type,
+        current_user=current_user,
+    )
+
+
+@router.delete("/generation-history")
+async def clear_generation_history(
+    feature_type: Optional[str] = Query(None, pattern="^(NAME|LOGO)$"),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    return await clear_generation_history_data(
+        feature_type=feature_type,
+        current_user=current_user,
+    )
+
+
+@router.delete("/generation-history/{history_id}")
+async def delete_generation_history_item(
+    history_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    return await delete_generation_history_item_data(
+        history_id=history_id,
         current_user=current_user,
     )
 

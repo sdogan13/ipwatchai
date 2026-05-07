@@ -267,9 +267,37 @@ class PathSettings(BaseSettings):
 
 class CreativeSettings(BaseSettings):
     """Creative Suite Configuration (Name Generator + Logo Studio)"""
+    # DeepSeek API (primary text provider for search risk reports)
+    deepseek_api_key: str = Field(default="", alias="CREATIVE_DEEPSEEK_API_KEY")
+    deepseek_base_url: str = Field(default="https://api.deepseek.com", alias="CREATIVE_DEEPSEEK_BASE_URL")
+    deepseek_text_model: str = Field(default="deepseek-v4-pro", alias="CREATIVE_DEEPSEEK_TEXT_MODEL")
+    deepseek_timeout: int = Field(default=120, alias="CREATIVE_DEEPSEEK_TIMEOUT")
+    deepseek_max_retries: int = Field(default=2, alias="CREATIVE_DEEPSEEK_MAX_RETRIES")
+
+    # Qwen API (primary text and multimodal provider for search risk reports)
+    qwen_api_key: str = Field(default="", alias="CREATIVE_QWEN_API_KEY")
+    qwen_base_url: str = Field(default="https://dashscope-intl.aliyuncs.com/compatible-mode/v1", alias="CREATIVE_QWEN_BASE_URL")
+    qwen_text_model: str = Field(default="qwen-max", alias="CREATIVE_QWEN_TEXT_MODEL")
+    qwen_class_model: str = Field(default="qwen-flash", alias="CREATIVE_QWEN_CLASS_MODEL")
+    qwen_vl_model: str = Field(default="qwen3-vl-plus", alias="CREATIVE_QWEN_VL_MODEL")
+    qwen_timeout: int = Field(default=120, alias="CREATIVE_QWEN_TIMEOUT")
+    qwen_max_retries: int = Field(default=2, alias="CREATIVE_QWEN_MAX_RETRIES")
+
+    # OpenAI API (primary image provider for Logo Studio)
+    openai_api_key: str = Field(default_factory=lambda: os.getenv("OPENAI_API_KEY", ""), alias="CREATIVE_OPENAI_API_KEY")
+    openai_image_model: str = Field(default="gpt-image-2", alias="CREATIVE_OPENAI_IMAGE_MODEL")
+    openai_image_size: str = Field(default="1024x1024", alias="CREATIVE_OPENAI_IMAGE_SIZE")
+    openai_image_quality: str = Field(default="high", alias="CREATIVE_OPENAI_IMAGE_QUALITY")
+    openai_image_revision_quality: str = Field(default="high", alias="CREATIVE_OPENAI_IMAGE_REVISION_QUALITY")
+    openai_image_background: str = Field(default="auto", alias="CREATIVE_OPENAI_IMAGE_BACKGROUND")
+    openai_image_output_format: str = Field(default="png", alias="CREATIVE_OPENAI_IMAGE_OUTPUT_FORMAT")
+    openai_timeout: int = Field(default=360, alias="CREATIVE_OPENAI_TIMEOUT")
+    openai_max_retries: int = Field(default=2, alias="CREATIVE_OPENAI_MAX_RETRIES")
+
     # Gemini API
     google_api_key: str = Field(default="", alias="CREATIVE_GOOGLE_API_KEY")
     gemini_text_model: str = Field(default="gemini-2.5-pro", alias="CREATIVE_GEMINI_TEXT_MODEL")
+    gemini_class_fallback_model: str = Field(default="gemini-2.5-flash-lite", alias="CREATIVE_GEMINI_CLASS_FALLBACK_MODEL")
     gemini_image_model: str = Field(default="gemini-3-pro-image-preview", alias="CREATIVE_GEMINI_IMAGE_MODEL")
     gemini_timeout: int = Field(default=30, alias="CREATIVE_GEMINI_TIMEOUT")
     gemini_max_retries: int = Field(default=2, alias="CREATIVE_GEMINI_MAX_RETRIES")
@@ -281,6 +309,7 @@ class CreativeSettings(BaseSettings):
 
     # Logo Studio
     logo_images_per_run: int = Field(default=4, alias="CREATIVE_LOGO_IMAGES_PER_RUN")
+    logo_revision_images_per_run: int = Field(default=1, alias="CREATIVE_LOGO_REVISION_IMAGES_PER_RUN")
     logo_similarity_threshold: float = Field(default=0.70, alias="CREATIVE_LOGO_SIMILARITY_THRESHOLD")
     logo_output_dir: str = Field(default=str(DEFAULT_LOGO_OUTPUT_DIR), alias="CREATIVE_LOGO_OUTPUT_DIR")
 

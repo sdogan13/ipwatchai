@@ -59,6 +59,7 @@ from pipeline.ingest import (
 UPDATE_ROW_KEYS = [
     "name",
     "clear_name",
+    "clear_text_features",
     "status",
     "nice_classes",
     "goods",
@@ -106,6 +107,7 @@ def make_metadata_record(
     bulletin_date="2026-04-13",
     gazette_no=None,
     gazette_date=None,
+    nice_classes=None,
 ):
     trademark = {
         "NAME": trademark_name,
@@ -116,7 +118,7 @@ def make_metadata_record(
         "BULLETIN_DATE": bulletin_date,
         "GAZETTE_NO": gazette_no,
         "GAZETTE_DATE": gazette_date,
-        "NICECLASSES_LIST": [25, 35],
+        "NICECLASSES_LIST": nice_classes if nice_classes is not None else [25, 35],
         "VIENNACLASSES_LIST": [1, 2],
     }
     return {
@@ -200,7 +202,7 @@ class FakeCursor:
             entry.update({"status": "failed", "error_log": error_log})
             return
 
-        if sql_text.startswith("SELECT application_no, id, last_event_date, current_status, expiry_date, status_source, name FROM trademarks"):
+        if sql_text.startswith("SELECT application_no, id, last_event_date, current_status, expiry_date, status_source, name"):
             app_nos = params[0]
             rows = []
             for app_no in app_nos:
@@ -215,6 +217,7 @@ class FakeCursor:
                             existing.get("expiry_date"),
                             existing.get("status_source"),
                             existing.get("name"),
+                            existing.get("nice_class_numbers"),
                         )
                     )
             self._fetchall = rows
@@ -563,13 +566,16 @@ class TestCoalesceDirection:
     def test_source_rank_hierarchy(self):
         """Verify source rank ordering: APP > GZ > BLT."""
         app_rank, app_tag = get_source_rank("APP_1")
+        live_rank, live_tag = get_source_rank("LIVE_ip_watch_ai_20260501")
         gz_rank, gz_tag = get_source_rank("GZ_315")
         blt_rank, blt_tag = get_source_rank("BLT_119")
 
         assert app_rank == 3
+        assert live_rank == 3
         assert gz_rank == 2
         assert blt_rank == 1
         assert app_tag == "APP"
+        assert live_tag == "APP"
         assert gz_tag == "GZ"
         assert blt_tag == "BLT"
 
@@ -638,7 +644,7 @@ class TestCoalesceDirection:
         assert "holder_tpe_client_id = COALESCE(v.holder_tpe_client_id, tm.holder_tpe_client_id)" in app_sql
         assert "attorney_name = COALESCE(v.attorney_name, tm.attorney_name)" in app_sql
         assert "attorney_no = COALESCE(v.attorney_no, tm.attorney_no)" in app_sql
-        assert "name_tr = COALESCE(v.name_tr, tm.name_tr)" in app_sql
+        assert "name_tr = CASE WHEN v.clear_text_features THEN NULL ELSE COALESCE(v.name_tr, tm.name_tr) END" in app_sql
 
         # BLT-owned fields: APP_ must NOT touch
         assert "bulletin_no = tm.bulletin_no" in app_sql
@@ -669,8 +675,24 @@ class TestCoalesceDirection:
 
         for source_type in ['APP', 'GZ', 'BLT']:
             sql = _build_update_sql(source_type)
-            assert "name, clear_name, status" in sql
+            assert "name, clear_name, clear_text_features, status" in sql
             assert "name = CASE WHEN v.clear_name THEN NULL ELSE" in sql
+            assert "text_embedding = CASE WHEN v.clear_text_features THEN NULL ELSE" in sql
+
+    def test_update_sql_preserves_richer_db_classes_from_exact_six_input(self):
+        """Known scraper truncation must not replace richer DB class arrays."""
+        from pipeline.ingest import _build_update_sql
+
+        for source_type in ['GZ', 'BLT']:
+            sql = _build_update_sql(source_type)
+            assert "COALESCE(cardinality(v.nice_classes::integer[]), 0) = 6" in sql
+            assert "cardinality(tm.nice_class_numbers), 0) > 6" in sql
+            assert "THEN tm.nice_class_numbers" in sql
+
+        app_sql = _build_update_sql("APP")
+        assert "COALESCE(cardinality(tm.nice_class_numbers), 0) = 0" in app_sql
+        assert "COALESCE(cardinality(v.nice_classes::integer[]), 0) > 6" in app_sql
+        assert "ELSE tm.nice_class_numbers" in app_sql
 
     def test_insert_sql_has_attorney_columns(self):
         """INSERT SQL must include attorney_name and attorney_no columns."""
@@ -1252,7 +1274,7 @@ class TestProcessFileBatchBehavior:
         assert watchlist_calls == []
         assert queue_calls == []
 
-    def test_app_blank_status_with_register_no_preserves_existing_source_status(self):
+    def test_app_blank_status_with_register_no_overwrites_existing_source_status(self):
         with temp_dir() as tmp:
             record = make_metadata_record(folder_status="", register_no="12345")
             metadata_path = write_metadata_file(tmp, "APP_1", records=[record])
@@ -1270,10 +1292,13 @@ class TestProcessFileBatchBehavior:
             result, reconcile_calls, watchlist_calls, queue_calls = self._run_batch(metadata_path, conn)
 
         updated = update_row_dict(conn.updated_rows[0])
+        history_row = conn.history_rows[0]
         assert result["updated"] == 1
-        assert updated["status"] == ingest.DB_STATUS_PUBLISHED
-        assert updated["src_tag"] == "BLT"
-        assert conn.history_rows == []
+        assert updated["status"] == ingest.DB_STATUS_REGISTERED
+        assert updated["src_tag"] == "APP"
+        assert history_row[0] == 101
+        assert history_row[2] == "STATUS_CHANGE"
+        assert f"{ingest.DB_STATUS_PUBLISHED} -> {ingest.DB_STATUS_REGISTERED}" in history_row[4]
         assert reconcile_calls == [["2024/001"]]
         assert watchlist_calls == []
         assert queue_calls == []
@@ -1303,6 +1328,205 @@ class TestProcessFileBatchBehavior:
         assert history_row[0] == 102
         assert history_row[2] == "STATUS_CHANGE"
         assert f"{ingest.DB_STATUS_PUBLISHED} -> {ingest.DB_STATUS_REGISTERED}" in history_row[4]
+        assert reconcile_calls == [["2024/001"]]
+        assert watchlist_calls == []
+        assert queue_calls == []
+
+    def test_legacy_live_folder_is_treated_as_app_source(self):
+        with temp_dir() as tmp:
+            record = make_metadata_record(folder_status="")
+            metadata_path = write_metadata_file(tmp, "LIVE_ip_watch_ai_20260501", records=[record])
+            conn = FakeConnection(
+                existing_trademarks={
+                    "2024/001": {
+                        "id": 106,
+                        "current_status": ingest.DB_STATUS_PUBLISHED,
+                        "expiry_date": date(2034, 7, 17),
+                        "status_source": "BLT",
+                    }
+                }
+            )
+
+            result, reconcile_calls, watchlist_calls, queue_calls = self._run_batch(
+                metadata_path,
+                conn,
+                force=True,
+            )
+
+        updated = update_row_dict(conn.updated_rows[0])
+        assert result["updated"] == 1
+        assert updated["status"] == ingest.DB_STATUS_PUBLISHED
+        assert updated["src_tag"] == "BLT"
+        assert conn.history_rows == []
+        assert reconcile_calls == [["2024/001"]]
+        assert watchlist_calls == []
+        assert queue_calls == []
+
+    def test_app_exact_six_classes_do_not_overwrite_existing_classes(self):
+        with temp_dir() as tmp:
+            record = make_metadata_record(nice_classes=[1, 2, 3, 4, 5, 6])
+            metadata_path = write_metadata_file(tmp, "APP_1", records=[record])
+            conn = FakeConnection(
+                existing_trademarks={
+                    "2024/001": {
+                        "id": 107,
+                        "current_status": ingest.DB_STATUS_PUBLISHED,
+                        "expiry_date": date(2034, 7, 17),
+                        "status_source": "BLT",
+                        "nice_class_numbers": [1, 2, 3, 4, 5, 6, 7],
+                    }
+                }
+            )
+
+            result, _, _, _ = self._run_batch(metadata_path, conn, force=True)
+
+        updated = update_row_dict(conn.updated_rows[0])
+        assert result["updated"] == 1
+        assert updated["nice_classes"] is None
+
+    def test_app_classes_do_not_shrink_existing_classes(self):
+        with temp_dir() as tmp:
+            record = make_metadata_record(nice_classes=[1, 2, 3, 4, 5])
+            metadata_path = write_metadata_file(tmp, "APP_1", records=[record])
+            conn = FakeConnection(
+                existing_trademarks={
+                    "2024/001": {
+                        "id": 108,
+                        "current_status": ingest.DB_STATUS_PUBLISHED,
+                        "expiry_date": date(2034, 7, 17),
+                        "status_source": "BLT",
+                        "nice_class_numbers": [1, 2, 3, 4, 5, 6],
+                    }
+                }
+            )
+
+            result, _, _, _ = self._run_batch(metadata_path, conn, force=True)
+
+        updated = update_row_dict(conn.updated_rows[0])
+        assert result["updated"] == 1
+        assert updated["nice_classes"] is None
+
+    def test_app_classes_fill_empty_db_classes(self):
+        with temp_dir() as tmp:
+            record = make_metadata_record(nice_classes=[9, 42])
+            metadata_path = write_metadata_file(tmp, "APP_1", records=[record])
+            conn = FakeConnection(
+                existing_trademarks={
+                    "2024/001": {
+                        "id": 109,
+                        "current_status": ingest.DB_STATUS_APPLIED,
+                        "expiry_date": date(2034, 7, 17),
+                        "status_source": "APP",
+                        "nice_class_numbers": None,
+                    }
+                }
+            )
+
+            result, _, _, _ = self._run_batch(metadata_path, conn, force=True)
+
+        updated = update_row_dict(conn.updated_rows[0])
+        assert result["updated"] == 1
+        assert updated["nice_classes"] == [9, 42]
+
+    def test_app_richer_classes_can_replace_shorter_existing_classes(self):
+        with temp_dir() as tmp:
+            richer_classes = [1, 3, 5, 6, 7, 9, 11, 42]
+            record = make_metadata_record(nice_classes=richer_classes)
+            metadata_path = write_metadata_file(tmp, "APP_1", records=[record])
+            conn = FakeConnection(
+                existing_trademarks={
+                    "2024/001": {
+                        "id": 110,
+                        "current_status": ingest.DB_STATUS_APPLIED,
+                        "expiry_date": date(2034, 7, 17),
+                        "status_source": "APP",
+                        "nice_class_numbers": [1, 3],
+                    }
+                }
+            )
+
+            result, _, _, _ = self._run_batch(metadata_path, conn, force=True)
+
+        updated = update_row_dict(conn.updated_rows[0])
+        assert result["updated"] == 1
+        assert updated["nice_classes"] == richer_classes
+
+    @pytest.mark.parametrize(
+        ("folder_name", "record_kwargs"),
+        [
+            ("BLT_490_2026-04-13", {"folder_status": ""}),
+            ("APP_1", {"folder_status": ""}),
+            ("BLT_490_2026-04-13", {"folder_status": "yayınlandı"}),
+        ],
+    )
+    def test_forced_ingest_preserves_live_status_for_weak_ingest_statuses(self, folder_name, record_kwargs):
+        with temp_dir() as tmp:
+            record = make_metadata_record(**record_kwargs)
+            metadata_path = write_metadata_file(tmp, folder_name, records=[record])
+            conn = FakeConnection(
+                existing_trademarks={
+                    "2024/001": {
+                        "id": 112,
+                        "current_status": ingest.DB_STATUS_REFUSED,
+                        "expiry_date": date(2034, 7, 17),
+                        "status_source": "LIVE",
+                        "name": "TEST MARK",
+                    }
+                }
+            )
+
+            result, reconcile_calls, watchlist_calls, queue_calls = self._run_batch(
+                metadata_path,
+                conn,
+                force=True,
+            )
+
+        updated = update_row_dict(conn.updated_rows[0])
+        assert result["updated"] == 1
+        assert updated["status"] == ingest.DB_STATUS_REFUSED
+        assert updated["src_tag"] == "LIVE"
+        assert conn.history_rows == []
+        assert reconcile_calls == [["2024/001"]]
+        assert watchlist_calls == []
+        assert queue_calls == []
+
+    @pytest.mark.parametrize(
+        ("status_text", "expected_status"),
+        [
+            ("feragat edildi", ingest.DB_STATUS_WITHDRAWN),
+            ("tescil edildi", ingest.DB_STATUS_REGISTERED),
+        ],
+    )
+    def test_forced_ingest_allows_explicit_strong_status_to_replace_live_status(self, status_text, expected_status):
+        with temp_dir() as tmp:
+            record = make_metadata_record(folder_status=status_text)
+            metadata_path = write_metadata_file(tmp, "BLT_490_2026-04-13", records=[record])
+            conn = FakeConnection(
+                existing_trademarks={
+                    "2024/001": {
+                        "id": 113,
+                        "current_status": ingest.DB_STATUS_PUBLISHED,
+                        "expiry_date": date(2034, 7, 17),
+                        "status_source": "LIVE",
+                        "name": "TEST MARK",
+                    }
+                }
+            )
+
+            result, reconcile_calls, watchlist_calls, queue_calls = self._run_batch(
+                metadata_path,
+                conn,
+                force=True,
+            )
+
+        updated = update_row_dict(conn.updated_rows[0])
+        history_row = conn.history_rows[0]
+        assert result["updated"] == 1
+        assert updated["status"] == expected_status
+        assert updated["src_tag"] == "BLT"
+        assert history_row[0] == 113
+        assert history_row[2] == "STATUS_CHANGE"
+        assert f"{ingest.DB_STATUS_PUBLISHED} -> {expected_status}" in history_row[4]
         assert reconcile_calls == [["2024/001"]]
         assert watchlist_calls == []
         assert queue_calls == []
@@ -1450,6 +1674,9 @@ class TestProcessFileBatchBehavior:
         assert result["updated"] == 1
         assert updated["name"] is None
         assert updated["clear_name"] is True
+        assert updated["clear_text_features"] is True
+        assert updated["txt_emb"] is None
+        assert updated["name_tr"] is None
 
     def test_shape_only_source_name_does_not_clear_real_existing_name(self):
         with temp_dir() as tmp:
@@ -1473,6 +1700,33 @@ class TestProcessFileBatchBehavior:
         assert result["updated"] == 1
         assert updated["name"] is None
         assert updated["clear_name"] is False
+        assert updated["clear_text_features"] is False
+
+    def test_mixed_shape_descriptor_invalidates_stale_text_features(self):
+        with temp_dir() as tmp:
+            record = make_metadata_record(trademark_name="ALPHA SEKIL")
+            record["text_embedding"] = [0.1] * 384
+            metadata_path = write_metadata_file(tmp, "BLT_490_2026-04-13", records=[record])
+            conn = FakeConnection(
+                existing_trademarks={
+                    "2024/001": {
+                        "id": 108,
+                        "current_status": ingest.DB_STATUS_PUBLISHED,
+                        "expiry_date": date(2034, 7, 17),
+                        "status_source": "BLT",
+                        "name": "ALPHA SEKIL",
+                    }
+                }
+            )
+
+            result, _, _, _ = self._run_batch(metadata_path, conn, force=True)
+
+        updated = update_row_dict(conn.updated_rows[0])
+        assert result["updated"] == 1
+        assert updated["name"] == "ALPHA"
+        assert updated["clear_text_features"] is True
+        assert updated["txt_emb"] is None
+        assert updated["name_tr"] is None
 
 
 class TestGetStatusRank:
@@ -1512,6 +1766,18 @@ class TestSchemaColumns:
         assert "ALTER TABLE trademarks ADD COLUMN IF NOT EXISTS name_tr_backend VARCHAR(32);" in source
         assert "ALTER TABLE trademarks ADD COLUMN IF NOT EXISTS name_tr_model VARCHAR(255);" in source
         assert "ALTER TABLE trademarks ADD COLUMN IF NOT EXISTS name_tr_updated_at TIMESTAMP;" in source
+
+
+class TestAiNameFeatureCleanup:
+    def test_ai_text_features_use_cleaned_trademark_name(self):
+        source = Path("pipeline/ai.py").read_text(encoding="utf-8")
+
+        assert "from pipeline.ingest_rules import clean_name" in source
+        assert "_prepare_name_derived_ai_features(rec)" in source
+        assert "names_to_encode = [_clean_ai_trademark_name(r) or \"\"" in source
+        assert "names = [_clean_ai_trademark_name(r) or \"\"" in source
+        assert "_TEXT_EMBEDDING_SOURCE_NAME_KEY" in source
+        assert "_TRANSLATION_SOURCE_NAME_KEY" in source
 
 
 class TestInsertPayloadShape:
@@ -2228,6 +2494,7 @@ class TestSourceAuthorityDecision:
     def test_source_rank_values(self):
         """Verify the rank hierarchy: APP(3) > GZ(2) > BLT(1)."""
         assert get_source_rank("APP_1") == (3, 'APP')
+        assert get_source_rank("LIVE_ip_watch_ai_20260501") == (3, 'APP')
         assert get_source_rank("GZ_300") == (2, 'GZ')
         assert get_source_rank("BLT_127") == (1, 'BLT')
 
@@ -2288,8 +2555,8 @@ class TestSourceAuthorityDecision:
         import inspect
         source = inspect.getsource(ingest.process_file_batch)
         assert "_explicit_db_status_from_text" in source
-        assert "explicit_status is None" in source
-        assert "DB_STATUS_APPLIED" in source
+        assert "status_can_replace" in source
+        assert "next_status = curr_status" in source
 
 
 # ============================================================

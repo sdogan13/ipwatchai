@@ -477,7 +477,8 @@ class SingleScanWorker:
             # Get recent trademark IDs
             cur.execute("""
                 SELECT id FROM trademarks 
-                WHERE final_status NOT IN ('Reddedildi', 'Geri Çekildi', 'Süresi Doldu')
+                WHERE appeal_deadline IS NOT NULL
+                  AND appeal_deadline >= CURRENT_DATE
                 ORDER BY created_at DESC
                 LIMIT %s
             """, (limit,))

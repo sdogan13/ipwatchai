@@ -25,6 +25,7 @@ from services.scoring_service import (
     RISK_THRESHOLDS,
     _calculate_visual_breakdown,
     _dynamic_combine,
+    build_logo_image_profile,
     calculate_adjusted_score,
     calculate_multilevel_similarity,
     calculate_name_similarity,
@@ -36,6 +37,7 @@ from services.scoring_service import (
     check_substring_containment,
     extract_ocr_text,
     get_risk_level,
+    resolve_logo_image_path,
     score_pair,
 )
 from utils.idf_scoring import (
@@ -338,11 +340,16 @@ class RiskEngine:
         """
         text_vec = self.text_model.encode(name).tolist()
         img_vec, dino_vec, color_vec, ocr_text = None, None, None, ""
+        self._last_query_logo_profile = None
 
         if image_path and os.path.exists(image_path):
             try:
                 pil_img = Image.open(image_path).convert('RGB')
                 img_vec, dino_vec, color_vec, ocr_text = self._encode_single_image(pil_img)
+                self._last_query_logo_profile = build_logo_image_profile(
+                    image_path,
+                    ocr_text,
+                )
             except Exception as e:
                 logger.error("Image process failed", extra={"error": str(e)})
 
@@ -815,6 +822,7 @@ class RiskEngine:
                        (1 - (text_embedding <=> %s::halfvec)) as lexical_score
                 FROM trademarks
                 WHERE text_embedding IS NOT NULL
+                  AND COALESCE(NULLIF(BTRIM(name), ''), NULLIF(BTRIM(name_tr), '')) IS NOT NULL
             """
             vec_params = [str(q_text_vec)]
             vec_sql, vec_params = apply_common_filters(vec_sql, vec_params)
@@ -1001,7 +1009,12 @@ class RiskEngine:
                 t.name_tr, t.application_date, t.expiry_date,
                 t.holder_name, t.holder_tpe_client_id,
                 t.attorney_name, t.attorney_no, t.registration_no,
-                (1 - (t.text_embedding <=> %s::halfvec)) as score_semantic,
+                CASE
+                    WHEN t.text_embedding IS NOT NULL
+                     AND COALESCE(NULLIF(BTRIM(t.name), ''), NULLIF(BTRIM(t.name_tr), '')) IS NOT NULL
+                    THEN (1 - (t.text_embedding <=> %s::halfvec))
+                    ELSE 0.0
+                END as score_semantic,
                 similarity(t.name, %s) as score_lexical,
                 {clip_col} as score_clip,
                 {dino_col} as score_dinov2,
@@ -1036,6 +1049,7 @@ class RiskEngine:
 
         for r in rows:
             candidate_name = r[1] or ""
+            candidate_image_path = r[4]
             candidate_name_tr = r[5] or ""
             candidate_app_date = r[6]
             candidate_expiry_date = r[7]
@@ -1053,6 +1067,18 @@ class RiskEngine:
             phon_match = bool(r[20]) if len(r) > 20 and r[20] is not None else False
             has_eg = bool(r[21]) if len(r) > 21 and r[21] is not None else False
             raw_extracted_goods = r[22] if len(r) > 22 else None
+            query_logo_profile = getattr(self, "_last_query_logo_profile", None)
+            candidate_logo_profile = None
+            if (query_img_vec or query_dino_vec) and candidate_image_path:
+                candidate_profile_path = resolve_logo_image_path(
+                    candidate_image_path,
+                    roots=[str(DATA_ROOT)],
+                )
+                if candidate_profile_path:
+                    candidate_logo_profile = build_logo_image_profile(
+                        candidate_profile_path,
+                        candidate_ocr,
+                    )
 
             vis, visual_breakdown = _calculate_visual_breakdown(
                 clip_sim=clip_sim,
@@ -1060,6 +1086,8 @@ class RiskEngine:
                 color_sim=color_sim,
                 ocr_text_a=query_ocr_text,
                 ocr_text_b=candidate_ocr,
+                logo_profile_a=query_logo_profile,
+                logo_profile_b=candidate_logo_profile,
             )
 
             # Centralized scoring via score_pair()
@@ -1094,14 +1122,13 @@ class RiskEngine:
                     "retrieval_query_variants",
                     [],
                 )
-
             results.append({
                 "application_no": r[0],
                 "name": candidate_name,
                 "name_tr": candidate_name_tr or None,
                 "status": r[2],
                 "classes": r[3],
-                "image_path": r[4],
+                "image_path": candidate_image_path,
                 "application_date": str(candidate_app_date) if candidate_app_date else None,
                 "expiry_date": str(candidate_expiry_date) if candidate_expiry_date else None,
                 "holder_name": candidate_holder_name,
@@ -1127,6 +1154,7 @@ class RiskEngine:
         Fast path only - returns result from local DB without live investigation.
         Returns tuple: (result_dict, needs_live_investigation: bool)
         """
+        name = name or ""
         query_start = time.perf_counter()
         logger.info(
             "Assessing brand risk",
@@ -1222,7 +1250,14 @@ class RiskEngine:
         )
 
         result = {
-            "query": {"name": name, "classes": target_classes, "has_logo": image_path is not None},
+            "query": {
+                "name": name,
+                "classes": target_classes,
+                "has_logo": image_path is not None,
+                "effective_name": name,
+                "text_source": "USER_TEXT" if name.strip() else "IMAGE_ONLY",
+                "ocr_text_used": False,
+            },
             "auto_suggested_classes": suggested_classes,
             "final_risk_score": top_score,
             "top_candidates": final_results[:100],

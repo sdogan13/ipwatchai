@@ -13,7 +13,7 @@ from utils.subscription import get_plan_limit, get_user_plan
 
 LEADS_PER_PAGE = 20
 MAX_EXPORT_LEADS = 500
-RENEWAL_ACTIVE_STATUSES = ("Tescil Edildi", "Yenilendi", "Devredildi")
+RENEWAL_ACTIVE_STATUSES = ("Tescil Edildi", "Devredildi")
 
 
 def _as_day_count(value):
@@ -134,6 +134,29 @@ def _urgency_case_sql():
             WHEN (uc.opposition_deadline - CURRENT_DATE) <= 30 THEN 'soon'
             ELSE 'normal'
         END
+    """
+
+
+def _shape_only_name_sql(column_sql: str) -> str:
+    """Return SQL that treats stale sekil-only labels as logo-only/no-name marks."""
+    return (
+        "NULLIF("
+        "regexp_replace("
+        f"regexp_replace(lower(coalesce({column_sql}, '')), '(şekil|sekil)', '', 'g'), "
+        "'[^[:alnum:]]+', '', 'g'"
+        "), "
+        "''"
+        ") IS NULL"
+    )
+
+
+def _shape_only_conflict_exclusion_sql(alias: str = "uc") -> str:
+    """Exclude derived Opposition Radar rows created from logo-only placeholder names."""
+    return f"""
+              AND NOT (
+                  {_shape_only_name_sql(f"{alias}.new_mark_name")}
+                  OR {_shape_only_name_sql(f"{alias}.existing_mark_name")}
+              )
     """
 
 
@@ -277,6 +300,7 @@ async def get_lead_feed_data(
               AND array_length(uc.overlapping_classes, 1) > 0
               AND (exist_tm.expiry_date IS NULL
                    OR exist_tm.expiry_date >= CURRENT_DATE - INTERVAL '6 months')
+              {_shape_only_conflict_exclusion_sql()}
         """
         params = [min_score]
 
@@ -362,7 +386,7 @@ async def get_lead_stats_data(
 
         cur = db.cursor()
         cur.execute(
-            """
+            f"""
             SELECT
                 COUNT(*) as total_leads,
                 COUNT(*) FILTER (WHERE (uc.opposition_deadline - CURRENT_DATE) <= 7) as critical_leads,
@@ -381,6 +405,7 @@ async def get_lead_stats_data(
               AND array_length(uc.overlapping_classes, 1) > 0
               AND (exist_tm.expiry_date IS NULL
                    OR exist_tm.expiry_date >= CURRENT_DATE - INTERVAL '6 months')
+              {_shape_only_conflict_exclusion_sql()}
         """
         )
         stats = cur.fetchone()
@@ -446,11 +471,16 @@ async def export_leads_csv_data(
         if not plan_limit_getter(access["plan"], "can_export_csv_leads"):
             raise HTTPException(
                 status_code=403,
-                detail="CSV export sadece Enterprise plan icin kullanilabilir.",
+                detail={
+                    "error": "upgrade_required",
+                    "message": "CSV export is available on paid plans.",
+                    "current_plan": access["plan"],
+                    "upgrade_context": "csv_export",
+                },
             )
 
         cur = db.cursor()
-        query = """
+        query = f"""
             SELECT
                 uc.new_mark_name, uc.new_mark_app_no, uc.new_mark_holder_name,
                 uc.existing_mark_name, uc.existing_mark_app_no, uc.existing_mark_holder_name,
@@ -465,6 +495,7 @@ async def export_leads_csv_data(
               AND array_length(uc.overlapping_classes, 1) > 0
               AND (exist_tm.expiry_date IS NULL
                    OR exist_tm.expiry_date >= CURRENT_DATE - INTERVAL '6 months')
+              {_shape_only_conflict_exclusion_sql()}
         """
         params = [min_score]
 
@@ -585,6 +616,7 @@ async def get_lead_detail_data(
             LEFT JOIN trademarks new_tm ON uc.new_mark_id = new_tm.id
             LEFT JOIN trademarks exist_tm ON uc.existing_mark_id = exist_tm.id
             WHERE uc.id = %s::uuid
+              {_shape_only_conflict_exclusion_sql()}
         """,
             (lead_id,),
         )
@@ -927,7 +959,12 @@ async def export_renewals_csv_data(
         if not plan_limit_getter(access["plan"], "can_export_csv_leads"):
             raise HTTPException(
                 status_code=403,
-                detail="CSV export sadece Enterprise plan icin kullanilabilir.",
+                detail={
+                    "error": "upgrade_required",
+                    "message": "CSV export is available on paid plans.",
+                    "current_plan": access["plan"],
+                    "upgrade_context": "csv_export",
+                },
             )
 
         cur = db.cursor()

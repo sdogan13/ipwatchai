@@ -1,6 +1,8 @@
 """Public portfolio route extraction from the legacy main app."""
 
-from fastapi import HTTPException, Query, Request
+from fastapi import Depends, HTTPException, Query, Request
+
+from auth.authentication import CurrentUser, get_current_user
 
 
 async def public_portfolio_impl(
@@ -29,6 +31,7 @@ async def public_portfolio_csv_impl(
     holder_id=None,
     attorney_no=None,
     logger=None,
+    current_user=None,
 ):
     """Build the public CSV export for a holder or attorney portfolio."""
     from services.search_service import build_public_portfolio_csv
@@ -38,6 +41,7 @@ async def public_portfolio_csv_impl(
             holder_id=holder_id,
             attorney_no=attorney_no,
             logger=logger,
+            current_user=current_user,
         )
     except HTTPException:
         raise
@@ -71,12 +75,14 @@ def register_public_portfolio_routes(app, limiter, logger):
         request: Request,
         holder_id: str = Query(None, max_length=50),
         attorney_no: str = Query(None, max_length=50),
+        current_user: CurrentUser = Depends(get_current_user),
     ):
-        """Public CSV export - all trademarks by holder or attorney."""
+        """CSV export for all trademarks by holder or attorney."""
         return await public_portfolio_csv_impl(
             holder_id=holder_id,
             attorney_no=attorney_no,
             logger=logger,
+            current_user=current_user,
         )
 
     app.add_api_route(

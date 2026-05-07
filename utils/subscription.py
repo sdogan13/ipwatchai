@@ -2,7 +2,7 @@
 Subscription Plan Gating & Usage Credits
 =========================================
 Checks user's subscription plan and tracks usage for:
-- Live search credits
+- Agentic Search credits
 - Lead access credits
 - Creative Suite: Unified AI credits (1 credit = name gen, 5 credits = logo gen)
 - Trademark application limits
@@ -36,7 +36,7 @@ PLAN_FEATURES = {
         "monthly_live_searches": 0,
         "daily_lead_views": 0,
         "monthly_reports": 1,
-        "can_export_reports": False,
+        "can_export_reports": True,
         "name_suggestions_per_session": 3,
         "monthly_ai_credits": 0,
         "monthly_applications": 0,
@@ -66,7 +66,7 @@ PLAN_FEATURES = {
         "monthly_applications": 1,
         "can_track_logos": True,
         "can_view_holder_portfolio": True,
-        "can_download_portfolio": False,
+        "can_download_portfolio": True,
         "can_export_csv_leads": True,
         "can_use_live_scraping": True,
         "max_users": 3,
@@ -305,7 +305,7 @@ def get_user_plan(db, user_id: str) -> dict:
 
 def get_live_search_usage(db, user_id: str) -> int:
     """
-    Get current month's live search usage count.
+    Get current month's Agentic Search usage count.
     Sums api_usage.live_searches for all rows in the current month.
 
     Args:
@@ -313,7 +313,7 @@ def get_live_search_usage(db, user_id: str) -> int:
         user_id: UUID string
 
     Returns:
-        Total live searches this month
+        Total Agentic Searches this month
     """
     cur = db.cursor(cursor_factory=RealDictCursor)
 
@@ -333,7 +333,7 @@ def get_live_search_usage(db, user_id: str) -> int:
 
 def increment_live_search_usage(db, user_id: str, org_id: str = None) -> int:
     """
-    Increment live search counter for today.
+    Increment Agentic Search counter for today.
     Uses upsert (INSERT ... ON CONFLICT DO UPDATE) on (user_id, usage_date).
 
     Args:
@@ -364,7 +364,7 @@ def increment_live_search_usage(db, user_id: str, org_id: str = None) -> int:
 
 def check_live_search_eligibility(db, user_id: str) -> Tuple[bool, str, dict]:
     """
-    Check if user can perform a live search.
+    Check if user can perform an Agentic Search.
 
     Args:
         db: Database context manager instance
@@ -375,7 +375,7 @@ def check_live_search_eligibility(db, user_id: str) -> Tuple[bool, str, dict]:
 
     Reasons:
         - "ok": User can search
-        - "upgrade_required": Plan doesn't include live search
+        - "upgrade_required": Plan doesn't include Agentic Search
         - "limit_exceeded": Monthly limit reached
     """
     plan = get_user_plan(db, user_id)
@@ -390,8 +390,8 @@ def check_live_search_eligibility(db, user_id: str) -> Tuple[bool, str, dict]:
             "current_plan": plan_name,
             "display_name": plan['display_name'],
             "required_plan": "live_search_enabled_plan",
-            "message": "Canli arama, planinda canli arama hakki bulunan kullanicilar icindir. Canli aramayi destekleyen bir plana yukseltmeniz gerekiyor.",
-            "message_en": "Live search is only available on plans with live-search access. Upgrade to a plan that includes live search.",
+            "message": "Agentic Search, planinda Agentic Search hakki bulunan kullanicilar icindir. Agentic Search'i destekleyen bir plana yukseltmeniz gerekiyor.",
+            "message_en": "Agentic Search is only available on plans with Agentic Search access. Upgrade to a plan that includes Agentic Search.",
         }
 
     current_usage = get_live_search_usage(db, user_id)
@@ -405,8 +405,8 @@ def check_live_search_eligibility(db, user_id: str) -> Tuple[bool, str, dict]:
             "monthly_limit": monthly_limit,
             "current_usage": current_usage,
             "remaining": 0,
-            "message": f"Bu ay {monthly_limit} canli arama hakkinin tamamini kullandiniz.",
-            "message_en": f"You've used all {monthly_limit} live searches this month.",
+            "message": f"Bu ay {monthly_limit} Agentic Search hakkinin tamamini kullandiniz.",
+            "message_en": f"You've used all {monthly_limit} Agentic Searches this month.",
         }
 
     remaining = monthly_limit - current_usage
@@ -649,6 +649,9 @@ def check_ai_credit_eligibility(db, org_id: str, cost: int) -> Tuple[bool, str, 
     if not row:
         return False, "upgrade_required", {
             "error": "upgrade_required",
+            "upgrade_context": "ai_credits",
+            "required_feature": "monthly_ai_credits",
+            "required_feature_value": cost,
             "current_plan": plan_name,
             "message": "Organizasyon bulunamadi.",
             "message_en": "Organization not found.",
@@ -669,6 +672,9 @@ def check_ai_credit_eligibility(db, org_id: str, cost: int) -> Tuple[bool, str, 
 
     return False, "credits_exhausted", {
         "error": "credits_exhausted",
+        "upgrade_context": "ai_credits",
+        "required_feature": "monthly_ai_credits",
+        "required_feature_value": cost,
         "current_plan": plan_name,
         "display_name": plan['display_name'],
         "monthly_remaining": monthly,
@@ -971,6 +977,9 @@ def check_name_generation_eligibility(db, org_id: str, session_count: int) -> Tu
         if legacy_purchased <= 0:
             return False, "upgrade_required", {
                 "error": "upgrade_required",
+                "upgrade_context": "name_suggestions",
+                "required_feature": "name_suggestions_per_session",
+                "required_feature_value": session_count + 1,
                 "current_plan": plan_name,
                 "display_name": plan['display_name'],
                 "session_limit": session_limit,
@@ -983,6 +992,9 @@ def check_name_generation_eligibility(db, org_id: str, session_count: int) -> Tu
     if monthly_limit < 999999 and monthly_used >= monthly_limit and legacy_purchased <= 0:
         return False, "monthly_limit_exceeded", {
             "error": "credits_exhausted",
+            "upgrade_context": "ai_credits",
+            "required_feature": "monthly_ai_credits",
+            "required_feature_value": 1,
             "current_plan": plan_name,
             "display_name": plan['display_name'],
             "monthly_limit": monthly_limit,
@@ -1006,6 +1018,9 @@ def check_name_generation_eligibility(db, org_id: str, session_count: int) -> Tu
         if legacy_purchased <= 0:
             return False, "monthly_limit_exceeded", {
                 "error": "credits_exhausted",
+                "upgrade_context": "ai_credits",
+                "required_feature": "monthly_ai_credits",
+                "required_feature_value": 1,
                 "current_plan": plan_name,
                 "display_name": plan['display_name'],
                 "remaining": 0,
@@ -1053,6 +1068,9 @@ def check_logo_generation_eligibility(db, org_id: str) -> Tuple[bool, str, dict]
     if not row:
         return False, "upgrade_required", {
             "error": "upgrade_required",
+            "upgrade_context": "ai_credits",
+            "required_feature": "monthly_ai_credits",
+            "required_feature_value": 5,
             "current_plan": plan_name,
             "message": "Organizasyon bulunamadi.",
             "message_en": "Organization not found.",
@@ -1073,6 +1091,9 @@ def check_logo_generation_eligibility(db, org_id: str) -> Tuple[bool, str, dict]
 
     return False, "credits_exhausted", {
         "error": "credits_exhausted",
+        "upgrade_context": "ai_credits",
+        "required_feature": "monthly_ai_credits",
+        "required_feature_value": 5,
         "current_plan": plan_name,
         "display_name": plan['display_name'],
         "monthly_remaining": monthly,
@@ -1086,12 +1107,41 @@ def check_logo_generation_eligibility(db, org_id: str) -> Tuple[bool, str, dict]
 
 
 # ============================================================
-# Reports
+# Risk reports
 # ============================================================
+
+def get_monthly_report_usage(db, org_id: str) -> dict:
+    """Get this month's inline search risk report usage for an organization."""
+    cur = db.cursor(cursor_factory=RealDictCursor)
+    today = date.today()
+    month_start = today.replace(day=1)
+
+    cur.execute("""
+        SELECT
+            0 as saved_reports,
+            COALESCE(SUM(reports_generated), 0) as inline_reports,
+            COALESCE(SUM(reports_generated), 0) as cnt
+        FROM api_usage
+        WHERE organization_id = %s
+          AND usage_date >= %s
+    """, (org_id, month_start))
+    row = cur.fetchone() or {}
+
+    saved_reports = _int_value(_row_value(row, "saved_reports", default=0))
+    inline_reports = _int_value(_row_value(row, "inline_reports", default=0))
+    reports_used = _int_value(_row_value(row, "cnt", default=saved_reports + inline_reports))
+
+    return {
+        "saved_reports": saved_reports,
+        "inline_reports": inline_reports,
+        "reports_used": reports_used,
+        "month_start": month_start,
+    }
+
 
 def check_report_eligibility(db, user_plan: str, org_id: str) -> dict:
     """
-    Check if an organization can generate more reports this month.
+    Check if an organization can generate more inline risk reports this month.
 
     Args:
         db: Database context manager instance
@@ -1101,40 +1151,86 @@ def check_report_eligibility(db, user_plan: str, org_id: str) -> dict:
     Returns:
         dict with: eligible, reports_used, reports_limit, can_export, reason
     """
-    reports_limit = get_plan_limit(user_plan, 'monthly_reports')
-    can_export = get_plan_limit(user_plan, 'can_export_reports')
+    reports_limit = _int_value(get_plan_limit(user_plan, 'monthly_reports'))
+    can_export = True
 
-    cur = db.cursor(cursor_factory=RealDictCursor)
+    usage = get_monthly_report_usage(db, org_id)
+    reports_used = usage["reports_used"]
+    if reports_limit >= 999999:
+        return {
+            'eligible': True,
+            'reports_used': reports_used,
+            'reports_limit': reports_limit,
+            'reports_remaining': reports_limit,
+            'saved_reports': usage["saved_reports"],
+            'inline_reports': usage["inline_reports"],
+            'can_export': can_export,
+            'reason': None,
+        }
 
-    # Count reports created this calendar month for this org
-    today = date.today()
-    month_start = today.replace(day=1)
-
-    cur.execute("""
-        SELECT COUNT(*) as cnt
-        FROM reports
-        WHERE organization_id = %s
-          AND created_at >= %s
-    """, (org_id, month_start))
-    row = cur.fetchone()
-    reports_used = row['cnt'] if row else 0
+    reports_remaining = max(0, reports_limit - reports_used)
 
     if reports_used >= reports_limit:
         return {
             'eligible': False,
             'reports_used': reports_used,
             'reports_limit': reports_limit,
+            'reports_remaining': 0,
+            'saved_reports': usage["saved_reports"],
+            'inline_reports': usage["inline_reports"],
             'can_export': can_export,
-            'reason': f"Bu ay {reports_limit} rapor hakkinin tamamini kullandiniz.",
+            'reason': f"Bu ay {reports_limit} risk raporu hakkinin tamamini kullandiniz.",
         }
 
     return {
         'eligible': True,
         'reports_used': reports_used,
         'reports_limit': reports_limit,
+        'reports_remaining': reports_remaining,
+        'saved_reports': usage["saved_reports"],
+        'inline_reports': usage["inline_reports"],
         'can_export': can_export,
         'reason': None,
     }
+
+
+def increment_report_usage(db, user_id: str, org_id: str, amount: int = 1) -> bool:
+    """Increment inline report usage tracked through api_usage.reports_generated."""
+    amount = max(1, _int_value(amount, default=1))
+    cur = db.cursor(cursor_factory=RealDictCursor)
+    cur.execute("""
+        INSERT INTO api_usage (
+            user_id, organization_id, usage_date, reports_generated, created_at, updated_at
+        )
+        VALUES (%s, %s, CURRENT_DATE, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT (user_id, usage_date)
+        DO UPDATE SET
+            organization_id = EXCLUDED.organization_id,
+            reports_generated = COALESCE(api_usage.reports_generated, 0) + EXCLUDED.reports_generated,
+            updated_at = CURRENT_TIMESTAMP
+        RETURNING reports_generated
+    """, (user_id, org_id, amount))
+    row = cur.fetchone()
+    db.commit()
+    return row is not None
+
+
+def decrement_report_usage(db, user_id: str, org_id: str, amount: int = 1) -> bool:
+    """Refund inline report usage for a failed generated risk report."""
+    amount = max(1, _int_value(amount, default=1))
+    cur = db.cursor(cursor_factory=RealDictCursor)
+    cur.execute("""
+        UPDATE api_usage
+        SET reports_generated = GREATEST(COALESCE(reports_generated, 0) - %s, 0),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = %s
+          AND organization_id = %s
+          AND usage_date = CURRENT_DATE
+        RETURNING reports_generated
+    """, (amount, user_id, org_id))
+    row = cur.fetchone()
+    db.commit()
+    return row is not None
 
 
 # ============================================================

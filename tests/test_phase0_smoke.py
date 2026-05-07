@@ -1001,19 +1001,31 @@ def test_pipeline_ingest_root_uses_local_project_boundary_and_env_overrides():
         data_expected = str((project_root / "archive_bulletins" / "Marka").resolve())
 
         def load_module():
-            sys.modules.pop("pipeline.ingest", None)
-            sys.modules.pop("pipeline", None)
+            # Pop all pipeline submodules so ROOT_DIR is recomputed against the
+            # current env vars instead of returning a cached value.
+            for name in (
+                "pipeline.ingest",
+                "pipeline.ingest_runtime",
+                "pipeline.ingest_bootstrap",
+                "pipeline.ingest_legacy",
+                "pipeline.ingest_rules",
+                "pipeline",
+            ):
+                sys.modules.pop(name, None)
             return importlib.import_module("pipeline.ingest")
 
-        os.environ.pop("PIPELINE_BULLETINS_ROOT", None)
-        os.environ.pop("DATA_ROOT", None)
+        # ingest_legacy calls load_dotenv() which fills missing vars from .env.
+        # Use "" (empty) instead of pop so dotenv treats them as already set
+        # but the falsy check in default_ingest_root() still falls through.
+        os.environ["PIPELINE_BULLETINS_ROOT"] = ""
+        os.environ["DATA_ROOT"] = ""
         default_module = load_module()
 
         os.environ["PIPELINE_BULLETINS_ROOT"] = "custom_bulletins/Marka"
-        os.environ.pop("DATA_ROOT", None)
+        os.environ["DATA_ROOT"] = ""
         pipeline_module = load_module()
 
-        os.environ.pop("PIPELINE_BULLETINS_ROOT", None)
+        os.environ["PIPELINE_BULLETINS_ROOT"] = ""
         os.environ["DATA_ROOT"] = "archive_bulletins/Marka"
         data_module = load_module()
 
@@ -1386,10 +1398,10 @@ def test_legacy_blt_scrap_root_uses_local_project_boundary_and_env_overrides():
         pipeline_expected = str((project_root / "custom_bulletins" / "Marka").resolve())
         data_expected = str((project_root / "archive_bulletins" / "Marka").resolve())
 
-        mock_sync_api = types.ModuleType("playwright.sync_api")
-        mock_sync_api.sync_playwright = MagicMock()
-        sys.modules["playwright"] = types.ModuleType("playwright")
-        sys.modules["playwright.sync_api"] = mock_sync_api
+        mock_collection = types.ModuleType("ui_scrape_collection")
+        mock_collection.collect_blt_issue = MagicMock()
+        mock_collection.collect_gz_issue = MagicMock()
+        sys.modules["ui_scrape_collection"] = mock_collection
 
         def load_module(name):
             spec = importlib.util.spec_from_file_location(name, script_path)
@@ -1442,10 +1454,10 @@ def test_legacy_tescil_root_uses_local_project_boundary_and_env_overrides():
         pipeline_expected = str((project_root / "custom_bulletins" / "Marka").resolve())
         data_expected = str((project_root / "archive_bulletins" / "Marka").resolve())
 
-        mock_sync_api = types.ModuleType("playwright.sync_api")
-        mock_sync_api.sync_playwright = MagicMock()
-        sys.modules["playwright"] = types.ModuleType("playwright")
-        sys.modules["playwright.sync_api"] = mock_sync_api
+        mock_collection = types.ModuleType("ui_scrape_collection")
+        mock_collection.collect_blt_issue = MagicMock()
+        mock_collection.collect_gz_issue = MagicMock()
+        sys.modules["ui_scrape_collection"] = mock_collection
 
         def load_module(name):
             spec = importlib.util.spec_from_file_location(name, script_path)
@@ -1843,12 +1855,19 @@ def test_scheduler_imports_as_package_entrypoint():
             "start_scheduler_callable": callable(scheduler.start_scheduler),
             "shutdown_scheduler_callable": callable(scheduler.shutdown_scheduler),
             "daily_watchlist_scan_callable": callable(scheduler.daily_watchlist_scan),
+            "weekly_watchlist_scan_callable": callable(scheduler.weekly_watchlist_scan),
+            "weekly_universal_scan_callable": callable(scheduler.weekly_universal_scan),
+            "watchlist_scan_day": scheduler.WATCHLIST_SCAN_DAY,
+            "watchlist_scan_hour": scheduler.WATCHLIST_SCAN_HOUR,
+            "universal_scan_day": scheduler.UNIVERSAL_SCAN_DAY,
+            "universal_scan_hour": scheduler.UNIVERSAL_SCAN_HOUR,
+            "scan_timezone": scheduler.SCAN_TIMEZONE_NAME,
             "has_path_hack": "sys.path.insert" in content,
         }))
         """
     )
 
-    assert output == '{"start_scheduler_callable": true, "shutdown_scheduler_callable": true, "daily_watchlist_scan_callable": true, "has_path_hack": false}'
+    assert output == '{"start_scheduler_callable": true, "shutdown_scheduler_callable": true, "daily_watchlist_scan_callable": true, "weekly_watchlist_scan_callable": true, "weekly_universal_scan_callable": true, "watchlist_scan_day": "mon", "watchlist_scan_hour": 0, "universal_scan_day": "tue", "universal_scan_hour": 0, "scan_timezone": "Europe/London", "has_path_hack": false}'
 
 
 def test_monitoring_worker_imports_as_package_entrypoint():
@@ -1992,6 +2011,29 @@ def test_universal_scanner_imports_as_package_entrypoint():
     assert output == '{"universal_scanner_class": true, "main_callable": true, "queue_poll_interval": 30, "has_path_hack": false}'
 
 
+def test_universal_scanner_conflict_upsert_refreshes_snapshot_fields():
+    content = Path("workers/universal_scanner.py").read_text(encoding="utf-8")
+
+    for field in [
+        "new_mark_name",
+        "new_mark_app_no",
+        "new_mark_holder_name",
+        "new_mark_nice_classes",
+        "existing_mark_name",
+        "existing_mark_app_no",
+        "existing_mark_holder_id",
+        "existing_mark_holder_name",
+        "existing_mark_nice_classes",
+        "conflict_type",
+        "overlapping_classes",
+        "conflict_reasons",
+        "bulletin_no",
+        "bulletin_date",
+        "opposition_deadline",
+    ]:
+        assert f"{field} = EXCLUDED.{field}" in content
+
+
 def test_settings_normalize_bulletin_roots_from_project_root():
     output = _run_python(
         """
@@ -2079,6 +2121,36 @@ def test_settings_default_report_dir_uses_uploads_boundary():
     )
 
     assert output == '{"report_dir_matches": true}'
+
+
+def test_creative_settings_openai_image_defaults_and_standard_key_fallback():
+    output = _run_python(
+        """
+        import json
+        import os
+
+        os.environ["DB_PASSWORD"] = "test-db-password"
+        os.environ["AUTH_SECRET_KEY"] = "test-auth-secret-key-with-at-least-32-characters"
+        os.environ.pop("CREATIVE_OPENAI_API_KEY", None)
+        os.environ["OPENAI_API_KEY"] = "standard-openai-key"
+        os.environ.pop("CREATIVE_OPENAI_IMAGE_MODEL", None)
+        os.environ.pop("CREATIVE_GEMINI_IMAGE_MODEL", None)
+
+        from config.settings import CreativeSettings
+
+        # _env_file=None bypasses the project .env so the fallback path
+        # (CREATIVE_OPENAI_API_KEY unset → OPENAI_API_KEY used) is actually exercised.
+        creative = CreativeSettings(_env_file=None)
+
+        print(json.dumps({
+            "openai_key_matches": creative.openai_api_key == "standard-openai-key",
+            "openai_model_matches": creative.openai_image_model == "gpt-image-2",
+            "gemini_backup_matches": creative.gemini_image_model == "gemini-3-pro-image-preview",
+        }))
+        """
+    )
+
+    assert output == '{"openai_key_matches": true, "openai_model_matches": true, "gemini_backup_matches": true}'
 
 
 def test_settings_preserve_absolute_runtime_dir_overrides():
@@ -2371,6 +2443,7 @@ def test_scrapper_root_uses_local_project_boundary_and_env_overrides():
 
         tenacity_module = types.ModuleType("tenacity")
         tenacity_module.retry = lambda *args, **kwargs: (lambda func: func)
+        tenacity_module.retry_if_not_exception_type = lambda *args, **kwargs: None
         tenacity_module.stop_after_attempt = lambda *args, **kwargs: None
         tenacity_module.wait_exponential = lambda *args, **kwargs: None
         sys.modules["tenacity"] = tenacity_module

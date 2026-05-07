@@ -2,6 +2,7 @@
 
 from database.crud import Database
 from models.schemas import DashboardStats
+from utils.deadline import active_similarity_conflict_sql
 
 
 async def get_dashboard_stats_data(
@@ -9,6 +10,7 @@ async def get_dashboard_stats_data(
     database_factory=Database,
     user_plan_getter=None,
     plan_limit_getter=None,
+    report_eligibility_checker=None,
 ):
     """Return the main dashboard statistics payload for the current user."""
     if user_plan_getter is None:
@@ -20,6 +22,11 @@ async def get_dashboard_stats_data(
         from utils.subscription import get_plan_limit
 
         plan_limit_getter = get_plan_limit
+
+    if report_eligibility_checker is None:
+        from utils.subscription import check_report_eligibility
+
+        report_eligibility_checker = check_report_eligibility
 
     with database_factory() as db:
         cur = db.cursor()
@@ -37,7 +44,7 @@ async def get_dashboard_stats_data(
         wl = cur.fetchone()
 
         cur.execute(
-            """
+            f"""
             SELECT
                 COUNT(*) as total,
                 COUNT(*) FILTER (WHERE a.status = 'new') as new,
@@ -46,17 +53,16 @@ async def get_dashboard_stats_data(
             FROM alerts_mt a
             LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
             WHERE a.organization_id = %s
-              AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
+              AND {active_similarity_conflict_sql('a', 't')}
         """,
             (org_id,),
         )
         al = cur.fetchone()
 
         cur.execute(
-            """
+            f"""
             SELECT
-                COUNT(*) FILTER (WHERE t.appeal_deadline IS NOT NULL
-                    AND t.appeal_deadline >= CURRENT_DATE
+                COUNT(*) FILTER (WHERE {active_similarity_conflict_sql('a', 't')}
                     AND a.status != 'dismissed') as active_deadlines,
                 COUNT(*) FILTER (WHERE t.appeal_deadline IS NULL
                     AND (t.final_status IS NULL OR t.final_status = 'Başvuruldu')
@@ -90,6 +96,7 @@ async def get_dashboard_stats_data(
         qs_limit = plan_limit_getter(plan_name, "max_daily_quick_searches")
         ls_limit = plan_limit_getter(plan_name, "monthly_live_searches")
         report_limit = plan_limit_getter(plan_name, "monthly_reports")
+        report_eligibility = report_eligibility_checker(db, plan_name, org_id)
 
         cur.execute(
             "SELECT COUNT(*) as cnt FROM users WHERE organization_id = %s AND is_active = TRUE",
@@ -111,6 +118,9 @@ async def get_dashboard_stats_data(
             "watchlist": {"used": wl["active"], "limit": wl_limit},
             "users": {"used": user_count, "limit": user_limit},
             "searches": {"used": searches_this_month, "limit": qs_limit + ls_limit},
-            "reports": {"used": 0, "limit": report_limit},
+            "reports": {
+                "used": report_eligibility["reports_used"],
+                "limit": report_limit,
+            },
         },
     )

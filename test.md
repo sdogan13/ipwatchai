@@ -87,15 +87,21 @@ Existing suites:
 - `tests/test_validation.py`
 - `tests/test_zip.py`
 
+Ingest/repair coverage note:
+- `tests/test_repair.py` and `tests/test_ingest.py` cover logo-only `SEKIL/ŞEKİL` cleanup so stored names, translations, and text embeddings are removed together while visual/OCR evidence remains available for image search.
+
 Scoring coverage note:
-- `tests/test_scoring_engine.py` covers the V2 text/visual scorer, including descriptor-like token caps, low-protectability shared-anchor guards, compact compounds, short-token boundary retrieval source checks, short-anchor phonetic guards, bidirectional short-acronym subset caps, short collapsed translation caps, dominant-anchor fuzzy/phonetic quality guards, short non-exact anchor visual boost suppression, dominant-core added matter, bidirectional and single-anchor asymmetric changed-matter caps, continuous guardrail calibration, weak/limited-text visual guards, OCR disagreement, and search/watchlist wiring into `score_pair()`.
+- `tests/test_scoring_engine.py` covers the V2 text/visual scorer, including descriptor-like token caps, low-protectability shared-anchor guards, compact compounds, short-token boundary retrieval source checks, short-anchor phonetic guards, bidirectional short-acronym subset caps, short collapsed translation caps, dominant-anchor fuzzy/phonetic quality guards, conservative OCR-vs-OCR visual behavior, image-only OCR staying out of the trademark-name text query, image-only visual quality calibration and strict/balanced layout-variant logo corroboration, plain-text wordmark visual guards, dominant-core added matter, bidirectional and single-anchor asymmetric changed-matter caps, continuous guardrail calibration, weak/limited-text visual guards, OCR disagreement diagnostics, and search/watchlist wiring into `score_pair()`.
+- `tests/test_search_risk_report.py` covers the advisory search risk report route, public pending-report generation, authenticated pending-report claiming, request validation, monthly report-quota handling, Qwen-first text provider selection with DeepSeek/Gemini fallbacks, Qwen-first multimodal provider selection with Gemini fallback, invalid-output usage refund behavior, factual-only prompt trimming without deterministic score anchoring, provider-score result ordering, saved PDF report persistence, and Unicode PDF rendering for Turkish text; `tests/test_api_endpoints.py`, `tests/test_page_smoke.py`, and `tests/test_dashboard_layout.py` cover report deletion routes, safe file cleanup, landing/dashboard report button wiring, multipart logo upload wiring, login-to-view handoff, and the compact ready-card handoff to the saved PDF.
 - `tests/test_api_endpoints.py` covers `/api/search` service wiring so unified enhanced search maps canonical `RiskEngine.assess_brand_risk()` results into the existing response shape.
+- `tests/test_page_smoke.py` covers search and watchlist score-card wiring so visible text score cards use the original-name `path_a_score`, while translated-name evidence remains in the translation card; inline watchlist conflicts keep semantic/phonetic evidence as sub-rows instead of folding semantic into the main text score.
 
 ### Layer 2: App API Integration
 
 Purpose:
 - verify FastAPI routes, auth gates, response shapes, validation, and service wiring with the test client
 - verify watchlist alert filtering behavior, including same-holder conflict exclusion by holder ID while preserving event alerts
+- verify active watchlist conflict filtering uses both an unexpired opposition deadline and an appealable published status, so historical registered/renewed/refused marks do not appear as active conflicts
 
 Existing suites:
 - `tests/test_api_endpoints.py`
@@ -244,7 +250,7 @@ Current environment note:
 - `tests/test_data_collection.py`: collector recency-window logic, Gazette validation, issue completeness checks, and download planning
 - `tests/test_subscription.py`: plan eligibility and credit logic
 - `tests/test_subscription_limits.py`: subscription limit behavior
-- `tests/test_scoring_engine.py`: V2 text/visual scoring behavior, common-anchor/generic/descriptor caps, descriptor-stat classifier tests, low-protectability anchor classifier and weak shared-anchor caps, short-anchor and dominant-anchor fuzzy/phonetic guardrails, short-acronym subset and short collapsed translation caps, continuous cap calibration, short non-exact anchor visual boost suppression, single-anchor asymmetric added-matter caps, weak/limited-text visual guardrails, OCR-disagreement caps, Retrieval V2 normalization/source diagnostics, compact compound retrieval/scoring, added-matter scoring, duplicate/collapsed translation caps, compatibility fields, and combiner behavior
+- `tests/test_scoring_engine.py`: V2 text/visual scoring behavior, common-anchor/generic/descriptor caps, descriptor-stat classifier tests, low-protectability anchor classifier and weak shared-anchor caps, short-anchor and dominant-anchor fuzzy/phonetic guardrails, short-acronym subset and short collapsed translation caps, continuous cap calibration, conservative OCR-vs-OCR visual behavior, image-only OCR staying out of the trademark-name text query, image-only visual quality calibration and strict/balanced layout-variant logo corroboration, plain-text wordmark visual profiling/guardrails, single-anchor asymmetric added-matter caps, weak/limited-text visual guardrails, OCR-disagreement diagnostics, Retrieval V2 normalization/source diagnostics, compact compound retrieval/scoring, added-matter scoring, duplicate/collapsed translation caps, compatibility fields, and combiner behavior
 - `tests/test_edge_cases.py`: scoring/search edge cases
 - `tests/test_translation.py`: translation behavior
 - `tests/test_translation_scoring.py`: translated-name Path B scoring behavior and CLIP/DINOv2/OCR visual composite coverage

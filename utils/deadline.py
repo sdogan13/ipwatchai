@@ -14,6 +14,36 @@ from datetime import date, datetime
 from dateutil.relativedelta import relativedelta
 
 
+APPEALABLE_PUBLISHED_STATUS = "Yay\u0131nda"
+
+
+def active_appeal_deadline_sql(alias: str = "t") -> str:
+    """Return the SQL predicate for a currently appealable published mark."""
+    prefix = f"{alias}." if alias else ""
+    return (
+        f"{prefix}appeal_deadline IS NOT NULL "
+        f"AND {prefix}appeal_deadline >= CURRENT_DATE "
+        f"AND COALESCE({prefix}final_status::text, {prefix}current_status::text) = "
+        f"'{APPEALABLE_PUBLISHED_STATUS}'"
+    )
+
+
+def active_similarity_alert_sql(alert_alias: str = "a", conflict_alias: str = "t") -> str:
+    """Keep non-similarity alerts visible, but require active appealability for conflicts."""
+    return (
+        f"({alert_alias}.alert_type != 'similarity' "
+        f"OR ({active_appeal_deadline_sql(conflict_alias)}))"
+    )
+
+
+def active_similarity_conflict_sql(alert_alias: str = "a", conflict_alias: str = "t") -> str:
+    """Return the SQL predicate for active similarity conflicts only."""
+    return (
+        f"{alert_alias}.alert_type = 'similarity' "
+        f"AND {active_appeal_deadline_sql(conflict_alias)}"
+    )
+
+
 def calculate_appeal_deadline(bulletin_date) -> date | None:
     """
     Calculate Turkish trademark opposition deadline.

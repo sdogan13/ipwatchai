@@ -81,6 +81,26 @@ def run_startup_tasks(logger, settings):
     except Exception as exc:
         logger.warning(f"   Pipeline runs table check failed (non-fatal): {exc}")
 
+    try:
+        from migrations.run_logo_studio_projects_migration import ensure_logo_studio_projects_schema
+
+        if ensure_logo_studio_projects_schema():
+            logger.info("   Logo Studio project schema ready")
+        else:
+            logger.warning("   Logo Studio project schema migration skipped or failed (non-fatal)")
+    except Exception as exc:
+        logger.warning(f"   Logo Studio project schema check failed (non-fatal): {exc}")
+
+    try:
+        from migrations.run_enhance_logo_visual import ensure_logo_visual_columns
+
+        if ensure_logo_visual_columns():
+            logger.info("   Logo visual audit columns ready")
+        else:
+            logger.warning("   Logo visual audit columns migration skipped or failed (non-fatal)")
+    except Exception as exc:
+        logger.warning(f"   Logo visual audit columns check failed (non-fatal): {exc}")
+
     from utils.settings_manager import settings_manager
 
     try:
@@ -92,7 +112,11 @@ def run_startup_tasks(logger, settings):
     except Exception as exc:
         logger.warning(f"   Settings manager init failed (non-fatal): {exc}")
 
-    from utils.seed_settings import align_legacy_quick_search_limits, seed_default_settings
+    from utils.seed_settings import (
+        align_legacy_quick_search_limits,
+        align_paid_csv_feature_limits,
+        seed_default_settings,
+    )
 
     try:
         seed_default_settings()
@@ -107,6 +131,14 @@ def run_startup_tasks(logger, settings):
     except Exception as exc:
         logger.warning(f"   Quick-search plan-limit alignment failed (non-fatal): {exc}")
 
+    try:
+        if align_paid_csv_feature_limits():
+            logger.info("   CSV export plan limits aligned")
+        else:
+            logger.warning("   CSV export plan-limit alignment skipped or failed (non-fatal)")
+    except Exception as exc:
+        logger.warning(f"   CSV export plan-limit alignment failed (non-fatal): {exc}")
+
     from utils.superadmin import seed_superadmin
 
     try:
@@ -115,10 +147,18 @@ def run_startup_tasks(logger, settings):
         logger.warning(f"   Superadmin seed failed (non-fatal): {exc}")
 
     try:
-        from workers.scheduler import start_scheduler
+        from workers.scheduler import (
+            get_universal_scan_schedule_label,
+            get_watchlist_scan_schedule_label,
+            start_scheduler,
+        )
 
         start_scheduler()
-        logger.info("   Scheduler started (watchlist scan 03:00, universal scan 04:00)")
+        logger.info(
+            "   Scheduler started (watchlist scan %s, universal scan %s)",
+            get_watchlist_scan_schedule_label(),
+            get_universal_scan_schedule_label(),
+        )
     except Exception as exc:
         logger.warning(f"   Scheduler init failed (non-fatal): {exc}")
 

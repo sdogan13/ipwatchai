@@ -18,6 +18,25 @@ LEGACY_QUICK_SEARCH_LIMITS = {
     "business": 150,
 }
 
+PAID_CSV_FEATURES = {
+    "can_download_portfolio": {
+        "free": False,
+        "starter": True,
+        "professional": True,
+        "business": True,
+        "enterprise": True,
+        "superadmin": True,
+    },
+    "can_export_csv_leads": {
+        "free": False,
+        "starter": True,
+        "professional": True,
+        "business": True,
+        "enterprise": True,
+        "superadmin": True,
+    },
+}
+
 
 def seed_default_settings():
     """Seed app_settings with current PLAN_FEATURES values. Idempotent."""
@@ -163,6 +182,49 @@ def align_legacy_quick_search_limits():
         if conn:
             conn.rollback()
         logger.warning(f"Quick-search limit alignment failed (non-fatal): {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def align_paid_csv_feature_limits():
+    """Force CSV export/download flags to the current product policy."""
+    from utils.settings_manager import settings_manager
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        updated = 0
+
+        for feature, plan_values in PAID_CSV_FEATURES.items():
+            for plan_name, enabled in plan_values.items():
+                cur.execute(
+                    """
+                    UPDATE app_settings
+                    SET value = %s::jsonb,
+                        updated_at = NOW()
+                    WHERE key = %s
+                      AND value IS DISTINCT FROM %s::jsonb
+                    """,
+                    (
+                        json.dumps(enabled),
+                        f"plan.{plan_name}.{feature}",
+                        json.dumps(enabled),
+                    ),
+                )
+                updated += cur.rowcount or 0
+
+        conn.commit()
+        if updated:
+            settings_manager.invalidate_cache()
+            logger.info(f"Aligned {updated} CSV export/download plan flag(s)")
+        return True
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        logger.warning(f"CSV feature alignment failed (non-fatal): {e}")
         return False
     finally:
         if conn:

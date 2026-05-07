@@ -243,8 +243,8 @@ async def suggest_nice_classes(request: ClassSuggestionRequest):
     """
     Suggest relevant Nice classes based on goods/services description.
 
-    Uses semantic embedding similarity against Nice class descriptions.
-    Supports both Turkish and English input (multilingual model).
+    Uses the configured LLM class-suggestion provider chain against the
+    canonical Nice class catalogue.
     """
     from services.nice_class_service import run_nice_class_suggestion
 

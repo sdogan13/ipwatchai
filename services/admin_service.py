@@ -653,6 +653,7 @@ async def change_admin_organization_plan_data(
     current_user,
     db_factory=Database,
     audit_logger=None,
+    plan_limit_getter=None,
 ):
     """Change an organization's subscription plan as superadmin."""
     plan_name = payload.get("plan_name")
@@ -660,6 +661,9 @@ async def change_admin_organization_plan_data(
         raise HTTPException(status_code=400, detail="'plan_name' is required")
 
     logger = audit_logger or _write_admin_audit_log
+    if plan_limit_getter is None:
+        from utils.subscription import get_plan_limit as plan_limit_getter
+    ai_monthly_limit = int(plan_limit_getter(plan_name, "monthly_ai_credits") or 0)
 
     with db_factory() as db:
         cur = db.cursor()
@@ -686,8 +690,14 @@ async def change_admin_organization_plan_data(
         old_plan = old["old_plan"]
 
         cur.execute(
-            "UPDATE organizations SET subscription_plan_id = %s WHERE id = %s",
-            (str(plan["id"]), org_id),
+            """
+            UPDATE organizations
+            SET subscription_plan_id = %s,
+                ai_credits_monthly = %s,
+                ai_credits_reset_at = NOW()
+            WHERE id = %s
+            """,
+            (str(plan["id"]), ai_monthly_limit, org_id),
         )
 
         logger(

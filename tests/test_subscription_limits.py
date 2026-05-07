@@ -15,7 +15,7 @@ Tests are organized by feature:
 9. Portfolio access (can_view_holder_portfolio)
 10. Logo tracking (can_track_logos)
 11. CSV export (can_export_csv_leads)
-12. Report export (can_export_reports)
+12. Legacy report export flag consistency
 """
 
 import pytest
@@ -51,7 +51,7 @@ class TestPlanFeaturesConsistency:
         "monthly_live_searches", "daily_lead_views", "monthly_reports",
         "can_export_reports", "name_suggestions_per_session",
         "monthly_ai_credits", "monthly_applications",
-        "can_track_logos", "can_view_holder_portfolio",
+        "can_track_logos", "can_view_holder_portfolio", "can_download_portfolio",
         "can_export_csv_leads", "can_use_live_scraping",
         "max_users", "max_watchlist_items", "max_daily_quick_searches",
         "auto_scan_max_items", "auto_scan_frequency",
@@ -77,7 +77,7 @@ class TestPlanFeaturesConsistency:
         assert free["monthly_ai_credits"] == 0
         assert free["monthly_applications"] == 0
         assert free["auto_scan_max_items"] == 0
-        assert free["can_export_reports"] is False
+        assert free["can_export_reports"] is True
         assert free["can_track_logos"] is False
         assert free["can_view_holder_portfolio"] is True
         assert free["can_download_portfolio"] is False
@@ -281,13 +281,13 @@ class TestLeadAccessLimits:
 # ===========================================================================
 
 class TestReportLimits:
-    """Verify report generation and export limits."""
+    """Verify inline risk report limits."""
 
     def test_free_1_report_per_month(self):
         assert PLAN_FEATURES["free"]["monthly_reports"] == 1
 
-    def test_free_cannot_export(self):
-        assert PLAN_FEATURES["free"]["can_export_reports"] is False
+    def test_free_can_download_reports(self):
+        assert PLAN_FEATURES["free"]["can_export_reports"] is True
 
     def test_starter_can_export(self):
         assert PLAN_FEATURES["starter"]["can_export_reports"] is True
@@ -312,6 +312,44 @@ class TestReportLimits:
         result = check_report_eligibility(db, "free", str(uuid.uuid4()))
         assert result["eligible"]
         assert result["reports_used"] == 0
+
+    @pytest.mark.parametrize(
+        ("plan_name", "limit"),
+        [
+            ("free", 1),
+            ("starter", 10),
+            ("professional", 30),
+        ],
+    )
+    def test_risk_report_limits_match_finite_package_allowance(self, plan_name, limit):
+        db = MagicMock()
+        cursor = MagicMock()
+        db.cursor.return_value = cursor
+
+        cursor.fetchone.return_value = {"cnt": limit - 1}
+        allowed = check_report_eligibility(db, plan_name, str(uuid.uuid4()))
+        assert allowed["eligible"] is True
+        assert allowed["reports_limit"] == limit
+        assert allowed["reports_remaining"] == 1
+
+        cursor.fetchone.return_value = {"cnt": limit}
+        blocked = check_report_eligibility(db, plan_name, str(uuid.uuid4()))
+        assert blocked["eligible"] is False
+        assert blocked["reports_limit"] == limit
+        assert blocked["reports_remaining"] == 0
+
+    @pytest.mark.parametrize("plan_name", ["enterprise", "superadmin"])
+    def test_unlimited_risk_report_plans_do_not_stop_at_sentinel_usage(self, plan_name):
+        db = MagicMock()
+        cursor = MagicMock()
+        db.cursor.return_value = cursor
+        cursor.fetchone.return_value = {"cnt": 999999}
+
+        result = check_report_eligibility(db, plan_name, str(uuid.uuid4()))
+
+        assert result["eligible"] is True
+        assert result["reports_limit"] == 999999
+        assert result["reports_remaining"] == 999999
 
 
 # ===========================================================================
@@ -387,6 +425,9 @@ class TestAICreditLimits:
         can_use, reason, details = check_ai_credit_eligibility(db, "org-123", cost=5)
         assert not can_use
         assert reason == "credits_exhausted"
+        assert details["upgrade_context"] == "ai_credits"
+        assert details["required_feature"] == "monthly_ai_credits"
+        assert details["required_feature_value"] == 5
 
     @patch("utils.subscription._reset_monthly_ai_credits_if_needed")
     @patch("utils.subscription.get_org_plan")
@@ -433,8 +474,8 @@ class TestPortfolioAccess:
     def test_free_no_portfolio_download(self):
         assert PLAN_FEATURES["free"]["can_download_portfolio"] is False
 
-    def test_starter_no_portfolio_download(self):
-        assert PLAN_FEATURES["starter"]["can_download_portfolio"] is False
+    def test_starter_has_portfolio_download(self):
+        assert PLAN_FEATURES["starter"]["can_download_portfolio"] is True
 
     def test_professional_has_portfolio_download(self):
         assert PLAN_FEATURES["professional"]["can_download_portfolio"] is True
@@ -550,6 +591,23 @@ class TestPlanExpiry:
 
         result = get_user_plan(db, "user-123")
         assert result["plan_name"] == "superadmin"  # Superadmin overrides
+
+    @patch("utils.subscription.RealDictCursor")
+    def test_org_admin_without_superadmin_flag_uses_package_plan(self, mock_cursor_cls):
+        db = MagicMock()
+        cursor = MagicMock()
+        db.cursor.return_value = cursor
+        cursor.fetchone.return_value = {
+            "plan_name": "starter",
+            "display_name": "Starter",
+            "can_use_live_search": True,
+            "role": "admin",
+            "is_superadmin": False,
+            "subscription_end_date": date.today() + timedelta(days=30),
+        }
+
+        result = get_user_plan(db, "user-123")
+        assert result["plan_name"] == "starter"
 
 
 # ===========================================================================
@@ -685,15 +743,17 @@ class TestAutoScanAccessChecks:
 # ===========================================================================
 
 class TestReportDownloadChecks:
-    """Verify report download checks can_export_reports."""
+    """Verify report downloads are not plan-gated."""
 
-    def test_download_report_checks_export_permission(self):
+    def test_download_report_does_not_check_export_permission(self):
         from services.report_service import build_report_download_response
         import inspect
         source = inspect.getsource(build_report_download_response)
-        assert "can_export_reports" in source, (
-            "build_report_download_response must check can_export_reports"
+        assert "can_export_reports" not in source, (
+            "build_report_download_response must not gate completed report downloads by plan"
         )
+        assert "organization_id" in source
+        assert 'row["status"] != "completed"' in source
 
 
 # ===========================================================================
@@ -721,7 +781,7 @@ class TestBooleanFeatureFlags:
 
     BOOLEAN_FEATURES = [
         "can_export_reports", "can_track_logos",
-        "can_view_holder_portfolio", "can_export_csv_leads",
+        "can_view_holder_portfolio", "can_download_portfolio", "can_export_csv_leads",
         "can_use_live_scraping", "priority_support",
         "api_access", "dedicated_account_manager",
     ]

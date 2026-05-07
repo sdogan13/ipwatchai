@@ -26,6 +26,7 @@ from models.schemas import (
     WatchlistItemCreate,
     WatchlistItemResponse,
 )
+from utils.deadline import active_similarity_conflict_sql
 from utils.watchlist_filters import same_holder_alert_exclusion_sql
 
 WATCHLIST_LOGOS_DIR = os.path.join(settings.paths.upload_dir, "watchlist_logos")
@@ -158,13 +159,13 @@ def _load_conflict_summaries(
             where_clause = f"""
                 a.watchlist_item_id = ANY(%s::uuid[])
                 AND a.status NOT IN ('dismissed', 'resolved')
-                AND (t.appeal_deadline IS NULL OR t.appeal_deadline >= CURRENT_DATE)
+                AND {active_similarity_conflict_sql('a', 't')}
                 AND a.overall_risk_score >= %s
                 AND {visible_alert_condition}
             """
             params += (threshold,)
             nearest_deadline_expr = (
-                "MIN(t.appeal_deadline) FILTER (WHERE t.appeal_deadline > CURRENT_DATE) as nearest_deadline,"
+                f"MIN(t.appeal_deadline) FILTER (WHERE {active_similarity_conflict_sql('a', 't')}) as nearest_deadline,"
             )
             severity_rank_expr = """
                 MAX(CASE a.severity
@@ -183,9 +184,9 @@ def _load_conflict_summaries(
                 a.watchlist_item_id,
                 COUNT(*) as total_conflicts,
                 COUNT(*) FILTER (WHERE t.final_status = 'Başvuruldu' AND t.bulletin_date IS NULL) as pre_publication_count,
-                COUNT(*) FILTER (WHERE t.appeal_deadline > CURRENT_DATE AND t.appeal_deadline <= CURRENT_DATE + INTERVAL '7 days') as critical_count,
-                COUNT(*) FILTER (WHERE t.appeal_deadline > CURRENT_DATE + INTERVAL '7 days' AND t.appeal_deadline <= CURRENT_DATE + INTERVAL '30 days') as urgent_count,
-                COUNT(*) FILTER (WHERE t.appeal_deadline > CURRENT_DATE + INTERVAL '30 days') as active_count,
+                COUNT(*) FILTER (WHERE {active_similarity_conflict_sql('a', 't')} AND t.appeal_deadline <= CURRENT_DATE + INTERVAL '7 days') as critical_count,
+                COUNT(*) FILTER (WHERE {active_similarity_conflict_sql('a', 't')} AND t.appeal_deadline > CURRENT_DATE + INTERVAL '7 days' AND t.appeal_deadline <= CURRENT_DATE + INTERVAL '30 days') as urgent_count,
+                COUNT(*) FILTER (WHERE {active_similarity_conflict_sql('a', 't')} AND t.appeal_deadline > CURRENT_DATE + INTERVAL '30 days') as active_count,
                 {nearest_deadline_expr}
                 {severity_rank_expr}
                 COUNT(*) FILTER (WHERE a.severity = 'critical') as sev_critical,
@@ -258,31 +259,32 @@ async def get_watchlist_stats_summary(
                 COUNT(DISTINCT w.id) FILTER (WHERE a.id IS NOT NULL
                     AND a.status NOT IN ('dismissed', 'resolved')
                     AND a.overall_risk_score >= {norm_score}
-                    AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
+                    AND {active_similarity_conflict_sql('a', 't')}
                     AND {visible_alert_condition}) AS items_with_threats,
                 COUNT(a.id) FILTER (WHERE a.severity = 'critical' AND a.status NOT IN ('dismissed', 'resolved')
                     AND a.overall_risk_score >= {norm_score}
-                    AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
+                    AND {active_similarity_conflict_sql('a', 't')}
                     AND {visible_alert_condition}) AS critical_threats,
                 COUNT(a.id) FILTER (WHERE a.severity = 'high' AND a.status NOT IN ('dismissed', 'resolved')
                     AND a.overall_risk_score >= {norm_score}
-                    AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
+                    AND {active_similarity_conflict_sql('a', 't')}
                     AND {visible_alert_condition}) AS high_threats,
                 COUNT(a.id) FILTER (WHERE a.severity = 'medium' AND a.status NOT IN ('dismissed', 'resolved')
                     AND a.overall_risk_score >= {norm_score}
-                    AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
+                    AND {active_similarity_conflict_sql('a', 't')}
                     AND {visible_alert_condition}) AS medium_threats,
                 COUNT(a.id) FILTER (WHERE a.severity = 'low' AND a.status NOT IN ('dismissed', 'resolved')
                     AND a.overall_risk_score >= {norm_score}
-                    AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
+                    AND {active_similarity_conflict_sql('a', 't')}
                     AND {visible_alert_condition}) AS low_threats,
                 COUNT(a.id) FILTER (WHERE a.status = 'new'
                     AND a.overall_risk_score >= {norm_score}
-                    AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
+                    AND {active_similarity_conflict_sql('a', 't')}
                     AND {visible_alert_condition}) AS new_alerts,
                 MIN(t.appeal_deadline) FILTER (WHERE t.appeal_deadline > CURRENT_DATE
                     AND a.overall_risk_score >= {norm_score}
                     AND a.status NOT IN ('dismissed', 'resolved')
+                    AND {active_similarity_conflict_sql('a', 't')}
                     AND {visible_alert_condition}) AS nearest_deadline,
                 COUNT(DISTINCT w.id) FILTER (
                     WHERE (my_tm.application_date IS NOT NULL
@@ -840,16 +842,24 @@ async def prepare_watchlist_scan_all(
     }
 
 
-async def get_watchlist_scan_status(current_user=None, next_scan_time_getter=None):
+async def get_watchlist_scan_status(
+    current_user=None,
+    next_scan_time_getter=None,
+    schedule_label_getter=None,
+):
     """Return the watchlist auto-scan schedule metadata."""
     if next_scan_time_getter is None:
         from workers.scheduler import get_next_scan_time
 
         next_scan_time_getter = get_next_scan_time
+    if schedule_label_getter is None:
+        from workers.scheduler import get_watchlist_scan_schedule_label
+
+        schedule_label_getter = get_watchlist_scan_schedule_label
 
     return {
         "auto_scan_enabled": True,
-        "schedule": "Daily at 03:00",
+        "schedule": schedule_label_getter(),
         "next_scan_at": next_scan_time_getter(),
     }
 

@@ -1,0 +1,77 @@
+{
+  "timestamp_utc": "20260507T114753Z",
+  "settings": {
+    "openai_key_loaded": true,
+    "gemini_key_loaded": true,
+    "openai_model": "gpt-image-2",
+    "gemini_model": "gemini-3-pro-image-preview",
+    "openai_size": "1024x1024",
+    "openai_quality": "high"
+  },
+  "availability": {
+    "openai": true,
+    "gemini": true
+  },
+  "tests": {
+    "openai_primary_chain": {
+      "ok": true,
+      "selected": {
+        "provider": "openai",
+        "model": "gpt-image-2",
+        "attempts": [
+          {
+            "provider": "openai",
+            "model": "gpt-image-2",
+            "available": true,
+            "used": true,
+            "error": null,
+            "fallback_allowed": true
+          }
+        ]
+      },
+      "images": [
+        {
+          "index": 1,
+          "bytes": 773345,
+          "sha256_12": "532dce5e5134",
+          "path": "C:\\Users\\701693\\turk_patent\\artifacts\\live_logo_tests\\20260507T114753Z_openai_primary_chain_1.png",
+          "magic": "89504e470d0a1a0a0000000d"
+        }
+      ]
+    },
+    "gemini_fallback_chain": {
+      "ok": true,
+      "selected": {
+        "provider": "gemini",
+        "model": "gemini-3-pro-image-preview",
+        "attempts": [
+          {
+            "provider": "openai",
+            "model": "gpt-image-2",
+            "available": true,
+            "used": false,
+            "error": "forced live fallback smoke failure",
+            "fallback_allowed": true
+          },
+          {
+            "provider": "gemini",
+            "model": "gemini-3-pro-image-preview",
+            "available": true,
+            "used": true,
+            "error": null,
+            "fallback_allowed": true
+          }
+        ]
+      },
+      "images": [
+        {
+          "index": 1,
+          "bytes": 547292,
+          "sha256_12": "23d82cd65ff8",
+          "path": "C:\\Users\\701693\\turk_patent\\artifacts\\live_logo_tests\\20260507T114753Z_gemini_fallback_chain_1.jpg",
+          "magic": "ffd8ffe000104a4649460001"
+        }
+      ]
+    }
+  }
+}

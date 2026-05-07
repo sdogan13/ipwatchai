@@ -27,6 +27,7 @@ Engineering workflow and change rules live in `rules.md`.
 - `api/`, `auth/`, `config/`, `database/`: core app layers
 - `services/`: business logic for auth, search, watchlist, billing, reports, usage, and admin flows
 - `pipeline/`: embedding and ingest pipeline modules
+  - logo-only `SEKIL/ŞEKİL` records are cleaned as textless marks; name-derived text embeddings/translations are cleared while OCR and visual embeddings are preserved
 - `templates/`, `static/`: mounted UI assets and server-rendered pages
 - `tests/`: unit, API, live, browser, and nightly suites
 - `deploy/`: bootstrap schema and deployment overlays
@@ -52,6 +53,21 @@ Edit `.env.production` and set at least:
 - `DB_PASSWORD`
 - `AUTH_SECRET_KEY`
 - `REDIS_PASSWORD` if you want Redis auth enabled
+- `CREATIVE_DEEPSEEK_API_KEY` if you want DeepSeek fallback for text-only risk reports
+- `CREATIVE_DEEPSEEK_TIMEOUT` for full fallback search risk reports; use `120` seconds for the 20-result dashboard report path
+- `CREATIVE_QWEN_API_KEY` or `DASHSCOPE_API_KEY` if you want Qwen risk reports enabled
+- `CREATIVE_QWEN_TEXT_MODEL` for text-only risk reports; default `qwen-max`
+- `CREATIVE_QWEN_CLASS_MODEL` for Nice class suggestions; default `qwen-flash`
+- `CREATIVE_QWEN_VL_MODEL` for logo-based risk reports; default `qwen3-vl-plus`
+- `CREATIVE_QWEN_TIMEOUT` for full logo-based risk reports; use `120` seconds for the 20-result dashboard report path
+- `CREATIVE_OPENAI_API_KEY` or `OPENAI_API_KEY` for Logo Studio image generation; default image model is `gpt-image-2`
+- `CREATIVE_OPENAI_IMAGE_SIZE`, `CREATIVE_OPENAI_IMAGE_QUALITY`, `CREATIVE_OPENAI_IMAGE_BACKGROUND`, and `CREATIVE_OPENAI_IMAGE_OUTPUT_FORMAT` to tune GPT Image logo output; in-code defaults are `1024x1024`, `high`, `auto`, and `png`. Production overrides first-generation quality to `medium` to control spend (high ≈ $0.17/image, medium ≈ $0.04/image, low ≈ $0.01/image at 1024×1024)
+- `CREATIVE_OPENAI_IMAGE_REVISION_QUALITY` to set the quality used by the edit endpoint when revising a chosen logo (defaults to `high`). Kept high because revisions refine a logo the user has already committed to, where fidelity matters more than cost
+- `CREATIVE_LOGO_IMAGES_PER_RUN` to control how many logo candidates each first-generation request produces; in-code default is `4` (also used in production for meaningful exploration). Cost scales linearly with this value
+- `CREATIVE_LOGO_REVISION_IMAGES_PER_RUN` to control how many candidates a revision (logo edit) request produces; in-code default is `1`. Revisions refine an already-chosen logo, so a single high-quality output usually matches user intent better than multiple variants
+- `CREATIVE_GOOGLE_API_KEY` if you want AI Studio Name Lab enabled, Gemini fallback for search risk reports, or Logo Studio backup image generation
+- `CREATIVE_GEMINI_CLASS_FALLBACK_MODEL` for Nice class suggestion fallback; default `gemini-2.5-flash-lite`
+- `CREATIVE_GEMINI_IMAGE_MODEL` for Logo Studio backup image generation; default `gemini-3-pro-image-preview` (Nano Banana Pro)
 - local host paths such as `DATA_PATH`, `CLIENTS_PATH`, `HF_HOME`, and `TORCH_HOME` if the defaults do not match your machine
 
 Worker note:
@@ -63,6 +79,12 @@ Start the core local stack:
 
 ```powershell
 docker compose up -d postgres redis backend nginx
+```
+
+If you change `.env.production` after the backend container has already been created, recreate the backend so Docker applies the new environment:
+
+```powershell
+docker compose up -d --force-recreate backend
 ```
 
 Useful endpoints:
@@ -158,16 +180,20 @@ Current version: `v2_text_visual`.
 - retrieval diagnostics record which internal stage and field found a candidate; scoring still decides Path A (`name`) versus Path B (`name_tr`)
 - dominant-core scoring keeps fully copied marks high with generic additions, while capping changed extra matter such as a different second brand term
 - collapsed `name_tr` values are capped so translated-name scoring cannot turn a longer original mark into an exact match
-- visual scoring normalizes across active CLIP, DINOv2, and OCR components only; color vectors may still be present in retrieval data but do not contribute to visual risk
+- visual scoring normalizes across active CLIP, DINOv2, and OCR components only; OCR is compared logo-to-logo with conservative exact/character evidence, can drive plain text wordmark visual matches when both images are text-on-blank, and cannot cap or drag down neural CLIP/DINO evidence; color vectors may still be present in retrieval data but do not contribute to visual risk
+- blank-background plain-text wordmark images are profiled from image geometry and OCR presence; when those logo texts or names do not agree, their CLIP/DINO visual score is capped so typography-on-white false positives do not dominate
+- image-only searches do not promote uploaded-logo OCR into the trademark-name text query; OCR stays inside `visual_breakdown`, is compared only against candidate `logo_ocr_text`, and has low weight in the image-only visual quality guard because EasyOCR can be noisy on logo crops; graphic/mixed logo layout variants can escape the moderate cap when CLIP and DINOv2 corroborate the same visual identity through strict high-component evidence or balanced close-component evidence
 - weak textual evidence, including generic-only, missing-anchor, dominant-anchor-missing, or semantic/phonetic-only support, prevents moderate visual similarity from creating a high conflict score
 - partial multi-anchor matches with changed matter on both sides are capped as limited text evidence, so one shared token cannot be boosted into high risk by moderate visual similarity
 - single-anchor matches with generic/service query matter and different target identity matter are treated as limited text evidence unless the full core is copied
 - weak non-exact dominant-anchor matches, including fuzzy and phonetic anchors, are calibrated by length ratio, edit distance, and anchor coverage; full-length one-edit variants can remain meaningful while fragment-like or weak translated matches are capped as limited text evidence
-- short one-token marks suppress text/visual agreement boosts when their only anchor match is non-exact and wordmark OCR disagrees, unless OCR is strong or CLIP+DINO are independently very strong
 - guarded caps are calibrated continuously from coverage, match quality, and added-matter evidence; cap values remain policy ceilings rather than automatic final scores
-- OCR disagreement between wordmark logos caps moderate CLIP/DINO visual evidence; weak-text cases require strong OCR agreement or very strong CLIP+DINO evidence before visual similarity can drive high risk
+- OCR disagreement remains diagnostic only; it no longer caps visual evidence or suppresses text/visual agreement boosts
 - `name_tr` values that normalize to the original candidate name cannot beat Path A solely because translated IDF flags classify tokens differently
 - final text/visual combining is max-plus, so a strong text or logo match is not diluted when the other signal is missing
+- search and watchlist score cards display original-name text from `path_a_score` and translated-name text from `translation_similarity`; `text_idf_score` remains the selected textual path used by the overall combiner
+- new watchlist similarity alerts persist the full V2 score diagnostics in `alerts_mt.score_details`, so conflict cards can show original-name, translated-name, semantic, and visual components without collapsing translated Path B into the direct text card; existing alert rows remain score snapshots until rescanned
+- watchlist conflict lists, counters, scanner pools, and alert feeds treat a similarity conflict as active only when the conflicting mark is published and its opposition deadline has not passed; older registered, renewed, refused, or withdrawn rows are not shown as active conflicts even if stale deadline data exists
 - the score remains a `0.0-1.0` similarity-risk score; legal factors such as status, class relatedness, seniority, and enforceability are handled outside this scoring slice
 
 When unified scoring is enabled, `/api/search` maps the canonical `RiskEngine.assess_brand_risk()` result into its legacy response shape, so enhanced search, public search, and watchlist conflicts use the same candidate retrieval and `score_pair()` scoring behavior.

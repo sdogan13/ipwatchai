@@ -1,9 +1,7 @@
 """Enhanced search route extraction from the legacy main app."""
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
-import psycopg2
-import psycopg2.extras
 from fastapi import Request
 from pydantic import BaseModel, Field
 from pipeline.ingest_rules import _repair_mojibake
@@ -69,6 +67,13 @@ class TrademarkResult(BaseModel):
     image_url: Optional[str] = Field(None, description="URL to trademark image")
     similarity: float = Field(..., ge=0, le=100, description="Overall similarity percentage")
     name_similarity: Optional[float] = Field(None, description="Text/name similarity (0-100)")
+    text_similarity: Optional[float] = Field(None, description="Raw direct text similarity (0-1)")
+    text_idf_score: Optional[float] = Field(None, description="Selected V2 textual path score (0-1)")
+    path_a_score: Optional[float] = Field(None, description="Original-name textual path score (0-1)")
+    path_b_score: Optional[float] = Field(None, description="Translated-name textual path score (0-1)")
+    translation_similarity: Optional[float] = Field(None, description="Displayed translation path score (0-1)")
+    scoring_path_source: Optional[str] = Field(None, description="Selected scoring source")
+    scores: Optional[Dict[str, Any]] = Field(None, description="Canonical scoring diagnostics")
     class_overlap_count: int = Field(
         default=0,
         description="Number of overlapping classes with search",
@@ -156,69 +161,36 @@ def get_image_url(
     return None
 
 
-def get_class_suggestions_internal(
+async def get_class_suggestions_internal(
     goods_description: str,
     trademark_name: str = None,
     limit: int = 5,
     settings=None,
     logger=None,
     class_name_lookup=None,
-    text_embedding_getter=None,
 ) -> List[dict]:
     """
     Internal helper to get class suggestions without going through HTTP.
     Returns list of dicts with class_number, class_name, similarity.
     """
-    if text_embedding_getter is None:
-        from pipeline.ai import get_text_embedding_cached
-
-        text_embedding_getter = get_text_embedding_cached
-
-    query_text = goods_description
-    if trademark_name:
-        query_text = f"{trademark_name}: {query_text}"
-
     try:
-        query_embedding = text_embedding_getter(query_text)
+        from services.nice_class_service import run_nice_class_suggestion
 
-        conn = psycopg2.connect(
-            host=settings.database.host,
-            port=settings.database.port,
-            database=settings.database.name,
-            user=settings.database.user,
-            password=settings.database.password,
+        lookup = class_name_lookup or {}
+
+        def class_name_getter(class_num, current_lang="tr"):
+            return lookup.get(class_num) or lookup.get(str(class_num)) or f"Class {class_num}"
+
+        payload = await run_nice_class_suggestion(
+            description=goods_description,
+            top_k=limit,
+            lang="tr",
+            settings=settings,
+            logger=logger,
+            class_name_getter=class_name_getter,
+            trademark_name=trademark_name,
         )
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
-        cur.execute(
-            """
-            SELECT
-                class_number,
-                1 - (description_embedding <=> %s::halfvec) as similarity
-            FROM nice_classes_lookup
-            WHERE description_embedding IS NOT NULL
-            ORDER BY description_embedding <=> %s::halfvec
-            LIMIT %s
-        """,
-            (query_embedding, query_embedding, limit),
-        )
-
-        results = []
-        for row in cur.fetchall():
-            results.append(
-                {
-                    "class_number": row["class_number"],
-                    "class_name": (class_name_lookup or {}).get(
-                        row["class_number"],
-                        f"Class {row['class_number']}",
-                    ),
-                    "similarity": float(row["similarity"]),
-                }
-            )
-
-        cur.close()
-        conn.close()
-        return results
+        return payload["suggestions"]
 
     except Exception as exc:
         if logger:
@@ -292,7 +264,6 @@ def register_enhanced_search_routes(
                 settings=settings,
                 logger=logger,
                 class_name_lookup=class_name_lookup,
-                text_embedding_getter=get_text_embedding_cached,
             ),
             text_embedding_getter=get_text_embedding_cached,
             encode_query_image_handler=encode_query_image_handler,

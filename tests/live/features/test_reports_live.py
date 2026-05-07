@@ -162,19 +162,14 @@ def test_download_report_permission_path():
     if session is None or not GENERATED_REPORT_ID:
         return
 
-    name = "GET /api/v1/reports/{report_id}/download free export gate"
+    name = "GET /api/v1/reports/{report_id}/download no export gate"
     response = session.client.get(f"/api/v1/reports/{GENERATED_REPORT_ID}/download")
-    if response.status_code == 403:
-        REPORTER.ok(f"{name} -> 403 as expected")
-        REPORTER.record(name, True)
-        return
-
     if response.status_code == 200 and response.content:
         REPORTER.ok(f"{name} -> download available")
         REPORTER.record(name, True)
         return
 
-    REPORTER.fail(f"{name} -> expected 403 or 200, got {response.status_code}: {response.text[:200]}")
+    REPORTER.fail(f"{name} -> expected 200, got {response.status_code}: {response.text[:200]}")
     REPORTER.record(name, False, response.text[:200])
 
 

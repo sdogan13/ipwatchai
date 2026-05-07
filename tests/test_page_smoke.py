@@ -6,6 +6,8 @@ ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES = ROOT / "templates"
 STATIC = ROOT / "static"
 APP_ASSETS = ROOT / "app_assets.py"
+DOCKER_COMPOSE = ROOT / "docker-compose.yml"
+ENV_PRODUCTION_EXAMPLE = ROOT / ".env.production.example"
 
 
 def _read_locale(locale: str) -> dict:
@@ -24,7 +26,7 @@ def _nested_get(data: dict, dotted_key: str):
 def test_admin_feature_page_loads_canonical_script_url():
     html = (TEMPLATES / "admin" / "page.html").read_text(encoding="utf-8")
     assert "{% include 'admin/partials/_overview.html' %}" in html
-    assert '<script src="/static/js/admin/panel.js"></script>' in html
+    assert '<script src="/static/js/admin/panel.js?v=2"></script>' in html
 
 
 def test_admin_feature_bundle_contains_panel_bootstrap():
@@ -40,6 +42,117 @@ def test_asset_routes_render_canonical_feature_templates():
     assert 'name="admin/page.html"' in source
     assert 'name="billing/pricing.html"' in source
     assert 'name="billing/checkout.html"' in source
+
+
+def test_docker_backend_uses_env_file_for_llm_provider_keys():
+    compose = DOCKER_COMPOSE.read_text(encoding="utf-8")
+    env_example = ENV_PRODUCTION_EXAMPLE.read_text(encoding="utf-8")
+    requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+
+    assert "- .env.production" in compose
+    assert "CREATIVE_GOOGLE_API_KEY: ${CREATIVE_GOOGLE_API_KEY:-}" not in compose
+    assert "./generative_ai:/app/generative_ai:ro" in compose
+    assert "openai>=" in requirements
+    assert "CREATIVE_DEEPSEEK_API_KEY=YOUR_DEEPSEEK_API_KEY" in env_example
+    assert "CREATIVE_DEEPSEEK_TEXT_MODEL=deepseek-v4-pro" in env_example
+    assert "CREATIVE_DEEPSEEK_TIMEOUT=120" in env_example
+    assert "CREATIVE_QWEN_API_KEY=YOUR_QWEN_OR_DASHSCOPE_API_KEY" in env_example
+    assert "CREATIVE_QWEN_TEXT_MODEL=qwen-max" in env_example
+    assert "CREATIVE_QWEN_VL_MODEL=qwen3-vl-plus" in env_example
+    assert "CREATIVE_QWEN_TIMEOUT=120" in env_example
+    assert "CREATIVE_GOOGLE_API_KEY=YOUR_GEMINI_API_KEY" in env_example
+
+
+def test_risk_report_score_label_is_fully_localized_without_llm_copy():
+    assert _nested_get(_read_locale("en"), "search.risk_report_llm_score") == "Risk score"
+    assert _nested_get(_read_locale("tr"), "search.risk_report_llm_score") == "Risk skoru"
+    assert _nested_get(_read_locale("ar"), "search.risk_report_llm_score") == "\u062f\u0631\u062c\u0629 \u0627\u0644\u0645\u062e\u0627\u0637\u0631"
+    assert _nested_get(_read_locale("en"), "search.risk_report_ready_view") == "Your risk report is ready to view"
+    assert _nested_get(_read_locale("en"), "search.risk_report_login_to_view") == "Log in to view this risk report."
+    assert _nested_get(_read_locale("tr"), "search.risk_report_open") == "Raporu a\u00e7"
+    assert _nested_get(_read_locale("tr"), "search.risk_report_login_to_view") == "Bu risk raporunu g\u00f6r\u00fcnt\u00fclemek i\u00e7in giri\u015f yap\u0131n."
+    assert _nested_get(_read_locale("ar"), "search.risk_report_open") == "\u0641\u062a\u062d \u0627\u0644\u062a\u0642\u0631\u064a\u0631"
+    assert _nested_get(_read_locale("ar"), "search.risk_report_login_to_view") == "\u0633\u062c\u0644 \u0627\u0644\u062f\u062e\u0648\u0644 \u0644\u0639\u0631\u0636 \u062a\u0642\u0631\u064a\u0631 \u0627\u0644\u0645\u062e\u0627\u0637\u0631 \u0647\u0630\u0627."
+    assert _nested_get(_read_locale("en"), "sort.risk_report_desc") == "Risk report \u2193"
+    assert _nested_get(_read_locale("tr"), "sort.risk_report_desc") == "Risk raporu \u2193"
+    assert _nested_get(_read_locale("ar"), "sort.risk_report_desc") == "\u062a\u0642\u0631\u064a\u0631 \u0627\u0644\u0645\u062e\u0627\u0637\u0631 \u2193"
+
+
+def test_search_score_cards_separate_original_text_from_translation_score():
+    score_badge_js = (STATIC / "js" / "components" / "score-badge.js").read_text(
+        encoding="utf-8"
+    )
+    dashboard_js = (STATIC / "js" / "dashboard" / "app.js").read_text(encoding="utf-8")
+    dashboard_search = (
+        TEMPLATES / "dashboard" / "partials" / "_search_panel.html"
+    ).read_text(encoding="utf-8")
+    landing_js = (STATIC / "js" / "marketing" / "landing.js").read_text(
+        encoding="utf-8"
+    )
+    landing_html = (TEMPLATES / "marketing" / "landing.html").read_text(
+        encoding="utf-8"
+    )
+
+    assert "getOriginalTextScore" in score_badge_js
+    assert "scores.path_a_score" in score_badge_js
+    assert "getEffectiveTextScoreForResult(sc)" in dashboard_js
+    assert "sc.path_b_score" in dashboard_js
+    assert "var textCombined = Math.max(textSim, semanticSim)" not in dashboard_js
+    assert "Math.round(textSim * 100)" in dashboard_js
+    assert "getTextScore(r)" in dashboard_search
+    assert "getOriginalTextScore(result)" in landing_js
+    assert "getTextScore(r)" in landing_html
+
+
+def test_logo_only_trademark_names_use_localized_display_label_only():
+    helpers_js = (STATIC / "js" / "utils" / "helpers.js").read_text(encoding="utf-8")
+    result_card_js = (STATIC / "js" / "components" / "result-card.js").read_text(
+        encoding="utf-8"
+    )
+    api_js = (STATIC / "js" / "api.js").read_text(encoding="utf-8")
+    dashboard_js = (STATIC / "js" / "dashboard" / "app.js").read_text(
+        encoding="utf-8"
+    )
+    dashboard_search = (
+        TEMPLATES / "dashboard" / "partials" / "_search_panel.html"
+    ).read_text(encoding="utf-8")
+    dashboard_results = (
+        TEMPLATES / "dashboard" / "partials" / "_results_panel.html"
+    ).read_text(encoding="utf-8")
+    landing_html = (TEMPLATES / "marketing" / "landing.html").read_text(
+        encoding="utf-8"
+    )
+
+    assert _nested_get(_read_locale("tr"), "common.logo_only_mark") == "\"Şekil\""
+    assert _nested_get(_read_locale("en"), "common.logo_only_mark") == "\"Logo\""
+    assert _nested_get(_read_locale("ar"), "common.logo_only_mark") == "\"شعار\""
+
+    assert "window.AppUtils.isLogoOnlyTrademarkName" in helpers_js
+    assert "window.AppUtils.getTrademarkDisplayName" in helpers_js
+    assert "record.trademark_name" in helpers_js
+    assert "record.name" in helpers_js
+    assert "common.logo_only_mark" in helpers_js
+    assert "raw === '-'" in helpers_js
+    assert "raw === '—'" in helpers_js
+    assert "noWhitespace === 'n/a'" in helpers_js
+    assert "alnumOnly === 'sekil'" in helpers_js
+
+    assert 'x-text="getTrademarkDisplayName(r)"' in dashboard_search
+    assert 'x-text="getTrademarkDisplayName(tm)"' in dashboard_search
+    assert 'x-text="getTrademarkDisplayName(r)"' in landing_html
+    assert 'x-text="getTrademarkDisplayName(tm)"' in landing_html
+    assert "getTrademarkDisplayName(r)" in result_card_js
+    assert "getTrademarkDisplayName(item)" in api_js
+    assert "getTrademarkDisplayName(a.conflicting_brand_name)" in dashboard_js
+    assert "getTrademarkDisplayName(a.watched_brand_name)" in dashboard_js
+    assert "getTrademarkDisplayName(a.conflicting_brand)" in dashboard_js
+    assert 'x-text="getTrademarkDisplayName(d.conflicting_brand)"' in dashboard_results
+
+    assert "r.trademark_name || r.name || '\\u2014'" not in dashboard_search
+    assert "r.trademark_name || '\\u2014'" not in landing_html
+    assert "name: r.name || ''" in result_card_js
+    assert "name: getTrademarkDisplayName" not in result_card_js
+    assert "conflicting_brand: c.name || 'N/A'" in dashboard_js
 
 
 def test_pricing_feature_page_keeps_checkout_links():
@@ -99,6 +212,18 @@ def test_checkout_feature_page_translates_unlimited_summary_limits():
     assert "pricing.f_unlimited_live" in checkout_html
 
 
+def test_ai_studio_credit_exhaustion_uses_shared_upgrade_modal():
+    api_js = (STATIC / "js" / "api.js").read_text(encoding="utf-8")
+    dashboard_js = (STATIC / "js" / "dashboard" / "app.js").read_text(encoding="utf-8")
+    upgrade_js = (STATIC / "js" / "utils" / "upgrade-modal.js").read_text(encoding="utf-8")
+
+    assert "showCreditsModal(data.detail);" not in api_js
+    assert "showLogoCreditsExhausted(data.detail);" not in api_js
+    assert "showUpgradeModal(data.detail || data, 'ai_credits')" in api_js
+    assert "showUpgradeModal(detail || { error: 'credits_exhausted' }, 'ai_credits')" in dashboard_js
+    assert "'credits_exhausted'" in upgrade_js
+
+
 def test_billing_locale_files_include_required_keys_for_all_supported_languages():
     required_keys = [
         "pricing.page_title",
@@ -128,6 +253,7 @@ def test_billing_locale_files_include_required_keys_for_all_supported_languages(
         "checkout.payment_eyebrow",
         "checkout.payment_desc",
         "checkout.summary_billing_label",
+        "common.logo_only_mark",
         "search.rate_limited",
         "upgrade.eyebrow",
         "upgrade.generic_title",
@@ -273,7 +399,7 @@ def test_i18n_loader_uses_versioned_locale_bundle_cache():
 
 
 def test_i18n_feature_pages_load_current_bundle_version():
-    expected_script = '<script src="/static/js/utils/i18n.js?v=38"></script>'
+    expected_script = '<script src="/static/js/utils/i18n.js?v=51"></script>'
     for relative_path in (
         TEMPLATES / "marketing" / "landing.html",
         TEMPLATES / "dashboard" / "page.html",
@@ -295,12 +421,17 @@ def test_dashboard_feature_page_loads_canonical_dashboard_script_url():
     assert 'id="bulk-upgrade-offer"' in modals_html
     assert "watchlist.bulk_upgrade_title" in modals_html
     assert "required_feature_value = requiredCapacity" in modals_html
-    assert '<script src="/static/js/utils/upgrade-modal.js?v=4"></script>' in html
-    assert '<script src="/static/js/dashboard/app.js?v=59"></script>' in html
+    assert '<script src="/static/js/utils/upgrade-modal.js?v=8"></script>' in html
+    assert '<script src="/static/js/api.js?v=39"></script>' in html
+    assert '<script src="/static/js/dashboard/app.js?v=88"></script>' in html
+    assert "claim_risk_report" in html
     assert 'id="watchlist-upload-modal-card"' in watchlist_panel_html
     assert 'id="upload-wl-upgrade-offer"' in watchlist_panel_html
     assert "watchlist.upload_upgrade_title" in watchlist_panel_html
     assert 'onclick="showBulkUploadStepOne()"' in watchlist_panel_html
+    assert 'id="wl-view-select"' in watchlist_panel_html
+    assert 'wl-view-tab-appeals' not in watchlist_panel_html
+    assert 'wl-view-tab-renewal' not in watchlist_panel_html
 
 
 def test_dashboard_feature_bundle_contains_dashboard_bootstrap():
@@ -309,6 +440,10 @@ def test_dashboard_feature_bundle_contains_dashboard_bootstrap():
     assert "showUpgradeModal(err, 'applications')" in script
     assert "showUpgradeModal(err, 'reports')" in script
     assert "showUpgradeModal(e, 'watchlist_logo')" in script
+    assert "var DASHBOARD_SEARCH_RESULT_LIMIT = 20;" in script
+    assert "slice(0, 30)" not in script
+    assert "Math.min(data.total || 0, 30)" not in script
+    assert "Math.min(data.total || results.length, 30)" not in script
     assert "window.AppUpgradeModal.maybeHandle(detail, 'quick_search')" in script
     assert "this.t('search.rate_limited')" in script
     assert "this.t('watchlist.added_toast')" in script
@@ -317,6 +452,10 @@ def test_dashboard_feature_bundle_contains_dashboard_bootstrap():
     assert "showBulkUploadStepOne()" in script
     assert "isUploadLimitOnlyResult(data)" in script
     assert "'watchlist.upload_limit_result'" in script
+    assert "function onWatchlistViewFilterChange()" in script
+    assert "var _wlView = 'all';" in script
+    assert "plan-limits-info" not in script
+    assert "fetch('/api/v1/auth/me', usageOpts)" not in script
     assert "item.custom_logo_url || (item.has_custom_logo ? item.logo_url : null)" in script
     assert "item.trademark_image_path" in script
     assert "(item.has_custom_logo" in script
@@ -326,9 +465,18 @@ def test_landing_feature_page_loads_canonical_landing_script_url():
     html = (TEMPLATES / "marketing" / "landing.html").read_text(encoding="utf-8")
     assert "window.SERVER_PLANS = {{ plans | default({}, true) | tojson }};" in html
     assert "{% include 'shared/_upgrade_modal.html' %}" in html
-    assert '<script src="/static/js/utils/i18n.js?v=38"></script>' in html
-    assert '<script src="/static/js/utils/upgrade-modal.js?v=4"></script>' in html
-    assert '<script src="/static/js/marketing/landing.js?v=50"></script>' in html
+    assert '<script src="/static/js/utils/i18n.js?v=51"></script>' in html
+    assert '<script src="/static/js/utils/upgrade-modal.js?v=8"></script>' in html
+    assert '<script src="/static/js/marketing/landing.js?v=64"></script>' in html
+    assert 'id="landing-risk-report-btn"' in html
+    assert "generateRiskReport()" in html
+    assert "riskReport && !riskReportLoading && !riskReportError" in html
+    assert 'data-testid="landing-risk-report-ready-card"' in html
+    assert 'data-testid="landing-risk-report-open-button"' in html
+    assert "openRiskReportPdf(riskReport)" in html
+    assert "t('search.risk_report_ready_view')" in html
+    assert "t('search.risk_report_title')" in html
+    assert "candidate.image_url" in html
     assert 'x-text="t(\'landing.nav_pricing\')"' in html
     assert 'x-text="t(\'landing.nav_education\')"' in html
     assert "activeTab === 'education'" in html
@@ -356,6 +504,13 @@ def test_landing_feature_page_loads_canonical_landing_script_url():
     assert 'data-testid="education-quiz-explanation-editor"' in html
     assert 'data-testid="education-quiz-explanation-input"' in html
     assert 'data-testid="education-quiz-summary-input"' in html
+    landing_js = (STATIC / "js" / "marketing" / "landing.js").read_text(encoding="utf-8")
+    assert "showRiskReportReadyNotification(data)" in landing_js
+    assert "self.riskReport = data" in landing_js
+    assert "'/api/v1/search/risk-report/public'" in landing_js
+    assert "claim_risk_report" in landing_js
+    assert "new FormData()" in landing_js
+    assert "body.append('query_image', this.selectedImage" in landing_js
     assert 'data-testid="education-quiz-explanation-save-button"' in html
     assert 'data-testid="education-quiz-explanation-cancel-button"' in html
     assert 'data-testid="education-quiz-delete-button"' in html
@@ -370,11 +525,33 @@ def test_landing_feature_page_loads_canonical_landing_script_url():
     assert 'class="block w-full py-2.5 rounded-lg text-sm font-medium text-white text-center no-underline" style="background:var(--color-primary)" x-text="t(\'landing.cta_start\')"' in html
 
 
+def test_portfolio_modals_are_cloaked_before_alpine_initializes():
+    landing_html = (TEMPLATES / "marketing" / "landing.html").read_text(encoding="utf-8")
+    dashboard_search_html = (
+        TEMPLATES / "dashboard" / "partials" / "_search_panel.html"
+    ).read_text(encoding="utf-8")
+
+    assert '<div x-show="showPortfolio" x-cloak' in landing_html
+    assert '<div x-show="showPortfolio" x-cloak' in dashboard_search_html
+
+
 def test_landing_feature_bundle_contains_landing_bootstrap():
     script = (STATIC / "js" / "marketing" / "landing.js").read_text(encoding="utf-8")
     assert "function landing()" in script
     assert "window.AppUpgradeModal.maybeHandle(detail, 'public_search')" in script
     assert "self.t('search.rate_limited')" in script
+    assert "riskReportLoading" in script
+    assert "visibleResults = this.searchResults.slice(0, 20)" in script
+    assert "buildRiskReportCandidate" in script
+    assert "getRiskReportLanguage" in script
+    assert "applyRiskReportOrdering" in script
+    assert "deterministic_score" not in script
+    assert "'/api/v1/search/risk-report'" in script
+    assert "'/api/v1/search/risk-report/public'" in script
+    assert "risk_report_login_to_view" in script
+    assert "new FormData()" in script
+    assert "body.append('query_image', this.selectedImage" in script
+    assert "window.AppUpgradeModal.maybeHandle(detail, 'reports')" in script
     assert "loadEducationCatalog" in script
     assert "syncEducationProgress" in script
     assert "getEducationCategoryProgress" in script
@@ -415,7 +592,7 @@ def test_shared_upgrade_modal_bundle_keeps_plan_handoff_logic():
 
     assert "window.AppUpgradeModal" in script
     assert "resolveOffer" in script
-    assert "allowedPlans: ['enterprise']" in script
+    assert "csv_export: { feature: 'can_export_csv_leads', kind: 'boolean' }" in script
     assert "public_search: { feature: 'max_daily_quick_searches', kind: 'numeric' }" in script
     assert "leads: { feature: 'daily_lead_views', kind: 'numeric' }" in script
     assert "function copyForContext(context)" in script

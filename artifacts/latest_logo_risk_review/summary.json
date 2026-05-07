@@ -1,0 +1,356 @@
+[
+  {
+    "variant": 1,
+    "image_id": "190eee88-0326-4b8c-a2a5-4aa6cc2a4c4b",
+    "llm_score": 78.0,
+    "safe": false,
+    "ocr_text": "seydaoğlu baklavalari",
+    "stored_closest": "baklavacı seyyid",
+    "llm_model": "qwen:qwen3-vl-plus",
+    "matches": [
+      {
+        "rank": 1,
+        "name": "baklavacı seyyid",
+        "application_no": "2019/133033",
+        "status": "Tescil Edildi",
+        "classes": [
+          35,
+          43
+        ],
+        "image_path": "bulletins/Marka/GZ_475_2021-01-31/images/2019_133033.jpg",
+        "combined": 70.9,
+        "clip": 66.0,
+        "dino": 77.2,
+        "ocr": 54.5
+      },
+      {
+        "rank": 2,
+        "name": "baklavacı seyfettin",
+        "application_no": "2024/010014",
+        "status": "Tescil Edildi",
+        "classes": [
+          30,
+          35,
+          43
+        ],
+        "image_path": "bulletins/Marka/GZ_490_2024-07-31/images/2024_010014.jpg",
+        "combined": 68.0,
+        "clip": 61.7,
+        "dino": 76.2,
+        "ocr": 40.0
+      },
+      {
+        "rank": 3,
+        "name": "baklavaistasyonu",
+        "application_no": "2019/86266",
+        "status": "Tescil Edildi",
+        "classes": [
+          43,
+          30
+        ],
+        "image_path": "bulletins/Marka/GZ_463_2020-01-31/images/2019_86266.jpg",
+        "combined": 67.4,
+        "clip": 59.8,
+        "dino": 77.1,
+        "ocr": 35.6
+      },
+      {
+        "rank": 4,
+        "name": "seyyarbakkal",
+        "application_no": "2020/44319",
+        "status": "Tescil Edildi",
+        "classes": [
+          30,
+          35,
+          43
+        ],
+        "image_path": "bulletins/Marka/GZ_470_2021-03-31/images/2020_44319.jpg",
+        "combined": 66.7,
+        "clip": 62.0,
+        "dino": 72.7,
+        "ocr": 54.5
+      },
+      {
+        "rank": 5,
+        "name": "soyluoğlu baklava",
+        "application_no": "2020/32938",
+        "status": "Reddedildi",
+        "classes": [
+          30,
+          43
+        ],
+        "image_path": "bulletins/Marka/BLT_346_2020-04-13/images/2020_32938.jpg",
+        "combined": 61.3,
+        "clip": 60.4,
+        "dino": 57.1,
+        "ocr": 73.7
+      }
+    ],
+    "contact_sheet": "/tmp/latest_logo_risk_review/variant_1_contact.jpg"
+  },
+  {
+    "variant": 2,
+    "image_id": "d4b4f6f5-9b87-4e51-ae90-af3c412f8636",
+    "llm_score": 85.0,
+    "safe": false,
+    "ocr_text": "seydaoglu baklavalari",
+    "stored_closest": "baklavacı seyyid",
+    "llm_model": "gemini:gemini-2.5-pro",
+    "matches": [
+      {
+        "rank": 1,
+        "name": "baklavacı seyyid",
+        "application_no": "2019/133033",
+        "status": "Tescil Edildi",
+        "classes": [
+          35,
+          43
+        ],
+        "image_path": "bulletins/Marka/GZ_475_2021-01-31/images/2019_133033.jpg",
+        "combined": 70.3,
+        "clip": 64.9,
+        "dino": 77.1,
+        "ocr": 54.5
+      },
+      {
+        "rank": 2,
+        "name": "baklavacı seyfettin",
+        "application_no": "2024/010014",
+        "status": "Tescil Edildi",
+        "classes": [
+          30,
+          35,
+          43
+        ],
+        "image_path": "bulletins/Marka/GZ_490_2024-07-31/images/2024_010014.jpg",
+        "combined": 68.3,
+        "clip": 61.9,
+        "dino": 76.6,
+        "ocr": 40.0
+      },
+      {
+        "rank": 3,
+        "name": "seyyarbakkal",
+        "application_no": "2020/44319",
+        "status": "Tescil Edildi",
+        "classes": [
+          30,
+          35,
+          43
+        ],
+        "image_path": "bulletins/Marka/GZ_470_2021-03-31/images/2020_44319.jpg",
+        "combined": 65.3,
+        "clip": 59.4,
+        "dino": 72.9,
+        "ocr": 54.5
+      },
+      {
+        "rank": 4,
+        "name": "sevgiyolu anaokulu",
+        "application_no": "2025/103968",
+        "status": "Yayında",
+        "classes": [
+          41,
+          43
+        ],
+        "image_path": "bulletins/Marka/BLT_477_2025-09-29/images/2025_103968.jpg",
+        "combined": 64.0,
+        "clip": 60.3,
+        "dino": 68.7,
+        "ocr": 51.3
+      },
+      {
+        "rank": 5,
+        "name": "b beyoğlu baklava lezzetin dilimlenmiş hali",
+        "application_no": "2022/145421",
+        "status": "Tescil Edildi",
+        "classes": [
+          43
+        ],
+        "image_path": "bulletins/Marka/GZ_485_2023-09-29/images/2022_145421.jpg",
+        "combined": 60.4,
+        "clip": 60.4,
+        "dino": 60.5,
+        "ocr": 54.0
+      }
+    ],
+    "contact_sheet": "/tmp/latest_logo_risk_review/variant_2_contact.jpg"
+  },
+  {
+    "variant": 3,
+    "image_id": "f0228f4c-579b-4871-87e6-b4a3e1e5f522",
+    "llm_score": 78.0,
+    "safe": false,
+    "ocr_text": "seydaoğlu baklavalari",
+    "stored_closest": "sevgiyolu anaokulu",
+    "llm_model": "qwen:qwen3-vl-plus",
+    "matches": [
+      {
+        "rank": 1,
+        "name": "sevgiyolu anaokulu",
+        "application_no": "2025/103968",
+        "status": "Yayında",
+        "classes": [
+          41,
+          43
+        ],
+        "image_path": "bulletins/Marka/BLT_477_2025-09-29/images/2025_103968.jpg",
+        "combined": 69.4,
+        "clip": 72.7,
+        "dino": 65.2,
+        "ocr": 51.3
+      },
+      {
+        "rank": 2,
+        "name": "baklavacı seyyid",
+        "application_no": "2019/133033",
+        "status": "Tescil Edildi",
+        "classes": [
+          35,
+          43
+        ],
+        "image_path": "bulletins/Marka/GZ_475_2021-01-31/images/2019_133033.jpg",
+        "combined": 69.1,
+        "clip": 68.1,
+        "dino": 70.4,
+        "ocr": 54.5
+      },
+      {
+        "rank": 3,
+        "name": "kral şemseddin baklavaları",
+        "application_no": "2020/85805",
+        "status": "Reddedildi",
+        "classes": [
+          43
+        ],
+        "image_path": "bulletins/Marka/BLT_359_2020-10-27/images/2020_85805.jpg",
+        "combined": 68.5,
+        "clip": 67.3,
+        "dino": 70.0,
+        "ocr": 63.8
+      },
+      {
+        "rank": 4,
+        "name": "1952 seyidoğlu istanbul baklava & patisserie",
+        "application_no": "2013/47866",
+        "status": "Reddedildi",
+        "classes": [
+          29,
+          30,
+          43,
+          35
+        ],
+        "image_path": "bulletins/Marka/BLT_220/images/2013_47866.jpeg",
+        "combined": 67.1,
+        "clip": 69.3,
+        "dino": 64.3,
+        "ocr": 43.0
+      },
+      {
+        "rank": 5,
+        "name": "gaziantepli seferoğlu baklavaları",
+        "application_no": "2021/063800",
+        "status": "Reddedildi",
+        "classes": [
+          30,
+          35,
+          43
+        ],
+        "image_path": "bulletins/Marka/BLT_376_2021-07-12/images/2021_063800.jpg",
+        "combined": 65.6,
+        "clip": 69.2,
+        "dino": 60.7,
+        "ocr": 66.7
+      }
+    ],
+    "contact_sheet": "/tmp/latest_logo_risk_review/variant_3_contact.jpg"
+  },
+  {
+    "variant": 4,
+    "image_id": "e5bf5a05-7a00-4336-a96d-abf9f0220019",
+    "llm_score": 68.0,
+    "safe": true,
+    "ocr_text": "c seydaoğlu baklavalari",
+    "stored_closest": "beyoğlu baklava diyarı",
+    "llm_model": "gemini:gemini-2.5-pro",
+    "matches": [
+      {
+        "rank": 1,
+        "name": "beyoğlu baklava diyarı",
+        "application_no": "2016/28268",
+        "status": "Yayında",
+        "classes": [
+          30,
+          43
+        ],
+        "image_path": "bulletins/Marka/BLT_251/images/2016_28268.jpg",
+        "combined": 65.8,
+        "clip": 66.7,
+        "dino": 60.2,
+        "ocr": 73.9
+      },
+      {
+        "rank": 2,
+        "name": "1952 seyidoğlu istanbul baklava & patisserie",
+        "application_no": "2013/47866",
+        "status": "Reddedildi",
+        "classes": [
+          29,
+          30,
+          43,
+          35
+        ],
+        "image_path": "bulletins/Marka/BLT_220/images/2013_47866.jpeg",
+        "combined": 65.6,
+        "clip": 68.0,
+        "dino": 62.4,
+        "ocr": 44.4
+      },
+      {
+        "rank": 3,
+        "name": "beyoğlu tavukcusu miras lezzetler",
+        "application_no": "2024/034582",
+        "status": "Tescil Edildi",
+        "classes": [
+          29,
+          35,
+          43
+        ],
+        "image_path": "bulletins/Marka/GZ_491_2024-09-30/images/2024_034582.jpg",
+        "combined": 64.9,
+        "clip": 66.9,
+        "dino": 62.4,
+        "ocr": 42.9
+      },
+      {
+        "rank": 4,
+        "name": "beyoğlu esnaf lokantası",
+        "application_no": "2025/114547",
+        "status": "Yayında",
+        "classes": [
+          43
+        ],
+        "image_path": "bulletins/Marka/BLT_481_2025-11-27/images/2025_114547.jpg",
+        "combined": 64.8,
+        "clip": 67.2,
+        "dino": 61.7,
+        "ocr": 46.2
+      },
+      {
+        "rank": 5,
+        "name": "paçacıoğlu beybağı konak",
+        "application_no": "2017/88797",
+        "status": "Tescil Edildi",
+        "classes": [
+          43
+        ],
+        "image_path": "bulletins/Marka/GZ_453_2018-05-31/images/2017_88797.jpg",
+        "combined": 63.1,
+        "clip": 70.5,
+        "dino": 53.5,
+        "ocr": 42.5
+      }
+    ],
+    "contact_sheet": "/tmp/latest_logo_risk_review/variant_4_contact.jpg"
+  }
+]

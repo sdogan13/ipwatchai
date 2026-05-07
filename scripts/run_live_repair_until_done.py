@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 import traceback
@@ -17,6 +18,16 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from db.pool import close_pool, get_connection, release_connection
 from pipeline.repair import run_live_class_repair, run_live_status_repair
+
+
+AGGRESSIVE_REPAIR_SAFETY_DEFAULTS = {
+    "SCRAPER_SAFETY_MIN_INTERVAL_SECONDS": "5",
+    "SCRAPER_SAFETY_JITTER_MIN_SECONDS": "0",
+    "SCRAPER_SAFETY_JITTER_MAX_SECONDS": "5",
+    "SCRAPER_SAFETY_HOURLY_BUDGET": "500",
+    "SCRAPER_SAFETY_DAILY_BUDGET": "8000",
+    "SCRAPER_SAFETY_MAX_WAIT_SECONDS": "120",
+}
 
 
 def _now_iso() -> str:
@@ -36,18 +47,41 @@ def _emit(log_path: Path, event: dict[str, Any]) -> None:
         handle.write(line + "\n")
 
 
+def _apply_safety_profile(profile: str) -> dict[str, str]:
+    applied: dict[str, str] = {}
+    if profile != "aggressive":
+        return applied
+    for key, value in AGGRESSIVE_REPAIR_SAFETY_DEFAULTS.items():
+        os.environ.setdefault(key, value)
+        applied[key] = os.environ[key]
+    return applied
+
+
 def _run_cycle(args: argparse.Namespace) -> dict[str, Any]:
     conn = get_connection()
     try:
-        status_summary = run_live_status_repair(
-            conn=conn,
-            limit=args.status_batch_size,
-            artifact_dir=args.artifact_dir,
-        )
         class_summary = run_live_class_repair(
             conn=conn,
             limit=args.class_batch_size,
             artifact_dir=args.artifact_dir,
+            include_older_than_11_years=args.include_older_than_11_years,
+        )
+        if class_summary.get("safety_stopped"):
+            return {
+                "live_classes": class_summary,
+                "live_status": {
+                    "status": "skipped",
+                    "checked": 0,
+                    "repaired": 0,
+                    "failed": 0,
+                    "safety_stopped": False,
+                },
+            }
+        status_summary = run_live_status_repair(
+            conn=conn,
+            limit=args.status_batch_size,
+            artifact_dir=args.artifact_dir,
+            include_older_than_11_years=args.include_older_than_11_years,
         )
         return {"live_status": status_summary, "live_classes": class_summary}
     finally:
@@ -68,6 +102,17 @@ def main() -> int:
     parser.add_argument("--max-checks", type=int, default=None)
     parser.add_argument("--max-errors", type=int, default=20)
     parser.add_argument(
+        "--include-older-than-11-years",
+        action="store_true",
+        help="Include older/unknown application-date records after the priority window.",
+    )
+    parser.add_argument(
+        "--safety-profile",
+        choices=["aggressive", "env"],
+        default="aggressive",
+        help="Use faster repair-only scraper pacing defaults, or leave SCRAPER_SAFETY_* env untouched.",
+    )
+    parser.add_argument(
         "--artifact-dir",
         type=Path,
         default=Path("artifacts/repair/live_trademark_checks"),
@@ -78,6 +123,7 @@ def main() -> int:
         default=Path("artifacts/repair/live_repair_until_done.jsonl"),
     )
     args = parser.parse_args()
+    safety_settings = _apply_safety_profile(args.safety_profile)
 
     total_checked = 0
     total_repaired = 0
@@ -94,6 +140,9 @@ def main() -> int:
             "class_batch_size": args.class_batch_size,
             "artifact_dir": str(args.artifact_dir),
             "max_checks": args.max_checks,
+            "include_older_than_11_years": args.include_older_than_11_years,
+            "safety_profile": args.safety_profile,
+            "safety_settings": safety_settings,
         },
     )
 
@@ -158,6 +207,27 @@ def main() -> int:
                     "live_classes": class_summary,
                 },
             )
+
+            safety_summary = None
+            if status_summary.get("safety_stopped"):
+                safety_summary = status_summary
+            elif class_summary.get("safety_stopped"):
+                safety_summary = class_summary
+            if safety_summary:
+                _emit(
+                    args.log_file,
+                    {
+                        "event": "stop",
+                        "reason": "safety_stop",
+                        "cycle": cycle,
+                        "safety_reason": safety_summary.get("safety_reason"),
+                        "next_allowed_at": safety_summary.get("next_allowed_at"),
+                        "total_checked": total_checked,
+                        "total_repaired": total_repaired,
+                        "total_failed": total_failed,
+                    },
+                )
+                return 0
 
             if args.max_checks is not None and total_checked >= args.max_checks:
                 _emit(

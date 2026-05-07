@@ -5,6 +5,7 @@ import math
 import re
 import warnings
 from difflib import SequenceMatcher
+from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 from foreign_generics import FOREIGN_GENERICS_OVERRIDE
@@ -71,6 +72,9 @@ _FUZZY_ANCHOR_STRONG_LENGTH_RATIO = 0.80
 _FUZZY_ANCHOR_STRONG_RAW_MIN = 0.78
 _MISSING_DOMINANT_ANCHOR_CAP = 0.62
 _SHORT_ANCHOR_NON_EXACT_MAX_LENGTH = 2
+_SHORT_NON_EXACT_ANCHOR_ADDED_MATTER_MAX_LENGTH = 4
+_SHORT_NON_EXACT_ANCHOR_ADDED_MATTER_CAP = 0.58
+_EXACT_SHORT_ANCHOR_ADDED_MATTER_CAP = 0.84
 _SHORT_ACRONYM_SUBSET_FLOOR = 0.68
 _SHORT_ACRONYM_SUBSET_CAP = 0.82
 _SHORT_NON_EXACT_VISUAL_MAX_LENGTH = 6
@@ -83,8 +87,26 @@ _STRONG_VISUAL_INDEPENDENCE_MIN = 0.80
 _OCR_DISAGREEMENT_MAX = 0.70
 _OCR_STRONG_MATCH_MIN = 0.78
 _VERY_STRONG_VISUAL_COMPONENT_MIN = 0.90
-_OCR_ONLY_VISUAL_CAP = 0.55
-_OCR_DISAGREEMENT_VISUAL_CAP = 0.69
+_PLAIN_TEXT_WORDMARK_STRONG_TEXT_AGREEMENT = 0.78
+_PLAIN_TEXT_WORDMARK_BOTH_CAP = 0.45
+_PLAIN_TEXT_WORDMARK_ONE_SIDE_CAP = 0.55
+_OCR_SHORT_NON_EXACT_MAX_LEN = 5
+_OCR_SHORT_NON_EXACT_CAP = 0.68
+_OCR_FRAGMENT_LENGTH_RATIO = 0.60
+_OCR_FRAGMENT_CAP = 0.62
+_IMAGE_ONLY_VISUAL_GUARD_FLOOR = 0.50
+_IMAGE_ONLY_VISUAL_GUARD_CAP = 0.68
+_IMAGE_ONLY_NEAR_DUPLICATE_COMPONENT_MIN = 0.88
+_IMAGE_ONLY_NEAR_DUPLICATE_TOTAL_MIN = 0.88
+_IMAGE_ONLY_LAYOUT_VARIANT_STRONG_COMPONENT_MIN = 0.84
+_IMAGE_ONLY_LAYOUT_VARIANT_SECONDARY_COMPONENT_MIN = 0.72
+_IMAGE_ONLY_LAYOUT_VARIANT_NEURAL_MIN = 0.78
+_IMAGE_ONLY_LAYOUT_VARIANT_BALANCED_STRONG_MIN = 0.81
+_IMAGE_ONLY_LAYOUT_VARIANT_BALANCED_SECONDARY_MIN = 0.74
+_IMAGE_ONLY_LAYOUT_VARIANT_BALANCED_NEURAL_MIN = 0.765
+_IMAGE_ONLY_LAYOUT_VARIANT_BALANCED_SPREAD_MAX = 0.10
+_IMAGE_ONLY_LAYOUT_VARIANT_CAP = 0.84
+_LOGO_PROFILE_CACHE_LIMIT = 4096
 _WEAK_TEXT_CAP_MARKERS = frozenset(
     {
         "generic_only_cap",
@@ -108,6 +130,7 @@ _LIMITED_TEXT_CAP_MARKERS = frozenset(
         "weak_phonetic_anchor_quality_cap",
         "weak_shared_low_protectability_exact_anchor_cap",
         "weak_shared_low_protectability_non_exact_anchor_cap",
+        "short_non_exact_anchor_added_matter_cap",
         "short_acronym_subset_missing_matter_cap",
     }
 )
@@ -127,6 +150,256 @@ def _clamp_score(value: float, lower: float = 0.0, upper: float = 1.0) -> float:
     if not math.isfinite(score):
         return lower
     return max(lower, min(upper, score))
+
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_LOGO_PROFILE_CACHE: Dict[Tuple[str, int, int, str], Dict] = {}
+
+
+def resolve_logo_image_path(image_path: str, roots: Optional[List[str]] = None) -> Optional[str]:
+    """Resolve a stored trademark image path without importing route modules."""
+    if not image_path:
+        return None
+
+    raw_path = str(image_path).strip()
+    if not raw_path:
+        return None
+
+    normalized = raw_path.replace("\\", "/")
+    path = Path(normalized)
+    if ".." in path.parts:
+        return None
+
+    candidates = []
+    if path.is_absolute():
+        candidates.append(path)
+    else:
+        candidates.append(_PROJECT_ROOT / normalized)
+        if "/images/" in normalized:
+            candidates.append(_PROJECT_ROOT / normalized.replace("/images/", "/"))
+
+        for root in roots or []:
+            if not root:
+                continue
+            root_path = Path(str(root)).expanduser()
+            if not root_path.is_absolute():
+                root_path = _PROJECT_ROOT / root_path
+
+            candidates.append(root_path / normalized)
+            marker = "bulletins/Marka/"
+            if normalized.startswith(marker):
+                candidates.append(root_path / normalized[len(marker):])
+            if "/images/" in normalized:
+                candidates.append(root_path / normalized.replace("/images/", "/"))
+
+    seen = set()
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if resolved.is_file():
+            return str(resolved)
+    return None
+
+
+def _empty_logo_profile(kind: str = "unknown", reason: str = "") -> Dict:
+    return {
+        "kind": kind,
+        "is_plain_text_wordmark": False,
+        "confidence": 0.0,
+        "reason": reason,
+        "metrics": {},
+    }
+
+
+def _count_activity_bands(row_activity) -> int:
+    bands = 0
+    in_band = False
+    gap = 0
+    for active in row_activity:
+        if active:
+            if not in_band:
+                bands += 1
+                in_band = True
+            gap = 0
+        elif in_band:
+            gap += 1
+            if gap > 2:
+                in_band = False
+                gap = 0
+    return bands
+
+
+def _safe_logo_profile(profile: Optional[Dict]) -> Optional[Dict]:
+    if not isinstance(profile, dict):
+        return None
+    metrics = profile.get("metrics") if isinstance(profile.get("metrics"), dict) else {}
+    return {
+        "kind": profile.get("kind", "unknown"),
+        "is_plain_text_wordmark": bool(profile.get("is_plain_text_wordmark")),
+        "confidence": round(_clamp_score(profile.get("confidence", 0.0)), 4),
+        "reason": profile.get("reason", ""),
+        "metrics": {
+            key: round(value, 4) if isinstance(value, float) else value
+            for key, value in metrics.items()
+            if key
+        },
+    }
+
+
+def _classify_logo_profile_from_metrics(metrics: Dict) -> Dict:
+    uniform_blank_background = (
+        metrics.get("uniform_background_ratio", 0.0) >= 0.78
+        and metrics.get("border_std", 999.0) <= 38.0
+    )
+    text_band_geometry = (
+        0.006 <= metrics.get("foreground_ratio", 0.0) <= 0.16
+        and metrics.get("bbox_width_ratio", 0.0) >= 0.34
+        and metrics.get("bbox_height_ratio", 1.0) <= 0.34
+        and metrics.get("bbox_area_ratio", 1.0) <= 0.24
+        and metrics.get("occupied_row_ratio", 1.0) <= 0.30
+        and metrics.get("horizontal_band_count", 99) <= 4
+    )
+    has_ocr_text = bool(metrics.get("has_ocr_text"))
+    plain_score = (
+        (0.30 if uniform_blank_background else 0.0)
+        + (0.30 if text_band_geometry else 0.0)
+        + (0.20 if has_ocr_text else 0.0)
+        + (0.10 if metrics.get("occupied_col_ratio", 0.0) >= 0.30 else 0.0)
+        + (0.10 if metrics.get("foreground_ratio", 1.0) <= 0.10 else 0.0)
+    )
+    is_plain_text = bool(
+        uniform_blank_background
+        and text_band_geometry
+        and has_ocr_text
+        and plain_score >= 0.70
+    )
+    return {
+        "kind": "plain_text_wordmark" if is_plain_text else "graphic_or_mixed",
+        "is_plain_text_wordmark": is_plain_text,
+        "confidence": round(_clamp_score(plain_score), 4),
+        "reason": (
+            "blank_background_text_geometry"
+            if is_plain_text
+            else "visual_geometry_not_plain_text"
+        ),
+        "metrics": metrics,
+    }
+
+
+def build_logo_image_profile(image_path: str, ocr_text: str = "") -> Dict:
+    """Classify whether an image is mostly plain OCR text on a blank background."""
+    resolved_path = resolve_logo_image_path(image_path)
+    if not resolved_path:
+        return _empty_logo_profile(reason="image_not_found")
+
+    ocr_norm = normalize_turkish(ocr_text or "")
+    try:
+        stat = Path(resolved_path).stat()
+    except OSError:
+        return _empty_logo_profile(reason="image_not_found")
+
+    cache_key = (
+        resolved_path,
+        int(stat.st_mtime),
+        int(stat.st_size),
+        ocr_norm[:80],
+    )
+    cached = _LOGO_PROFILE_CACHE.get(cache_key)
+    if cached is not None:
+        return dict(cached)
+
+    try:
+        from PIL import Image
+        import numpy as np
+
+        with Image.open(resolved_path) as image:
+            image = image.convert("RGB")
+            image.thumbnail((512, 512))
+            arr = np.asarray(image, dtype=np.float32)
+    except Exception as exc:
+        profile = _empty_logo_profile(reason=f"profile_failed:{type(exc).__name__}")
+        _LOGO_PROFILE_CACHE[cache_key] = profile
+        return dict(profile)
+
+    if arr.ndim < 2:
+        profile = _empty_logo_profile(reason="profile_failed:invalid_image_shape")
+        _LOGO_PROFILE_CACHE[cache_key] = profile
+        return dict(profile)
+
+    height, width = arr.shape[:2]
+    if width <= 0 or height <= 0:
+        return _empty_logo_profile(reason="empty_image")
+
+    border_size = max(1, min(width, height) // 20)
+    border_pixels = np.concatenate(
+        [
+            arr[:border_size, :, :].reshape(-1, 3),
+            arr[-border_size:, :, :].reshape(-1, 3),
+            arr[:, :border_size, :].reshape(-1, 3),
+            arr[:, -border_size:, :].reshape(-1, 3),
+        ],
+        axis=0,
+    )
+    background = np.median(border_pixels, axis=0)
+    distances = np.linalg.norm(arr - background, axis=2)
+    border_distances = np.linalg.norm(border_pixels - background, axis=1)
+    uniform_background_ratio = float(np.mean(border_distances <= 32.0))
+    border_std = float(np.mean(np.std(border_pixels, axis=0)))
+    threshold = max(28.0, float(np.percentile(border_distances, 95)) + 14.0)
+    foreground = distances > threshold
+    foreground_ratio = float(np.mean(foreground))
+
+    if not foreground.any():
+        profile = _empty_logo_profile(kind="blank", reason="no_foreground")
+        profile["metrics"] = {
+            "uniform_background_ratio": uniform_background_ratio,
+            "border_std": border_std,
+            "foreground_ratio": foreground_ratio,
+        }
+        _LOGO_PROFILE_CACHE[cache_key] = profile
+        return dict(profile)
+
+    ys, xs = np.where(foreground)
+    bbox_width = int(xs.max() - xs.min() + 1)
+    bbox_height = int(ys.max() - ys.min() + 1)
+    bbox_width_ratio = bbox_width / max(width, 1)
+    bbox_height_ratio = bbox_height / max(height, 1)
+    bbox_area_ratio = (bbox_width * bbox_height) / max(width * height, 1)
+    row_counts = foreground.sum(axis=1)
+    col_counts = foreground.sum(axis=0)
+    row_activity = row_counts > max(2, width * 0.01)
+    col_activity = col_counts > max(1, height * 0.004)
+    occupied_row_ratio = float(np.mean(row_activity))
+    occupied_col_ratio = float(np.mean(col_activity))
+    band_count = _count_activity_bands(row_activity.tolist())
+    has_ocr_text = len(ocr_norm.replace(" ", "")) >= 3
+
+    profile = _classify_logo_profile_from_metrics(
+        {
+            "width": width,
+            "height": height,
+            "uniform_background_ratio": uniform_background_ratio,
+            "border_std": border_std,
+            "foreground_ratio": foreground_ratio,
+            "bbox_width_ratio": bbox_width_ratio,
+            "bbox_height_ratio": bbox_height_ratio,
+            "bbox_area_ratio": bbox_area_ratio,
+            "occupied_row_ratio": occupied_row_ratio,
+            "occupied_col_ratio": occupied_col_ratio,
+            "horizontal_band_count": band_count,
+            "has_ocr_text": has_ocr_text,
+        }
+    )
+
+    if len(_LOGO_PROFILE_CACHE) >= _LOGO_PROFILE_CACHE_LIMIT:
+        _LOGO_PROFILE_CACHE.clear()
+    _LOGO_PROFILE_CACHE[cache_key] = profile
+    return dict(profile)
 
 
 def get_risk_level(score: float) -> str:
@@ -164,23 +437,59 @@ def calculate_visual_similarity(
     return score
 
 
+def _calculate_ocr_visual_similarity(ocr_text_a: str, ocr_text_b: str) -> float:
+    """Score logo OCR against logo OCR without promoting OCR into trademark-name text.
+
+    OCR is intentionally conservative: exact/compact-exact text can be strong, but
+    noisy partial token overlap is not treated as proof of visual similarity.
+    """
+    a_norm = normalize_turkish(ocr_text_a or "")
+    b_norm = normalize_turkish(ocr_text_b or "")
+    if not a_norm or not b_norm:
+        return 0.0
+    if a_norm == b_norm:
+        return 1.0
+
+    a_tokens = [token for token in a_norm.split() if token]
+    b_tokens = [token for token in b_norm.split() if token]
+    a_compact = "".join(a_tokens)
+    b_compact = "".join(b_tokens)
+    if a_compact and b_compact and a_compact == b_compact:
+        return 1.0
+
+    raw_char_score = SequenceMatcher(None, a_norm, b_norm).ratio()
+    compact_char_score = (
+        SequenceMatcher(None, a_compact, b_compact).ratio()
+        if a_compact and b_compact
+        else 0.0
+    )
+    char_score = max(raw_char_score, compact_char_score)
+    if not a_compact or not b_compact:
+        return round(_clamp_score(char_score), 4)
+
+    shorter_len = min(len(a_compact), len(b_compact))
+    longer_len = max(len(a_compact), len(b_compact), 1)
+    length_ratio = shorter_len / longer_len
+    if shorter_len <= _OCR_SHORT_NON_EXACT_MAX_LEN:
+        char_score = min(char_score, _OCR_SHORT_NON_EXACT_CAP)
+    if length_ratio < _OCR_FRAGMENT_LENGTH_RATIO:
+        char_score = min(char_score, _OCR_FRAGMENT_CAP)
+
+    return round(_clamp_score(char_score), 4)
+
+
 def _calculate_visual_breakdown(
     clip_sim: float = 0.0,
     dinov2_sim: float = 0.0,
     color_sim: float = 0.0,
     ocr_text_a: str = "",
     ocr_text_b: str = "",
+    logo_profile_a: Optional[Dict] = None,
+    logo_profile_b: Optional[Dict] = None,
 ) -> Tuple[float, Dict]:
     del color_sim  # Compatibility input; color is not a V2 visual risk signal.
 
-    if ocr_text_a and ocr_text_b:
-        ocr_sim = _clamp_score(SequenceMatcher(
-            None,
-            normalize_turkish(ocr_text_a),
-            normalize_turkish(ocr_text_b),
-        ).ratio())
-    else:
-        ocr_sim = 0.0
+    ocr_sim = _calculate_ocr_visual_similarity(ocr_text_a, ocr_text_b)
 
     components = {}
     if clip_sim:
@@ -202,17 +511,42 @@ def _calculate_visual_breakdown(
             },
             "normalization": "active_components",
             "cap_applied": None,
+            "logo_profile": {
+                "query": _safe_logo_profile(logo_profile_a),
+                "candidate": _safe_logo_profile(logo_profile_b),
+            },
         }
 
-    score = sum(
+    weighted_score = sum(
         components[name] * _VISUAL_COMPONENT_WEIGHTS[name]
         for name in components
     ) / active_weight
+    neural_components = {
+        name: components[name]
+        for name in ("clip", "dinov2")
+        if name in components
+    }
+    neural_weight = sum(_VISUAL_COMPONENT_WEIGHTS[name] for name in neural_components)
+    neural_score = (
+        sum(
+            neural_components[name] * _VISUAL_COMPONENT_WEIGHTS[name]
+            for name in neural_components
+        ) / neural_weight
+        if neural_weight > 0
+        else 0.0
+    )
+    score = max(weighted_score, neural_score) if neural_components else weighted_score
+    query_plain = _logo_profile_is_plain_text(logo_profile_a)
+    candidate_plain = _logo_profile_is_plain_text(logo_profile_b)
+    wordmark_ocr_driver_active = bool(
+        query_plain
+        and candidate_plain
+        and ocr_sim >= _OCR_STRONG_MATCH_MIN
+    )
+    if wordmark_ocr_driver_active:
+        score = max(score, ocr_sim)
 
     active = frozenset(components)
-    cap_applied = None
-    cap_reason = None
-    caps_applied = []
     ocr_available = bool(ocr_text_a and ocr_text_b)
     ocr_disagreement = bool(ocr_available and ocr_sim < _OCR_DISAGREEMENT_MAX)
     ocr_strong_match = bool(ocr_available and ocr_sim >= _OCR_STRONG_MATCH_MIN)
@@ -220,26 +554,6 @@ def _calculate_visual_breakdown(
         components.get("clip", 0.0) >= _VERY_STRONG_VISUAL_COMPONENT_MIN
         and components.get("dinov2", 0.0) >= _VERY_STRONG_VISUAL_COMPONENT_MIN
     )
-    if active == frozenset({"ocr"}):
-        cap_applied = _OCR_ONLY_VISUAL_CAP
-        cap_reason = "ocr_only_cap"
-        caps_applied.append(f"{cap_reason}:{_OCR_ONLY_VISUAL_CAP:.2f}")
-
-    if (
-        ocr_disagreement
-        and ("clip" in active or "dinov2" in active)
-        and not very_strong_visual_components
-    ):
-        cap_applied = (
-            min(cap_applied, _OCR_DISAGREEMENT_VISUAL_CAP)
-            if cap_applied is not None
-            else _OCR_DISAGREEMENT_VISUAL_CAP
-        )
-        cap_reason = "ocr_disagreement_cap"
-        caps_applied.append(f"{cap_reason}:{_OCR_DISAGREEMENT_VISUAL_CAP:.2f}")
-
-    if cap_applied is not None:
-        score = min(score, cap_applied)
 
     score = round(_clamp_score(score), 4)
     return score, {
@@ -255,15 +569,47 @@ def _calculate_visual_breakdown(
             for name in sorted(active)
         },
         "normalization": "active_components",
-        "cap_applied": cap_applied,
-        "cap_reason": cap_reason,
-        "caps_applied": caps_applied,
+        "ocr_policy": (
+            "wordmark_visual_driver"
+            if wordmark_ocr_driver_active
+            else "support_only"
+        ),
+        "ocr_text_normalized": {
+            "query": normalize_turkish(ocr_text_a)[:120] if ocr_text_a else "",
+            "candidate": normalize_turkish(ocr_text_b)[:120] if ocr_text_b else "",
+        },
+        "weighted_total_with_ocr": round(_clamp_score(weighted_score), 4),
+        "neural_total_without_ocr": round(_clamp_score(neural_score), 4),
+        "cap_applied": None,
+        "cap_reason": None,
+        "caps_applied": [],
+        "logo_profile": {
+            "query": _safe_logo_profile(logo_profile_a),
+            "candidate": _safe_logo_profile(logo_profile_b),
+        },
         "ocr_disagreement": ocr_disagreement,
         "ocr_strong_match": ocr_strong_match,
         "very_strong_visual_components": very_strong_visual_components,
+        "wordmark_ocr_visual_driver": {
+            "applies": wordmark_ocr_driver_active,
+            "reason": (
+                "plain_text_wordmark_ocr_match"
+                if wordmark_ocr_driver_active
+                else "not_applicable"
+            ),
+            "score": round(ocr_sim, 4) if wordmark_ocr_driver_active else 0.0,
+            "query_plain_text_wordmark": query_plain,
+            "candidate_plain_text_wordmark": candidate_plain,
+        },
+        "ocr_guardrails": "disabled",
+        "ocr_similarity_policy": "exact_or_conservative_character_only",
         "ocr_thresholds": {
             "disagreement_below": _OCR_DISAGREEMENT_MAX,
             "strong_match_min": _OCR_STRONG_MATCH_MIN,
+            "short_non_exact_max_len": _OCR_SHORT_NON_EXACT_MAX_LEN,
+            "short_non_exact_cap": _OCR_SHORT_NON_EXACT_CAP,
+            "fragment_length_ratio": _OCR_FRAGMENT_LENGTH_RATIO,
+            "fragment_cap": _OCR_FRAGMENT_CAP,
         },
     }
 
@@ -767,6 +1113,7 @@ def _text_breakdown_base(
         "added_matter_breakdown": {},
         "weak_shared_anchor_guard": {},
         "short_acronym_subset_guard": {},
+        "short_non_exact_anchor_added_matter_guard": {},
         "low_protectability_terms": {"query": [], "target": []},
         "low_protectability_stats": {},
         "short_anchor_guard": [],
@@ -1452,6 +1799,88 @@ def _short_acronym_subset_guard(
     }
 
 
+def _short_non_exact_anchor_added_matter_guard(
+    *,
+    q_classes: Dict[str, Set[str]],
+    t_classes: Dict[str, Set[str]],
+    matches: List[Dict],
+    added_matter_breakdown: Dict,
+) -> Dict:
+    base_record = {
+        "applies": False,
+        "reason": "",
+        "cap_reason": "",
+        "score_cap": None,
+        "matched_anchor": None,
+        "query_extra_tokens": [],
+        "target_extra_tokens": [],
+    }
+    query_anchor_tokens = set().union(*(q_classes[role] for role in _ANCHOR_TOKEN_ROLES))
+    target_anchor_tokens = set().union(*(t_classes[role] for role in _ANCHOR_TOKEN_ROLES))
+    anchor_matches = [
+        match
+        for match in matches
+        if (
+            match.get("score", 0.0) >= 0.70
+            and (
+                match.get("query_word") in query_anchor_tokens
+                or match.get("target_word") in target_anchor_tokens
+            )
+        )
+    ]
+    if len(anchor_matches) != 1:
+        return base_record
+
+    match = anchor_matches[0]
+    match_type = match.get("match_type") or ""
+    if match_type not in {"fuzzy", "phonetic"}:
+        return base_record
+
+    query_word = normalize_turkish(match.get("query_word", ""))
+    target_word = normalize_turkish(match.get("target_word", ""))
+    if not query_word or not target_word or query_word == target_word:
+        return base_record
+
+    shorter_anchor_length = min(len(query_word), len(target_word))
+    if shorter_anchor_length > _SHORT_NON_EXACT_ANCHOR_ADDED_MATTER_MAX_LENGTH:
+        return base_record
+
+    query_extra_tokens = sorted(added_matter_breakdown.get("query_extra_tokens") or [])
+    target_extra_tokens = sorted(added_matter_breakdown.get("target_extra_tokens") or [])
+    query_material_extra_count = int(
+        added_matter_breakdown.get("query_material_extra_count", 0) or 0
+    )
+    target_material_extra_count = int(
+        added_matter_breakdown.get("target_material_extra_count", 0) or 0
+    )
+    has_extra_matter = bool(
+        query_extra_tokens
+        or target_extra_tokens
+        or query_material_extra_count > 0
+        or target_material_extra_count > 0
+    )
+    if not has_extra_matter:
+        return base_record
+
+    return {
+        "applies": True,
+        "reason": "short non-exact anchor match with added matter",
+        "cap_reason": "short_non_exact_anchor_added_matter_cap",
+        "score_cap": _SHORT_NON_EXACT_ANCHOR_ADDED_MATTER_CAP,
+        "matched_anchor": {
+            "query_word": query_word,
+            "target_word": target_word,
+            "match_type": match_type,
+            "score": round(_clamp_score(match.get("score", 0.0)), 4),
+            "shorter_anchor_length": shorter_anchor_length,
+        },
+        "query_extra_tokens": query_extra_tokens,
+        "target_extra_tokens": target_extra_tokens,
+        "query_material_extra_count": query_material_extra_count,
+        "target_material_extra_count": target_material_extra_count,
+    }
+
+
 def _edit_distance(left: str, right: str) -> int:
     left = left or ""
     right = right or ""
@@ -1852,7 +2281,16 @@ def _analyze_added_matter_v2(
 
     full_query_exact = bool(meaningful_q_tokens) and not query_exact_extra_tokens
     full_target_exact = bool(meaningful_t_tokens) and not target_exact_extra_tokens
-    has_exact_query_anchor = bool(query_anchor_tokens.intersection(exact_query_tokens))
+    exact_query_anchor_tokens = query_anchor_tokens.intersection(exact_query_tokens)
+    has_exact_query_anchor = bool(exact_query_anchor_tokens)
+    single_exact_short_query_anchor = bool(
+        full_query_exact
+        and len(meaningful_q_tokens) == 1
+        and len(exact_query_anchor_tokens) == 1
+        and len(next(iter(exact_query_anchor_tokens))) <= (
+            _SHORT_NON_EXACT_ANCHOR_ADDED_MATTER_MAX_LENGTH
+        )
+    )
     anchor_match_quality = _average_anchor_match_quality(
         matches,
         query_anchor_tokens,
@@ -1874,10 +2312,16 @@ def _analyze_added_matter_v2(
         if (full_query_exact or full_target_exact) and penalized_extra_count:
             if brandlike_extra_count:
                 if copied_core_size <= 1:
+                    floor = 0.80 if single_exact_short_query_anchor else 0.66
+                    ceiling = (
+                        _EXACT_SHORT_ANCHOR_ADDED_MATTER_CAP
+                        if single_exact_short_query_anchor
+                        else _ADDED_MATTER_SINGLE_ANCHOR_EXTRA_CAP
+                    )
                     dominant_core_score, calibration_breakdown = (
                         _calibrate_added_matter_score(
-                            floor=0.66,
-                            ceiling=_ADDED_MATTER_SINGLE_ANCHOR_EXTRA_CAP,
+                            floor=floor,
+                            ceiling=ceiling,
                             query_anchor_coverage=query_anchor_coverage,
                             target_anchor_coverage=target_anchor_coverage,
                             full_query_token_coverage=full_query_token_coverage,
@@ -1888,8 +2332,12 @@ def _analyze_added_matter_v2(
                             brandlike_extra_count=brandlike_extra_count,
                         )
                     )
-                    score_cap = _ADDED_MATTER_SINGLE_ANCHOR_EXTRA_CAP
-                    cap_reason = "single_anchor_distinctive_extra"
+                    score_cap = ceiling
+                    cap_reason = (
+                        "single_short_anchor_distinctive_extra"
+                        if single_exact_short_query_anchor
+                        else "single_anchor_distinctive_extra"
+                    )
                     reason = "single copied anchor plus distinctive added matter"
                 else:
                     dominant_core_score, calibration_breakdown = (
@@ -2420,6 +2868,14 @@ def _score_textual_path_v2(
         added_matter_breakdown=added_matter_breakdown,
         use_translated_idf=use_translated_idf,
     )
+    short_non_exact_anchor_added_matter_guard = (
+        _short_non_exact_anchor_added_matter_guard(
+            q_classes=q_classes,
+            t_classes=t_classes,
+            matches=matches,
+            added_matter_breakdown=added_matter_breakdown,
+        )
+    )
     anchor_quality_guard = _anchor_quality_guard(
         q_classes=q_classes,
         t_classes=t_classes,
@@ -2463,6 +2919,11 @@ def _score_textual_path_v2(
         "TEXT_PHONETIC_SUPPORT": phonetic_support_score,
         "TEXT_DOMINANT_CORE": dominant_core_score,
     }
+    if short_non_exact_anchor_added_matter_guard.get("applies"):
+        component_scores = {
+            path: min(score_value, _SHORT_NON_EXACT_ANCHOR_ADDED_MATTER_CAP)
+            for path, score_value in component_scores.items()
+        }
     scoring_path, score = max(component_scores.items(), key=lambda item: item[1])
 
     if scoring_path == "TEXT_TOKEN_ALIGNMENT":
@@ -2551,6 +3012,23 @@ def _score_textual_path_v2(
         )
         scoring_path = "TEXT_SHORT_ACRONYM_SUBSET"
 
+    short_non_exact_anchor_added_matter_cap = (
+        short_non_exact_anchor_added_matter_guard.get("score_cap")
+    )
+    short_non_exact_anchor_added_matter_cap_reason = (
+        short_non_exact_anchor_added_matter_guard.get("cap_reason")
+    )
+    if (
+        short_non_exact_anchor_added_matter_guard.get("applies")
+        and short_non_exact_anchor_added_matter_cap_reason
+    ):
+        score = min(score, short_non_exact_anchor_added_matter_cap)
+        cap_notes.append(
+            f"{short_non_exact_anchor_added_matter_cap_reason}:"
+            f"{short_non_exact_anchor_added_matter_cap:.2f}"
+        )
+        scoring_path = "TEXT_SHORT_NON_EXACT_ANCHOR_ADDED_MATTER"
+
     anchor_quality_cap = anchor_quality_guard.get("score_cap")
     anchor_quality_effective_cap = anchor_quality_guard.get("calibrated_score_cap")
     anchor_quality_cap_reason = anchor_quality_guard.get("cap_reason")
@@ -2592,6 +3070,9 @@ def _score_textual_path_v2(
     breakdown["added_matter_breakdown"] = added_matter_breakdown
     breakdown["weak_shared_anchor_guard"] = weak_shared_anchor_guard
     breakdown["short_acronym_subset_guard"] = short_acronym_subset_guard
+    breakdown["short_non_exact_anchor_added_matter_guard"] = (
+        short_non_exact_anchor_added_matter_guard
+    )
     breakdown["anchor_quality_guard"] = anchor_quality_guard
     breakdown["fuzzy_anchor_guard"] = anchor_quality_guard
     breakdown["calibration_breakdown"] = (
@@ -3272,6 +3753,7 @@ def _short_non_exact_anchor_visual_guard(
     visual_score: float,
     visual_breakdown: Optional[Dict],
 ) -> Dict:
+    del breakdown, visual_breakdown
     record = {
         "applies": False,
         "reason": "",
@@ -3280,66 +3762,9 @@ def _short_non_exact_anchor_visual_guard(
         "ocr_disagreement": False,
         "visual_score": round(_clamp_score(visual_score), 4),
     }
-    if not breakdown or _clamp_score(visual_score) <= 0.0:
-        return record
-    if _visual_has_strong_ocr(visual_breakdown) or _visual_has_very_strong_clip_dino(
-        visual_breakdown
-    ):
-        return record
-
-    token_classes = breakdown.get("token_classes") or {}
-    query_classes = token_classes.get("query") or {}
-    query_anchor_tokens = set()
-    query_token_count = 0
-    for role, tokens in query_classes.items():
-        token_set = set(tokens or [])
-        query_token_count += len(token_set)
-        if role in _ANCHOR_TOKEN_ROLES:
-            query_anchor_tokens.update(token_set)
-    if query_token_count != 1 or len(query_anchor_tokens) != 1:
-        return record
-
-    anchor_token = next(iter(query_anchor_tokens))
-    if len(anchor_token) > _SHORT_NON_EXACT_VISUAL_MAX_LENGTH:
-        return record
-
-    anchor_matches = [
-        match
-        for match in breakdown.get("matched_words") or []
-        if (
-            match.get("query_word") == anchor_token
-            and match.get("token_role") in _ANCHOR_TOKEN_ROLES
-            and match.get("match_type") in {"fuzzy", "phonetic"}
-        )
-    ]
-    if len(anchor_matches) != 1:
-        return record
-
-    ocr_value = _visual_component_value(visual_breakdown, "ocr")
-    ocr_disagreement = bool(
-        visual_breakdown
-        and (
-            visual_breakdown.get("ocr_disagreement") is True
-            or (ocr_value > 0.0 and ocr_value < _OCR_DISAGREEMENT_MAX)
-        )
-    )
-    if not ocr_disagreement:
-        return record
-
-    record.update(
-        {
-            "applies": True,
-            "reason": "short_non_exact_anchor_ocr_disagreement",
-            "anchor_token": anchor_token,
-            "match_type": anchor_matches[0].get("match_type", ""),
-            "ocr_disagreement": True,
-            "ocr_similarity": round(ocr_value, 4),
-            "strong_ocr": _visual_has_strong_ocr(visual_breakdown),
-            "very_strong_clip_dino": _visual_has_very_strong_clip_dino(
-                visual_breakdown
-            ),
-        }
-    )
+    # OCR disagreement is retained as diagnostic data only. It no longer
+    # suppresses visual/text agreement because OCR is too noisy on screenshots,
+    # figure labels, and non-word logos.
     return record
 
 
@@ -3367,6 +3792,322 @@ def _visual_has_very_strong_clip_dino(visual_breakdown: Optional[Dict]) -> bool:
         _visual_component_value(visual_breakdown, "clip") >= _VERY_STRONG_VISUAL_COMPONENT_MIN
         and _visual_component_value(visual_breakdown, "dinov2") >= _VERY_STRONG_VISUAL_COMPONENT_MIN
     )
+
+
+def _logo_profile_is_plain_text(profile: Optional[Dict]) -> bool:
+    return bool(
+        isinstance(profile, dict)
+        and (
+            profile.get("is_plain_text_wordmark") is True
+            or profile.get("kind") == "plain_text_wordmark"
+        )
+    )
+
+
+def _plain_text_wordmark_visual_guard(
+    *,
+    query_name: str,
+    candidate_name: str,
+    selected_text_score: float,
+    visual_score: float,
+    visual_breakdown: Optional[Dict],
+) -> Tuple[float, Dict, Dict]:
+    visual_score = _clamp_score(visual_score)
+    visual_diag = dict(visual_breakdown or {})
+    profiles = visual_diag.get("logo_profile") or {}
+    query_profile = profiles.get("query") if isinstance(profiles, dict) else None
+    candidate_profile = profiles.get("candidate") if isinstance(profiles, dict) else None
+    query_plain = _logo_profile_is_plain_text(query_profile)
+    candidate_plain = _logo_profile_is_plain_text(candidate_profile)
+
+    ocr_texts = visual_diag.get("ocr_text_normalized") or {}
+    ocr_query = ocr_texts.get("query", "") if isinstance(ocr_texts, dict) else ""
+    ocr_candidate = ocr_texts.get("candidate", "") if isinstance(ocr_texts, dict) else ""
+    ocr_agreement = _visual_component_value(visual_diag, "ocr")
+    direct_name_agreement = calculate_name_similarity(query_name or "", candidate_name or "")
+    query_ocr_name_agreement = (
+        calculate_name_similarity(query_name or "", ocr_query) if query_name and ocr_query else 0.0
+    )
+    candidate_ocr_name_agreement = (
+        calculate_name_similarity(candidate_name or "", ocr_candidate)
+        if candidate_name and ocr_candidate
+        else 0.0
+    )
+    text_agreement = max(
+        _clamp_score(selected_text_score),
+        _clamp_score(direct_name_agreement),
+        _clamp_score(ocr_agreement),
+    )
+
+    record = {
+        "applies": False,
+        "reason": "",
+        "query_plain_text_wordmark": query_plain,
+        "candidate_plain_text_wordmark": candidate_plain,
+        "visual_before_guard": round(visual_score, 4),
+        "visual_after_guard": round(visual_score, 4),
+        "ocr_text_agreement": round(ocr_agreement, 4),
+        "direct_name_agreement": round(direct_name_agreement, 4),
+        "text_agreement": round(_clamp_score(text_agreement), 4),
+        "strong_text_agreement_min": _PLAIN_TEXT_WORDMARK_STRONG_TEXT_AGREEMENT,
+    }
+
+    if not (query_plain or candidate_plain) or visual_score <= 0.0:
+        visual_diag["plain_text_wordmark_visual_guard"] = record
+        return visual_score, visual_diag, record
+
+    if text_agreement >= _PLAIN_TEXT_WORDMARK_STRONG_TEXT_AGREEMENT:
+        record["reason"] = "text_or_ocr_agrees"
+        visual_diag["plain_text_wordmark_visual_guard"] = record
+        return visual_score, visual_diag, record
+
+    both_plain = query_plain and candidate_plain
+    floor = 0.35 if both_plain else 0.45
+    ceiling = (
+        _PLAIN_TEXT_WORDMARK_BOTH_CAP
+        if both_plain
+        else _PLAIN_TEXT_WORDMARK_ONE_SIDE_CAP
+    )
+    evidence = text_agreement / max(_PLAIN_TEXT_WORDMARK_STRONG_TEXT_AGREEMENT, 0.01)
+    cap_limit = _bounded_score(floor, ceiling, evidence)
+    calibration = _calibration_record(
+        floor=floor,
+        ceiling=ceiling,
+        evidence=evidence,
+        calibrated_score=cap_limit,
+        factors={
+            "both_plain_text_wordmarks": both_plain,
+            "ocr_text_agreement": round(ocr_agreement, 4),
+            "direct_name_agreement": round(direct_name_agreement, 4),
+            "selected_text_score": round(_clamp_score(selected_text_score), 4),
+            "query_ocr_name_agreement": round(query_ocr_name_agreement, 4),
+            "candidate_ocr_name_agreement": round(candidate_ocr_name_agreement, 4),
+        },
+    )
+    if visual_score > cap_limit:
+        visual_score = round(cap_limit, 4)
+        record.update(
+            {
+                "applies": True,
+                "reason": (
+                    "both_plain_text_wordmarks_text_disagrees"
+                    if both_plain
+                    else "plain_text_wordmark_text_disagrees"
+                ),
+                "cap": round(ceiling, 4),
+                "calibrated_limit": round(cap_limit, 4),
+                "visual_after_guard": visual_score,
+                "calibration": calibration,
+            }
+        )
+        visual_diag["total"] = visual_score
+        visual_diag["input_visual_similarity"] = visual_score
+        visual_diag["visual_before_plain_text_guard"] = record["visual_before_guard"]
+        visual_diag["cap_applied"] = "plain_text_wordmark_visual_guard"
+        visual_diag["cap_reason"] = record["reason"]
+        caps = list(visual_diag.get("caps_applied") or [])
+        caps.append(f"plain_text_wordmark_visual_guard:{ceiling:.2f}")
+        visual_diag["caps_applied"] = caps
+    else:
+        record["reason"] = "visual_already_below_plain_text_limit"
+        record["calibrated_limit"] = round(cap_limit, 4)
+        record["calibration"] = calibration
+
+    visual_diag["plain_text_wordmark_visual_guard"] = record
+    return visual_score, visual_diag, record
+
+
+def _apply_image_only_visual_quality_guard(
+    visual_score: float,
+    visual_breakdown: Optional[Dict],
+) -> Tuple[float, Dict, Dict]:
+    """Calibrate image-only visual matches that have no textual corroboration."""
+    visual_score = _clamp_score(visual_score)
+    visual_diag = dict(visual_breakdown or {})
+    clip = _visual_component_value(visual_diag, "clip")
+    dinov2 = _visual_component_value(visual_diag, "dinov2")
+    ocr = _visual_component_value(visual_diag, "ocr")
+    has_clip = clip > 0.0
+    has_dinov2 = dinov2 > 0.0
+    neural_values = [value for value in (clip, dinov2) if value > 0.0]
+    neural_total = _clamp_score(
+        visual_diag.get(
+            "neural_total_without_ocr",
+            sum(neural_values) / len(neural_values) if neural_values else 0.0,
+        )
+    )
+    wordmark_driver = bool(
+        (visual_diag.get("wordmark_ocr_visual_driver") or {}).get("applies")
+    )
+    profiles = visual_diag.get("logo_profile") or {}
+    query_profile = profiles.get("query") if isinstance(profiles, dict) else None
+    candidate_profile = profiles.get("candidate") if isinstance(profiles, dict) else None
+    both_graphic_mixed = bool(
+        isinstance(query_profile, dict)
+        and isinstance(candidate_profile, dict)
+        and query_profile.get("kind") == "graphic_or_mixed"
+        and candidate_profile.get("kind") == "graphic_or_mixed"
+        and not _logo_profile_is_plain_text(query_profile)
+        and not _logo_profile_is_plain_text(candidate_profile)
+    )
+    near_duplicate = bool(
+        has_clip
+        and has_dinov2
+        and clip >= _IMAGE_ONLY_NEAR_DUPLICATE_COMPONENT_MIN
+        and dinov2 >= _IMAGE_ONLY_NEAR_DUPLICATE_COMPONENT_MIN
+        and neural_total >= _IMAGE_ONLY_NEAR_DUPLICATE_TOTAL_MIN
+    )
+    strongest_neural = max(neural_values) if neural_values else 0.0
+    weakest_neural = min(neural_values) if neural_values else 0.0
+    neural_spread = strongest_neural - weakest_neural if neural_values else 0.0
+    strict_layout_variant = bool(
+        has_clip
+        and has_dinov2
+        and not near_duplicate
+        and both_graphic_mixed
+        and strongest_neural >= _IMAGE_ONLY_LAYOUT_VARIANT_STRONG_COMPONENT_MIN
+        and weakest_neural >= _IMAGE_ONLY_LAYOUT_VARIANT_SECONDARY_COMPONENT_MIN
+        and neural_total >= _IMAGE_ONLY_LAYOUT_VARIANT_NEURAL_MIN
+    )
+    balanced_layout_variant = bool(
+        has_clip
+        and has_dinov2
+        and not near_duplicate
+        and not strict_layout_variant
+        and both_graphic_mixed
+        and strongest_neural >= _IMAGE_ONLY_LAYOUT_VARIANT_BALANCED_STRONG_MIN
+        and weakest_neural >= _IMAGE_ONLY_LAYOUT_VARIANT_BALANCED_SECONDARY_MIN
+        and neural_total >= _IMAGE_ONLY_LAYOUT_VARIANT_BALANCED_NEURAL_MIN
+        and neural_spread <= _IMAGE_ONLY_LAYOUT_VARIANT_BALANCED_SPREAD_MAX
+    )
+    layout_variant_same_logo = strict_layout_variant or balanced_layout_variant
+    layout_variant_mode = (
+        "strict"
+        if strict_layout_variant
+        else "balanced"
+        if balanced_layout_variant
+        else None
+    )
+    record = {
+        "applies": False,
+        "reason": "",
+        "visual_before_guard": round(visual_score, 4),
+        "visual_after_guard": round(visual_score, 4),
+        "clip": round(clip, 4),
+        "dinov2": round(dinov2, 4),
+        "ocr": round(ocr, 4),
+        "neural_total_without_ocr": round(neural_total, 4),
+        "wordmark_ocr_visual_driver": wordmark_driver,
+        "near_duplicate_neural_match": near_duplicate,
+        "layout_variant_same_logo": layout_variant_same_logo,
+        "layout_variant_mode": layout_variant_mode,
+        "both_graphic_mixed": both_graphic_mixed,
+        "neural_component_spread": round(neural_spread, 4),
+        "near_duplicate_component_min": _IMAGE_ONLY_NEAR_DUPLICATE_COMPONENT_MIN,
+        "near_duplicate_total_min": _IMAGE_ONLY_NEAR_DUPLICATE_TOTAL_MIN,
+        "layout_variant_thresholds": {
+            "strong_component_min": _IMAGE_ONLY_LAYOUT_VARIANT_STRONG_COMPONENT_MIN,
+            "secondary_component_min": _IMAGE_ONLY_LAYOUT_VARIANT_SECONDARY_COMPONENT_MIN,
+            "neural_total_min": _IMAGE_ONLY_LAYOUT_VARIANT_NEURAL_MIN,
+            "cap": _IMAGE_ONLY_LAYOUT_VARIANT_CAP,
+            "balanced_strong_component_min": _IMAGE_ONLY_LAYOUT_VARIANT_BALANCED_STRONG_MIN,
+            "balanced_secondary_component_min": _IMAGE_ONLY_LAYOUT_VARIANT_BALANCED_SECONDARY_MIN,
+            "balanced_neural_total_min": _IMAGE_ONLY_LAYOUT_VARIANT_BALANCED_NEURAL_MIN,
+            "balanced_component_spread_max": _IMAGE_ONLY_LAYOUT_VARIANT_BALANCED_SPREAD_MAX,
+        },
+    }
+
+    if visual_score <= 0.0 or wordmark_driver or near_duplicate or not neural_values:
+        record["reason"] = (
+            "wordmark_ocr_driver"
+            if wordmark_driver
+            else "near_duplicate_visual"
+            if near_duplicate
+            else "not_applicable"
+        )
+        visual_diag["image_only_visual_quality_guard"] = record
+        return visual_score, visual_diag, record
+
+    if layout_variant_same_logo:
+        record["reason"] = "layout_variant_visual_corroboration"
+        capped_score = round(min(visual_score, _IMAGE_ONLY_LAYOUT_VARIANT_CAP), 4)
+        if visual_score > capped_score:
+            visual_score = capped_score
+            record["applies"] = True
+            record["visual_after_guard"] = visual_score
+            record["cap"] = _IMAGE_ONLY_LAYOUT_VARIANT_CAP
+            visual_diag["total"] = visual_score
+            visual_diag["input_visual_similarity"] = visual_score
+            visual_diag["visual_before_image_only_quality_guard"] = record[
+                "visual_before_guard"
+            ]
+            visual_diag["cap_applied"] = "image_only_layout_variant_cap"
+            visual_diag["cap_reason"] = record["reason"]
+            caps = list(visual_diag.get("caps_applied") or [])
+            caps.append(
+                f"image_only_layout_variant_cap:{_IMAGE_ONLY_LAYOUT_VARIANT_CAP:.2f}"
+            )
+            visual_diag["caps_applied"] = caps
+        visual_diag["image_only_visual_quality_guard"] = record
+        return visual_score, visual_diag, record
+
+    neural_evidence = min(neural_total / _IMAGE_ONLY_NEAR_DUPLICATE_TOTAL_MIN, 1.0)
+    corroboration_evidence = min(
+        weakest_neural / _IMAGE_ONLY_NEAR_DUPLICATE_COMPONENT_MIN,
+        1.0,
+    )
+    # OCR is deliberately low weight because EasyOCR can be noisy on logo crops.
+    ocr_evidence = min(ocr / max(_OCR_STRONG_MATCH_MIN, 0.01), 1.0)
+    evidence = (
+        0.50 * neural_evidence
+        + 0.40 * corroboration_evidence
+        + 0.10 * ocr_evidence
+    )
+    cap_limit = _bounded_score(
+        _IMAGE_ONLY_VISUAL_GUARD_FLOOR,
+        _IMAGE_ONLY_VISUAL_GUARD_CAP,
+        evidence,
+    )
+    calibration = _calibration_record(
+        floor=_IMAGE_ONLY_VISUAL_GUARD_FLOOR,
+        ceiling=_IMAGE_ONLY_VISUAL_GUARD_CAP,
+        evidence=evidence,
+        calibrated_score=cap_limit,
+        factors={
+            "neural_evidence": round(neural_evidence, 4),
+            "corroboration_evidence": round(corroboration_evidence, 4),
+            "ocr_evidence": round(ocr_evidence, 4),
+            "ocr_weight": 0.10,
+            "clip": round(clip, 4),
+            "dinov2": round(dinov2, 4),
+            "ocr": round(ocr, 4),
+        },
+    )
+    record.update(
+        {
+            "reason": "image_only_moderate_neural_weak_ocr",
+            "cap": _IMAGE_ONLY_VISUAL_GUARD_CAP,
+            "calibrated_limit": round(cap_limit, 4),
+            "calibration": calibration,
+        }
+    )
+    if visual_score > cap_limit:
+        visual_score = round(cap_limit, 4)
+        record["applies"] = True
+        record["visual_after_guard"] = visual_score
+        visual_diag["total"] = visual_score
+        visual_diag["input_visual_similarity"] = visual_score
+        visual_diag["visual_before_image_only_quality_guard"] = record[
+            "visual_before_guard"
+        ]
+        visual_diag["cap_applied"] = "image_only_visual_quality_guard"
+        visual_diag["cap_reason"] = record["reason"]
+        caps = list(visual_diag.get("caps_applied") or [])
+        caps.append(f"image_only_moderate_visual_cap:{_IMAGE_ONLY_VISUAL_GUARD_CAP:.2f}")
+        visual_diag["caps_applied"] = caps
+
+    visual_diag["image_only_visual_quality_guard"] = record
+    return visual_score, visual_diag, record
 
 
 def _apply_weak_text_visual_cap(
@@ -3563,7 +4304,30 @@ def score_pair(
     visual_diag = _score_pair_visual_breakdown(visual_sim, visual_breakdown)
 
     if not query_name or not query_name.strip():
+        (
+            visual_sim,
+            visual_diag,
+            plain_text_wordmark_visual_guard,
+        ) = _plain_text_wordmark_visual_guard(
+            query_name=query_name or "",
+            candidate_name=candidate_name or "",
+            selected_text_score=0.0,
+            visual_score=visual_sim,
+            visual_breakdown=visual_diag,
+        )
+        (
+            visual_sim,
+            visual_diag,
+            image_only_visual_quality_guard,
+        ) = _apply_image_only_visual_quality_guard(
+            visual_sim,
+            visual_diag,
+        )
         combined = _combine_text_visual_v2(0.0, visual_sim)
+        if plain_text_wordmark_visual_guard.get("applies"):
+            combined["decision_reason"] += "; plain text wordmark visual cap applied"
+        if image_only_visual_quality_guard.get("applies"):
+            combined["decision_reason"] += "; image-only visual quality cap applied"
         return {
             "score_version": SCORE_VERSION,
             "exact_match": False,
@@ -3593,6 +4357,16 @@ def score_pair(
                 "path_b_score": 0.0,
             },
             "visual_breakdown": visual_diag,
+            "text_visual_guard": {
+                "plain_text_wordmark_visual_guard": plain_text_wordmark_visual_guard,
+                "plain_text_wordmark_visual_guard_active": bool(
+                    plain_text_wordmark_visual_guard.get("applies")
+                ),
+                "image_only_visual_quality_guard": image_only_visual_quality_guard,
+                "image_only_visual_quality_guard_active": bool(
+                    image_only_visual_quality_guard.get("applies")
+                ),
+            },
             "decision_reason": combined["decision_reason"],
         }
 
@@ -3715,12 +4489,39 @@ def score_pair(
         4,
     )
 
+    (
+        visual_sim,
+        visual_diag,
+        plain_text_wordmark_visual_guard,
+    ) = _plain_text_wordmark_visual_guard(
+        query_name=query_name,
+        candidate_name=candidate_name,
+        selected_text_score=selected_text_score,
+        visual_score=visual_sim,
+        visual_breakdown=visual_diag,
+    )
+
     weak_text_cap_active = _has_weak_text_cap(selected_breakdown)
     limited_text_cap_active = _has_limited_text_cap(selected_breakdown)
     limited_text_visual_guard_active = _limited_text_visual_guard_active(
         limited_text_cap_active,
         visual_sim,
         visual_diag,
+    )
+    short_non_exact_anchor_added_matter_guard = (
+        selected_breakdown.get("short_non_exact_anchor_added_matter_guard") or {}
+    )
+    short_non_exact_anchor_added_matter_guard_active = bool(
+        short_non_exact_anchor_added_matter_guard.get("applies")
+    )
+    independent_strong_visual = bool(
+        _visual_has_strong_ocr(visual_diag)
+        or _visual_has_very_strong_clip_dino(visual_diag)
+    )
+    short_non_exact_anchor_added_matter_visual_guard_active = bool(
+        short_non_exact_anchor_added_matter_guard_active
+        and visual_sim > 0.0
+        and not independent_strong_visual
     )
     short_non_exact_anchor_visual_guard = _short_non_exact_anchor_visual_guard(
         selected_breakdown,
@@ -3730,8 +4531,14 @@ def score_pair(
     short_non_exact_anchor_visual_guard_active = bool(
         short_non_exact_anchor_visual_guard.get("applies")
     )
+    plain_text_wordmark_visual_guard_active = bool(
+        plain_text_wordmark_visual_guard.get("applies")
+    )
     agreement_boost_suppressed = (
-        limited_text_visual_guard_active or short_non_exact_anchor_visual_guard_active
+        limited_text_visual_guard_active
+        or short_non_exact_anchor_added_matter_visual_guard_active
+        or short_non_exact_anchor_visual_guard_active
+        or plain_text_wordmark_visual_guard_active
     )
     combiner_text_score = (
         0.0 if weak_text_cap_active and visual_sim > 0 else selected_text_score
@@ -3765,6 +4572,19 @@ def score_pair(
             visual_diag,
         )
     )
+    short_non_exact_anchor_added_matter_visual_cap = None
+    short_non_exact_anchor_added_matter_visual_cap_reason = None
+    if (
+        short_non_exact_anchor_added_matter_visual_guard_active
+        and final_total > _SHORT_NON_EXACT_ANCHOR_ADDED_MATTER_CAP
+    ):
+        final_total = _SHORT_NON_EXACT_ANCHOR_ADDED_MATTER_CAP
+        short_non_exact_anchor_added_matter_visual_cap = (
+            _SHORT_NON_EXACT_ANCHOR_ADDED_MATTER_CAP
+        )
+        short_non_exact_anchor_added_matter_visual_cap_reason = (
+            "short_non_exact_anchor_added_matter_visual_cap"
+        )
     breakdown = dict(selected_breakdown)
     caps_applied = list(breakdown.get("caps_applied") or [])
     if weak_text_visual_cap is not None:
@@ -3772,6 +4592,11 @@ def score_pair(
     if limited_text_visual_cap is not None:
         caps_applied.append(
             f"{limited_text_visual_cap_reason}:{limited_text_visual_cap:.2f}"
+        )
+    if short_non_exact_anchor_added_matter_visual_cap is not None:
+        caps_applied.append(
+            f"{short_non_exact_anchor_added_matter_visual_cap_reason}:"
+            f"{short_non_exact_anchor_added_matter_visual_cap:.2f}"
         )
     breakdown["caps_applied"] = caps_applied
     breakdown["score_version"] = SCORE_VERSION
@@ -3805,9 +4630,28 @@ def score_pair(
         "weak_text_cap_active": weak_text_cap_active,
         "limited_text_cap_active": limited_text_cap_active,
         "limited_text_visual_guard_active": limited_text_visual_guard_active,
+        "short_non_exact_anchor_added_matter_guard_active": (
+            short_non_exact_anchor_added_matter_guard_active
+        ),
+        "short_non_exact_anchor_added_matter_guard": (
+            short_non_exact_anchor_added_matter_guard
+        ),
+        "short_non_exact_anchor_added_matter_visual_guard_active": (
+            short_non_exact_anchor_added_matter_visual_guard_active
+        ),
+        "short_non_exact_anchor_added_matter_visual_cap": (
+            short_non_exact_anchor_added_matter_visual_cap
+        ),
+        "short_non_exact_anchor_added_matter_visual_cap_reason": (
+            short_non_exact_anchor_added_matter_visual_cap_reason
+        ),
         "short_non_exact_anchor_visual_guard": short_non_exact_anchor_visual_guard,
         "short_non_exact_anchor_visual_guard_active": (
             short_non_exact_anchor_visual_guard_active
+        ),
+        "plain_text_wordmark_visual_guard": plain_text_wordmark_visual_guard,
+        "plain_text_wordmark_visual_guard_active": (
+            plain_text_wordmark_visual_guard_active
         ),
         "agreement_boost_suppressed": agreement_boost_suppressed,
         "effective_text_score_for_combiner": round(combiner_text_score, 4),
@@ -3850,10 +4694,23 @@ def score_pair(
         "weak_text_cap_active": weak_text_cap_active,
         "limited_text_cap_active": limited_text_cap_active,
         "limited_text_visual_guard_active": limited_text_visual_guard_active,
+        "short_non_exact_anchor_added_matter_guard_active": (
+            short_non_exact_anchor_added_matter_guard_active
+        ),
+        "short_non_exact_anchor_added_matter_guard": (
+            short_non_exact_anchor_added_matter_guard
+        ),
+        "short_non_exact_anchor_added_matter_visual_guard_active": (
+            short_non_exact_anchor_added_matter_visual_guard_active
+        ),
         "short_non_exact_anchor_visual_guard_active": (
             short_non_exact_anchor_visual_guard_active
         ),
         "short_non_exact_anchor_visual_guard": short_non_exact_anchor_visual_guard,
+        "plain_text_wordmark_visual_guard_active": (
+            plain_text_wordmark_visual_guard_active
+        ),
+        "plain_text_wordmark_visual_guard": plain_text_wordmark_visual_guard,
         "agreement_boost_suppressed": agreement_boost_suppressed,
         "weak_text_visual_cap": weak_text_visual_cap,
         "weak_text_visual_cap_reason": weak_text_visual_cap_reason,
@@ -3861,6 +4718,12 @@ def score_pair(
         "limited_text_visual_cap": limited_text_visual_cap,
         "limited_text_visual_cap_reason": limited_text_visual_cap_reason,
         "limited_text_visual_calibration": limited_text_visual_calibration,
+        "short_non_exact_anchor_added_matter_visual_cap": (
+            short_non_exact_anchor_added_matter_visual_cap
+        ),
+        "short_non_exact_anchor_added_matter_visual_cap_reason": (
+            short_non_exact_anchor_added_matter_visual_cap_reason
+        ),
     }
     breakdown["visual_breakdown"] = visual_diag
     breakdown["decision_reason"] = (
@@ -3873,6 +4736,10 @@ def score_pair(
         breakdown["decision_reason"] += "; limited text visual agreement suppressed"
     if short_non_exact_anchor_visual_guard_active:
         breakdown["decision_reason"] += "; short non-exact anchor visual agreement suppressed"
+    if short_non_exact_anchor_added_matter_visual_guard_active:
+        breakdown["decision_reason"] += "; short non-exact anchor added matter visual cap applied"
+    if plain_text_wordmark_visual_guard_active:
+        breakdown["decision_reason"] += "; plain text wordmark visual cap applied"
     if limited_text_visual_cap is not None:
         breakdown["decision_reason"] += "; limited text visual cap applied"
 
@@ -3895,6 +4762,7 @@ __all__ = [
     "_dynamic_combine",
     "HierarchicalTextScorer",
     "adjust_image_similarity",
+    "build_logo_image_profile",
     "calculate_adjusted_score",
     "calculate_alert_risk_score",
     "calculate_combined_score",
@@ -3916,6 +4784,7 @@ __all__ = [
     "fuzzy_match",
     "get_risk_level",
     "normalize_turkish",
+    "resolve_logo_image_path",
     "score_candidates",
     "score_pair",
     "tokenize",

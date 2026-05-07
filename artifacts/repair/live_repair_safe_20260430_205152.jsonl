@@ -1,0 +1,1 @@
+{"event": "start", "status_batch_size": 20, "class_batch_size": 20, "artifact_dir": "artifacts\\repair\\live_trademark_checks", "max_checks": null, "ts": "2026-04-30T19:51:52.835057+00:00"}

@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 from config.settings import settings
 from database.crud import Database, get_db_connection
-from utils.subscription import PLAN_FEATURES
+from utils.subscription import PLAN_FEATURES, get_plan_limit
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +77,7 @@ def activate_subscription(
     billing_period: str,
     *,
     plan_id_lookup=get_subscription_plan_id,
+    plan_limit_getter=get_plan_limit,
     now_getter=None,
     gateway_logger=None,
 ):
@@ -98,6 +99,8 @@ def activate_subscription(
     else:
         end_date = now + relativedelta(months=1)
 
+    ai_monthly_limit = int(plan_limit_getter(plan_name, "monthly_ai_credits") or 0)
+
     cur = db.cursor()
     cur.execute(
         """
@@ -105,10 +108,12 @@ def activate_subscription(
         SET subscription_plan_id = %s,
             subscription_start_date = %s,
             subscription_end_date = %s,
+            ai_credits_monthly = %s,
+            ai_credits_reset_at = %s,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = %s
     """,
-        (plan_id, now, end_date, org_id),
+        (plan_id, now, end_date, ai_monthly_limit, now, org_id),
     )
     db.commit()
     return True

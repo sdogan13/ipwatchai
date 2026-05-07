@@ -144,7 +144,14 @@ async def search_holder_portfolio_data(
     with database_factory() as db:
         plan = user_plan_getter(db, str(current_user.id))
         if not plan_limit_getter(plan["plan_name"], "can_view_holder_portfolio"):
-            raise HTTPException(status_code=403, detail="PRO feature")
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "pro_feature",
+                    "message": "Holder portfolio viewing requires a paid plan.",
+                    "upgrade_url": "/pricing",
+                },
+            )
 
         cur = db.cursor()
         safe_query = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -198,8 +205,16 @@ async def build_holder_trademarks_csv_stream(
 
     with database_factory() as db:
         plan = user_plan_getter(db, str(current_user.id))
-        if not plan_limit_getter(plan["plan_name"], "can_view_holder_portfolio"):
-            raise HTTPException(status_code=403, detail="PRO feature")
+        if not plan_limit_getter(plan["plan_name"], "can_download_portfolio"):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "upgrade_required",
+                    "message": "CSV export is available on paid plans.",
+                    "current_plan": plan["plan_name"],
+                    "upgrade_context": "portfolio_download",
+                },
+            )
 
         cur = db.cursor()
         cur.execute(

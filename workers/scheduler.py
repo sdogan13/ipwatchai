@@ -1,5 +1,5 @@
 """
-Scheduled Tasks — APScheduler integration for daily watchlist auto-scan.
+Scheduled Tasks - APScheduler integration for weekly watchlist and radar scans.
 
 Usage (standalone):
     python -m workers.scheduler
@@ -10,11 +10,23 @@ Usage (integrated via main.py lifespan):
 import logging
 from datetime import datetime, timedelta
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 logger = logging.getLogger(__name__)
+
+WATCHLIST_SCAN_DAY = "mon"
+WATCHLIST_SCAN_DAY_LABEL = "Monday"
+UNIVERSAL_SCAN_DAY = "tue"
+UNIVERSAL_SCAN_DAY_LABEL = "Tuesday"
+WATCHLIST_SCAN_HOUR = 0
+UNIVERSAL_SCAN_HOUR = 0
+WATCHLIST_SCAN_JOB_ID = "weekly_watchlist_scan"
+UNIVERSAL_SCAN_JOB_ID = "weekly_universal_scan"
+SCAN_TIMEZONE_NAME = "Europe/London"
+SCAN_TIMEZONE = ZoneInfo(SCAN_TIMEZONE_NAME)
 
 # Singleton scheduler
 _scheduler: BackgroundScheduler | None = None
@@ -25,7 +37,8 @@ def get_scheduler() -> BackgroundScheduler:
     global _scheduler
     if _scheduler is None:
         _scheduler = BackgroundScheduler(
-            job_defaults={'coalesce': True, 'max_instances': 1}
+            job_defaults={'coalesce': True, 'max_instances': 1},
+            timezone=SCAN_TIMEZONE,
         )
     return _scheduler
 
@@ -37,21 +50,31 @@ def start_scheduler():
         logger.info("Scheduler already running")
         return scheduler
 
-    # Daily watchlist scan at 03:00
+    # Weekly watchlist scan on Monday at 00:00.
     scheduler.add_job(
-        daily_watchlist_scan,
-        trigger=CronTrigger(hour=3, minute=0),
-        id='daily_watchlist_scan',
-        name='Daily Watchlist Auto-Scan',
+        weekly_watchlist_scan,
+        trigger=CronTrigger(
+            day_of_week=WATCHLIST_SCAN_DAY,
+            hour=WATCHLIST_SCAN_HOUR,
+            minute=0,
+            timezone=SCAN_TIMEZONE,
+        ),
+        id=WATCHLIST_SCAN_JOB_ID,
+        name='Weekly Watchlist Auto-Scan',
         replace_existing=True,
     )
 
-    # Daily universal conflict scan at 04:00 (Opposition Radar)
+    # Weekly universal conflict scan on Tuesday at 00:00 (Opposition Radar).
     scheduler.add_job(
-        daily_universal_scan,
-        trigger=CronTrigger(hour=4, minute=0),
-        id='daily_universal_scan',
-        name='Daily Universal Conflict Scan',
+        weekly_universal_scan,
+        trigger=CronTrigger(
+            day_of_week=UNIVERSAL_SCAN_DAY,
+            hour=UNIVERSAL_SCAN_HOUR,
+            minute=0,
+            timezone=SCAN_TIMEZONE,
+        ),
+        id=UNIVERSAL_SCAN_JOB_ID,
+        name='Weekly Universal Conflict Scan',
         replace_existing=True,
     )
 
@@ -65,9 +88,9 @@ def start_scheduler():
     )
 
     scheduler.start()
-    next_run = scheduler.get_job('daily_watchlist_scan').next_run_time
-    next_universal = scheduler.get_job('daily_universal_scan').next_run_time
-    logger.info(f"Scheduler started — next watchlist scan: {next_run}, next universal scan: {next_universal}")
+    next_run = scheduler.get_job(WATCHLIST_SCAN_JOB_ID).next_run_time
+    next_universal = scheduler.get_job(UNIVERSAL_SCAN_JOB_ID).next_run_time
+    logger.info(f"Scheduler started - next watchlist scan: {next_run}, next universal scan: {next_universal}")
     return scheduler
 
 
@@ -85,25 +108,35 @@ def get_next_scan_time() -> str | None:
     scheduler = get_scheduler()
     if not scheduler.running:
         return None
-    job = scheduler.get_job('daily_watchlist_scan')
+    job = scheduler.get_job(WATCHLIST_SCAN_JOB_ID)
     if job and job.next_run_time:
         return job.next_run_time.isoformat()
     return None
 
 
-def daily_watchlist_scan():
+def get_watchlist_scan_schedule_label() -> str:
+    """Return the user-facing watchlist auto-scan schedule label."""
+    return f"Weekly on {WATCHLIST_SCAN_DAY_LABEL} at {WATCHLIST_SCAN_HOUR:02d}:00"
+
+
+def get_universal_scan_schedule_label() -> str:
+    """Return the user-facing Opposition Radar scan schedule label."""
+    return f"Weekly on {UNIVERSAL_SCAN_DAY_LABEL} at {UNIVERSAL_SCAN_HOUR:02d}:00"
+
+
+def weekly_watchlist_scan():
     """
     Scan active watchlist items, gated by organization plan.
 
     Plan gating:
     - Free (auto_scan_max_items=0): Skip entirely
-    - Starter (auto_scan_frequency="weekly"): Only on Mondays, up to 25 items
-    - Professional (auto_scan_frequency="daily"): Daily, up to 50 items
-    - Enterprise (auto_scan_frequency="daily"): Daily, up to 500 items
+    - Starter: Up to 25 items
+    - Professional: Up to 50 items
+    - Enterprise: Up to 500 items
 
     Also respects each item's alert_frequency and last_scan_at.
     """
-    logger.info("=== Daily Watchlist Auto-Scan starting ===")
+    logger.info("=== Weekly Watchlist Auto-Scan starting ===")
 
     try:
         from database.crud import Database, WatchlistCRUD
@@ -113,13 +146,12 @@ def daily_watchlist_scan():
 
         scanner = get_scanner()
         now = datetime.utcnow()
-        is_monday = now.weekday() == 0  # 0 = Monday
 
         with Database() as db:
             all_items = WatchlistCRUD.get_all_active(db)
 
         if not all_items:
-            logger.info("No active watchlist items — nothing to scan")
+            logger.info("No active watchlist items - nothing to scan")
             return
 
         # Group items by organization
@@ -157,17 +189,9 @@ def daily_watchlist_scan():
             # Skip orgs with no auto-scan (free)
             if max_scan_items == 0 or scan_frequency is None:
                 logger.info(
-                    f"Skipping org {org_id} (plan: {plan_name}) — auto-scan not included"
+                    f"Skipping org {org_id} (plan: {plan_name}) - auto-scan not included"
                 )
                 skipped_plan += len(items)
-                continue
-
-            # Weekly plans only scan on Mondays
-            if scan_frequency == 'weekly' and not is_monday:
-                logger.info(
-                    f"Skipping org {org_id} (plan: {plan_name}) — weekly scan, not Monday"
-                )
-                skipped += len(items)
                 continue
 
             # Sort by most recently added (newest first) and cap at plan limit
@@ -216,10 +240,10 @@ def daily_watchlist_scan():
         )
 
     except Exception as e:
-        logger.error(f"Daily watchlist scan failed: {e}", exc_info=True)
+        logger.error(f"Weekly watchlist scan failed: {e}", exc_info=True)
 
 
-def daily_universal_scan():
+def weekly_universal_scan():
     """
     Scan within-deadline bulletins for opposition conflicts (Opposition Radar).
 
@@ -227,9 +251,9 @@ def daily_universal_scan():
     scanner against each one. This populates the universal_conflicts table
     that powers the Opposition Radar lead feed.
 
-    Runs daily at 04:00 (after watchlist scan at 03:00).
+    Runs weekly on Tuesday at 00:00.
     """
-    logger.info("=== Daily Universal Conflict Scan starting ===")
+    logger.info("=== Weekly Universal Conflict Scan starting ===")
 
     try:
         from workers.universal_scanner import UniversalScanner
@@ -252,7 +276,7 @@ def daily_universal_scan():
             bulletins = [r['bulletin_no'] for r in cur.fetchall()]
 
         if not bulletins:
-            logger.info("No bulletins with active appeal deadlines — nothing to scan")
+            logger.info("No bulletins with active appeal deadlines - nothing to scan")
             scanner.close()
             return
 
@@ -288,7 +312,12 @@ def daily_universal_scan():
         )
 
     except Exception as e:
-        logger.error(f"Daily universal scan failed: {e}", exc_info=True)
+        logger.error(f"Weekly universal scan failed: {e}", exc_info=True)
+
+
+# Backwards-compatible names for existing manual callers/imports.
+daily_watchlist_scan = weekly_watchlist_scan
+daily_universal_scan = weekly_universal_scan
 
 
 def check_subscription_expiry():
@@ -379,7 +408,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Watchlist & Universal scanner scheduler")
     parser.add_argument("--run-now", action="store_true",
-                        help="Run daily scans immediately (don't wait for schedule)")
+                        help="Run weekly scans immediately (don't wait for schedule)")
     parser.add_argument("--run-universal", action="store_true",
                         help="Run universal conflict scan immediately")
     parser.add_argument("--daemon", action="store_true",
@@ -387,12 +416,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.run_now:
-        logger.info("Running daily scans immediately...")
-        daily_watchlist_scan()
-        daily_universal_scan()
+        logger.info("Running weekly scans immediately...")
+        weekly_watchlist_scan()
+        weekly_universal_scan()
     elif args.run_universal:
         logger.info("Running universal conflict scan immediately...")
-        daily_universal_scan()
+        weekly_universal_scan()
     elif args.daemon:
         import time
         scheduler = start_scheduler()

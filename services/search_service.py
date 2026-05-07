@@ -2,6 +2,7 @@
 
 import csv
 import datetime
+import inspect
 import io
 import os
 import time
@@ -13,6 +14,12 @@ import psycopg2.extras
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 from psycopg2 import sql as psql
+
+from services.scoring_service import (
+    _calculate_visual_breakdown,
+    build_logo_image_profile,
+    resolve_logo_image_path,
+)
 
 PUBLIC_SEARCH_CLIENT_COOKIE = "public_search_client_id"
 PUBLIC_SEARCH_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365
@@ -167,6 +174,9 @@ def _map_public_search_results(results, status_code_getter=None):
         scores = result.get("scores") or {}
         trademark_name = result.get("trademark_name") or result.get("name")
         translation_similarity = _display_translation_similarity(result, scores)
+        effective_text_score = scores.get("text_idf_score")
+        if effective_text_score is None:
+            effective_text_score = scores.get("text_similarity", 0)
         image_path = result.get("image_path")
         image_url = f"/api/trademark-image/{image_path}" if image_path else None
         safe_results.append(
@@ -195,6 +205,13 @@ def _map_public_search_results(results, status_code_getter=None):
                 "registration_no": result.get("registration_no"),
                 "scoring_path": scores.get("scoring_path"),
                 "text_similarity": round(scores.get("text_similarity", 0), 3),
+                "text_idf_score": round(effective_text_score, 3),
+                "path_a_score": round(
+                    scores.get("path_a_score", scores.get("text_similarity", 0)),
+                    3,
+                ),
+                "path_b_score": round(scores.get("path_b_score", 0), 3),
+                "scoring_path_source": scores.get("scoring_path_source"),
                 "visual_similarity": round(scores.get("visual_similarity", 0), 3),
                 "translation_similarity": round(translation_similarity, 3),
                 "phonetic_similarity": round(scores.get("phonetic_similarity", 0), 3),
@@ -271,6 +288,22 @@ def _map_risk_engine_results_for_enhanced_search(
                 ),
                 "similarity": similarity_pct,
                 "name_similarity": similarity_pct,
+                "text_similarity": round(scores.get("text_similarity", 0), 3),
+                "text_idf_score": round(
+                    scores.get("text_idf_score", scores.get("text_similarity", 0)),
+                    3,
+                ),
+                "path_a_score": round(
+                    scores.get("path_a_score", scores.get("text_similarity", 0)),
+                    3,
+                ),
+                "path_b_score": round(scores.get("path_b_score", 0), 3),
+                "translation_similarity": round(
+                    _display_translation_similarity(result, scores),
+                    3,
+                ),
+                "scoring_path_source": scores.get("scoring_path_source"),
+                "scores": scores,
                 "class_overlap_count": overlap_count,
             }
         )
@@ -428,17 +461,41 @@ async def build_public_portfolio_csv(
     attorney_no=None,
     logger=None,
     database_factory=None,
+    current_user=None,
+    user_plan_getter=None,
+    plan_limit_getter=None,
 ):
-    """Build the public CSV export for a holder or attorney portfolio."""
+    """Build the CSV export for a holder or attorney portfolio."""
     if database_factory is None:
         from database.crud import Database
 
         database_factory = Database
+    if user_plan_getter is None:
+        from utils.subscription import get_user_plan
+
+        user_plan_getter = get_user_plan
+    if plan_limit_getter is None:
+        from utils.subscription import get_plan_limit
+
+        plan_limit_getter = get_plan_limit
 
     where_col, param, entity_type = resolve_public_portfolio_lookup(holder_id, attorney_no)
 
     try:
         with database_factory() as db:
+            if current_user is not None:
+                plan = user_plan_getter(db, str(current_user.id))
+                if not plan_limit_getter(plan["plan_name"], "can_download_portfolio"):
+                    raise HTTPException(
+                        status_code=403,
+                        detail={
+                            "error": "upgrade_required",
+                            "message": "CSV export is available on paid plans.",
+                            "current_plan": plan["plan_name"],
+                            "upgrade_context": "portfolio_download",
+                        },
+                    )
+
             cur = db.cursor()
             cur.execute(
                 psql.SQL(
@@ -742,6 +799,8 @@ async def run_enhanced_search(
                 trademark_name=search_request.name,
                 limit=5,
             )
+            if inspect.isawaitable(suggestions):
+                suggestions = await suggestions
             top_suggestions = [item for item in suggestions if item["similarity"] > 0.3][:3]
 
             if top_suggestions:
@@ -1243,6 +1302,7 @@ async def run_image_search(
                 else None
             )
             query_ocr_text = query_img_data.get("ocr_text", "")
+            query_logo_profile = build_logo_image_profile(temp_path, query_ocr_text)
         else:
             query_embedding = get_image_embedding_handler(temp_path)
             clip_vec_str = "[" + ",".join(str(value) for value in query_embedding) + "]"
@@ -1252,7 +1312,7 @@ async def run_image_search(
                 query_ocr_text = extract_ocr_text_handler(temp_path) or ""
             except Exception:
                 pass
-
+            query_logo_profile = None
         class_filter_sql = (
             "AND (t.nice_class_numbers && %s::int[] OR 99 = ANY(t.nice_class_numbers))"
             if class_list
@@ -1304,13 +1364,15 @@ async def run_image_search(
         merged = {**dino_rows, **clip_rows}
 
         query_text_vec = None
-        has_name = bool(name and name.strip())
-        if has_name:
+        has_typed_name = bool(name and name.strip())
+        query_name = (name or "").strip()
+        query_text_source = "USER_TEXT" if has_typed_name else "IMAGE_ONLY"
+        if has_typed_name:
             if text_embedding_getter is None:
                 from ai import get_text_embedding_cached
 
                 text_embedding_getter = get_text_embedding_cached
-            query_text_vec = text_embedding_getter(name)
+            query_text_vec = text_embedding_getter(query_name)
             if name_similarity_fn is None:
                 from risk_engine import calculate_name_similarity
 
@@ -1346,31 +1408,49 @@ async def run_image_search(
                 clip_sim = _cosine(query_img_data["clip_vec"], row.get("image_embedding"))
                 dino_sim = _cosine(query_img_data.get("dino_vec"), row.get("dinov2_embedding"))
                 color_sim = _cosine(query_img_data.get("color_vec"), row.get("color_histogram"))
-
-                vis_sim = visual_similarity_fn(
+                candidate_profile_path = resolve_logo_image_path(
+                    row.get("image_path") or "",
+                    roots=[
+                        getattr(settings.paths, "data_root", ""),
+                        getattr(settings.pipeline, "bulletins_root", ""),
+                    ],
+                )
+                candidate_logo_profile = (
+                    build_logo_image_profile(candidate_profile_path, candidate_ocr)
+                    if candidate_profile_path
+                    else None
+                )
+                vis_sim, visual_breakdown = _calculate_visual_breakdown(
                     clip_sim=clip_sim,
                     dinov2_sim=dino_sim,
                     color_sim=color_sim,
                     ocr_text_a=query_ocr_text,
                     ocr_text_b=candidate_ocr,
+                    logo_profile_a=query_logo_profile,
+                    logo_profile_b=candidate_logo_profile,
                 )
 
                 text_sim = 0.0
                 semantic_sim = 0.0
                 phon_sim = 0.0
-                if has_name:
-                    text_sim = name_similarity_fn(name, candidate_name)
+                if has_typed_name:
+                    text_sim = name_similarity_fn(query_name, candidate_name)
                     semantic_sim = _cosine(query_text_vec, row.get("text_embedding"))
 
                 score_breakdown = score_pair_fn(
-                    query_name=name or "",
+                    query_name=query_name if has_typed_name else "",
                     candidate_name=candidate_name,
                     text_sim=text_sim,
                     semantic_sim=semantic_sim,
                     visual_sim=vis_sim,
                     phonetic_sim=phon_sim,
                     candidate_translations={"name_tr": row.get("name_tr") or ""},
+                    visual_breakdown=visual_breakdown,
                 )
+                score_breakdown["query_text_source"] = query_text_source
+                score_breakdown.setdefault("textual_breakdown", {})[
+                    "query_text_source"
+                ] = query_text_source
 
                 total = score_breakdown["total"]
                 results.append(
@@ -1387,9 +1467,11 @@ async def run_image_search(
                         "similarity": round(total * 100, 1),
                         "image_similarity": round(clip_sim * 100, 1),
                         "visual_similarity": round(vis_sim * 100, 1),
-                        "text_similarity": round(text_sim * 100, 1) if has_name else None,
+                        "text_similarity": round(text_sim * 100, 1) if has_typed_name else None,
                         "final_score": total,
                         "risk_level": risk_level_getter(total),
+                        "query_text_source": query_text_source,
+                        "query_ocr_text_used": False,
                         "scores": score_breakdown,
                     }
                 )
@@ -1436,10 +1518,12 @@ async def run_image_search(
 
         return {
             "success": True,
-            "search_type": "combined" if has_name else "image",
+            "search_type": "combined" if has_typed_name else "image",
             "scoring_engine": "unified" if use_unified else "legacy",
             "ocr_enabled": True,
             "query_ocr_text": query_ocr_text[:100] if query_ocr_text else None,
+            "query_text_source": query_text_source,
+            "query_ocr_text_used": False,
             "total_results": len(results),
             "classes_filtered": class_list if class_list else None,
             "results": results,

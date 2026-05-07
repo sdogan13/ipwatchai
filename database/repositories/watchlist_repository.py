@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 from models.schemas import WatchlistItemCreate, WatchlistItemUpdate
 
 from database.repositories.organization_repository import OrganizationCRUD
+from utils.deadline import active_similarity_conflict_sql
 from utils.watchlist_filters import same_holder_alert_exclusion_sql
 
 if TYPE_CHECKING:
@@ -265,8 +266,7 @@ class WatchlistCRUD:
                     LEFT JOIN trademarks my_tm2 ON w.customer_application_no = my_tm2.application_no
                     WHERE a2.watchlist_item_id = w.id
                       AND a2.status = %s
-                      AND t2.appeal_deadline IS NOT NULL
-                      AND t2.appeal_deadline >= CURRENT_DATE
+                      AND {active_similarity_conflict_sql('a2', 't2')}
                       AND {_visible_alert_condition('a2', 't2', 'my_tm2')}
                 )"""
                 )
@@ -282,14 +282,13 @@ class WatchlistCRUD:
                 params.append(status_filter)
             else:
                 where_parts.append(
-                    """EXISTS (
+                    f"""EXISTS (
                     SELECT 1 FROM alerts_mt a2
                     JOIN trademarks t2 ON a2.conflicting_trademark_id = t2.id
                     LEFT JOIN trademarks my_tm2 ON w.customer_application_no = my_tm2.application_no
                     WHERE a2.watchlist_item_id = w.id
                       AND a2.status NOT IN ('dismissed', 'resolved')
-                      AND t2.appeal_deadline IS NOT NULL
-                      AND t2.appeal_deadline >= CURRENT_DATE
+                      AND {active_similarity_conflict_sql('a2', 't2')}
                       AND {_visible_alert_condition('a2', 't2', 'my_tm2')}
                 )"""
                 )
@@ -353,7 +352,7 @@ class WatchlistCRUD:
             order_by = (
                 "COUNT(a.id) FILTER ("
                 "  WHERE a.status NOT IN ('dismissed', 'resolved')"
-                "  AND (t.appeal_deadline IS NULL OR t.appeal_deadline >= CURRENT_DATE)"
+                f"  AND {active_similarity_conflict_sql('a', 't')}"
                 f"  AND a.overall_risk_score >= {float(threshold)}"
                 f"  AND {_visible_alert_condition()}"
                 ") DESC NULLS LAST, w.created_at DESC"
@@ -369,14 +368,14 @@ class WatchlistCRUD:
                       AND a2.status = '{sf}'
                 ) DESC NULLS LAST""".format(sf=status_filter)
             else:
-                order_by = """(
+                order_by = f"""(
                     SELECT MIN(t2.appeal_deadline)
                     FROM alerts_mt a2
                     JOIN trademarks t2 ON a2.conflicting_trademark_id = t2.id
                     LEFT JOIN trademarks my_tm2 ON w.customer_application_no = my_tm2.application_no
                     WHERE a2.watchlist_item_id = w.id
                       AND a2.status NOT IN ('dismissed', 'resolved')
-                      AND t2.appeal_deadline >= CURRENT_DATE
+                      AND {active_similarity_conflict_sql('a2', 't2')}
                       AND {_visible_alert_condition('a2', 't2', 'my_tm2')}
                 ) ASC NULLS LAST"""
         else:
@@ -388,11 +387,12 @@ class WatchlistCRUD:
                    COUNT(a.id) FILTER (
                        WHERE a.status = 'new'
                        AND a.overall_risk_score >= {float(threshold)}
+                       AND {active_similarity_conflict_sql('a', 't')}
                        AND {visible_alert_condition}
                    ) AS new_alerts_count,
                    COUNT(a.id) FILTER (
                        WHERE a.status NOT IN ('dismissed', 'resolved')
-                       AND (t.appeal_deadline IS NULL OR t.appeal_deadline >= CURRENT_DATE)
+                       AND {active_similarity_conflict_sql('a', 't')}
                        AND a.overall_risk_score >= {float(threshold)}
                        AND {visible_alert_condition}
                    ) AS total_alerts_count,

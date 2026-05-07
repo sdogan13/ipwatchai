@@ -91,9 +91,6 @@ services:
       HF_HOME: "/root/.cache/huggingface"
       EASYOCR_MODULE_PATH: "/root/.EasyOCR"
 
-      # Creative Suite (Gemini AI)
-      CREATIVE_GOOGLE_API_KEY: ${CREATIVE_GOOGLE_API_KEY:-}
-
       # CORS
       CORS_ORIGINS: '${CORS_ORIGINS:-["https://ipwatchai.com","https://www.ipwatchai.com"]}'
 
@@ -158,6 +155,7 @@ services:
       - ./migrations:/app/migrations:ro
       - ./utils:/app/utils:ro
       - ./services:/app/services:ro
+      - ./generative_ai:/app/generative_ai:ro
       - ./reports:/app/reports:ro
       - ./notifications:/app/notifications:ro
       - ./watchlist:/app/watchlist:ro

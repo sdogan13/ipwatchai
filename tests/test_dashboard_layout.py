@@ -228,6 +228,9 @@ class TestOverviewPanel:
         ]:
             assert f'id="{element_id}"' in self.html
 
+    def test_system_stats_card_omits_plan_limit_rows(self):
+        assert 'id="plan-limits-info"' not in self.html
+
     def test_pipeline_panel_includes_event_ingest_step_card(self):
         assert 'id="pipeline-step-event_ingest"' in self.html
         assert 'id="pipeline-count-event_ingest"' in self.html
@@ -272,6 +275,7 @@ class TestOtherPanels:
         assert 'id="studio-logo-revision-panel"' in html
         assert 'id="studio-logo-revision-prompt"' in html
         assert 'id="studio-logo-revise-btn"' in html
+        assert 'onclick="clearStudioHistory()"' in html
         assert 'data-i18n-value="studio.palette_blue_value"' in html
         assert 'id="studio-name-classes-summary" class="studio-class-summary" x-text' not in html
         assert 'id="studio-logo-classes-summary" class="studio-class-summary" x-text' not in html
@@ -336,8 +340,30 @@ class TestAppJS:
         assert "fetchAndRenderLogoProject" in self.js
         assert "startLogoProjectPollingIfNeeded" in self.js
         assert "reviseSelectedLogo" in self.js
-        assert "selectFinalLogoCandidate" in self.js
         assert "retryLogoAudit" in self.js
+        assert "openStudioHistoryItem" in self.js
+        assert "openStudioHistoryLogo" in self.js
+        assert "deleteStudioHistoryItem" in self.js
+        assert "clearStudioHistory" in self.js
+
+    def test_revise_validation_aligned_with_highlight_selection_source(self):
+        """reviseSelectedLogo must validate against the same source as the UI highlight
+        (per-logo lookup in _studioLogos) and fall back to the project's
+        selected_image_id, not the global project id — which can drift in
+        history-load flows and produce a misleading 'select a logo' toast on a
+        visibly-selected card."""
+        revise_block = self.js.split("async function reviseSelectedLogo()", 1)[1]
+        revise_block = revise_block.split("async function ", 1)[0]
+        # Resolves a revision target from explicit selection OR project's selected logo
+        assert "studioSelectedLogoImageId" in revise_block
+        assert "studioLastLogoResult" in revise_block
+        assert "selected_image_id" in revise_block
+        # Looks up the chosen logo from the same in-memory store as the UI
+        assert "_studioLogos[" in revise_block
+        # Project id is read from the logo itself, not just the drift-prone global
+        assert "selectedLogo.project_id" in revise_block
+        # Guard against re-introducing the strict combined gate that caused the bug
+        assert "!studioActiveLogoProjectId || !studioSelectedLogoImageId" not in revise_block
 
 
 class TestLocaleFiles:
@@ -386,6 +412,19 @@ class TestLocaleFiles:
             "history_empty",
             "history_logo_meta",
             "history_name_meta",
+            "history_view_logo",
+            "history_open_logos",
+            "history_open_names",
+            "history_loaded",
+            "history_item_missing",
+            "history_delete_confirm",
+            "history_delete_failed",
+            "history_deleted",
+            "history_clear",
+            "history_clear_all_confirm",
+            "history_clear_names_confirm",
+            "history_clear_logos_confirm",
+            "history_cleared",
             "credits_used",
             "mode_label",
             "status_checking",
@@ -423,13 +462,16 @@ class TestLocaleFiles:
             "audit_status_failed",
             "audit_pending_note",
             "download_requires_safe_audit",
+            "ai_risk_score",
+            "ai_risk_score_short",
+            "risk_source_llm",
+            "closest_relevant_match",
+            "relevant_existing_mark",
             "revision_title",
             "revision_prompt_label",
             "revision_prompt_placeholder",
             "generate_revision",
             "revise_btn",
-            "select_logo",
-            "selected_badge",
             "select_logo_to_revise",
             "enter_revision_prompt",
             "project_load_failed",
@@ -438,13 +480,26 @@ class TestLocaleFiles:
             data = json.loads((STATIC / "locales" / f"{locale}.json").read_text(encoding="utf-8"))
             assert required <= set(data["studio"].keys())
 
+    def test_logo_cards_render_single_llm_risk_score_without_deterministic_breakdown(self):
+        studio_card = (STATIC / "js" / "components" / "studio-card.js").read_text(encoding="utf-8")
+        dashboard_app = (STATIC / "js" / "dashboard" / "app.js").read_text(encoding="utf-8")
+
+        for source in (studio_card, dashboard_app):
+            assert "visual_similarity_score" not in source
+            assert "name_conflict_score" not in source
+            assert "risk_driver" not in source
+            assert "visual_breakdown" not in source
+            assert "risk_source_deterministic" not in source
+        assert "ai_risk_score" in dashboard_app
+        assert "ai_risk_score_short" in studio_card
+
     def test_i18n_asset_versions_bust_ai_studio_locale_cache(self):
         import re
 
         i18n_js = I18N_JS.read_text(encoding="utf-8")
         locale_version = re.search(r"_localeAssetVersion = '(\d+)'", i18n_js)
         assert locale_version
-        assert int(locale_version.group(1)) >= 43
+        assert int(locale_version.group(1)) >= 50
 
         for template in [
             TEMPLATES / "dashboard" / "page.html",
@@ -455,7 +510,7 @@ class TestLocaleFiles:
             html = template.read_text(encoding="utf-8")
             script_version = re.search(r"/static/js/utils/i18n\.js\?v=(\d+)", html)
             assert script_version, f"Missing i18n script version in {template}"
-            assert int(script_version.group(1)) >= 42
+            assert int(script_version.group(1)) >= 50
 
     def test_dashboard_ai_studio_asset_versions_bumped(self):
         import re
@@ -463,11 +518,13 @@ class TestLocaleFiles:
         html = DASHBOARD_TEMPLATE.read_text(encoding="utf-8")
         css_version = re.search(r"/static/css/tokens\.css\?v=(\d+)", html)
         studio_card_version = re.search(r"/static/js/components/studio-card\.js\?v=(\d+)", html)
+        api_version = re.search(r"/static/js/api\.js\?v=(\d+)", html)
         dashboard_app_version = re.search(r"/static/js/dashboard/app\.js\?v=(\d+)", html)
 
-        assert css_version and int(css_version.group(1)) >= 24
-        assert studio_card_version and int(studio_card_version.group(1)) >= 33
-        assert dashboard_app_version and int(dashboard_app_version.group(1)) >= 64
+        assert css_version and int(css_version.group(1)) >= 25
+        assert studio_card_version and int(studio_card_version.group(1)) >= 34
+        assert api_version and int(api_version.group(1)) >= 39
+        assert dashboard_app_version and int(dashboard_app_version.group(1)) >= 84
 
 
 class TestNoSearchLeakage:
@@ -501,6 +558,89 @@ class TestNoSearchLeakage:
                       "_ai_studio_panel.html", "_reports_panel.html"]:
             other_html = (PARTIALS / other).read_text(encoding="utf-8")
             assert 'id="search-input"' not in other_html
+
+
+class TestSearchRiskReportUI:
+    """Verify the advisory risk report is wired into the search tab only."""
+
+    def test_search_panel_has_risk_report_button_and_panel(self):
+        html = (PARTIALS / "_search_panel.html").read_text(encoding="utf-8")
+        assert 'id="dashboard-risk-report-btn"' in html
+        assert "generateRiskReport()" in html
+        assert "riskReport && !riskReportLoading && !riskReportError" in html
+        assert 'data-testid="dashboard-risk-report-ready-card"' in html
+        assert 'data-testid="dashboard-risk-report-open-button"' in html
+        assert "openRiskReportPdf(riskReport)" in html
+        assert "t('search.risk_report_ready_view')" in html
+        assert "t('search.risk_report_title')" in html
+        assert "candidate.image_url" in html
+        assert "t('sort.risk_report_desc')" in html
+
+    def test_dashboard_app_posts_visible_results_to_risk_report_endpoint(self):
+        js = DASHBOARD_APP.read_text(encoding="utf-8")
+        assert "riskReportLoading" in js
+        assert "sortedResults.slice(0, DASHBOARD_SEARCH_RESULT_LIMIT)" in js
+        assert "getRiskReportLanguage" in js
+        assert "applyRiskReportOrdering(data, visibleResults)" in js
+        assert "showRiskReportReadyNotification(data)" in js
+        assert "this.riskReport = data" in js
+        assert "risk_report_desc" in js
+        assert "deterministic_score" not in js
+        assert "'/api/v1/search/risk-report'" in js
+        assert "new FormData()" in js
+        assert "body.append('query_image', this.selectedImage" in js
+        assert "showUpgradeModal(data.detail || data, 'reports')" in js
+        assert "usage.monthly_reports" in js
+
+    def test_dashboard_claims_landing_risk_report_deep_link(self):
+        html = (TEMPLATES / "dashboard" / "page.html").read_text(encoding="utf-8")
+        js = DASHBOARD_APP.read_text(encoding="utf-8")
+        api_js = (STATIC / "js" / "api.js").read_text(encoding="utf-8")
+
+        assert "claim_risk_report" in html
+        assert "claimPendingRiskReport(claimRiskReport)" in html
+        assert "function claimPendingRiskReport" in js
+        assert "claimRiskReportAPI" in js
+        assert "'/api/v1/search/risk-report/claim'" in api_js
+        assert "window.AppAPI.claimRiskReport" in api_js
+
+    def test_reports_panel_does_not_show_monthly_report_quota(self):
+        html = (PARTIALS / "_reports_panel.html").read_text(encoding="utf-8")
+        assert 'id="reports-usage"' not in html
+        assert 'id="reports-usage-count"' not in html
+
+    def test_reports_panel_has_delete_controls(self):
+        html = (PARTIALS / "_reports_panel.html").read_text(encoding="utf-8")
+        js = DASHBOARD_APP.read_text(encoding="utf-8")
+        api_js = (STATIC / "js" / "api.js").read_text(encoding="utf-8")
+
+        assert 'id="reports-delete-all-btn"' in html
+        assert "deleteAllReports()" in html
+        assert "reports.delete_all" in html
+        assert "function deleteReport(reportId, reportTitle)" in js
+        assert "function deleteAllReports()" in js
+        assert "deleteReport(decodeURIComponent" in js
+        assert "window.AppAPI.deleteReport" in api_js
+        assert "window.AppAPI.deleteAllReports" in api_js
+        assert "method: 'DELETE'" in api_js
+
+    def test_all_locales_have_report_delete_keys(self):
+        import json
+
+        required = {
+            "delete_report",
+            "delete_all",
+            "delete_confirm",
+            "delete_all_confirm",
+            "delete_success",
+            "delete_all_success",
+            "delete_failed",
+            "delete_all_failed",
+            "untitled",
+        }
+        for locale in ("en", "tr", "ar"):
+            data = json.loads((STATIC / "locales" / f"{locale}.json").read_text(encoding="utf-8"))
+            assert required <= set(data["reports"].keys())
 
 
 class TestTabContentIDs:

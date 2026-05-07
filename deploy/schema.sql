@@ -599,6 +599,32 @@ CREATE INDEX IF NOT EXISTS idx_reports_org ON reports(organization_id);
 CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status);
 CREATE INDEX IF NOT EXISTS idx_reports_created ON reports(created_at DESC);
 
+CREATE TABLE IF NOT EXISTS pending_risk_reports (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    claim_token_hash VARCHAR(128) UNIQUE NOT NULL,
+    query_text VARCHAR(300),
+    selected_classes JSONB DEFAULT '[]'::jsonb,
+    language VARCHAR(5) DEFAULT 'tr',
+    image_used BOOLEAN DEFAULT FALSE,
+    summary TEXT,
+    overall_risk_score NUMERIC,
+    highest_risk_application_no VARCHAR(80),
+    results_json JSONB NOT NULL,
+    request_json JSONB NOT NULL,
+    response_json JSONB NOT NULL,
+    model VARCHAR(160),
+    report_name VARCHAR(255),
+    file_path TEXT NOT NULL,
+    file_size_bytes INTEGER,
+    expires_at TIMESTAMPTZ NOT NULL,
+    claimed_at TIMESTAMPTZ,
+    claimed_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    claimed_by_organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_pending_risk_reports_token ON pending_risk_reports(claim_token_hash);
+CREATE INDEX IF NOT EXISTS idx_pending_risk_reports_expires ON pending_risk_reports(expires_at);
+
 -- ==========================================
 -- 8. AUDIT LOG
 -- ==========================================
@@ -852,6 +878,7 @@ CREATE TABLE IF NOT EXISTS generated_images (
     visual_breakdown JSONB,
     similarity_score FLOAT,
     is_safe BOOLEAN DEFAULT TRUE,
+    style VARCHAR(20),
     created_at TIMESTAMP DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_gen_images_log ON generated_images(generation_log_id);

@@ -34,6 +34,31 @@ class DummyConnection:
         self.commits += 1
 
 
+class CaptureCursor:
+    def __init__(self):
+        self.sql = ""
+        self.params = None
+
+    def execute(self, sql, params=None):
+        self.sql = sql
+        self.params = params
+
+    def fetchall(self):
+        return []
+
+    def fetchone(self):
+        return {}
+
+
+class CaptureConnection:
+    def __init__(self):
+        self.last_cursor = None
+
+    def cursor(self, *args, **kwargs):
+        self.last_cursor = CaptureCursor()
+        return self.last_cursor
+
+
 def test_name_repair_removes_exact_sekil_word(monkeypatch):
     conn = DummyConnection()
     updates = []
@@ -59,7 +84,7 @@ def test_name_repair_removes_exact_sekil_word(monkeypatch):
 
     assert summary["repaired"] == 1
     assert summary["samples"][0]["to"] == "alpha beta"
-    assert updates == [("11111111-1111-1111-1111-111111111111", "alpha beta")]
+    assert updates == [("11111111-1111-1111-1111-111111111111", "alpha beta", True, True)]
     assert conn.commits == 1
 
 
@@ -107,8 +132,8 @@ def test_name_repair_removes_terminal_attached_sekil_suffix(monkeypatch):
         },
     ]
     assert updates == [
-        ("11111111-1111-1111-1111-111111111111", "cansigorta"),
-        ("22222222-2222-2222-2222-222222222222", "g81"),
+        ("11111111-1111-1111-1111-111111111111", "cansigorta", True, True),
+        ("22222222-2222-2222-2222-222222222222", "g81", True, True),
     ]
     assert conn.commits == 1
 
@@ -177,7 +202,7 @@ def test_name_tr_repair_clears_shape_only_translation(monkeypatch):
 
     assert summary["repaired"] == 1
     assert summary["samples"][0]["to"] is None
-    assert updates == [("11111111-1111-1111-1111-111111111111", None)]
+    assert updates == [("11111111-1111-1111-1111-111111111111", None, True, True)]
     assert conn.commits == 1
 
 
@@ -223,7 +248,7 @@ def test_name_tr_repair_removes_plus_sekil_and_preserves_embedded_terms(monkeypa
             "to": "+cafesebastian",
         }
     ]
-    assert updates == [("11111111-1111-1111-1111-111111111111", "+cafesebastian")]
+    assert updates == [("11111111-1111-1111-1111-111111111111", "+cafesebastian", False, True)]
     assert conn.commits == 1
 
 
@@ -252,7 +277,7 @@ def test_name_tr_repair_removes_empty_parens_after_shape_descriptor(monkeypatch)
 
     assert summary["repaired"] == 1
     assert summary["samples"][0]["to"] == "bitkisel çayı"
-    assert updates == [("11111111-1111-1111-1111-111111111111", "bitkisel çayı")]
+    assert updates == [("11111111-1111-1111-1111-111111111111", "bitkisel çayı", False, True)]
 
 
 def test_name_tr_repair_does_not_trim_separator_for_embedded_sekilde(monkeypatch):
@@ -281,6 +306,66 @@ def test_name_tr_repair_does_not_trim_separator_for_embedded_sekilde(monkeypatch
     assert summary["repaired"] == 0
     assert updates == []
     assert conn.commits == 0
+
+
+def test_name_tr_repair_preserves_text_embedding_when_original_name_is_real(monkeypatch):
+    conn = DummyConnection()
+    updates = []
+
+    monkeypatch.setattr(
+        repair,
+        "_name_tr_repair_candidates",
+        lambda conn, app_no=None, limit=None: [
+            {
+                "id": "11111111-1111-1111-1111-111111111111",
+                "application_no": "2026/013",
+                "name": "real brand",
+                "name_tr": "sekil",
+            }
+        ],
+    )
+
+    def fake_execute_values(cur, sql, rows):
+        updates.extend(rows)
+
+    monkeypatch.setattr(repair, "execute_values", fake_execute_values)
+
+    summary = repair.run_name_tr_repair(conn=conn)
+
+    assert summary["repaired"] == 1
+    assert updates == [("11111111-1111-1111-1111-111111111111", None, False, True)]
+    assert summary["text_embeddings_cleared"] == 0
+
+
+def test_logo_only_text_feature_repair_clears_stale_name_derived_features(monkeypatch):
+    conn = DummyConnection()
+    updates = []
+
+    monkeypatch.setattr(
+        repair,
+        "_logo_only_text_feature_candidates",
+        lambda conn, app_no=None, limit=None: [
+            {
+                "id": "11111111-1111-1111-1111-111111111111",
+                "application_no": "2026/014",
+            }
+        ],
+    )
+
+    def fake_execute_values(cur, sql, rows):
+        updates.extend(rows)
+        assert "text_embedding = NULL" in sql
+        assert "logo_ocr_text" not in sql
+        assert "image_embedding" not in sql
+
+    monkeypatch.setattr(repair, "execute_values", fake_execute_values)
+
+    summary = repair.run_logo_only_text_feature_repair(conn=conn)
+
+    assert summary["repaired"] == 1
+    assert summary["text_embeddings_cleared"] == 1
+    assert updates == [("11111111-1111-1111-1111-111111111111",)]
+    assert conn.commits == 1
 
 
 def test_class_repair_updates_exact_six_from_richer_blt_metadata(monkeypatch, tmp_path):
@@ -501,10 +586,104 @@ def test_live_detail_nice_classes_parser_excludes_invalid_values():
 
 def test_resolve_live_status_uses_explicit_non_published_status_only():
     assert repair._resolve_live_status("tescil edildi") == DB_STATUS_REGISTERED
+    assert repair._resolve_live_status("", "2021 160894") == DB_STATUS_REGISTERED
+    assert repair._resolve_live_status(None, "2021 160894") == DB_STATUS_REGISTERED
     assert repair._resolve_live_status("marka başvurusu/tescili geçersiz sayıldı") == DB_STATUS_REFUSED
     assert repair._resolve_live_status("yayınlandı") is None
     assert repair._resolve_live_status("Başvuruldu") is None
     assert repair._resolve_live_status("") is None
+    assert repair._resolve_live_status("", "-") is None
+
+
+def test_live_status_candidates_use_four_month_threshold_priority_window_and_newest_order():
+    conn = CaptureConnection()
+
+    repair._live_status_candidates(conn, limit=10)
+
+    sql = conn.last_cursor.sql
+    assert "INTERVAL '4 months'" in sql
+    assert "INTERVAL '1 year'" not in sql
+    assert "INTERVAL '5 months'" not in sql
+    assert sql.count("tm.application_date >= CURRENT_DATE - INTERVAL '11 years'") == 2
+    assert "chk.live_registration_no IS NOT NULL" in sql
+    assert "tm.bulletin_date DESC NULLS LAST" in sql
+    assert "tm.application_date DESC NULLS LAST" in sql
+    assert "tm.id DESC" in sql
+    assert conn.last_cursor.params[:3] == [
+        DB_STATUS_PUBLISHED,
+        DB_STATUS_REFUSED,
+        repair.LIVE_PROVISIONAL_SOURCE,
+    ]
+    assert "tm.status_source = %s" in sql
+    assert "no_decision" not in conn.last_cursor.params[3]
+
+
+def test_live_status_candidates_can_include_older_priority_records():
+    conn = CaptureConnection()
+
+    repair._live_status_candidates(conn, limit=10, include_older_than_11_years=True)
+
+    sql = conn.last_cursor.sql
+    assert "INTERVAL '4 months'" in sql
+    assert sql.count("tm.application_date >= CURRENT_DATE - INTERVAL '11 years'") == 1
+
+
+def test_live_status_provisional_mark_uses_same_pending_filter(monkeypatch):
+    conn = CaptureConnection()
+    monkeypatch.setattr(repair, "_ensure_live_check_table", lambda conn: None)
+    monkeypatch.setattr(repair, "_ensure_live_provisional_table", lambda conn: None)
+
+    summary = repair.run_live_status_provisional_refusal_mark(conn=conn, dry_run=True, limit=5)
+
+    sql = conn.last_cursor.sql
+    assert summary["dry_run"] is True
+    assert summary["source"] == repair.LIVE_PROVISIONAL_SOURCE
+    assert "tm.current_status = %s::tm_status" in sql
+    assert "tm.bulletin_date < CURRENT_DATE - INTERVAL '1 year'" in sql
+    assert "tm.bulletin_date IS NULL" not in sql
+    assert "repair_live_trademark_checks" in sql
+    assert "chk.live_registration_no IS NOT NULL" in sql
+    assert "tm.application_date >= CURRENT_DATE - INTERVAL '11 years'" in sql
+    assert conn.last_cursor.params[0] == DB_STATUS_PUBLISHED
+    assert "no_decision" not in conn.last_cursor.params[1]
+
+
+def test_fetch_live_status_evidence_uses_grid_only():
+    calls = []
+
+    class FakeScraper:
+        def fetch_live_grid_evidence(self, application_no, name, **kwargs):
+            calls.append((application_no, name, kwargs))
+            return {
+                "matched": True,
+                "status_text": "",
+                "registration_no": "2021 160894",
+                "detail_opened": False,
+            }
+
+        def fetch_live_detail_evidence(self, *args, **kwargs):
+            raise AssertionError("status repair should not open DETAY")
+
+    evidence = repair._fetch_live_status_evidence(
+        {"application_no": "2021/160894", "name": "ip"},
+        scraper=FakeScraper(),
+    )
+
+    assert evidence["registration_no"] == "2021 160894"
+    assert evidence["detail_opened"] is False
+    assert calls[0][0:2] == ("2021/160894", "ip")
+
+
+def test_live_class_candidates_default_to_priority_window():
+    conn = CaptureConnection()
+
+    repair._live_class_candidates(conn, limit=10)
+
+    sql = conn.last_cursor.sql
+    assert sql.count("tm.application_date >= CURRENT_DATE - INTERVAL '11 years'") == 2
+    assert "cardinality(tm.nice_class_numbers) = 6" in sql
+    assert "tm.application_date DESC NULLS LAST" in sql
+    assert "tm.id DESC" in sql
 
 
 def test_live_status_repair_updates_published_row_from_live_status(monkeypatch):
@@ -517,7 +696,7 @@ def test_live_status_repair_updates_published_row_from_live_status(monkeypatch):
     monkeypatch.setattr(
         repair,
         "_live_status_candidates",
-        lambda conn, app_no=None, limit=None: [
+        lambda conn, app_no=None, limit=None, **kwargs: [
             {
                 "id": "11111111-1111-1111-1111-111111111111",
                 "application_no": "2020/001",
@@ -526,7 +705,11 @@ def test_live_status_repair_updates_published_row_from_live_status(monkeypatch):
             }
         ],
     )
-    monkeypatch.setattr(repair, "_live_status_skip_counts", lambda conn, app_no=None: {"skipped_no_name": 0, "skipped_recent": 0})
+    monkeypatch.setattr(
+        repair,
+        "_live_status_skip_counts",
+        lambda conn, app_no=None, **kwargs: {"skipped_no_name": 0, "skipped_recent": 0, "skipped_older_than_11_years": 0},
+    )
     monkeypatch.setattr(repair, "_apply_live_status_decisions", lambda conn, decisions: applied.extend(decisions))
     monkeypatch.setattr(repair, "_upsert_live_check_rows", lambda conn, rows: progress.extend(rows))
     monkeypatch.setattr(
@@ -551,6 +734,51 @@ def test_live_status_repair_updates_published_row_from_live_status(monkeypatch):
     assert conn.commits == 1
 
 
+def test_live_status_repair_uses_registration_no_when_status_text_blank(monkeypatch):
+    conn = DummyConnection()
+    applied = []
+    progress = []
+
+    monkeypatch.setattr(repair, "_ensure_live_check_table", lambda conn: None)
+    monkeypatch.setattr(
+        repair,
+        "_live_status_candidates",
+        lambda conn, app_no=None, limit=None, **kwargs: [
+            {
+                "id": "11111111-1111-1111-1111-111111111111",
+                "application_no": "2021/160894",
+                "name": "ip",
+                "current_status": DB_STATUS_PUBLISHED,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        repair,
+        "_live_status_skip_counts",
+        lambda conn, app_no=None, **kwargs: {"skipped_no_name": 0, "skipped_recent": 0, "skipped_older_than_11_years": 0},
+    )
+    monkeypatch.setattr(repair, "_apply_live_status_decisions", lambda conn, decisions: applied.extend(decisions))
+    monkeypatch.setattr(repair, "_upsert_live_check_rows", lambda conn, rows: progress.extend(rows))
+
+    summary = repair.run_live_status_repair(
+        conn=conn,
+        live_fetcher=lambda candidate: {
+            "matched": True,
+            "status_text": "",
+            "registration_no": "2021 160894",
+            "nice_classes": [9, 42],
+            "artifact_dir": "artifacts/live/2021_160894",
+        },
+    )
+
+    assert summary["repaired"] == 1
+    assert summary["no_decision"] == 0
+    assert applied[0]["to"] == DB_STATUS_REGISTERED
+    assert applied[0]["registration_no"] == "2021 160894"
+    assert progress[0][4] == "updated"
+    assert progress[0][6] == "2021 160894"
+
+
 def test_live_status_repair_does_not_downgrade_to_applied(monkeypatch):
     conn = DummyConnection()
     applied = []
@@ -560,7 +788,7 @@ def test_live_status_repair_does_not_downgrade_to_applied(monkeypatch):
     monkeypatch.setattr(
         repair,
         "_live_status_candidates",
-        lambda conn, app_no=None, limit=None: [
+        lambda conn, app_no=None, limit=None, **kwargs: [
             {
                 "id": "11111111-1111-1111-1111-111111111111",
                 "application_no": "2020/002",
@@ -569,7 +797,11 @@ def test_live_status_repair_does_not_downgrade_to_applied(monkeypatch):
             }
         ],
     )
-    monkeypatch.setattr(repair, "_live_status_skip_counts", lambda conn, app_no=None: {"skipped_no_name": 0, "skipped_recent": 0})
+    monkeypatch.setattr(
+        repair,
+        "_live_status_skip_counts",
+        lambda conn, app_no=None, **kwargs: {"skipped_no_name": 0, "skipped_recent": 0, "skipped_older_than_11_years": 0},
+    )
     monkeypatch.setattr(repair, "_apply_live_status_decisions", lambda conn, decisions: applied.extend(decisions))
     monkeypatch.setattr(repair, "_upsert_live_check_rows", lambda conn, rows: progress.extend(rows))
 
@@ -587,13 +819,18 @@ def test_live_status_repair_reports_recent_and_no_name_skips(monkeypatch):
     conn = DummyConnection()
 
     monkeypatch.setattr(repair, "_ensure_live_check_table", lambda conn: None)
-    monkeypatch.setattr(repair, "_live_status_candidates", lambda conn, app_no=None, limit=None: [])
-    monkeypatch.setattr(repair, "_live_status_skip_counts", lambda conn, app_no=None: {"skipped_no_name": 3, "skipped_recent": 5})
+    monkeypatch.setattr(repair, "_live_status_candidates", lambda conn, app_no=None, limit=None, **kwargs: [])
+    monkeypatch.setattr(
+        repair,
+        "_live_status_skip_counts",
+        lambda conn, app_no=None, **kwargs: {"skipped_no_name": 3, "skipped_recent": 5, "skipped_older_than_11_years": 7},
+    )
 
     summary = repair.run_live_status_repair(conn=conn, live_fetcher=lambda candidate: {})
 
     assert summary["skipped_no_name"] == 3
     assert summary["skipped_recent"] == 5
+    assert summary["skipped_older_than_11_years"] == 7
     assert summary["checked"] == 0
 
 
@@ -606,7 +843,7 @@ def test_live_class_repair_updates_exact_six_from_live_detail(monkeypatch):
     monkeypatch.setattr(
         repair,
         "_live_class_candidates",
-        lambda conn, app_no=None, limit=None: [
+        lambda conn, app_no=None, limit=None, **kwargs: [
             {
                 "id": "11111111-1111-1111-1111-111111111111",
                 "application_no": "2020/003",
@@ -643,7 +880,7 @@ def test_live_class_repair_dry_run_does_not_write(monkeypatch):
     monkeypatch.setattr(
         repair,
         "_live_class_candidates",
-        lambda conn, app_no=None, limit=None: [
+        lambda conn, app_no=None, limit=None, **kwargs: [
             {
                 "id": "11111111-1111-1111-1111-111111111111",
                 "application_no": "2020/004",
@@ -666,6 +903,90 @@ def test_live_class_repair_dry_run_does_not_write(monkeypatch):
     assert applied == []
     assert progress == []
     assert conn.commits == 0
+
+
+def test_live_status_repair_stops_batch_on_safety_stop(monkeypatch):
+    conn = DummyConnection()
+    applied = []
+    progress = []
+
+    monkeypatch.setattr(repair, "_ensure_live_check_table", lambda conn: None)
+    monkeypatch.setattr(
+        repair,
+        "_live_status_candidates",
+        lambda conn, app_no=None, limit=None, **kwargs: [
+            {
+                "id": "11111111-1111-1111-1111-111111111111",
+                "application_no": "2020/005",
+                "name": "epsilon",
+                "current_status": DB_STATUS_PUBLISHED,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        repair,
+        "_live_status_skip_counts",
+        lambda conn, app_no=None, **kwargs: {"skipped_no_name": 0, "skipped_recent": 0, "skipped_older_than_11_years": 0},
+    )
+    monkeypatch.setattr(repair, "_apply_live_status_decisions", lambda conn, decisions: applied.extend(decisions))
+    monkeypatch.setattr(repair, "_upsert_live_check_rows", lambda conn, rows: progress.extend(rows))
+
+    summary = repair.run_live_status_repair(
+        conn=conn,
+        live_fetcher=lambda candidate: {
+            "safety_stop": True,
+            "safety_reason": "safety_rate_limited",
+            "artifact_error": "safety_rate_limited",
+            "next_allowed_at": "2026-04-30T12:00:00+00:00",
+        },
+    )
+
+    assert summary["checked"] == 0
+    assert summary["safety_stopped"] is True
+    assert summary["safety_reason"] == "safety_rate_limited"
+    assert summary["next_allowed_at"] == "2026-04-30T12:00:00+00:00"
+    assert summary["repaired"] == 0
+    assert applied == []
+    assert progress[0][4] == "safety_stop"
+
+
+def test_live_class_repair_stops_batch_on_safety_stop(monkeypatch):
+    conn = DummyConnection()
+    applied = []
+    progress = []
+
+    monkeypatch.setattr(repair, "_ensure_live_check_table", lambda conn: None)
+    monkeypatch.setattr(
+        repair,
+        "_live_class_candidates",
+        lambda conn, app_no=None, limit=None, **kwargs: [
+            {
+                "id": "11111111-1111-1111-1111-111111111111",
+                "application_no": "2020/006",
+                "name": "zeta",
+                "nice_class_numbers": [1, 2, 3, 4, 5, 6],
+            }
+        ],
+    )
+    monkeypatch.setattr(repair, "_apply_live_class_decisions", lambda conn, decisions: applied.extend(decisions))
+    monkeypatch.setattr(repair, "_upsert_live_check_rows", lambda conn, rows: progress.extend(rows))
+
+    summary = repair.run_live_class_repair(
+        conn=conn,
+        live_fetcher=lambda candidate: {
+            "safety_stop": True,
+            "safety_reason": "safety_blocked",
+            "artifact_error": "safety_blocked",
+            "next_allowed_at": "2026-05-01T12:00:00+00:00",
+        },
+    )
+
+    assert summary["checked"] == 0
+    assert summary["safety_stopped"] is True
+    assert summary["safety_reason"] == "safety_blocked"
+    assert summary["repaired"] == 0
+    assert applied == []
+    assert progress[0][4] == "safety_stop"
 
 
 def test_run_repair_aggregates_status_and_name_routines(monkeypatch):
@@ -699,6 +1020,16 @@ def test_run_repair_aggregates_status_and_name_routines(monkeypatch):
             "would_repair": 0,
             "candidates": 7,
             "decisions": 6,
+        },
+    )
+    monkeypatch.setattr(
+        repair,
+        "run_logo_only_text_feature_repair",
+        lambda **kwargs: {
+            "repaired": 0,
+            "would_repair": 0,
+            "candidates": 0,
+            "decisions": 0,
         },
     )
     monkeypatch.setattr(
@@ -740,6 +1071,7 @@ def test_run_repair_aggregates_status_and_name_routines(monkeypatch):
     assert summary["routines"]["status"]["repaired"] == 2
     assert summary["routines"]["name"]["repaired"] == 4
     assert summary["routines"]["name_tr"]["repaired"] == 6
+    assert summary["routines"]["logo_only_text_features"]["repaired"] == 0
     assert summary["routines"]["classes"]["repaired"] == 8
     assert summary["routines"]["live_status"]["repaired"] == 8
     assert summary["routines"]["live_classes"]["repaired"] == 10

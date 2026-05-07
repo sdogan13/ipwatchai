@@ -58,6 +58,8 @@ determine_db_status = _rules.determine_db_status
 determine_status = _rules.determine_status
 get_status_rank = _rules.get_status_rank
 get_source_rank = _rules.get_source_rank
+is_app_source_folder = _rules.is_app_source_folder
+has_valid_registration_no = _rules.has_valid_registration_no
 clean_name = _rules.clean_name
 _name_cleans_to_empty = _rules._name_cleans_to_empty
 _SHARED_FIELDS = _rules._SHARED_FIELDS
@@ -71,6 +73,50 @@ _build_update_set = _rules._build_update_set
 _build_update_sql = _rules._build_update_sql
 check_and_migrate_schema = _bootstrap.check_and_migrate_schema
 load_nice_classes = _bootstrap.load_nice_classes
+
+_TEXT_EMBEDDING_SOURCE_NAME_KEY = "text_embedding_source_name"
+_TRANSLATION_SOURCE_NAME_KEY = "name_tr_source_name"
+
+
+def _raw_name_was_materially_cleaned(raw_name, cleaned_name) -> bool:
+    raw_text = sanitize(_rules._repair_mojibake(str(raw_name))) if raw_name is not None else None
+    if not raw_text:
+        return False
+    return (cleaned_name or None) != " ".join(str(raw_text).split())
+
+
+def _metadata_text_features_are_from_clean_name(rec: dict, cleaned_name: str | None) -> bool:
+    if not cleaned_name:
+        return False
+    return (
+        rec.get(_TEXT_EMBEDDING_SOURCE_NAME_KEY) == cleaned_name
+        and rec.get(_TRANSLATION_SOURCE_NAME_KEY) == cleaned_name
+    )
+
+
+def _incoming_status_can_replace_existing(
+    explicit_status: str | None,
+    db_status: str,
+    reg_no_val,
+) -> bool:
+    if explicit_status not in (None, DB_STATUS_APPLIED, DB_STATUS_PUBLISHED):
+        return True
+    return (
+        explicit_status is None
+        and db_status == DB_STATUS_REGISTERED
+        and has_valid_registration_no(reg_no_val)
+    )
+
+
+def _app_safe_nice_classes_for_update(incoming_classes, existing_classes):
+    if not incoming_classes:
+        return None
+    existing_classes = existing_classes or []
+    if not existing_classes:
+        return incoming_classes
+    if len(incoming_classes) > 6 and len(incoming_classes) > len(existing_classes):
+        return incoming_classes
+    return None
 
 
 _INSERT_COLUMNS = [
@@ -173,14 +219,24 @@ def _collect_metadata_files(root_dir: Path, folder_name: str | None = None, desc
     return metadata_files
 
 
-def process_file_batch(conn, file_path, force=False):
+def process_records_batch(conn, records, *, folder_name: str, filename: str = "metadata.json", force=False):
+    return process_file_batch(
+        conn,
+        Path(folder_name) / filename,
+        force=force,
+        records=records,
+    )
+
+
+def process_file_batch(conn, file_path, force=False, *, records=None):
+    file_path = Path(file_path)
     cur = conn.cursor()
     filename = file_path.name
     folder_name = file_path.parent.name
     file_key = f"{folder_name}/{filename}"
     logging.info(f"Processing Batch: {file_key}")
 
-    is_app_source = folder_name.upper().startswith("APP_") or "scraped" in folder_name.lower()
+    is_app_source = is_app_source_folder(folder_name)
     is_bulletin_source = folder_name.upper().startswith("BLT_") or "BULTEN" in folder_name.upper()
     is_gazette_source = folder_name.upper().startswith("GZ_") or "GAZETE" in folder_name.upper()
     new_source_rank, source_tag = get_source_rank(folder_name)
@@ -224,30 +280,33 @@ def process_file_batch(conn, file_path, force=False):
 
     was_repaired = False
     try:
-        try:
-            with open(file_path, "r", encoding="utf-8") as handle:
-                data = json.load(handle)
-        except json.JSONDecodeError:
-            repair = _repair_corrupt_metadata(file_path)
-            if repair["status"] == "repaired":
+        if records is None:
+            try:
                 with open(file_path, "r", encoding="utf-8") as handle:
                     data = json.load(handle)
-                was_repaired = True
-            else:
-                cur.execute(
-                    "UPDATE processed_files SET status = %s, error_log = %s WHERE filename = %s",
-                    (repair["status"], repair.get("error", ""), file_key),
-                )
-                conn.commit()
-                return {
-                    "status": repair["status"],
-                    "filename": file_key,
-                    "inserted": 0,
-                    "updated": 0,
-                    "skipped": 0,
-                    "record_count": 0,
-                    "error": repair.get("error"),
-                }
+            except json.JSONDecodeError:
+                repair = _repair_corrupt_metadata(file_path)
+                if repair["status"] == "repaired":
+                    with open(file_path, "r", encoding="utf-8") as handle:
+                        data = json.load(handle)
+                    was_repaired = True
+                else:
+                    cur.execute(
+                        "UPDATE processed_files SET status = %s, error_log = %s WHERE filename = %s",
+                        (repair["status"], repair.get("error", ""), file_key),
+                    )
+                    conn.commit()
+                    return {
+                        "status": repair["status"],
+                        "filename": file_key,
+                        "inserted": 0,
+                        "updated": 0,
+                        "skipped": 0,
+                        "record_count": 0,
+                        "error": repair.get("error"),
+                    }
+        else:
+            data = list(records)
 
         if not data:
             file_result_status = "repaired" if was_repaired else "success"
@@ -272,7 +331,7 @@ def process_file_batch(conn, file_path, force=False):
         if all_app_nos:
             cur.execute(
                 """
-                SELECT application_no, id, last_event_date, current_status, expiry_date, status_source, name
+                SELECT application_no, id, last_event_date, current_status, expiry_date, status_source, name, nice_class_numbers
                 FROM trademarks
                 WHERE application_no = ANY(%s)
                 """,
@@ -286,6 +345,7 @@ def process_file_batch(conn, file_path, force=False):
                     "expiry": row[4],
                     "status_source": row[5],
                     "name": row[6],
+                    "nice_class_numbers": row[7],
                 }
 
         new_inserts = []
@@ -344,16 +404,23 @@ def process_file_batch(conn, file_path, force=False):
 
             img_emb = embedding_to_halfvec(rec.get("image_embedding"), 512)
             dino_emb = embedding_to_halfvec(rec.get("dinov2_embedding"), 768)
-            txt_emb = embedding_to_halfvec(rec.get("text_embedding"), 384)
+            name_features_are_stale = (
+                not tm_name
+                or (
+                    _raw_name_was_materially_cleaned(raw_tm_name, tm_name)
+                    and not _metadata_text_features_are_from_clean_name(rec, tm_name)
+                )
+            )
+            txt_emb = None if name_features_are_stale else embedding_to_halfvec(rec.get("text_embedding"), 384)
             color_emb = embedding_to_halfvec(rec.get("color_histogram"), 512)
             img_path = _resolve_image_path(folder_name, rec.get("IMAGE"), ROOT_DIR)
             ocr_text = rec.get("logo_ocr_text")
 
-            name_tr = _trunc(rec.get("name_tr"), 500)
-            detected_lang = _trunc(rec.get("detected_lang"), 10)
-            name_tr_backend = _trunc(rec.get("name_tr_backend"), 32)
-            name_tr_model = _trunc(rec.get("name_tr_model"), 255)
-            name_tr_updated_at_raw = rec.get("name_tr_updated_at")
+            name_tr = None if name_features_are_stale else _trunc(rec.get("name_tr"), 500)
+            detected_lang = None if name_features_are_stale else _trunc(rec.get("detected_lang"), 10)
+            name_tr_backend = None if name_features_are_stale else _trunc(rec.get("name_tr_backend"), 32)
+            name_tr_model = None if name_features_are_stale else _trunc(rec.get("name_tr_model"), 255)
+            name_tr_updated_at_raw = None if name_features_are_stale else rec.get("name_tr_updated_at")
             name_tr_updated_at = None
             if name_tr_updated_at_raw:
                 try:
@@ -437,10 +504,19 @@ def process_file_batch(conn, file_path, force=False):
                 _name_cleans_to_empty(raw_tm_name)
                 and _name_cleans_to_empty(existing.get("name"))
             )
+            clear_text_features = name_features_are_stale and (bool(tm_name) or clear_name)
             should_update = force
             next_status = db_status
+            status_can_replace = _incoming_status_can_replace_existing(
+                explicit_status,
+                db_status,
+                reg_no_val,
+            )
 
-            if (
+            if existing_source == "LIVE" and not status_can_replace:
+                should_update = True
+                next_status = curr_status
+            elif (
                 existing_source == "APP"
                 and curr_status == DB_STATUS_APPLIED
                 and not is_app_source
@@ -450,9 +526,7 @@ def process_file_batch(conn, file_path, force=False):
                 next_status = db_status
             elif new_source_rank >= old_source_rank:
                 should_update = True
-                if is_app_source and (
-                    db_status == DB_STATUS_APPLIED or explicit_status is None
-                ):
+                if is_app_source and not status_can_replace:
                     next_status = curr_status
             else:
                 should_update = True
@@ -469,12 +543,19 @@ def process_file_batch(conn, file_path, force=False):
                     is_renewal = True
 
             next_source_tag = existing_source if (next_status == curr_status and not is_renewal) else source_tag
+            update_classes_list = clean_classes_list or None
+            if is_app_source:
+                update_classes_list = _app_safe_nice_classes_for_update(
+                    clean_classes_list,
+                    existing.get("nice_class_numbers"),
+                )
             updates.append(
                 (
                     sanitize(tm_name),
                     clear_name,
+                    clear_text_features,
                     next_status,
-                    clean_classes_list or None,
+                    update_classes_list,
                     Json(extracted_goods_data) if extracted_goods_data else None,
                     db_write_date,
                     appeal_dl,
@@ -644,18 +725,37 @@ def _process_metadata_files(conn, metadata_files, force=False):
 
 
 def cleanup_sekil_names(conn, batch_size: int = 5000) -> int:
-    """Remove placeholder-only 'sekil' values and clean mixed name variants."""
+    """Remove placeholder-only 'sekil' values and invalidate stale name-derived text features."""
     cur = conn.cursor()
     cleaned_total = 0
     cur.execute(
         """
-        SELECT id, name
+        SELECT id, name, name_tr
         FROM trademarks
-        WHERE name IS NOT NULL
+        WHERE (
+            name IS NOT NULL
           AND (
               lower(name) LIKE '%sekil%'
               OR name ~* '(s|ş)ek(i|ı|İ)l'
           )
+        )
+        OR (
+            name_tr IS NOT NULL
+            AND (
+                lower(name_tr) LIKE '%sekil%'
+                OR name_tr ~* '(s|ÅŸ)ek(i|Ä±|Ä°)l'
+            )
+        )
+        OR (
+            COALESCE(NULLIF(BTRIM(name), ''), NULLIF(BTRIM(name_tr), '')) IS NULL
+            AND (
+                text_embedding IS NOT NULL
+                OR detected_lang IS NOT NULL
+                OR name_tr_backend IS NOT NULL
+                OR name_tr_model IS NOT NULL
+                OR name_tr_updated_at IS NOT NULL
+            )
+        )
         """
     )
 
@@ -663,10 +763,23 @@ def cleanup_sekil_names(conn, batch_size: int = 5000) -> int:
     for start in range(0, len(rows), batch_size):
         batch = rows[start:start + batch_size]
         updates = []
-        for tm_id, current_name in batch:
-            cleaned = clean_name(current_name)
-            if cleaned != current_name:
-                updates.append((str(tm_id), sanitize(cleaned)))
+        for tm_id, current_name, current_name_tr in batch:
+            cleaned_name = clean_name(current_name)
+            cleaned_name_tr = clean_name(current_name_tr)
+            name_changed = cleaned_name != current_name
+            name_tr_changed = cleaned_name_tr != current_name_tr
+            logo_only_after_cleanup = not cleaned_name and not cleaned_name_tr
+            if name_changed or name_tr_changed or logo_only_after_cleanup:
+                clear_translation = name_changed or name_tr_changed or logo_only_after_cleanup
+                updates.append(
+                    (
+                        str(tm_id),
+                        sanitize(cleaned_name),
+                        None if clear_translation else sanitize(cleaned_name_tr),
+                        name_changed or logo_only_after_cleanup,
+                        clear_translation,
+                    )
+                )
 
         if updates:
             execute_values(
@@ -674,8 +787,14 @@ def cleanup_sekil_names(conn, batch_size: int = 5000) -> int:
                 """
                 UPDATE trademarks AS tm
                 SET name = v.name::text,
+                    text_embedding = CASE WHEN v.clear_text_embedding THEN NULL ELSE tm.text_embedding END,
+                    name_tr = v.name_tr::text,
+                    detected_lang = CASE WHEN v.clear_translation THEN NULL ELSE tm.detected_lang END,
+                    name_tr_backend = CASE WHEN v.clear_translation THEN NULL ELSE tm.name_tr_backend END,
+                    name_tr_model = CASE WHEN v.clear_translation THEN NULL ELSE tm.name_tr_model END,
+                    name_tr_updated_at = CASE WHEN v.clear_translation THEN NULL ELSE tm.name_tr_updated_at END,
                     updated_at = NOW()
-                FROM (VALUES %s) AS v(id, name)
+                FROM (VALUES %s) AS v(id, name, name_tr, clear_text_embedding, clear_translation)
                 WHERE tm.id = v.id::uuid
                 """,
                 updates,
@@ -788,6 +907,8 @@ __all__ = [
     "determine_status",
     "get_status_rank",
     "get_source_rank",
+    "is_app_source_folder",
+    "has_valid_registration_no",
     "_SHARED_FIELDS",
     "_SUSPICIOUS_SIX_FIELDS",
     "_BLT_OWNED_FIELDS",
@@ -802,6 +923,7 @@ __all__ = [
     "_INSERT_COLUMNS",
     "_build_insert_sql",
     "metadata_file_sort_key",
+    "process_records_batch",
     "process_file_batch",
     "_collect_metadata_files",
     "_process_metadata_files",

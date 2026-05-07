@@ -300,7 +300,9 @@ async def bulk_import_watchlist(
     )
     for item_id in payload["scan_item_ids"]:
         background_tasks.add_task(run_watchlist_scan_task, item_id)
-    return WatchlistBulkImportResult(**payload["result"])
+    result = dict(payload["result"])
+    result["queued_scans"] = len(payload["scan_item_ids"])
+    return WatchlistBulkImportResult(**result)
 
     with Database() as db:
         from utils.subscription import get_plan_limit, get_user_plan
@@ -475,7 +477,9 @@ async def bulk_import_from_portfolio(
     )
     for item_id in payload["scan_item_ids"]:
         background_tasks.add_task(run_watchlist_scan_task, item_id)
-    return WatchlistBulkImportResult(**payload["result"])
+    result = dict(payload["result"])
+    result["queued_scans"] = len(payload["scan_item_ids"])
+    return WatchlistBulkImportResult(**result)
 
     if not data.holder_id and not data.attorney_no:
         raise HTTPException(status_code=400, detail="holder_id or attorney_no required")
@@ -806,7 +810,13 @@ async def upload_with_mapping(
     if background_tasks:
         for item_id in payload["scan_item_ids"]:
             background_tasks.add_task(run_watchlist_scan_task, item_id)
-    return payload["result"]
+    result = payload["result"]
+    if isinstance(result, dict):
+        result = dict(result)
+        result["queued_scans"] = len(payload["scan_item_ids"])
+    else:
+        result.queued_scans = len(payload["scan_item_ids"])
+    return result
 
     import json
 
@@ -1048,7 +1058,13 @@ async def upload_file(
     if background_tasks:
         for item_id in payload["scan_item_ids"]:
             background_tasks.add_task(run_watchlist_scan_task, item_id)
-    return payload["result"]
+    result = payload["result"]
+    if isinstance(result, dict):
+        result = dict(result)
+        result["queued_scans"] = len(payload["scan_item_ids"])
+    else:
+        result.queued_scans = len(payload["scan_item_ids"])
+    return result
 
     contents = await file.read()
     filename = file.filename.lower() if file.filename else ""

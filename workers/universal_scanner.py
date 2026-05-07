@@ -347,12 +347,27 @@ class UniversalScanner:
             ) VALUES %s
             ON CONFLICT (new_mark_id, existing_mark_id)
             DO UPDATE SET
+                new_mark_name = EXCLUDED.new_mark_name,
+                new_mark_app_no = EXCLUDED.new_mark_app_no,
+                new_mark_holder_name = EXCLUDED.new_mark_holder_name,
+                new_mark_nice_classes = EXCLUDED.new_mark_nice_classes,
+                existing_mark_name = EXCLUDED.existing_mark_name,
+                existing_mark_app_no = EXCLUDED.existing_mark_app_no,
+                existing_mark_holder_id = EXCLUDED.existing_mark_holder_id,
+                existing_mark_holder_name = EXCLUDED.existing_mark_holder_name,
+                existing_mark_nice_classes = EXCLUDED.existing_mark_nice_classes,
                 similarity_score = EXCLUDED.similarity_score,
                 text_similarity = EXCLUDED.text_similarity,
                 visual_similarity = EXCLUDED.visual_similarity,
                 semantic_similarity = EXCLUDED.semantic_similarity,
                 translation_similarity = EXCLUDED.translation_similarity,
+                conflict_type = EXCLUDED.conflict_type,
+                overlapping_classes = EXCLUDED.overlapping_classes,
                 risk_level = EXCLUDED.risk_level,
+                conflict_reasons = EXCLUDED.conflict_reasons,
+                bulletin_no = EXCLUDED.bulletin_no,
+                bulletin_date = EXCLUDED.bulletin_date,
+                opposition_deadline = EXCLUDED.opposition_deadline,
                 updated_at = NOW()
         """, values)
 

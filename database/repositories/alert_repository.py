@@ -2,15 +2,34 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+from datetime import date, datetime
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 from uuid import UUID, uuid4
 
+from psycopg2.extras import Json
+
 from models.schemas import AlertStatus
+from utils.deadline import active_appeal_deadline_sql, active_similarity_alert_sql
 from utils.watchlist_filters import same_holder_alert_exclusion_sql
 
 if TYPE_CHECKING:
     from database.crud import Database
+
+
+def _json_ready(value: Any) -> Any:
+    """Convert score diagnostics into values psycopg can store as JSONB."""
+    if isinstance(value, dict):
+        return {str(key): _json_ready(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_ready(item) for item in value]
+    if isinstance(value, (datetime, date, UUID)):
+        return value.isoformat() if hasattr(value, "isoformat") else str(value)
+    if hasattr(value, "item"):
+        try:
+            return value.item()
+        except Exception:
+            pass
+    return value
 
 
 class AlertCRUD:
@@ -53,7 +72,12 @@ class AlertCRUD:
         conflict_id = conflicting_trademark.get("id")
         if conflict_id:
             cur.execute(
-                "SELECT appeal_deadline FROM trademarks WHERE id = %s::uuid",
+                f"""
+                SELECT t.appeal_deadline
+                FROM trademarks t
+                WHERE t.id = %s::uuid
+                  AND {active_appeal_deadline_sql("t")}
+                """,
                 (str(conflict_id),),
             )
             row = cur.fetchone()
@@ -61,6 +85,7 @@ class AlertCRUD:
                 opposition_deadline = row["appeal_deadline"]
 
         alert_id = uuid4()
+        score_details = _json_ready(scores.get("score_details") or {})
 
         cur.execute(
             f"""
@@ -70,10 +95,10 @@ class AlertCRUD:
                 conflicting_classes, conflicting_holder_name, conflicting_image_path,
                 overall_risk_score, text_similarity_score, semantic_similarity_score,
                 visual_similarity_score, translation_similarity_score,
-                phonetic_match, severity, source_type, alert_type, status,
+                score_details, phonetic_match, severity, source_type, alert_type, status,
                 overlapping_classes, opposition_deadline
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING *
         """,
             (
@@ -92,6 +117,7 @@ class AlertCRUD:
                 scores.get("semantic_similarity"),
                 scores.get("visual_similarity"),
                 scores.get("translation_similarity", 0),
+                Json(score_details),
                 scores.get("phonetic_match", False),
                 severity,
                 source_info.get("type"),
@@ -123,6 +149,7 @@ class AlertCRUD:
             LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
             LEFT JOIN trademarks my_tm ON w.customer_application_no = my_tm.application_no
             WHERE a.id = %s AND a.organization_id = %s
+              AND {active_similarity_alert_sql("a", "t")}
               AND {AlertCRUD._visible_alert_condition()}
         """,
             (str(alert_id), str(org_id)),
@@ -175,7 +202,7 @@ class AlertCRUD:
             LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
             LEFT JOIN trademarks my_tm ON w.customer_application_no = my_tm.application_no
             WHERE {where_clause}
-            AND (t.appeal_deadline IS NULL OR t.appeal_deadline >= CURRENT_DATE)
+            AND {active_similarity_alert_sql("a", "t")}
             AND {visible_alert_condition}
         """,
             params,
@@ -205,7 +232,7 @@ class AlertCRUD:
             LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
             LEFT JOIN trademarks my_tm ON w.customer_application_no = my_tm.application_no
             WHERE a.organization_id = %s
-            AND (t.appeal_deadline IS NULL OR t.appeal_deadline >= CURRENT_DATE)
+            AND {active_similarity_alert_sql("a", "t")}
             {"AND a.status = ANY(%s)" if status else ""}
             {"AND a.severity = ANY(%s)" if severity else ""}
             {"AND a.watchlist_item_id = %s" if watchlist_id else ""}

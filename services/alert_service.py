@@ -1,5 +1,6 @@
 """Service helpers for alert routes."""
 
+import json
 from datetime import date as date_type
 from uuid import UUID
 
@@ -17,6 +18,7 @@ from models.schemas import (
     ConflictingTrademark,
     PaginatedResponse,
 )
+from utils.deadline import active_similarity_alert_sql
 from utils.watchlist_filters import same_holder_alert_exclusion_sql
 
 
@@ -26,6 +28,72 @@ def _visible_alert_condition(
     watched_alias: str = "my_tm",
 ) -> str:
     return same_holder_alert_exclusion_sql(alert_alias, conflict_alias, watched_alias)
+
+
+def _coerce_score_details(raw) -> dict:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _score_number(value, default=None):
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _format_alert_scores(alert: dict) -> AlertScores:
+    details = _coerce_score_details(alert.get("score_details"))
+
+    text_similarity = _score_number(
+        details.get("text_similarity"),
+        _score_number(alert.get("text_similarity_score")),
+    )
+    semantic_similarity = _score_number(
+        details.get("semantic_similarity"),
+        _score_number(alert.get("semantic_similarity_score")),
+    )
+    visual_similarity = _score_number(
+        details.get("visual_similarity"),
+        _score_number(alert.get("visual_similarity_score")),
+    )
+    translation_similarity = _score_number(
+        details.get("translation_similarity"),
+        _score_number(alert.get("translation_similarity_score"), 0.0),
+    )
+    path_a_score = _score_number(details.get("path_a_score"), text_similarity or 0.0)
+    path_b_score = _score_number(
+        details.get("path_b_score"),
+        translation_similarity or 0.0,
+    )
+    text_idf_score = _score_number(details.get("text_idf_score"))
+    if text_idf_score is None:
+        text_idf_score = max(path_a_score or 0.0, path_b_score or 0.0)
+
+    return AlertScores(
+        total=_score_number(alert.get("overall_risk_score"), 0.0),
+        text_similarity=text_similarity,
+        semantic_similarity=semantic_similarity,
+        visual_similarity=visual_similarity,
+        translation_similarity=translation_similarity,
+        phonetic_match=alert.get("phonetic_match", False),
+        text_idf_score=text_idf_score,
+        path_a_score=path_a_score,
+        path_b_score=path_b_score,
+        scoring_path_source=details.get("scoring_path_source"),
+        decision_reason=details.get("decision_reason"),
+        textual_breakdown=details.get("textual_breakdown"),
+        visual_breakdown=details.get("visual_breakdown"),
+    )
 
 
 def format_alert_response(alert: dict, deadline_classifier=None) -> AlertResponse:
@@ -76,14 +144,7 @@ def format_alert_response(alert: dict, deadline_classifier=None) -> AlertRespons
         ),
         conflict_bulletin_no=alert.get("conflict_bulletin_no"),
         overlapping_classes=alert.get("overlapping_classes", []),
-        scores=AlertScores(
-            total=alert.get("overall_risk_score", 0),
-            text_similarity=alert.get("text_similarity_score"),
-            semantic_similarity=alert.get("semantic_similarity_score"),
-            visual_similarity=alert.get("visual_similarity_score"),
-            translation_similarity=alert.get("translation_similarity_score"),
-            phonetic_match=alert.get("phonetic_match", False),
-        ),
+        scores=_format_alert_scores(alert),
         severity=alert["severity"],
         status=alert["status"],
         source_type=alert.get("source_type"),
@@ -158,7 +219,7 @@ async def get_alerts_summary_data(
             LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
             LEFT JOIN trademarks my_tm ON w.customer_application_no = my_tm.application_no
             WHERE a.organization_id = %s
-              AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
+              AND {active_similarity_alert_sql("a", "t")}
               AND {visible_alert_condition}
             GROUP BY a.status
         """,
@@ -174,7 +235,7 @@ async def get_alerts_summary_data(
             LEFT JOIN trademarks t ON a.conflicting_trademark_id = t.id
             LEFT JOIN trademarks my_tm ON w.customer_application_no = my_tm.application_no
             WHERE a.organization_id = %s AND a.status = 'new'
-              AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
+              AND {active_similarity_alert_sql("a", "t")}
               AND {visible_alert_condition}
             GROUP BY a.severity
         """,
@@ -219,7 +280,7 @@ async def aggregate_alerts_data(
             LEFT JOIN trademarks my_tm ON w.customer_application_no = my_tm.application_no
             WHERE a.organization_id = %s
                 AND a.status NOT IN ('dismissed', 'resolved')
-                AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
+                AND {active_similarity_alert_sql("a", "t")}
                 AND {visible_alert_condition}
         """
             + where_extra,
@@ -240,7 +301,7 @@ async def aggregate_alerts_data(
             LEFT JOIN trademarks my_tm ON w.customer_application_no = my_tm.application_no
             WHERE a.organization_id = %s
                 AND a.status NOT IN ('dismissed', 'resolved')
-                AND (t.appeal_deadline IS NOT NULL AND t.appeal_deadline >= CURRENT_DATE)
+                AND {active_similarity_alert_sql("a", "t")}
                 AND {visible_alert_condition}
         """
             + where_extra

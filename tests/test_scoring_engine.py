@@ -20,6 +20,8 @@ import pytest
 
 from services.scoring_service import (
     _calculate_visual_breakdown,
+    _classify_logo_profile_from_metrics,
+    build_logo_image_profile,
     compute_idf_weighted_score,
     tokenize,
     normalize_turkish,
@@ -111,7 +113,7 @@ class TestCalculateVisualSimilarity:
 
     def test_ocr_only(self):
         score = calculate_visual_similarity(ocr_text_a="NIKE", ocr_text_b="NIKE")
-        assert abs(score - 0.55) < 0.001
+        assert abs(score - 1.0) < 0.001
 
     def test_all_components(self):
         score = calculate_visual_similarity(
@@ -129,8 +131,8 @@ class TestCalculateVisualSimilarity:
 
     def test_ocr_partial_match(self):
         score = calculate_visual_similarity(ocr_text_a="NIKE", ocr_text_b="NIKEA")
-        # SequenceMatcher("nike", "nikea").ratio() ≈ 0.89
-        assert score == 0.55
+        # Short non-exact OCR is noisy and remains capped as support evidence.
+        assert abs(score - 0.68) < 0.001
 
     def test_ocr_case_insensitive(self):
         s1 = calculate_visual_similarity(ocr_text_a="NIKE", ocr_text_b="nike")
@@ -150,15 +152,15 @@ class TestCalculateVisualSimilarity:
         assert "color" not in breakdown["components"]
         assert "color" not in breakdown["weights"]
 
-    def test_color_does_not_raise_ocr_only_score(self):
+    def test_color_does_not_change_ocr_only_score(self):
         score = calculate_visual_similarity(
             color_sim=0.90,
             ocr_text_a="NIKE",
             ocr_text_b="NIKE",
         )
-        assert score == 0.55
+        assert score == 1.0
 
-    def test_ocr_disagreement_caps_moderate_neural_visual(self):
+    def test_ocr_disagreement_does_not_cap_or_drag_neural_visual(self):
         score, breakdown = _calculate_visual_breakdown(
             clip_sim=0.7310,
             dinov2_sim=0.9053,
@@ -166,9 +168,12 @@ class TestCalculateVisualSimilarity:
             ocr_text_b="Qorvital",
         )
 
-        assert score <= 0.69
+        expected_neural = (0.7310 * 0.45 + 0.9053 * 0.35) / (0.45 + 0.35)
+        assert abs(score - expected_neural) < 0.001
         assert breakdown["ocr_disagreement"] is True
-        assert "ocr_disagreement_cap:0.69" in breakdown["caps_applied"]
+        assert breakdown["ocr_policy"] == "support_only"
+        assert breakdown["cap_applied"] is None
+        assert breakdown["caps_applied"] == []
 
     def test_very_strong_clip_and_dino_can_survive_ocr_disagreement(self):
         score, breakdown = _calculate_visual_breakdown(
@@ -180,7 +185,359 @@ class TestCalculateVisualSimilarity:
 
         assert score >= 0.80
         assert breakdown["very_strong_visual_components"] is True
-        assert "ocr_disagreement_cap:0.69" not in breakdown["caps_applied"]
+        assert breakdown["caps_applied"] == []
+
+    def test_exact_neural_image_is_not_pulled_down_by_noisy_ocr(self):
+        score, breakdown = _calculate_visual_breakdown(
+            clip_sim=1.0,
+            dinov2_sim=1.0,
+            ocr_text_a="7 sekil 2025/158936",
+            ocr_text_b="0",
+        )
+
+        assert score == 1.0
+        assert breakdown["ocr_disagreement"] is True
+        assert breakdown["weighted_total_with_ocr"] < 1.0
+        assert breakdown["neural_total_without_ocr"] == 1.0
+        assert breakdown["caps_applied"] == []
+
+
+class TestPlainTextWordmarkVisualGuard:
+    """Plain text on blank logo canvases should defer to trademark text."""
+
+    @staticmethod
+    def _plain_profile():
+        return {
+            "kind": "plain_text_wordmark",
+            "is_plain_text_wordmark": True,
+            "confidence": 0.92,
+            "reason": "blank_background_text_geometry",
+            "metrics": {"foreground_ratio": 0.04},
+        }
+
+    @staticmethod
+    def _graphic_profile():
+        return {
+            "kind": "graphic_or_mixed",
+            "is_plain_text_wordmark": False,
+            "confidence": 0.12,
+            "reason": "visual_geometry_not_plain_text",
+            "metrics": {"foreground_ratio": 0.28},
+        }
+
+    def test_profile_detects_text_geometry_on_blank_background(self):
+        profile = _classify_logo_profile_from_metrics(
+            {
+                "uniform_background_ratio": 1.0,
+                "border_std": 0.0,
+                "foreground_ratio": 0.05,
+                "bbox_width_ratio": 0.82,
+                "bbox_height_ratio": 0.18,
+                "bbox_area_ratio": 0.15,
+                "occupied_row_ratio": 0.18,
+                "occupied_col_ratio": 0.64,
+                "horizontal_band_count": 1,
+                "has_ocr_text": True,
+            }
+        )
+
+        assert profile["kind"] == "plain_text_wordmark", profile
+        assert profile["is_plain_text_wordmark"] is True
+        assert profile["metrics"]["foreground_ratio"] < 0.16
+
+    def test_profile_does_not_flag_graphic_geometry_as_plain_text(self):
+        profile = _classify_logo_profile_from_metrics(
+            {
+                "uniform_background_ratio": 0.40,
+                "border_std": 54.0,
+                "foreground_ratio": 0.28,
+                "bbox_width_ratio": 0.90,
+                "bbox_height_ratio": 0.88,
+                "bbox_area_ratio": 0.79,
+                "occupied_row_ratio": 0.70,
+                "occupied_col_ratio": 0.66,
+                "horizontal_band_count": 6,
+                "has_ocr_text": False,
+            }
+        )
+
+        assert profile["kind"] != "plain_text_wordmark"
+        assert profile["is_plain_text_wordmark"] is False
+
+    def test_missing_logo_profile_path_is_unknown(self):
+        profile = build_logo_image_profile("missing/logo.png", "Text")
+
+        assert profile["kind"] == "unknown"
+        assert profile["reason"] == "image_not_found"
+
+    def test_unrelated_plain_text_wordmarks_cap_neural_visual(self):
+        visual_score, visual_breakdown = _calculate_visual_breakdown(
+            clip_sim=0.84,
+            dinov2_sim=0.88,
+            ocr_text_a="Okur Gunlugu",
+            ocr_text_b="Longevity Kutuphanesi",
+            logo_profile_a=self._plain_profile(),
+            logo_profile_b=self._plain_profile(),
+        )
+
+        result = score_pair(
+            "okur gunlugu",
+            "longevity kutuphanesi",
+            visual_sim=visual_score,
+            visual_breakdown=visual_breakdown,
+        )
+
+        guard = result["visual_breakdown"]["plain_text_wordmark_visual_guard"]
+        assert guard["applies"] is True
+        assert result["visual_similarity"] <= 0.45
+        assert result["total"] < 0.70
+
+    def test_matching_plain_text_wordmarks_are_not_capped(self):
+        visual_score, visual_breakdown = _calculate_visual_breakdown(
+            clip_sim=0.84,
+            dinov2_sim=0.88,
+            ocr_text_a="Okur Gunlugu",
+            ocr_text_b="Okur Gunlugu",
+            logo_profile_a=self._plain_profile(),
+            logo_profile_b=self._plain_profile(),
+        )
+
+        result = score_pair(
+            "okur gunlugu",
+            "okur gunlugu",
+            visual_sim=visual_score,
+            visual_breakdown=visual_breakdown,
+        )
+
+        guard = result["visual_breakdown"]["plain_text_wordmark_visual_guard"]
+        assert guard["applies"] is False
+        assert result["visual_similarity"] == visual_score
+        assert result["total"] == 1.0
+
+    def test_graphic_exact_neural_match_stays_independent_of_ocr_text(self):
+        visual_score, visual_breakdown = _calculate_visual_breakdown(
+            clip_sim=1.0,
+            dinov2_sim=1.0,
+            ocr_text_a="7 sekil 2025 158936",
+            ocr_text_b="0",
+            logo_profile_a=self._graphic_profile(),
+            logo_profile_b=self._graphic_profile(),
+        )
+
+        result = score_pair(
+            "alpha",
+            "omega",
+            visual_sim=visual_score,
+            visual_breakdown=visual_breakdown,
+        )
+
+        guard = result["visual_breakdown"]["plain_text_wordmark_visual_guard"]
+        assert guard["applies"] is False
+        assert result["visual_similarity"] == 1.0
+
+    def test_image_only_plain_text_wordmark_disagreement_is_capped(self):
+        visual_score, visual_breakdown = _calculate_visual_breakdown(
+            clip_sim=0.84,
+            dinov2_sim=0.88,
+            ocr_text_a="Okur Gunlugu",
+            ocr_text_b="Longevity Kutuphanesi",
+            logo_profile_a=self._plain_profile(),
+            logo_profile_b=self._plain_profile(),
+        )
+
+        result = score_pair(
+            "",
+            "longevity kutuphanesi",
+            visual_sim=visual_score,
+            visual_breakdown=visual_breakdown,
+        )
+
+        guard = result["visual_breakdown"]["plain_text_wordmark_visual_guard"]
+        assert guard["applies"] is True
+        assert result["visual_similarity"] <= 0.45
+        assert result["total"] <= 0.45
+
+    def test_plain_text_wordmark_ocr_match_drives_visual_not_text(self):
+        visual_score, visual_breakdown = _calculate_visual_breakdown(
+            clip_sim=0.55,
+            dinov2_sim=0.55,
+            ocr_text_a="Patremontana",
+            ocr_text_b="PATREMONTANA BERLIN",
+            logo_profile_a=self._plain_profile(),
+            logo_profile_b=self._plain_profile(),
+        )
+
+        image_only = score_pair(
+            "",
+            "patremontana berlin",
+            visual_sim=visual_score,
+            visual_breakdown=visual_breakdown,
+        )
+
+        assert image_only["scoring_path"] == "IMAGE_ONLY"
+        assert image_only["text_similarity"] == 0.0
+        assert image_only["path_a_score"] == 0.0
+        assert image_only["total"] >= 0.78
+        assert image_only["visual_breakdown"]["components"]["ocr"] >= 0.78
+        assert image_only["visual_breakdown"]["wordmark_ocr_visual_driver"]["applies"] is True
+
+    def test_plain_text_wordmark_ocr_does_not_promote_against_candidate_name(self):
+        visual_score, visual_breakdown = _calculate_visual_breakdown(
+            clip_sim=0.55,
+            dinov2_sim=0.55,
+            ocr_text_a="Patremontana",
+            ocr_text_b="",
+            logo_profile_a=self._plain_profile(),
+            logo_profile_b=self._plain_profile(),
+        )
+
+        image_only = score_pair(
+            "",
+            "patremontana berlin",
+            visual_sim=visual_score,
+            visual_breakdown=visual_breakdown,
+        )
+
+        assert image_only["scoring_path"] == "IMAGE_ONLY"
+        assert image_only["text_similarity"] == 0.0
+        assert image_only["translation_similarity"] == 0.0
+        assert image_only["total"] <= visual_score
+        assert image_only["total"] < 0.70
+
+    def test_image_only_moderate_graphic_visual_is_calibrated_below_high(self):
+        visual_score, visual_breakdown = _calculate_visual_breakdown(
+            clip_sim=0.6931,
+            dinov2_sim=0.8097,
+            ocr_text_a="e mh tekstil",
+            ocr_text_b="agkin makina",
+            logo_profile_a=self._graphic_profile(),
+            logo_profile_b=self._graphic_profile(),
+        )
+
+        result = score_pair(
+            "",
+            "candidate graphic mark",
+            visual_sim=visual_score,
+            visual_breakdown=visual_breakdown,
+        )
+
+        guard = result["visual_breakdown"]["image_only_visual_quality_guard"]
+        assert guard["applies"] is True
+        assert result["visual_similarity"] < visual_score
+        assert result["total"] < 0.70
+        assert result["text_visual_guard"]["image_only_visual_quality_guard_active"] is True
+
+    def test_image_only_layout_variant_graphic_visual_escapes_moderate_cap(self):
+        visual_score, visual_breakdown = _calculate_visual_breakdown(
+            clip_sim=0.7458,
+            dinov2_sim=0.8494,
+            ocr_text_a="koala",
+            ocr_text_b="woala",
+            logo_profile_a=self._graphic_profile(),
+            logo_profile_b=self._graphic_profile(),
+        )
+
+        result = score_pair(
+            "",
+            "candidate graphic mark",
+            visual_sim=visual_score,
+            visual_breakdown=visual_breakdown,
+        )
+
+        guard = result["visual_breakdown"]["image_only_visual_quality_guard"]
+        assert guard["layout_variant_same_logo"] is True
+        assert guard["layout_variant_mode"] == "strict"
+        assert guard["reason"] == "layout_variant_visual_corroboration"
+        assert guard["applies"] is False
+        assert 0.78 <= result["total"] <= 0.82
+
+    def test_image_only_balanced_layout_variant_escapes_moderate_cap(self):
+        visual_score, visual_breakdown = _calculate_visual_breakdown(
+            clip_sim=0.7458,
+            dinov2_sim=0.8173,
+            ocr_text_a="m@-ala",
+            ocr_text_b="WA-ALE",
+            logo_profile_a=self._graphic_profile(),
+            logo_profile_b=self._graphic_profile(),
+        )
+
+        result = score_pair(
+            "",
+            "candidate graphic mark",
+            visual_sim=visual_score,
+            visual_breakdown=visual_breakdown,
+        )
+
+        guard = result["visual_breakdown"]["image_only_visual_quality_guard"]
+        assert guard["layout_variant_same_logo"] is True
+        assert guard["layout_variant_mode"] == "balanced"
+        assert guard["reason"] == "layout_variant_visual_corroboration"
+        assert guard["applies"] is False
+        assert 0.76 <= result["total"] <= 0.80
+
+    def test_image_only_near_duplicate_graphic_visual_stays_high(self):
+        visual_score, visual_breakdown = _calculate_visual_breakdown(
+            clip_sim=0.96,
+            dinov2_sim=0.94,
+            ocr_text_a="noisy read",
+            ocr_text_b="different noise",
+            logo_profile_a=self._graphic_profile(),
+            logo_profile_b=self._graphic_profile(),
+        )
+
+        result = score_pair(
+            "",
+            "candidate graphic mark",
+            visual_sim=visual_score,
+            visual_breakdown=visual_breakdown,
+        )
+
+        guard = result["visual_breakdown"]["image_only_visual_quality_guard"]
+        assert guard["applies"] is False
+        assert guard["near_duplicate_neural_match"] is True
+        assert result["total"] == visual_score
+
+    def test_ocr_heavy_image_only_match_does_not_trigger_layout_variant(self):
+        visual_score, visual_breakdown = _calculate_visual_breakdown(
+            clip_sim=0.20,
+            dinov2_sim=0.30,
+            ocr_text_a="same logo words",
+            ocr_text_b="same logo words",
+            logo_profile_a=self._graphic_profile(),
+            logo_profile_b=self._graphic_profile(),
+        )
+
+        result = score_pair(
+            "",
+            "candidate graphic mark",
+            visual_sim=visual_score,
+            visual_breakdown=visual_breakdown,
+        )
+
+        guard = result["visual_breakdown"]["image_only_visual_quality_guard"]
+        assert guard["layout_variant_same_logo"] is False
+        assert guard["layout_variant_mode"] is None
+        assert guard["reason"] != "layout_variant_visual_corroboration"
+
+    def test_typed_text_with_moderate_graphic_visual_is_not_image_only_capped(self):
+        TestIDFWaterfall._seed_distinctive_tokens("alpha", "beta")
+        visual_score, visual_breakdown = _calculate_visual_breakdown(
+            clip_sim=0.6931,
+            dinov2_sim=0.8097,
+            ocr_text_a="e mh tekstil",
+            ocr_text_b="agkin makina",
+            logo_profile_a=self._graphic_profile(),
+            logo_profile_b=self._graphic_profile(),
+        )
+
+        result = score_pair(
+            "alpha",
+            "beta",
+            visual_sim=visual_score,
+            visual_breakdown=visual_breakdown,
+        )
+
+        assert "image_only_visual_quality_guard" not in result["visual_breakdown"]
 
 
 # ============================================================
@@ -610,7 +967,15 @@ class TestIDFWaterfall:
         # "nike" fuzzy-matches "nikea" (≥0.75), others don't match
         # IDF-weighted coverage: 1/3 distinctive words matched → ~0.30 (harmonic of 1/3 × 1/3)
         assert score >= 0.25
-        assert "TEXT_FUZZY" in breakdown["scoring_path"] or "TEXT_CHAR_SUPPORT" in breakdown["scoring_path"]
+        assert breakdown["scoring_path"] in {
+            "TEXT_FUZZY_ALIGNMENT",
+            "TEXT_CHAR_SUPPORT",
+            "TEXT_SHORT_NON_EXACT_ANCHOR_ADDED_MATTER",
+        }
+        if breakdown["scoring_path"] == "TEXT_SHORT_NON_EXACT_ANCHOR_ADDED_MATTER":
+            assert "short_non_exact_anchor_added_matter_cap:0.58" in (
+                breakdown["caps_applied"]
+            )
 
     def test_tier_6_semi_generic_safeguard(self):
         """Only semi-generic words match → low score."""
@@ -1548,6 +1913,19 @@ class TestRiskEngineSqlNormalization:
         assert "nice_class_numbers && %s::integer[]" in source
         assert source.count("apply_common_filters(") >= 8
 
+    def test_semantic_retrieval_requires_real_trademark_text(self):
+        import risk_engine
+
+        prescreen_source = inspect.getsource(risk_engine.RiskEngine.pre_screen_candidates)
+        hybrid_source = inspect.getsource(risk_engine.RiskEngine.calculate_hybrid_risk)
+
+        assert "WHERE text_embedding IS NOT NULL" in prescreen_source
+        assert "NULLIF(BTRIM(name), '')" in prescreen_source
+        assert "NULLIF(BTRIM(name_tr), '')" in prescreen_source
+        assert "ELSE 0.0" in hybrid_source
+        assert "NULLIF(BTRIM(t.name), '')" in hybrid_source
+        assert "NULLIF(BTRIM(t.name_tr), '')" in hybrid_source
+
     def test_retrieval_metadata_merges_sources_for_same_candidate(self):
         import risk_engine
 
@@ -2358,7 +2736,149 @@ class TestRegressionKnownPairs:
         assert guard["applies"] is True
         assert guard["match_type"] == "phonetic"
 
-    def test_short_non_exact_anchor_with_ocr_disagreement_gets_no_visual_boost(self):
+    @pytest.mark.parametrize(
+        "candidate",
+        [
+            "bor satir sucuğu",
+            "tamser kompresör satış & servis",
+            "satır lahmacun & pide salonu",
+            "hazırlar otomotiv araç alım satım",
+        ],
+    )
+    def test_short_non_exact_anchor_added_matter_is_capped_bidirectionally(
+        self,
+        candidate,
+    ):
+        TestIDFWaterfall._seed_distinctive_tokens(
+            "sati",
+            "satir",
+            "satis",
+            "satim",
+            "bor",
+            "sucugu",
+            "tamser",
+            "kompresor",
+            "servis",
+            "lahmacun",
+            "pide",
+            "salonu",
+            "hazirlar",
+            "otomotiv",
+            "arac",
+            "alim",
+        )
+
+        for query, target in (("sati", candidate), (candidate, "sati")):
+            result = score_pair(
+                query,
+                target,
+                text_sim=0.0,
+                semantic_sim=0.0,
+                phonetic_sim=0.0,
+                visual_sim=0.0,
+            )
+
+            assert result["total"] <= 0.58
+            assert "short_non_exact_anchor_added_matter_cap:0.58" in (
+                result["caps_applied"]
+            )
+            guard = result["short_non_exact_anchor_added_matter_guard"]
+            assert guard["applies"] is True
+            assert guard["matched_anchor"]["match_type"] in {"fuzzy", "phonetic"}
+
+    def test_exact_short_anchor_with_added_matter_scores_low_very_high(self):
+        TestIDFWaterfall._seed_distinctive_tokens("sati", "les", "cafes")
+
+        result = score_pair(
+            "sati",
+            "les cafés sati",
+            text_sim=0.0,
+            semantic_sim=0.0,
+            phonetic_sim=0.0,
+            visual_sim=0.0,
+        )
+
+        assert 0.80 <= result["total"] <= 0.84
+        assert "added_matter_single_short_anchor_distinctive_extra_cap:0.84" in (
+            result["caps_applied"]
+        )
+        assert result["short_non_exact_anchor_added_matter_guard"]["applies"] is False
+        assert any(
+            match["query_word"] == "sati" and match["match_type"] == "exact"
+            for match in result["matched_words"]
+        )
+
+    def test_short_non_exact_anchor_added_matter_blocks_moderate_visual_boost(self):
+        TestIDFWaterfall._seed_distinctive_tokens(
+            "sati",
+            "satis",
+            "tamser",
+            "kompresor",
+            "servis",
+        )
+        visual_breakdown = {
+            "total": 0.76,
+            "active_components": ["clip", "dinov2", "ocr"],
+            "components": {"clip": 0.78, "dinov2": 0.74, "ocr": 0.30},
+            "ocr_disagreement": True,
+            "ocr_strong_match": False,
+            "very_strong_visual_components": False,
+        }
+
+        result = score_pair(
+            "sati",
+            "tamser kompresör satış & servis",
+            text_sim=0.0,
+            semantic_sim=0.0,
+            phonetic_sim=0.0,
+            visual_sim=0.76,
+            visual_breakdown=visual_breakdown,
+        )
+
+        assert result["total"] <= 0.58
+        assert result["text_visual_guard"][
+            "short_non_exact_anchor_added_matter_visual_guard_active"
+        ] is True
+        assert "short_non_exact_anchor_added_matter_visual_cap:0.58" in (
+            result["caps_applied"]
+        )
+
+    def test_short_non_exact_anchor_added_matter_allows_independent_strong_visual(self):
+        TestIDFWaterfall._seed_distinctive_tokens(
+            "sati",
+            "satis",
+            "tamser",
+            "kompresor",
+            "servis",
+        )
+        visual_breakdown = {
+            "total": 0.94,
+            "active_components": ["clip", "dinov2", "ocr"],
+            "components": {"clip": 0.94, "dinov2": 0.93, "ocr": 0.30},
+            "ocr_disagreement": True,
+            "ocr_strong_match": False,
+            "very_strong_visual_components": True,
+        }
+
+        result = score_pair(
+            "sati",
+            "tamser kompresör satış & servis",
+            text_sim=0.0,
+            semantic_sim=0.0,
+            phonetic_sim=0.0,
+            visual_sim=0.94,
+            visual_breakdown=visual_breakdown,
+        )
+
+        assert result["total"] > 0.58
+        assert result["text_visual_guard"][
+            "short_non_exact_anchor_added_matter_visual_guard_active"
+        ] is False
+        assert "short_non_exact_anchor_added_matter_visual_cap:0.58" not in (
+            result["caps_applied"]
+        )
+
+    def test_short_non_exact_anchor_ocr_disagreement_does_not_suppress_visual_boost(self):
         TestIDFWaterfall._seed_distinctive_tokens("nayya", "naya")
         visual_breakdown = {
             "total": 0.48,
@@ -2378,10 +2898,10 @@ class TestRegressionKnownPairs:
             visual_breakdown=visual_breakdown,
         )
 
-        assert result["total"] == result["text_idf_score"]
+        assert result["total"] > result["text_idf_score"]
         guard = result["text_visual_guard"]["short_non_exact_anchor_visual_guard"]
-        assert guard["applies"] is True
-        assert result["text_visual_guard"]["agreement_boost_suppressed"] is True
+        assert guard["applies"] is False
+        assert result["text_visual_guard"]["agreement_boost_suppressed"] is False
 
     def test_no_anchor_empty_target_text_uses_weak_visual_cap(self):
         TestIDFWaterfall._seed_distinctive_tokens("luseva")
@@ -2592,7 +3112,7 @@ class TestRegressionKnownPairs:
         assert result["total"] <= 0.45
         assert "semantic_or_phonetic_without_lexical_anchor_cap:0.45" in result["caps_applied"]
 
-    def test_ocr_disagreement_pair_stays_below_high_when_text_is_weak(self):
+    def test_ocr_disagreement_pair_uses_general_weak_text_visual_cap(self):
         TestIDFWaterfall._seed_distinctive_tokens("oksipital", "qorvital")
         visual_score, visual_breakdown = _calculate_visual_breakdown(
             clip_sim=0.7310,
@@ -2610,8 +3130,10 @@ class TestRegressionKnownPairs:
             visual_breakdown=visual_breakdown,
         )
 
-        assert result["total"] <= 0.45
+        assert result["total"] < 0.69
         assert result["visual_breakdown"]["ocr_disagreement"] is True
+        assert result["visual_breakdown"]["caps_applied"] == []
+        assert result["text_visual_guard"]["weak_text_cap_active"] is True
 
     def test_short_anchor_non_exact_phonetic_is_blocked(self):
         TestIDFWaterfall._seed_distinctive_tokens("gk", "gok", "gky")
@@ -2703,13 +3225,21 @@ class TestRegressionKnownPairs:
 
     def test_search_and_watchlist_pass_visual_breakdown_to_score_pair(self):
         import risk_engine
+        import services.search_service as search_service
         import watchlist.scanner as scanner
 
         search_source = inspect.getsource(risk_engine.RiskEngine.calculate_hybrid_risk)
+        assess_source = inspect.getsource(risk_engine.RiskEngine.assess_brand_risk)
+        image_search_source = inspect.getsource(search_service.run_image_search)
         watchlist_source = inspect.getsource(scanner.WatchlistScanner._check_conflict)
 
+        assert "derive_ocr_scoring_query" not in assess_source
+        assert "query_scoring_context" not in assess_source
         assert "_calculate_visual_breakdown" in search_source
         assert "visual_breakdown=visual_breakdown" in search_source
+        assert "_calculate_visual_breakdown" in image_search_source
+        assert "visual_breakdown=visual_breakdown" in image_search_source
+        assert "query_name=query_name if has_typed_name else" in image_search_source
         assert "_compute_visual_breakdown" in watchlist_source
         assert "visual_breakdown=visual_breakdown" in watchlist_source
 

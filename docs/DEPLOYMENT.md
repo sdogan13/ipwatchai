@@ -59,7 +59,17 @@ Set at least:
 - `WORKERS=1` unless you have explicitly revalidated multi-worker search stability
 
 AI Studio:
-- set `CREATIVE_GOOGLE_API_KEY` before enabling the AI Studio feature flag
+- set `CREATIVE_DEEPSEEK_API_KEY` in `.env.production` before enabling DeepSeek fallback for text-only risk reports
+- set `CREATIVE_DEEPSEEK_TIMEOUT=120` so full 20-result fallback search risk reports do not fail just because the fallback provider timed out
+- set `CREATIVE_QWEN_API_KEY` or `DASHSCOPE_API_KEY` in `.env.production` before enabling Qwen risk reports
+- set `CREATIVE_QWEN_TEXT_MODEL=qwen-max` for text-only risk reports so they use the strongest text model quota instead of the VL model quota
+- set `CREATIVE_QWEN_VL_MODEL=qwen3-vl-plus` for logo-based risk reports
+- set `CREATIVE_QWEN_TIMEOUT=120` so full logo-based search risk reports do not fall back just because the primary multimodal provider timed out
+- set `CREATIVE_OPENAI_API_KEY` or `OPENAI_API_KEY` in `.env.production` before enabling primary Logo Studio image generation with `gpt-image-2`
+- set `CREATIVE_GOOGLE_API_KEY` in `.env.production` before enabling Name Lab, Gemini fallback for search risk reports, or Logo Studio backup image generation
+- keep `CREATIVE_GEMINI_IMAGE_MODEL=gemini-3-pro-image-preview` for the Logo Studio Nano Banana Pro backup unless you intentionally change Gemini image model tier
+- after pulling this provider change, rebuild the backend image with `docker compose up -d --build backend` so the OpenAI SDK dependency is installed
+- after changing `.env.production`, recreate the backend with `docker compose up -d --force-recreate backend`; restarting an existing container does not apply newly added environment variables
 - `GET /api/v1/tools/status` should report Name Lab and Logo Studio as available before exposing the dashboard tab to users
 
 Start the stack:

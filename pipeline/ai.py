@@ -46,6 +46,7 @@ from torchvision import transforms
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 from utils.model_cache import find_hf_snapshot_dir, find_hf_snapshot_file, find_torch_hub_repo
+from pipeline.ingest_rules import clean_name
 
 # ===================== STRUCTURED LOGGING =====================
 from logging_config import get_logger, setup_logging, log_timing, log_batch_stats
@@ -53,6 +54,42 @@ from logging_config import get_logger, setup_logging, log_timing, log_batch_stat
 # Initialize logging
 setup_logging()
 logger = get_logger(__name__)
+
+_TEXT_EMBEDDING_SOURCE_NAME_KEY = "text_embedding_source_name"
+_TRANSLATION_SOURCE_NAME_KEY = "name_tr_source_name"
+
+
+def _clean_ai_trademark_name(record):
+    return clean_name((record.get("TRADEMARK") or {}).get("NAME"))
+
+
+def _clear_name_derived_ai_features(record, *, clear_text=True, clear_translation=True):
+    if clear_text:
+        record["text_embedding"] = None
+        record[_TEXT_EMBEDDING_SOURCE_NAME_KEY] = None
+    if clear_translation:
+        record["name_tr"] = None
+        record["detected_lang"] = None
+        record["name_tr_backend"] = None
+        record["name_tr_model"] = None
+        record["name_tr_updated_at"] = None
+        record[_TRANSLATION_SOURCE_NAME_KEY] = None
+
+
+def _prepare_name_derived_ai_features(record):
+    cleaned_name = _clean_ai_trademark_name(record)
+    if not cleaned_name:
+        _clear_name_derived_ai_features(record)
+        return None
+
+    raw_name = ((record.get("TRADEMARK") or {}).get("NAME") or "").strip()
+    name_was_cleaned = cleaned_name != " ".join(raw_name.split())
+    if name_was_cleaned:
+        if record.get(_TEXT_EMBEDDING_SOURCE_NAME_KEY) != cleaned_name:
+            _clear_name_derived_ai_features(record, clear_text=True, clear_translation=False)
+        if record.get(_TRANSLATION_SOURCE_NAME_KEY) != cleaned_name:
+            _clear_name_derived_ai_features(record, clear_text=False, clear_translation=True)
+    return cleaned_name
 
 # ===================== CENTRALIZED SETTINGS =====================
 # Try to import from config, fall back to defaults if not available
@@ -763,20 +800,22 @@ def process_folder(folder_path):
     # --- Identify records needing AI processing ---
     records_to_process = []
     for rec in data:
+        cleaned_text_name = _prepare_name_derived_ai_features(rec)
         # Check features for backfill
         has_text = rec.get("text_embedding") is not None
         has_translation = rec.get("name_tr") is not None
         has_lang = rec.get("detected_lang") is not None
+        name_text_done = cleaned_text_name is None or (has_text and has_translation and has_lang)
 
         if has_images:
             has_clip = rec.get("image_embedding") is not None
             has_dino = rec.get("dinov2_embedding") is not None
             has_color = rec.get("color_histogram") is not None
             has_ocr = rec.get("logo_ocr_text") is not None
-            all_done = has_clip and has_dino and has_text and has_color and has_ocr and has_translation and has_lang
+            all_done = has_clip and has_dino and has_color and has_ocr and name_text_done
         else:
             # No images dir: only text features matter
-            all_done = has_text and has_translation and has_lang
+            all_done = name_text_done
 
         if SKIP_IF_PROCESSED and all_done:
             continue
@@ -792,14 +831,15 @@ def process_folder(folder_path):
     # Skip records with null/empty names (logo-only trademarks cleaned by metadata.py)
     records_needing_text = [
         (i, r) for i, r in enumerate(records_to_process)
-        if r.get("text_embedding") is None and r.get("TRADEMARK", {}).get("NAME")
+        if r.get("text_embedding") is None and _clean_ai_trademark_name(r)
     ]
     if records_needing_text:
         text_start = time.perf_counter()
-        names_to_encode = [r.get("TRADEMARK", {}).get("NAME", "") for _, r in records_needing_text]
+        names_to_encode = [_clean_ai_trademark_name(r) or "" for _, r in records_needing_text]
         embeddings = get_text_embeddings_batch_cached(names_to_encode)
         for (orig_idx, r), emb in zip(records_needing_text, embeddings):
             r["text_embedding"] = emb
+            r[_TEXT_EMBEDDING_SOURCE_NAME_KEY] = _clean_ai_trademark_name(r)
         logger.info(
             "Text embeddings processed",
             folder=folder_path.name,
@@ -810,11 +850,11 @@ def process_folder(folder_path):
     # Task 1b: Translate to Turkish only (batched for GPU efficiency)
     records_needing_translation = [
         (i, r) for i, r in enumerate(records_to_process)
-        if (r.get("name_tr") is None or r.get("detected_lang") is None) and r.get("TRADEMARK", {}).get("NAME")
+        if (r.get("name_tr") is None or r.get("detected_lang") is None) and _clean_ai_trademark_name(r)
     ]
     if records_needing_translation:
         trans_start = time.perf_counter()
-        names = [r.get("TRADEMARK", {}).get("NAME", "") for _, r in records_needing_translation]
+        names = [_clean_ai_trademark_name(r) or "" for _, r in records_needing_translation]
         translations = batch_translate_to_turkish(names, backend=PIPELINE_TRANSLATION_BACKEND)
         provenance = get_translation_backend_info(PIPELINE_TRANSLATION_BACKEND)
         translation_timestamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -825,6 +865,7 @@ def process_folder(folder_path):
             r["name_tr_backend"] = provenance["backend"]
             r["name_tr_model"] = provenance["model_name"]
             r["name_tr_updated_at"] = translation_timestamp
+            r[_TRANSLATION_SOURCE_NAME_KEY] = _clean_ai_trademark_name(r)
             trans_count += 1
         logger.info(
             "Translations processed (batched TR)",

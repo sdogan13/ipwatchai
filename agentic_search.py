@@ -173,7 +173,7 @@ class AgenticTrademarkSearch:
     ):
         """
         Args:
-            confidence_threshold: Trigger live search if max score below this
+            confidence_threshold: Trigger Agentic Search if max score below this
             auto_scrape: Enable automatic scraping
             scrape_limit: Max records to scrape
             headless: Run browser in headless mode
@@ -187,13 +187,6 @@ class AgenticTrademarkSearch:
         self._risk_engine = None
         self._scrapper = None
         self._conn = None
-
-        # Track scraped data location
-        self.scraped_data_dir = DATA_ROOT / "APP_LIVE"
-        try:
-            self.scraped_data_dir.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            pass  # Read-only filesystem (e.g. Docker container)
 
     @property
     def conn(self):
@@ -592,15 +585,9 @@ class AgenticTrademarkSearch:
                 else:
                     formatted = results
 
-                # Save to live scrape directory
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                safe_query = "".join(c if c.isalnum() else "_" for c in query)
-                output_file = self.scraped_data_dir / f"live_{safe_query}_{timestamp}.json"
-
-                with open(output_file, 'w', encoding='utf-8') as f:
-                    json.dump(formatted, f, ensure_ascii=False, indent=2)
-
-                logger.info(f"   Saved to: {output_file.name}")
+                save_info = getattr(self.scrapper, "last_save_info", None) or {}
+                if save_info.get("metadata_path"):
+                    logger.info(f"   Saved to: {save_info['folder_name']}/metadata.json")
 
                 # Brief cooldown after scrape to be gentle on TurkPatent
                 time.sleep(2)
@@ -693,22 +680,26 @@ class AgenticTrademarkSearch:
         if not records:
             return 0
 
-        # Create the folder structure expected by pipeline.ingest
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_query = "".join(c if c.isalnum() else "_" for c in query)
-
-        live_folder = self.scraped_data_dir / f"LIVE_{safe_query}_{timestamp}"
-        live_folder.mkdir(parents=True, exist_ok=True)
-
-        metadata_file = live_folder / "metadata.json"
-        with open(metadata_file, 'w', encoding='utf-8') as f:
-            json.dump(records, f, ensure_ascii=False, indent=2)
-
-        # Call pipeline.ingest to process
         try:
-            from pipeline.ingest import process_file_batch
+            from pipeline.ingest import process_records_batch
 
-            process_file_batch(self.conn, metadata_file, force=True)
+            save_info = getattr(self.scrapper, "last_save_info", None) or {}
+            metadata_path = save_info.get("metadata_path")
+            if metadata_path:
+                save_info = self.scrapper.save_to_json(records, target_file=metadata_path)
+
+            folder_name = save_info.get("folder_name")
+            if not folder_name:
+                active_dir = getattr(self.scrapper, "active_data_dir", None)
+                folder_name = active_dir.name if active_dir else "APP_1"
+
+            process_records_batch(
+                self.conn,
+                records,
+                folder_name=folder_name,
+                filename="metadata.json",
+                force=True,
+            )
             self.conn.commit()
             return len(records)
 
@@ -791,6 +782,13 @@ from slowapi.util import get_remote_address
 
 from auth.authentication import CurrentUser, get_current_user
 from database.crud import Database
+from models.schemas import SearchRiskReportClaimRequest, SearchRiskReportRequest, SearchRiskReportResponse
+from services.search_risk_report_service import (
+    RISK_REPORT_IMAGE_MAX_BYTES,
+    claim_pending_search_risk_report_data,
+    generate_pending_search_risk_report_data,
+    generate_search_risk_report_data,
+)
 from utils.settings_manager import get_rate_limit_value
 from utils.feature_flags import is_feature_enabled
 from utils.subscription import (
@@ -861,7 +859,14 @@ def _normalize_search_results(result: dict) -> None:
         r["trademark_name"] = r.get("trademark_name") or r.get("name", "")
         r["nice_classes"] = r.get("nice_classes") or r.get("classes") or []
         r["risk_score"] = scores.get("total") if scores.get("total") is not None else r.get("risk_score", 0)
+        effective_text_score = scores.get("text_idf_score")
+        if effective_text_score is None:
+            effective_text_score = scores.get("text_similarity", 0)
         r["text_similarity"] = round(scores.get("text_similarity", 0), 3)
+        r["text_idf_score"] = round(effective_text_score, 3)
+        r["path_a_score"] = round(scores.get("path_a_score", scores.get("text_similarity", 0)), 3)
+        r["path_b_score"] = round(scores.get("path_b_score", 0), 3)
+        r["scoring_path_source"] = scores.get("scoring_path_source")
         r["visual_similarity"] = round(scores.get("visual_similarity", 0), 3)
         r["translation_similarity"] = round(_display_translation_similarity(r, scores), 3)
         r["phonetic_similarity"] = round(scores.get("phonetic_similarity", 0), 3)
@@ -924,7 +929,7 @@ async def get_search_progress(
 async def cancel_search(
     current_user: CurrentUser = Depends(get_current_user)
 ):
-    """Cancel the current running live search."""
+    """Cancel the current running Agentic Search."""
     user_id = str(current_user.id)
     if _progress_redis:
         try:
@@ -940,7 +945,7 @@ async def get_search_credits(
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """
-    Get current user's live search credit status.
+    Get current user's Agentic Search credit status.
     Returns plan info and remaining credits.
     """
     with Database() as db:
@@ -957,6 +962,84 @@ async def get_search_credits(
             "remaining": max(0, monthly_limit - current_usage),
             "resets_on": datetime.now().strftime('%Y-%m') + "-01",
         }
+
+
+async def _parse_risk_report_request(request: Request):
+    content_type = request.headers.get("content-type", "")
+    query_image_bytes = None
+    query_image_mime = None
+
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        payload_raw = form.get("payload")
+        if not payload_raw or not isinstance(payload_raw, str):
+            raise HTTPException(status_code=422, detail="Missing risk report payload")
+        try:
+            report_request = SearchRiskReportRequest(**json.loads(payload_raw))
+        except Exception as exc:
+            detail = exc.errors() if hasattr(exc, "errors") else "Invalid risk report payload"
+            raise HTTPException(status_code=422, detail=detail) from exc
+
+        query_image = form.get("query_image")
+        if query_image is not None and hasattr(query_image, "read"):
+            query_image_mime = getattr(query_image, "content_type", None) or "application/octet-stream"
+            if not query_image_mime.startswith("image/"):
+                raise HTTPException(status_code=422, detail="Risk report query image must be an image file")
+            query_image_bytes = await query_image.read()
+            if query_image_bytes and len(query_image_bytes) > RISK_REPORT_IMAGE_MAX_BYTES:
+                raise HTTPException(status_code=422, detail="Risk report query image is too large")
+            if query_image_bytes:
+                report_request.image_used = True
+    else:
+        try:
+            report_request = SearchRiskReportRequest(**await request.json())
+        except Exception as exc:
+            detail = exc.errors() if hasattr(exc, "errors") else "Invalid risk report payload"
+            raise HTTPException(status_code=422, detail=detail) from exc
+
+    return report_request, query_image_bytes, query_image_mime
+
+
+@router.post("/risk-report/public", response_model=SearchRiskReportResponse)
+@_search_limiter.limit(lambda: get_rate_limit_value("rate_limit.public_risk_report", "3/minute"))
+async def public_search_risk_report(request: Request):
+    """Generate a claimable landing-page risk report before login."""
+    report_request, query_image_bytes, query_image_mime = await _parse_risk_report_request(request)
+    return await generate_pending_search_risk_report_data(
+        request=report_request,
+        query_image_bytes=query_image_bytes,
+        query_image_mime=query_image_mime,
+    )
+
+
+@router.post("/risk-report/claim")
+@_search_limiter.limit(lambda: get_rate_limit_value("rate_limit.quick_search", "60/minute"))
+async def claim_search_risk_report(
+    request: Request,
+    claim_request: SearchRiskReportClaimRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Attach a landing-page pending risk report to the logged-in account."""
+    return await claim_pending_search_risk_report_data(
+        claim_token=claim_request.claim_token,
+        current_user=current_user,
+    )
+
+
+@router.post("/risk-report", response_model=SearchRiskReportResponse)
+@_search_limiter.limit(lambda: get_rate_limit_value("rate_limit.quick_search", "60/minute"))
+async def search_risk_report(
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Generate an advisory LLM risk report for the visible search results."""
+    report_request, query_image_bytes, query_image_mime = await _parse_risk_report_request(request)
+    return await generate_search_risk_report_data(
+        request=report_request,
+        current_user=current_user,
+        query_image_bytes=query_image_bytes,
+        query_image_mime=query_image_mime,
+    )
 
 
 @router.get("/quick")
@@ -1121,7 +1204,7 @@ async def intelligent_search(
     """
     Intelligent search with automatic live investigation.
 
-    Requires: a plan with live-search access.
+    Requires: a plan with Agentic Search access.
     Deducts 1 credit per live scrape triggered.
 
     If database confidence is below threshold, automatically:
@@ -1133,7 +1216,7 @@ async def intelligent_search(
     Returns:
     - 200: Success with results
     - 402: Monthly limit exceeded
-    - 403: Plan doesn't include live search
+    - 403: Plan doesn't include Agentic Search
     """
     # Feature flag kill switch
     if not is_feature_enabled("live_scraping_enabled"):
@@ -1155,7 +1238,7 @@ async def intelligent_search(
 
     try:
         _uid = str(current_user.id)
-        # Canlı Arama always scrapes TurkPatent for live data
+        # Agentic Search always scrapes TurkPatent for live data
         result = await asyncio.to_thread(
             _run_search_sync,
             confidence_threshold=threshold,
@@ -1214,7 +1297,7 @@ async def intelligent_search_with_image(
     Text query is always required. Image is optional and enhances scoring
     with CLIP + DINOv2 + color histogram + OCR similarity against DB logos.
 
-    Requires: a plan with live-search access for live scraping.
+    Requires: a plan with Agentic Search access for live scraping.
     """
     # Feature flag kill switch
     if not is_feature_enabled("live_scraping_enabled"):
@@ -1246,7 +1329,7 @@ async def intelligent_search_with_image(
             logger.info(f"Image uploaded: {image.filename} ({len(content)} bytes) -> {image_path}")
 
         _uid = str(current_user.id)
-        # Canlı Arama always scrapes TurkPatent for live data
+        # Agentic Search always scrapes TurkPatent for live data
         result = await asyncio.to_thread(
             _run_search_sync,
             confidence_threshold=threshold,
@@ -1301,7 +1384,7 @@ async def post_search(
 ):
     """
     Full search via POST request.
-    If auto_scrape is True, requires a plan with live-search access.
+    If auto_scrape is True, requires a plan with Agentic Search access.
     """
     # If auto_scrape requested, check plan eligibility
     if request.auto_scrape or request.force_scrape:
@@ -1318,7 +1401,7 @@ async def post_search(
 
     try:
         _uid = str(current_user.id)
-        # Canlı Arama always scrapes TurkPatent for live data
+        # Agentic Search always scrapes TurkPatent for live data
         result = await asyncio.to_thread(
             _run_search_sync,
             confidence_threshold=request.confidence_threshold,

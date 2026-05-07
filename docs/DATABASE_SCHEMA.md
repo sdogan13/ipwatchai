@@ -49,8 +49,9 @@ Notes:
 - `trademark_history` is partitioned by date range in the bootstrap schema
 - vector similarity support depends on `pgvector`
 - ingest runtime prerequisites for `processed_files`, `nice_classes_lookup`, `tm_status`, and ingest-owned `trademarks` columns now come from `migrations/ingest_runtime.sql` plus `migrations/run_ingest_runtime_migration.py`, not opportunistic schema mutation during `pipeline/ingest.py` runs
-- ingest owns `trademarks.current_status` and `status_source`; APP source updates preserve an existing BLT/GZ status unless APP supplies explicit recognized non-`Applied` status text
+- ingest owns `trademarks.current_status` and `status_source`; APP source updates preserve existing BLT/GZ status unless APP supplies explicit recognized strong status text or blank status with a valid registration number, and APP Nice-class updates cannot shrink or replace existing classes with the live grid's suspicious six-class list
 - the post-ingest `repair` step can fix known DB data pollution, including APP-applied status downgrades, `sekil`/`şekil` shape descriptors in `trademarks.name` and `trademarks.name_tr`, six-class scraper truncation in `trademarks.nice_class_numbers` when BLT/GZ metadata proves more classes, and batched live TURKPATENT status/class checks tracked in `repair_live_trademark_checks`
+- live status repair may temporarily mark unchecked `Yayında` rows older than 1 year as `Reddedildi` with `status_source='LIVE_PROV'`; these rows stay eligible for the live checker, and original status fields are audited in `repair_live_provisional_status_marks`
 
 ### Multi-Tenant And Auth
 
@@ -76,6 +77,7 @@ Primary monitoring tables:
 - `scan_jobs`
 - `scan_results`
 - `reports`
+- `pending_risk_reports`
 - `notification_queue`
 - `api_usage`
 - `public_search_usage`
@@ -84,7 +86,10 @@ Primary monitoring tables:
 
 Notes:
 - `_mt` tables are the current multi-tenant watchlist/alert surface
-- free/paid limits and report usage depend on organization-linked data
+- `alerts_mt.score_details` stores the full V2 `score_pair()` diagnostic payload for new similarity alerts; legacy scalar score columns remain the compatibility and filtering surface
+- free/paid risk-report limits depend on organization-linked data; authenticated search risk reports consume `api_usage.reports_generated` and save a downloadable PDF row in `reports`, while other downloadable report types are not monthly-limited
+- `pending_risk_reports` stores short-lived anonymous landing-page risk-report PDFs keyed by a hashed claim token; the row is attached to a user's organization and copied into `reports` only after login and quota validation
+- report deletion is organization-scoped; deleting a report removes the `reports` row and cleans the stored file only when that file resolves under the configured `REPORT_DIR`
 - `public_search_usage` tracks anonymous landing-page free-search quota consumption by stable browser client id
 - `education_progress` stores per-user landing-page study progress for PDFs, flashcards, and quiz sections
 

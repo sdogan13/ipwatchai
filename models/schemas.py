@@ -392,6 +392,7 @@ class WatchlistBulkImportResult(BaseModel):
     limit_reached: bool = False
     max_allowed: int = 0
     current_count: int = 0
+    queued_scans: int = 0
 
 
 class PortfolioPreviewRequest(BaseModel):
@@ -442,6 +443,7 @@ class FileUploadResult(BaseModel):
     warnings: List[FileUploadWarning] = []
     skipped_items: List[FileUploadSkippedItem] = []
     error_items: List[FileUploadErrorItem] = []
+    queued_scans: int = 0
 
 
 class MissingColumnInfo(BaseModel):
@@ -529,6 +531,13 @@ class AlertScores(BaseModel):
     visual_similarity: Optional[float]
     translation_similarity: Optional[float] = None
     phonetic_match: bool = False
+    text_idf_score: Optional[float] = None
+    path_a_score: Optional[float] = None
+    path_b_score: Optional[float] = None
+    scoring_path_source: Optional[str] = None
+    decision_reason: Optional[str] = None
+    textual_breakdown: Optional[Dict[str, Any]] = None
+    visual_breakdown: Optional[Dict[str, Any]] = None
 
 
 class AlertResponse(BaseModel):
@@ -669,6 +678,99 @@ class RiskAnalysisResponse(BaseModel):
     top_candidates: List[Dict[str, Any]]
     source: str
     job_id: Optional[str] = None
+
+
+class SearchRiskReportCandidateInput(BaseModel):
+    """Visible search result sent for advisory LLM risk reporting."""
+    name: str = Field(..., min_length=1, max_length=300)
+    application_no: Optional[str] = Field(None, max_length=80)
+    status: Optional[str] = Field(None, max_length=120)
+    status_code: Optional[str] = Field(None, max_length=80)
+    nice_classes: List[int] = Field(default_factory=list)
+    owner: Optional[str] = Field(None, max_length=300)
+    attorney: Optional[str] = Field(None, max_length=300)
+    image_url: Optional[str] = Field(None, max_length=500)
+    deterministic_score: Optional[float] = Field(None, ge=0.0, le=1.0)
+    text_similarity: Optional[float] = Field(None, ge=0.0, le=1.0)
+    visual_similarity: Optional[float] = Field(None, ge=0.0, le=1.0)
+    phonetic_similarity: Optional[float] = Field(None, ge=0.0, le=1.0)
+    translation_similarity: Optional[float] = Field(None, ge=0.0, le=1.0)
+    scores: Optional[Dict[str, Any]] = None
+
+    @validator("nice_classes", pre=True, always=True)
+    def validate_nice_classes(cls, value):
+        if not value:
+            return []
+        cleaned = []
+        for item in value:
+            try:
+                class_no = int(item)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= class_no <= 45 and class_no not in cleaned:
+                cleaned.append(class_no)
+        return cleaned
+
+
+class SearchRiskReportRequest(BaseModel):
+    """Request to generate an advisory LLM risk report for visible results."""
+    query: str = Field(default="", max_length=300)
+    selected_classes: List[int] = Field(default_factory=list)
+    language: Literal["tr", "en", "ar"] = "tr"
+    image_used: bool = False
+    results: List[SearchRiskReportCandidateInput] = Field(..., min_length=1, max_length=20)
+
+    @validator("selected_classes", pre=True, always=True)
+    def validate_selected_classes(cls, value):
+        if not value:
+            return []
+        cleaned = []
+        for item in value:
+            try:
+                class_no = int(item)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= class_no <= 45 and class_no not in cleaned:
+                cleaned.append(class_no)
+        return cleaned
+
+
+class SearchRiskReportCandidate(BaseModel):
+    """Advisory LLM risk assessment for one visible result."""
+    input_index: int = Field(..., ge=1, le=20)
+    name: str
+    application_no: Optional[str] = None
+    image_url: Optional[str] = Field(None, max_length=500)
+    llm_risk_score: float = Field(..., ge=0.0, le=100.0)
+    risk_level: Literal["critical", "high", "medium", "low"]
+    reasons: List[str] = Field(default_factory=list)
+    key_factors: List[str] = Field(default_factory=list)
+    uncertainty: Literal["low", "medium", "high"] = "medium"
+
+
+class SearchRiskReportResponse(BaseModel):
+    """Validated advisory risk report returned to the dashboard."""
+    query: str
+    selected_classes: List[int]
+    image_used: bool
+    summary: str
+    overall_risk_score: float = Field(..., ge=0.0, le=100.0)
+    highest_risk_application_no: Optional[str] = None
+    results: List[SearchRiskReportCandidate]
+    model: str
+    generated_at: datetime
+    report_usage: Optional[Dict[str, Any]] = None
+    report_id: Optional[str] = None
+    report_download_url: Optional[str] = None
+    claim_token: Optional[str] = None
+    claim_expires_at: Optional[datetime] = None
+    is_pending: bool = False
+    credits_remaining: Optional[Dict[str, Any]] = None
+
+
+class SearchRiskReportClaimRequest(BaseModel):
+    """Request to attach a landing-page pending risk report to the logged-in user."""
+    claim_token: str = Field(..., min_length=24, max_length=256)
 
 
 class SearchHistoryResponse(BaseModel):
@@ -930,7 +1032,9 @@ class NameSuggestionRequest(BaseModel):
 class SafeNameResult(BaseModel):
     """A single validated name suggestion with risk assessment"""
     name: str
-    risk_score: float                           # 0-100, from risk_engine
+    risk_score: float                           # 0-100 effective displayed risk score
+    llm_risk_score: Optional[float] = None      # score-only AI Studio risk-report score (0-100)
+    risk_source: Optional[str] = None           # risk_report_llm/hard_block
     text_similarity: float                      # vs closest existing trademark
     semantic_similarity: float
     phonetic_match: bool                        # double metaphone collision
@@ -958,7 +1062,7 @@ class LogoGenerationRequest(BaseModel):
     """Request for AI-powered logo generation"""
     brand_name: str = Field(..., min_length=1, max_length=200, description="Text to render in the logo")
     description: str = Field(default="", max_length=500, description="Visual description / style guide")
-    style: Literal["modern", "classic", "minimal", "bold", "playful"] = Field(default="modern", description="Logo style")
+    style: Optional[Literal["modern", "classic", "bold", "playful"]] = Field(default=None, description="Logo style. When omitted on first-gen, the server fans out one candidate per canonical style. Revisions read the parent's style automatically.")
     nice_classes: List[int] = Field(default=[], description="Nice classes for targeted similarity search")
     color_preferences: str = Field(default="", max_length=200, description="Color preferences, e.g. 'blue and white'")
     project_id: Optional[str] = Field(default=None, description="Existing Logo Studio project/thread id for revisions")
@@ -976,16 +1080,18 @@ class LogoResult(BaseModel):
     """A single generated logo with visual similarity audit"""
     image_id: str                                       # UUID from generated_images table
     image_url: str                                      # URL to serve the generated image
-    similarity_score: float                             # max similarity vs existing trademarks (0-100)
+    similarity_score: float                             # backward-compatible overall risk vs existing trademarks (0-100)
+    llm_risk_score: Optional[float] = None              # score-only AI Studio risk-report score (0-100)
+    risk_source: Optional[str] = None                   # risk_report_llm
     closest_match_name: Optional[str] = None            # name of most similar existing trademark
     closest_match_image_url: Optional[str] = None       # image URL of the closest match
     is_safe: bool                                       # True if similarity < 70% threshold
-    visual_breakdown: Optional[Dict[str, Any]] = None   # {"clip": 0.45, "dino": 0.38, "ocr": 0.0, ...}
     project_id: Optional[str] = None
     parent_image_id: Optional[str] = None
     variant_index: Optional[int] = None
     generation_kind: str = "INITIAL"
     revision_prompt: Optional[str] = None
+    style: Optional[str] = None                         # canonical style this candidate represents
     audit_status: str = "completed"                     # pending/running/completed/failed
     audit_error: Optional[str] = None
     audited_at: Optional[datetime] = None
