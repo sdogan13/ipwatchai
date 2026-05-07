@@ -1007,14 +1007,14 @@ def test_pipeline_ingest_root_uses_local_project_boundary_and_env_overrides():
                 "pipeline.ingest",
                 "pipeline.ingest_runtime",
                 "pipeline.ingest_bootstrap",
-                "pipeline.ingest_legacy",
+                "pipeline.ingest_helpers",
                 "pipeline.ingest_rules",
                 "pipeline",
             ):
                 sys.modules.pop(name, None)
             return importlib.import_module("pipeline.ingest")
 
-        # ingest_legacy calls load_dotenv() which fills missing vars from .env.
+        # ingest_helpers calls load_dotenv() which fills missing vars from .env.
         # Use "" (empty) instead of pop so dotenv treats them as already set
         # but the falsy check in default_ingest_root() still falls through.
         os.environ["PIPELINE_BULLETINS_ROOT"] = ""

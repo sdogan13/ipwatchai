@@ -103,36 +103,9 @@ window.AppComponents.renderLogoCard = function(logo) {
             : '<span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style="' + window.AppComponents.getScoreColor(90) + '">&#x26a0; ' + t('studio.risk_exists') + '</span>';
     }
 
-    var closestMatchName = logo.closest_match_name;
-    var closestMatchUrl = logo.closest_match_image_url;
-    var closestSubtitle = t('studio.relevant_existing_mark');
-
-    var closestHtml = '';
-    if (auditDone && closestMatchName) {
-        closestHtml = '<div class="text-xs mt-1" style="color:var(--color-text-muted)">'
-            + t('studio.closest_label') + ' <span class="font-medium" style="color:var(--color-text-secondary)">' + escapeHtml(closestMatchName) + '</span>'
-            + '</div>';
-
-        // Show the closest match's logo image alongside the name. Render the
-        // panel in red-warning styling for unsafe candidates and in neutral
-        // styling for safe ones (still informational, not alarming).
-        if (closestMatchUrl) {
-            var matchUrl = closestMatchUrl;
-            var matchName = (closestMatchName || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-            var panelBg = isSafe ? 'var(--color-bg-muted)' : 'var(--color-risk-critical-bg)';
-            var panelBorder = isSafe ? 'var(--color-border)' : 'var(--color-risk-critical-border)';
-            var labelColor = isSafe ? 'var(--color-text-muted)' : 'var(--color-risk-critical-text)';
-            var hoverRing = isSafe ? 'hover:ring-indigo-200' : 'hover:ring-red-300';
-            closestHtml += '<div class="mt-2 flex items-center gap-2 rounded-lg p-2" style="background:' + panelBg + ';border:1px solid ' + panelBorder + '">'
-                + '<img src="' + matchUrl + '" alt="' + closestSubtitle + '" '
-                + 'class="w-10 h-10 object-contain rounded cursor-pointer hover:ring-2 ' + hoverRing + ' transition" '
-                + 'style="background:var(--color-bg-card);border:1px solid ' + panelBorder + '" '
-                + 'onclick="window.dispatchEvent(new CustomEvent(\'open-lightbox\', { detail: { src: \'' + matchUrl.replace(/'/g, "\\'") + '\', title: \'' + matchName + '\', subtitle: \'' + closestSubtitle.replace(/'/g, "\\'") + '\' } }))" '
-                + 'onerror="this.style.display=\'none\'">'
-                + '<span class="text-xs" style="color:' + labelColor + '">' + closestSubtitle + '</span>'
-                + '</div>';
-        }
-    }
+    // Closest-match name + image are intentionally not rendered on the card
+    // body — only the similarity / risk score is kept at a glance. The full
+    // closest-match info is still available in the expanded logo detail panel.
 
     var imgUrl = logo.image_url || '';
     var imgPlaceholderId = 'logo-img-' + logo.image_id;
@@ -180,7 +153,6 @@ window.AppComponents.renderLogoCard = function(logo) {
         + '<div class="flex items-center gap-1.5 flex-wrap">' + safetyBadge + styleBadge + '</div>'
         + scoreHtml
         + '</div>'
-        + closestHtml
         // Actions
         + '<div class="studio-logo-actions">'
         + actions

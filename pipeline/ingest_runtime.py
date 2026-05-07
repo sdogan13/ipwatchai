@@ -14,7 +14,7 @@ from psycopg2.extras import Json, execute_values
 
 from db.pool import close_pool, get_connection, release_connection
 from pipeline import ingest_bootstrap as _bootstrap
-from pipeline import ingest_legacy as _legacy
+from pipeline import ingest_helpers as _helpers
 from pipeline import ingest_rules as _rules
 from utils.deadline import calculate_appeal_deadline
 
@@ -22,18 +22,18 @@ ROOT_DIR = _bootstrap.default_ingest_root()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-sanitize = _legacy.sanitize
-_trunc = _legacy._trunc
-embedding_to_halfvec = _legacy.embedding_to_halfvec
-extract_tpe_id = _legacy.extract_tpe_id
-_build_file_index = _legacy._build_file_index
-_resolve_image_path = _legacy._resolve_image_path
-_has_tmbulletin_source = _legacy._has_tmbulletin_source
-_repair_corrupt_metadata = _legacy._repair_corrupt_metadata
-pre_scan_and_repair = _legacy.pre_scan_and_repair
-_print_repair_summary = _legacy._print_repair_summary
-_check_scan_queue_table = _legacy._check_scan_queue_table
-add_to_scan_queue = _legacy.add_to_scan_queue
+sanitize = _helpers.sanitize
+_trunc = _helpers._trunc
+embedding_to_halfvec = _helpers.embedding_to_halfvec
+extract_tpe_id = _helpers.extract_tpe_id
+_build_file_index = _helpers._build_file_index
+_resolve_image_path = _helpers._resolve_image_path
+_has_tmbulletin_source = _helpers._has_tmbulletin_source
+_repair_corrupt_metadata = _helpers._repair_corrupt_metadata
+pre_scan_and_repair = _helpers.pre_scan_and_repair
+_print_repair_summary = _helpers._print_repair_summary
+_check_scan_queue_table = _helpers._check_scan_queue_table
+add_to_scan_queue = _helpers.add_to_scan_queue
 
 DB_STATUS_APPLIED = _rules.DB_STATUS_APPLIED
 DB_STATUS_PUBLISHED = _rules.DB_STATUS_PUBLISHED
@@ -315,7 +315,7 @@ def process_file_batch(conn, file_path, force=False, *, records=None):
                 (file_result_status, file_key),
             )
             conn.commit()
-            _legacy._file_index.clear()
+            _helpers._file_index.clear()
             return {
                 "status": file_result_status,
                 "filename": file_key,
@@ -639,7 +639,7 @@ def process_file_batch(conn, file_path, force=False, *, records=None):
             (file_result_status, len(new_inserts) + len(updates), file_key),
         )
         conn.commit()
-        _legacy._file_index.clear()
+        _helpers._file_index.clear()
 
         batch_app_nos = [row[0] for row in new_inserts] + [row[-1] for row in updates]
         if batch_app_nos:
@@ -689,7 +689,7 @@ def process_file_batch(conn, file_path, force=False, *, records=None):
         logging.error(f"   Batch Failed: {exc}")
         cur.execute("UPDATE processed_files SET status = 'failed', error_log = %s WHERE filename = %s", (str(exc), file_key))
         conn.commit()
-        _legacy._file_index.clear()
+        _helpers._file_index.clear()
         return {
             "status": "failed",
             "filename": file_key,

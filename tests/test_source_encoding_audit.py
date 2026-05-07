@@ -52,7 +52,7 @@ SUSPECT_PATTERNS = (
 MOJIBAKE_C3 = "\u00c3"
 ALLOWLIST_MARKERS = {
     "metadata.py": ("_SCRAPED_MOJIBAKE_TOKENS",),
-    "pipeline/ingest_legacy.py": ("if not any(ch in repaired",),
+    "pipeline/ingest_helpers.py": ("if not any(ch in repaired",),
     "pipeline/ingest_rules.py": ("if not any(ch in repaired",),
     "tests/test_scoring_engine.py": (f'assert "{MOJIBAKE_C3}" not',),
     "tests/test_source_encoding_audit.py": ("SUSPECT_PATTERNS", "ALLOWLIST_MARKERS"),

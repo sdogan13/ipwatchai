@@ -60,7 +60,7 @@ The app still uses several root-level route and assembly modules:
 ## Data And Pipeline Areas
 
 - `pipeline/`: embedding and ingest modules
-  canonical ingest modules are `pipeline/ingest.py` (compat wrapper), `pipeline/ingest_rules.py`, `pipeline/ingest_runtime.py`, and `pipeline/ingest_bootstrap.py`
+  canonical ingest modules are `pipeline/ingest.py` (compat wrapper), `pipeline/ingest_rules.py`, `pipeline/ingest_runtime.py`, `pipeline/ingest_bootstrap.py`, and `pipeline/ingest_helpers.py`
 - `bulletins/`: bulletin data root
 - `custom_bulletins/`: local bulletin inputs and experiments
 - `archive_bulletins/`: archived bulletin data
