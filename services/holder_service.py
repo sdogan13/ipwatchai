@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
 from database.crud import Database
+from utils.event_severity import classify_event_severity
 
 
 async def get_holder_trademarks_data(
@@ -75,6 +76,8 @@ async def get_holder_trademarks_data(
                 nice_class_numbers, application_date, registration_date,
                 image_path, bulletin_no, gazette_no,
                 attorney_name, attorney_no, registration_no,
+                holder_changed_at, last_event_type, last_event_date,
+                has_restrictions, active_restriction_count,
                 (extracted_goods IS NOT NULL
                     AND extracted_goods != '[]'::jsonb
                     AND extracted_goods != 'null'::jsonb) AS has_extracted_goods
@@ -107,6 +110,16 @@ async def get_holder_trademarks_data(
                     "attorney_no": tm.get("attorney_no"),
                     "registration_no": tm.get("registration_no"),
                     "bulletin_no": tm.get("bulletin_no"),
+                    "holder_changed_at": (
+                        tm["holder_changed_at"].isoformat() if tm.get("holder_changed_at") else None
+                    ),
+                    "last_event_type": tm.get("last_event_type"),
+                    "last_event_date": (
+                        tm["last_event_date"].isoformat() if tm.get("last_event_date") else None
+                    ),
+                    "last_event_severity": classify_event_severity(tm.get("last_event_type")),
+                    "has_restrictions": bool(tm.get("has_restrictions", False)),
+                    "active_restriction_count": tm.get("active_restriction_count") or 0,
                 }
             )
 
@@ -234,7 +247,9 @@ async def build_holder_trademarks_csv_stream(
             SELECT application_no, name, final_status,
                    nice_class_numbers, application_date, registration_date,
                    registration_no, attorney_name, attorney_no,
-                   bulletin_no, gazette_no
+                   bulletin_no, gazette_no,
+                   holder_changed_at, last_event_type, last_event_date,
+                   has_restrictions, active_restriction_count
             FROM trademarks
             WHERE holder_tpe_client_id = %s
             ORDER BY application_date DESC NULLS LAST, application_no DESC
@@ -259,6 +274,10 @@ async def build_holder_trademarks_csv_stream(
             "Vekil No",
             "Bulten No",
             "Gazete No",
+            "Sahip Degisim Tarihi",
+            "Son Olay",
+            "Son Olay Tarihi",
+            "Aktif Kisitlama",
         ]
     )
     for tm in rows:
@@ -275,6 +294,10 @@ async def build_holder_trademarks_csv_stream(
                 tm.get("attorney_no") or "",
                 tm.get("bulletin_no") or "",
                 tm.get("gazette_no") or "",
+                tm["holder_changed_at"].isoformat() if tm.get("holder_changed_at") else "",
+                tm.get("last_event_type") or "",
+                tm["last_event_date"].isoformat() if tm.get("last_event_date") else "",
+                tm.get("active_restriction_count") or 0,
             ]
         )
 

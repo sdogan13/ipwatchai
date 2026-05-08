@@ -23,6 +23,7 @@ from services.scoring_service import (
     extract_ocr_text,
     resolve_logo_image_path,
 )
+from utils.event_severity import EVENT_SEVERITY_MAP
 from utils.idf_scoring import (
     MAX_ALERTS_PER_ITEM
 )
@@ -698,26 +699,6 @@ EVENT_ALERT_MESSAGES = {
     "name_change": "Trademark holder name changed",
 }
 
-EVENT_SEVERITY_MAP = {
-    "cancellation": "critical",
-    "seizure": "critical",
-    "precautionary_seizure": "critical",
-    "bankruptcy": "critical",
-    "injunction": "high",
-    "precautionary_injunction": "high",
-    "transfer": "high",
-    "merger": "high",
-    "partial_transfer": "high",
-    "withdrawal": "high",
-    "renewal": "medium",
-    "license": "medium",
-    "seizure_lift": "low",
-    "injunction_lift": "low",
-    "restriction_lift": "low",
-    "correction": "low",
-    "address_change": "low",
-    "name_change": "low",
-}
 
 
 def scan_events_for_watchlist(conn=None) -> int:

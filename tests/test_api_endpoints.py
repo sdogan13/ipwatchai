@@ -15024,6 +15024,11 @@ async def test_holder_service_get_holder_trademarks_data_formats_rows():
             "attorney_no": "A-1",
             "registration_no": "TR-9",
             "bulletin_no": "2024-1",
+            "holder_changed_at": date(2025, 11, 15),
+            "last_event_type": "transfer",
+            "last_event_date": date(2025, 11, 15),
+            "has_restrictions": True,
+            "active_restriction_count": 2,
         }
     ]
 
@@ -15062,6 +15067,12 @@ async def test_holder_service_get_holder_trademarks_data_formats_rows():
                 "attorney_no": "A-1",
                 "registration_no": "TR-9",
                 "bulletin_no": "2024-1",
+                "holder_changed_at": "2025-11-15",
+                "last_event_type": "transfer",
+                "last_event_date": "2025-11-15",
+                "last_event_severity": "high",
+                "has_restrictions": True,
+                "active_restriction_count": 2,
             }
         ],
     }
@@ -15137,6 +15148,11 @@ async def test_holder_service_build_holder_trademarks_csv_streams_csv():
             "attorney_no": "A-1",
             "bulletin_no": "2024-1",
             "gazette_no": "55",
+            "holder_changed_at": date(2025, 11, 15),
+            "last_event_type": "transfer",
+            "last_event_date": date(2025, 11, 15),
+            "has_restrictions": True,
+            "active_restriction_count": 2,
         }
     ]
 
@@ -15155,7 +15171,8 @@ async def test_holder_service_build_holder_trademarks_csv_streams_csv():
 
     assert response.headers["content-disposition"] == 'attachment; filename="Nike_Holder_portfolio.csv"'
     assert "Marka Adi,Basvuru No,Durum,Siniflar" in body
-    assert "NIKE,2024/1,Published,25; 35,2024-01-02,2024-06-03,TR-9,Agent,A-1,2024-1,55" in body
+    assert "Sahip Degisim Tarihi,Son Olay,Son Olay Tarihi,Aktif Kisitlama" in body
+    assert "NIKE,2024/1,Published,25; 35,2024-01-02,2024-06-03,TR-9,Agent,A-1,2024-1,55,2025-11-15,transfer,2025-11-15,2" in body
 
 
 @pytest.mark.asyncio
@@ -15284,6 +15301,11 @@ async def test_attorney_service_get_attorney_trademarks_data_formats_rows():
             "has_extracted_goods": True,
             "holder_name": "Nike Holder",
             "holder_tpe_client_id": "H-1",
+            "holder_changed_at": None,
+            "last_event_type": "cancellation",
+            "last_event_date": date(2026, 3, 12),
+            "has_restrictions": False,
+            "active_restriction_count": 0,
         }
     ]
 
@@ -15320,6 +15342,12 @@ async def test_attorney_service_get_attorney_trademarks_data_formats_rows():
                 "has_extracted_goods": True,
                 "holder_name": "Nike Holder",
                 "holder_tpe_client_id": "H-1",
+                "holder_changed_at": None,
+                "last_event_type": "cancellation",
+                "last_event_date": "2026-03-12",
+                "last_event_severity": "critical",
+                "has_restrictions": False,
+                "active_restriction_count": 0,
             }
         ],
     }
@@ -15394,6 +15422,11 @@ async def test_attorney_service_build_attorney_trademarks_csv_streams_csv():
             "holder_name": "Nike Holder",
             "holder_tpe_client_id": "H-1",
             "bulletin_no": "2024-1",
+            "holder_changed_at": date(2025, 11, 15),
+            "last_event_type": "transfer",
+            "last_event_date": date(2025, 11, 15),
+            "has_restrictions": True,
+            "active_restriction_count": 1,
         }
     ]
 
@@ -15412,6 +15445,8 @@ async def test_attorney_service_build_attorney_trademarks_csv_streams_csv():
 
     assert response.headers["content-disposition"] == 'attachment; filename="Agent_Smith_portfolio.csv"'
     assert "Marka Adi,Basvuru No,Durum,Siniflar" in body
+    assert "Sahip Degisim Tarihi,Son Olay,Son Olay Tarihi,Aktif Kisitlama" in body
+    assert "2025-11-15,transfer,2025-11-15,1" in body
     assert "NIKE,2024/1,Published,25; 35,2024-01-02,2024-06-03,TR-9,Nike Holder,H-1,2024-1" in body
 
 
