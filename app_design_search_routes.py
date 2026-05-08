@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from PIL import Image
 
@@ -190,20 +190,20 @@ async def design_search_public(
 # Registration
 # ---------------------------------------------------------------------------
 
-def register_design_search_routes(app, limiter, get_current_user_dep):
+def register_design_search_routes(app, limiter):
     """Register the three design routes on the app.
 
     ``limiter`` is the slowapi.Limiter instance used by the rest of the app.
-    ``get_current_user_dep`` is the FastAPI dependency that decodes the
-    Bearer token and returns ``{user_id, ...}`` (mirrors the trademark
-    routes' auth wiring).
+    Auth is wired internally via ``Depends(get_current_user)`` from
+    ``auth.authentication`` to match the existing trademark-route conventions.
     """
+    from auth.authentication import get_current_user
 
-    @app.get("/api/v1/design-image/{image_path:path}")
+    @app.get("/api/v1/design-image/{image_path:path}", tags=["Design Search"])
     async def get_design_image(image_path: str):
         return design_image_response(image_path)
 
-    @app.get("/api/v1/design-search/public")
+    @app.get("/api/v1/design-search/public", tags=["Design Search"])
     @limiter.limit("10/minute")
     async def public_design_search_get(
         request: Request,
@@ -212,7 +212,7 @@ def register_design_search_routes(app, limiter, get_current_user_dep):
     ):
         return await design_search_public(query=query, locarno=locarno)
 
-    @app.post("/api/v1/design-search/public")
+    @app.post("/api/v1/design-search/public", tags=["Design Search"])
     @limiter.limit("10/minute")
     async def public_design_search_post(
         request: Request,
@@ -221,7 +221,7 @@ def register_design_search_routes(app, limiter, get_current_user_dep):
     ):
         return await design_search_public(query=query, locarno=locarno)
 
-    @app.post("/api/v1/design-search/quick")
+    @app.post("/api/v1/design-search/quick", tags=["Design Search"])
     @limiter.limit("60/minute")
     async def quick_design_search(
         request: Request,
@@ -229,9 +229,12 @@ def register_design_search_routes(app, limiter, get_current_user_dep):
         image: Optional[UploadFile] = File(None),
         locarno: Optional[str] = Form(None),
         limit: int = Form(20),
-        current_user: dict = get_current_user_dep,
+        current_user=Depends(get_current_user),
     ):
+        user_id = None
+        if current_user is not None:
+            user_id = getattr(current_user, "user_id", None) or getattr(current_user, "id", None)
         return await design_search_quick(
             query=query, image=image, locarno=locarno, limit=limit,
-            user_id=current_user.get("user_id") if current_user else None,
+            user_id=user_id,
         )
