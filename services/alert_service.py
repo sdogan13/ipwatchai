@@ -309,6 +309,14 @@ async def aggregate_alerts_data(
                 CASE WHEN a.opposition_deadline IS NOT NULL AND a.opposition_deadline > CURRENT_DATE
                      THEN 0 ELSE 1 END,
                 a.opposition_deadline ASC NULLS LAST,
+                CASE a.severity
+                    WHEN 'critical' THEN 0
+                    WHEN 'very_high' THEN 1
+                    WHEN 'high' THEN 2
+                    WHEN 'medium' THEN 3
+                    WHEN 'low' THEN 4
+                    ELSE 5
+                END,
                 a.created_at DESC
             LIMIT %s OFFSET %s
         """,
@@ -340,6 +348,8 @@ async def aggregate_alerts_data(
                 "opposition_deadline": deadline.isoformat() if deadline else None,
                 "deadline_days": deadline_days,
                 "overlapping_classes": row.get("overlapping_classes"),
+                "alert_type": row.get("alert_type"),
+                "source_type": row.get("source_type"),
                 "created_at": (
                     row["created_at"].isoformat() if row.get("created_at") else None
                 ),

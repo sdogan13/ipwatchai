@@ -12899,6 +12899,59 @@ async def test_alert_service_aggregate_alerts_data_formats_deadlines():
 
 
 @pytest.mark.asyncio
+async def test_alert_service_aggregate_alerts_data_passes_event_fields():
+    from services.alert_service import aggregate_alerts_data
+
+    current_user = MagicMock()
+    current_user.organization_id = uuid.uuid4()
+    alert_id = uuid.uuid4()
+    watchlist_id = uuid.uuid4()
+    conflict_id = uuid.uuid4()
+
+    mock_cursor = MagicMock()
+    mock_cursor.fetchone.return_value = {"count": 1}
+    mock_cursor.fetchall.return_value = [
+        {
+            "id": alert_id,
+            "watchlist_item_id": watchlist_id,
+            "watched_brand_name": "WATCHED MARK",
+            "conflicting_name": "TRANSFERRED MARK",
+            "tm_name": "TRANSFERRED MARK",
+            "conflicting_trademark_id": conflict_id,
+            "severity": "high",
+            "overall_risk_score": 1.0,
+            "status": "new",
+            "opposition_deadline": None,
+            "overlapping_classes": [25],
+            "alert_type": "event",
+            "source_type": "transfer",
+            "created_at": datetime(2026, 4, 12, 12, 0, tzinfo=timezone.utc),
+        }
+    ]
+    mock_db_cm = MagicMock()
+    mock_db = MagicMock()
+    mock_db.cursor.return_value = mock_cursor
+    mock_db_cm.__enter__.return_value = mock_db
+    mock_db_cm.__exit__.return_value = False
+
+    response = await aggregate_alerts_data(
+        page=1,
+        page_size=20,
+        severity=None,
+        current_user=current_user,
+        db_factory=MagicMock(return_value=mock_db_cm),
+        today_getter=lambda: date(2026, 4, 12),
+    )
+
+    assert response.total == 1
+    item = response.items[0]
+    assert item["alert_type"] == "event"
+    assert item["source_type"] == "transfer"
+    assert item["deadline_days"] is None
+    assert item["opposition_deadline"] is None
+
+
+@pytest.mark.asyncio
 async def test_alert_service_get_alert_data_marks_new_seen():
     from models.schemas import AlertStatus
     from services.alert_service import get_alert_data

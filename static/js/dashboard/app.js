@@ -5105,19 +5105,38 @@ function loadAggregateAlerts() {
         }
         var esc = window.AppUtils.escapeHtml;
         var html = items.map(function (a) {
-            var severityColors = { critical: '#dc2626', high: '#ea580c', medium: '#ca8a04', low: '#6b7280' };
+            var severityColors = { critical: '#dc2626', very_high: '#dc2626', high: '#ea580c', medium: '#ca8a04', low: '#6b7280' };
             var sevColor = severityColors[a.severity] || '#6b7280';
             var deadlineHtml = '';
             if (a.deadline_days !== null && a.deadline_days !== undefined) {
                 var dColor = a.deadline_days <= 7 ? '#dc2626' : a.deadline_days <= 30 ? '#ea580c' : '#ca8a04';
                 deadlineHtml = '<span class="text-xs font-bold" style="color:' + dColor + '">' + a.deadline_days + ' ' + t('common.days') + '</span>';
             }
-            var riskPct = a.risk_score !== null && a.risk_score !== undefined ? Math.round(a.risk_score * 100) + '%' : '';
-            return '<div class="px-4 py-3 hover:bg-gray-50 transition-colors" style="border-left:3px solid ' + sevColor + '">'
+            var isEvent = a.alert_type === 'event';
+            var leadPillHtml = '';
+            if (isEvent && a.source_type) {
+                var typeKey = 'events.type_' + a.source_type;
+                var typeLabel = t(typeKey);
+                if (typeLabel === typeKey) typeLabel = a.source_type;
+                leadPillHtml = '<span class="text-xs font-bold px-1.5 py-0.5 rounded" '
+                    + 'style="background:' + sevColor + '20;color:' + sevColor + '" '
+                    + 'data-alert-pill="event-type">' + esc(typeLabel) + '</span>';
+            } else {
+                var riskPct = a.risk_score !== null && a.risk_score !== undefined ? Math.round(a.risk_score * 100) + '%' : '';
+                if (riskPct) {
+                    leadPillHtml = '<span class="text-xs font-bold px-1.5 py-0.5 rounded" '
+                        + 'style="background:' + sevColor + '20;color:' + sevColor + '" '
+                        + 'data-alert-pill="risk">' + riskPct + '</span>';
+                }
+            }
+            var dataAttrs = ' data-alert-type="' + (isEvent ? 'event' : 'similarity') + '"'
+                + ' data-severity="' + esc(a.severity || '') + '"';
+            return '<div class="px-4 py-3 hover:bg-gray-50 transition-colors"' + dataAttrs
+                + ' style="border-left:3px solid ' + sevColor + '">'
                 + '<div class="flex items-center justify-between">'
                 + '<div class="flex-1 min-w-0">'
                 + '<div class="flex items-center gap-2">'
-                + (riskPct ? '<span class="text-xs font-bold px-1.5 py-0.5 rounded" style="background:' + sevColor + '20;color:' + sevColor + '">' + riskPct + '</span>' : '')
+                + leadPillHtml
                 + '<span class="text-sm font-medium truncate" style="color:var(--color-text-primary)">' + esc(getTrademarkDisplayName(a.conflicting_brand_name)) + '</span>'
                 + '</div>'
                 + '<div class="text-xs mt-0.5" style="color:var(--color-text-muted)">'
