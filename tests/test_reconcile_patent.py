@@ -18,13 +18,16 @@ from pipeline.reconcile_patent import (
     _normalize_cd_attorney,
     _normalize_cd_party,
     _normalize_cd_priority,
+    _merge_figures,
     _normalize_pdf_attorney_to_list,
     _normalize_pdf_figure,
     _normalize_pdf_party,
     _normalize_pdf_priority,
     _page_range_or_none,
+    _pick_longer_title,
     load_cd_metadata,
     load_pdf_metadata,
+    merge_records,
     normalize_cd_record,
     normalize_pdf_record,
 )
@@ -537,3 +540,186 @@ def test_normalize_pdf_record_drops_holder_address_null() -> None:
     }
     rec = normalize_pdf_record(pdf)
     assert rec.holders == [{"name": "JİANZHONG SHANG"}]
+
+
+# ---------------------------------------------------------------------------
+# Step 4.4 — merge_records (CD ↔ PDF precedence)
+# ---------------------------------------------------------------------------
+
+
+def test_pick_longer_title_pdf_wins_when_longer() -> None:
+    assert _pick_longer_title("Short", "Much longer title text") == "Much longer title text"
+
+
+def test_pick_longer_title_cd_wins_on_tie() -> None:
+    """Equal-length titles -> CD (it's the typed source)."""
+    assert _pick_longer_title("ABCDE", "VWXYZ") == "ABCDE"
+
+
+def test_pick_longer_title_falls_back_to_present_side() -> None:
+    assert _pick_longer_title("CD only", None) == "CD only"
+    assert _pick_longer_title(None, "PDF only") == "PDF only"
+    assert _pick_longer_title(None, None) is None
+
+
+def test_merge_figures_concats_with_dedup() -> None:
+    cd = [{"image_path": "data/images/2017/15048.tif"}]
+    pdf = [
+        {"image_path": "2025_08_figures/0042.jpg", "page": 117, "image_xref": 4204},
+        {"image_path": "2025_08_figures/0043.jpg", "page": 118, "image_xref": 4205},
+    ]
+    out = _merge_figures(cd, pdf)
+    assert len(out) == 3
+    assert out[0]["image_path"] == "data/images/2017/15048.tif"   # CD first
+    assert out[1]["image_path"] == "2025_08_figures/0042.jpg"
+    assert out[2]["image_path"] == "2025_08_figures/0043.jpg"
+
+
+def test_merge_figures_dedups_by_image_path() -> None:
+    """Defensive dedup — paths can't collide today (.tif vs .jpg) but
+    a future change might surface overlap. Don't double-emit."""
+    same = "shared/path.jpg"
+    cd = [{"image_path": same}]
+    pdf = [{"image_path": same, "page": 1}]
+    out = _merge_figures(cd, pdf)
+    assert len(out) == 1
+    assert out[0]["image_path"] == same      # CD (first) wins
+
+
+def test_merge_figures_handles_empty() -> None:
+    assert _merge_figures([], []) == []
+    assert _merge_figures([{"image_path": "a.tif"}], []) == [{"image_path": "a.tif"}]
+
+
+def _cd_canonical() -> CanonicalRecord:
+    """Reusable CD-side fixture for merge tests."""
+    return CanonicalRecord(
+        application_no="2017/15048",
+        application_date="2017-10-05",
+        publication_no="TR 2017 15048 U3",
+        publication_date="2025-12-22",
+        kind_code="U3",
+        record_type="UNKNOWN",                 # gap memory
+        title="EMNİYET BELİRTEÇLİ ENJEKTÖR KİLİDİ",
+        abstract="CD truncated abstract...",
+        ipc_classes=["A61M 5/31"],
+        holders=[{"name": "ACME", "city": "İzmir", "country": "TR"}],
+        inventors=[{"name": "JANE DOE"}],
+        attorneys=[{"no": "361", "name": "ERDEM KAYA"}],
+        priorities=[{"priority_no": "X", "priority_date": "2020-03-31"}],
+        figures=[{"image_path": "data/images/2017/15048.tif"}],
+        patent_type="2",
+        source_format="CD",
+    )
+
+
+def _pdf_canonical() -> CanonicalRecord:
+    """Reusable PDF-side fixture matching _cd_canonical's application_no."""
+    return CanonicalRecord(
+        application_no="2017/15048",
+        application_date="2017-10-05",
+        publication_no="TR 2017 15048 U3",
+        publication_date="2025-12-22",
+        grant_date="2025-12-22",                # PDF-only
+        kind_code="U3",
+        record_type="UNKNOWN",
+        title="EMNİYET BELİRTEÇLİ ENJEKTÖR KİLİDİ VE KİLİTLEME YÖNTEMİ",  # longer
+        abstract="Full PDF abstract — much longer than CD truncation.",
+        ipc_classes=["A61M 5/31", "A61J 1/14"],
+        holders=[{"name": "ACME", "country": "TR"}],   # less detail than CD
+        inventors=[{"name": "JANE DOE"}],
+        attorneys=[{"name": "ERDEM KAYA"}],            # no `no` field
+        priorities=[],
+        figures=[{"image_path": "2025_08_figures/0042.jpg", "page": 117}],
+        patent_type=None,                              # CD-only
+        page_range=[120, 121],                          # PDF-only
+        source_format="PDF",
+    )
+
+
+def test_merge_records_full_precedence() -> None:
+    """Walks the precedence table: every rule fires on a single record."""
+    merged = merge_records(_cd_canonical(), _pdf_canonical())
+
+    # Structured fields -> CD wins
+    assert merged.application_date == "2017-10-05"
+    assert merged.publication_no == "TR 2017 15048 U3"
+    assert merged.publication_date == "2025-12-22"
+    assert merged.ipc_classes == ["A61M 5/31"]                 # CD's narrower list
+    # Holders: CD has city + country; PDF has only country. CD wins.
+    assert merged.holders == [{"name": "ACME", "city": "İzmir", "country": "TR"}]
+    # Attorneys: CD's list is non-empty -> CD wins (preserves `no` field)
+    assert merged.attorneys == [{"no": "361", "name": "ERDEM KAYA"}]
+    assert merged.priorities[0]["priority_no"] == "X"
+
+    # Title: PDF longer -> PDF wins
+    assert merged.title == "EMNİYET BELİRTEÇLİ ENJEKTÖR KİLİDİ VE KİLİTLEME YÖNTEMİ"
+    # Abstract: PDF wins (CD truncated)
+    assert merged.abstract.startswith("Full PDF abstract")
+
+    # PDF-only fields preserved
+    assert merged.grant_date == "2025-12-22"
+    assert merged.page_range == [120, 121]
+
+    # CD-only field preserved
+    assert merged.patent_type == "2"
+
+    # Figures unioned
+    assert len(merged.figures) == 2
+    assert merged.figures[0]["image_path"] == "data/images/2017/15048.tif"
+    assert merged.figures[1]["image_path"] == "2025_08_figures/0042.jpg"
+
+    # Source flag flipped
+    assert merged.source_format == "BOTH"
+
+
+def test_merge_records_pdf_attorney_used_when_cd_empty() -> None:
+    """Edge case: CD didn't ship an attorney; PDF's becomes the merged value."""
+    cd = _cd_canonical()
+    cd.attorneys = []                               # simulate missing CD attorney
+    pdf = _pdf_canonical()
+    merged = merge_records(cd, pdf)
+    assert merged.attorneys == [{"name": "ERDEM KAYA"}]
+
+
+def test_merge_records_falls_back_to_pdf_kind_when_cd_unknown() -> None:
+    """CD's publication_no may be malformed (no kind suffix) — PDF rescues."""
+    cd = _cd_canonical()
+    cd.kind_code = None
+    cd.record_type = None
+    pdf = _pdf_canonical()
+    pdf.kind_code = "B"
+    pdf.record_type = "GRANTED_PATENT"
+    merged = merge_records(cd, pdf)
+    assert merged.kind_code == "B"
+    assert merged.record_type == "GRANTED_PATENT"
+
+
+def test_merge_records_cd_kind_used_when_pdf_missing() -> None:
+    """And the symmetric path: PDF didn't see this record (e.g. event index page)."""
+    cd = _cd_canonical()
+    cd.kind_code = "T4"
+    cd.record_type = "GRANTED_PATENT"
+    pdf = _pdf_canonical()
+    pdf.kind_code = None
+    pdf.record_type = None
+    merged = merge_records(cd, pdf)
+    assert merged.kind_code == "T4"
+    assert merged.record_type == "GRANTED_PATENT"
+
+
+def test_merge_records_title_tiebreak_goes_to_cd() -> None:
+    cd = _cd_canonical()
+    cd.title = "Same length"
+    pdf = _pdf_canonical()
+    pdf.title = "Other words"          # same length
+    merged = merge_records(cd, pdf)
+    assert merged.title == "Same length"
+
+
+def test_merge_records_raises_on_app_no_mismatch() -> None:
+    cd = _cd_canonical()
+    pdf = _pdf_canonical()
+    pdf.application_no = "9999/99999"
+    with pytest.raises(ValueError, match="mismatched application_no"):
+        merge_records(cd, pdf)

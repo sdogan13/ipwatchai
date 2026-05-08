@@ -394,3 +394,106 @@ def normalize_pdf_record(pdf_record: Dict[str, Any]) -> CanonicalRecord:
         page_range=_page_range_or_none(pdf_record.get("page_range")),
         source_format="PDF",
     )
+
+
+# ---------------------------------------------------------------------------
+# Step 4.4 — merge_records (CD ↔ PDF precedence)
+# ---------------------------------------------------------------------------
+#
+# Precedence rules (locked decisions: bulletins/Patent__Faydali_Model/
+# PROCESSING_PLAN.md §d.2):
+#
+#                          | Source of truth
+#   -----------------------+-------------------------------------------
+#   structured fields      | CD  (HSQLDB rows are typed; PDF is regex)
+#   abstract               | PDF (CD truncates to VARCHAR(2000))
+#   title                  | longer of the two (CD truncates sometimes)
+#   kind_code, record_type | PDF (already classified upstream); CD as
+#                          | fallback when PDF didn't see this app
+#   grant_date             | PDF (CD has no grant_date concept)
+#   page_range             | PDF only
+#   patent_type            | CD only
+#   figures                | union — CD TIFFs primary, PDF JPEGs added
+#                          | (paths never collide: .tif vs .jpg)
+#   source_format          | 'BOTH'
+
+
+def _pick_longer_title(cd_title: Optional[str], pdf_title: Optional[str]) -> Optional[str]:
+    """Return the longer non-empty title; tiebreak goes to CD.
+
+    CD is a clean DB row, PDF is text-extraction with possible OCR
+    artefacts — a tied length usually means CD got the canonical form.
+    """
+    if not pdf_title:
+        return cd_title
+    if not cd_title:
+        return pdf_title
+    return pdf_title if len(pdf_title) > len(cd_title) else cd_title
+
+
+def _merge_figures(
+    cd_figs: List[Dict[str, Any]],
+    pdf_figs: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Concatenate CD and PDF figure lists.
+
+    CD ships at most one TIFF (``data/images/{year}/{appno}.tif``);
+    PDF ships zero or many JPEGs (``2025_08_figures/...jpg``).
+    Paths never collide so a simple concat is correct — but dedup on
+    image_path defensively in case a future change surfaces overlap.
+    """
+    seen: set = set()
+    merged: List[Dict[str, Any]] = []
+    for fig in [*cd_figs, *pdf_figs]:
+        path = fig.get("image_path")
+        if path is None:
+            merged.append(fig)
+            continue
+        if path in seen:
+            continue
+        seen.add(path)
+        merged.append(fig)
+    return merged
+
+
+def merge_records(cd: CanonicalRecord, pdf: CanonicalRecord) -> CanonicalRecord:
+    """Merge a matched CD/PDF pair into a single canonical record.
+
+    Caller must guarantee both inputs share the same ``application_no`` —
+    pairing happens in ``reconcile_metadata`` (step 4.5). This function
+    is pure precedence application; it doesn't validate keys.
+
+    Raises ``ValueError`` if the application_no differs — defensive guard
+    against pairing bugs upstream.
+    """
+    if cd.application_no != pdf.application_no:
+        raise ValueError(
+            f"merge_records called with mismatched application_no: "
+            f"cd={cd.application_no!r} vs pdf={pdf.application_no!r}"
+        )
+
+    # CD's attorneys list is the canonical when present; fall back to PDF
+    # only when CD shipped nothing (rare — CD almost always carries the
+    # attorney row).
+    attorneys = cd.attorneys if cd.attorneys else pdf.attorneys
+
+    return CanonicalRecord(
+        application_no=cd.application_no,
+        application_date=cd.application_date or pdf.application_date,
+        publication_no=cd.publication_no or pdf.publication_no,
+        publication_date=cd.publication_date or pdf.publication_date,
+        grant_date=pdf.grant_date,                     # PDF-only field
+        kind_code=pdf.kind_code or cd.kind_code,
+        record_type=pdf.record_type or cd.record_type,
+        title=_pick_longer_title(cd.title, pdf.title),
+        abstract=pdf.abstract or cd.abstract,          # PDF wins (CD truncates)
+        ipc_classes=cd.ipc_classes or pdf.ipc_classes,
+        holders=cd.holders or pdf.holders,
+        inventors=cd.inventors or pdf.inventors,
+        attorneys=attorneys,
+        priorities=cd.priorities or pdf.priorities,
+        figures=_merge_figures(cd.figures, pdf.figures),
+        patent_type=cd.patent_type,                    # CD-only field
+        page_range=pdf.page_range,                     # PDF-only field
+        source_format="BOTH",
+    )
