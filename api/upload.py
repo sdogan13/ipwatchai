@@ -9,10 +9,7 @@ from fastapi import APIRouter, Depends, File, Form, UploadFile
 
 from auth.authentication import CurrentUser, get_current_user
 from services.upload_service import (
-    COLUMN_ALIASES,
     build_upload_template_response,
-    find_column,
-    parse_nice_classes,
     process_trademark_upload,
 )
 

@@ -6,7 +6,6 @@ import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Body, Query
-from psycopg2.extras import RealDictCursor
 
 from auth.authentication import CurrentUser, require_superadmin
 from database.crud import Database

@@ -3,15 +3,9 @@ Usage Routes
 Extracted from api/routes.py for maintainability.
 """
 import logging
-from typing import List, Optional
-from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, HTTPException, status
-from auth.authentication import CurrentUser, get_current_user, require_role
-from models.schemas import (
-    PaginatedResponse, SuccessResponse
-)
-from database.crud import Database
+from fastapi import APIRouter, Depends
+from auth.authentication import CurrentUser, get_current_user
 
 logger = logging.getLogger(__name__)
 

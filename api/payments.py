@@ -14,8 +14,8 @@ from fastapi import APIRouter, Body, Depends, Request
 
 from auth.authentication import CurrentUser, get_current_user
 from services.payment_service import (
-    _activate_subscription,
-    _get_iyzico_options,
+    _activate_subscription,  # noqa: F401  re-exported
+    _get_iyzico_options,  # noqa: F401  re-exported
     activate_free_plan_data,
     initialize_payment_data,
     payment_callback_data,

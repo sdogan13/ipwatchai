@@ -8,7 +8,6 @@ from typing import List, Optional
 from uuid import UUID, uuid4
 
 import pandas as pd
-import psycopg2
 from fastapi import (
     APIRouter,
     BackgroundTasks,

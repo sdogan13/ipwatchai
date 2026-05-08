@@ -9,12 +9,6 @@ from pydantic import BaseModel
 from auth.authentication import CurrentUser, get_current_user
 from services.lead_service import (
     LEADS_PER_PAGE,
-    RENEWAL_ACTIVE_STATUSES,
-    _get_lead_access,
-    _log_lead_access,
-    _renewal_urgency_sql,
-    _require_lead_access,
-    _urgency_case_sql,
     dismiss_lead_data,
     export_leads_csv_data,
     export_renewals_csv_data,

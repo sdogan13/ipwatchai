@@ -17,7 +17,7 @@ import logging
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Query, HTTPException, Depends, UploadFile, File
+from fastapi import APIRouter, Query, Depends, UploadFile, File
 from fastapi.responses import FileResponse
 
 from auth.authentication import CurrentUser, get_current_user

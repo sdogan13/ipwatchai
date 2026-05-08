@@ -3,15 +3,9 @@ Admin Routes
 Extracted from api/routes.py for maintainability.
 """
 import logging
-from typing import List, Optional
-from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, HTTPException, status
-from auth.authentication import CurrentUser, get_current_user, require_role
-from models.schemas import (
-    PaginatedResponse, SuccessResponse
-)
-from database.crud import Database
+from fastapi import APIRouter, Depends, Query
+from auth.authentication import CurrentUser, require_role
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +21,7 @@ async def get_idf_stats(user: CurrentUser = Depends(require_role(["admin"]))):
     Shows cache status, word counts, and top generic words.
     """
     from utils.idf_scoring import (
-        is_cache_loaded, get_cache_stats, get_most_common_words
+        get_cache_stats, get_most_common_words
     )
 
     stats = get_cache_stats()
