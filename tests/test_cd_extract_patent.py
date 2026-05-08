@@ -6,7 +6,13 @@ point cleanly at the unit under test.
 
 import pytest
 
-from cd_extract_patent import decode_hsqldb_escapes, strip_ipc_html
+from cd_extract_patent import (
+    TABLE_COLUMNS,
+    decode_hsqldb_escapes,
+    parse_hsqldb_log_line,
+    strip_ipc_html,
+)
+from cd_extract_patent import _parse_sql_values
 
 
 # ---------------------------------------------------------------------------
@@ -169,3 +175,187 @@ def test_strip_ipc_html_is_case_insensitive_on_tags():
     """Defensive: HTML tag case is irrelevant in the spec."""
     raw = "<HTML><P>A61M 5/31</P><P>A61J 1/14</P></HTML>"
     assert strip_ipc_html(raw) == ["A61M 5/31", "A61J 1/14"]
+
+
+# ---------------------------------------------------------------------------
+# Step 2.3 — _parse_sql_values (state-machine VALUES tokenizer)
+# ---------------------------------------------------------------------------
+
+def test_parse_sql_values_simple_strings():
+    assert _parse_sql_values("'a','b','c'") == ["a", "b", "c"]
+
+
+def test_parse_sql_values_empty_strings():
+    assert _parse_sql_values("'','',''") == ["", "", ""]
+
+
+def test_parse_sql_values_doubled_apostrophe_is_literal():
+    """Real captured value: TÜRKİYE''NİN must decode to TÜRKİYE'NİN."""
+    assert _parse_sql_values("'O''Brien','SAM''ler'") == ["O'Brien", "SAM'ler"]
+
+
+def test_parse_sql_values_apostrophe_quoted_word():
+    """Real captured value: ''vadi'' is the string with literal apostrophes
+    around the word ``vadi`` (Turkish for 'valley')."""
+    assert _parse_sql_values("'''vadi'''") == ["'vadi'"]
+
+
+def test_parse_sql_values_handles_inner_commas():
+    """Commas inside a quoted string must NOT split the value list."""
+    assert _parse_sql_values("'a, b, c','d'") == ["a, b, c", "d"]
+
+
+def test_parse_sql_values_tolerates_whitespace_around_commas():
+    assert _parse_sql_values("'a' , 'b' ,'c'") == ["a", "b", "c"]
+
+
+def test_parse_sql_values_rejects_unterminated_string():
+    with pytest.raises(ValueError):
+        _parse_sql_values("'unterminated")
+
+
+def test_parse_sql_values_rejects_unquoted_token():
+    with pytest.raises(ValueError):
+        _parse_sql_values("'a',unquoted,'b'")
+
+
+# ---------------------------------------------------------------------------
+# Step 2.3 — parse_hsqldb_log_line
+# ---------------------------------------------------------------------------
+
+def test_parse_log_line_real_patent_row():
+    """Real INSERT for application 2017/15048 from 2025_12 ptbulletin.log."""
+    line = (
+        "INSERT INTO PATENT VALUES('2017/15048','05/10/2017','','',"
+        "'<html><p>A61M 5/31</p><p>A61J 1/14</p></html>',"
+        "'TR 2017 15048 U3','73','22/12/2025',"
+        "'EMN\\u0130YET BEL\\u0130RTE\\u00c7L\\u0130 ENJEKT\\u00d6R',"
+        "'2','','','')"
+    )
+    result = parse_hsqldb_log_line(line)
+    assert result is not None
+    assert result["table"] == "PATENT"
+    row = result["row"]
+    assert row["APPLICATIONNO"] == "2017/15048"
+    assert row["APPLICATIONDATE"] == "05/10/2017"
+    assert row["IPCCODE"] == ["A61M 5/31", "A61J 1/14"]
+    assert row["PUBLICATIONNO"] == "TR 2017 15048 U3"
+    assert row["PATENTTITLE"] == "EMNİYET BELİRTEÇLİ ENJEKTÖR"
+    # Empty fields preserved as empty strings (NOT None) — semantics deferred to ingest
+    assert row["PATENTNO"] == ""
+    assert row["IMAGEPATH1"] == ""
+
+
+def test_parse_log_line_real_holder_row():
+    """Real HOLDER row including SQL-escaped apostrophe inside Turkish text."""
+    line = (
+        "INSERT INTO HOLDER VALUES('2023/016403',"
+        "'T\\u00dcRK\\u0130YE''N\\u0130N OTOMOB\\u0130L\\u0130',"
+        "'MUALL\\u0130MK\\u00d6Y MAH.','Gebze','','Kocaeli','TR')"
+    )
+    result = parse_hsqldb_log_line(line)
+    assert result is not None
+    assert result["table"] == "HOLDER"
+    assert result["row"]["TITLE"] == "TÜRKİYE'NİN OTOMOBİLİ"
+    assert result["row"]["CITY"] == "Kocaeli"
+
+
+def test_parse_log_line_real_inventer_row():
+    line = (
+        "INSERT INTO INVENTER VALUES('2017/15048',"
+        "'AT\\u0130LLA SEV\\u0130N\\u00c7L\\u0130','','','','','')"
+    )
+    result = parse_hsqldb_log_line(line)
+    assert result is not None
+    assert result["table"] == "INVENTER"
+    assert result["row"]["TITLE"] == "ATİLLA SEVİNÇLİ"
+    assert result["row"]["APPLICATIONNO"] == "2017/15048"
+
+
+def test_parse_log_line_real_attorney_row():
+    line = (
+        "INSERT INTO ATTORNEY VALUES('2017/15048','361','ERDEM KAYA','',"
+        "'ERDEM KAYA PATENT VE DAN. A.\\u015e.')"
+    )
+    result = parse_hsqldb_log_line(line)
+    assert result is not None
+    assert result["table"] == "ATTORNEY"
+    row = result["row"]
+    assert row["NO"] == "361"
+    assert row["NAME"] == "ERDEM KAYA"
+    assert row["TITLE"] == "ERDEM KAYA PATENT VE DAN. A.Ş."
+
+
+def test_parse_log_line_real_priority_row():
+    line = "INSERT INTO PRIORITY VALUES('2020/10769','2019/21188','23/12/2019','TR')"
+    result = parse_hsqldb_log_line(line)
+    assert result is not None
+    assert result["table"] == "PRIORITY"
+    assert result["row"] == {
+        "APPLICATIONNO": "2020/10769",
+        "PRIORITYNO": "2019/21188",
+        "PRIORITYDATE": "23/12/2019",
+        "COUNTRYNO": "TR",
+    }
+
+
+def test_parse_log_line_preserves_embedded_newline_in_abstract():
+    """Real PATENTABSTRACT contains \\u000a for inline line breaks."""
+    line = (
+        "INSERT INTO PATENT VALUES('2017/16580','26/10/2017','','',"
+        "'<html><p>B01D 21/24</p></html>','TR 2017 16580 U3','73','22/12/2025',"
+        "'B\\u0130R YA\\u011e SIYIRMA','2',"
+        "'\\u015eekil 1\\u000ar\\u0131c\\u0131','','')"
+    )
+    result = parse_hsqldb_log_line(line)
+    assert result is not None
+    assert "\n" in result["row"]["PATENTABSTRACT"]
+    assert result["row"]["PATENTABSTRACT"].startswith("Şekil 1")
+
+
+def test_parse_log_line_returns_none_for_non_insert():
+    """Real non-INSERT lines from the log header — must not raise."""
+    assert parse_hsqldb_log_line('CREATE USER SA PASSWORD "" ADMIN') is None
+    assert parse_hsqldb_log_line("/*C1*/CONNECT USER SA") is None
+    assert parse_hsqldb_log_line("DISCONNECT") is None
+    assert parse_hsqldb_log_line("CREATE TABLE PATENT (APPLICATIONNO VARCHAR ( 20 ))") is None
+    assert parse_hsqldb_log_line("CREATE INDEX holdertitle ON HOLDER(TITLE)") is None
+
+
+def test_parse_log_line_returns_none_for_blank_or_none():
+    assert parse_hsqldb_log_line("") is None
+    assert parse_hsqldb_log_line("   ") is None
+    assert parse_hsqldb_log_line(None) is None
+
+
+def test_parse_log_line_handles_crlf_line_ending():
+    """The log file has CRLF endings on Windows; the trailing \\r must
+    not leak into the last column's value."""
+    line = "INSERT INTO PRIORITY VALUES('2020/10769','2019/21188','23/12/2019','TR')\r\n"
+    result = parse_hsqldb_log_line(line)
+    assert result is not None
+    assert result["row"]["COUNTRYNO"] == "TR"  # not "TR\r"
+
+
+def test_parse_log_line_returns_none_for_unknown_table():
+    """HSQLDB internal / housekeeping tables are silently ignored."""
+    line = "INSERT INTO MYSCHEMA.SYS_TABLE VALUES('a','b')"
+    assert parse_hsqldb_log_line(line) is None
+
+
+def test_parse_log_line_raises_on_column_count_mismatch():
+    """If the row arity disagrees with the schema, that's a real bug —
+    fail loudly, never silently truncate or pad."""
+    # PATENT has 13 columns; this line has only 5
+    line = "INSERT INTO PATENT VALUES('a','b','c','d','e')"
+    with pytest.raises(ValueError, match="expected 13 columns"):
+        parse_hsqldb_log_line(line)
+
+
+def test_table_columns_match_known_arities():
+    """Sanity guard so an accidental edit to TABLE_COLUMNS is caught."""
+    assert len(TABLE_COLUMNS["PATENT"]) == 13
+    assert len(TABLE_COLUMNS["HOLDER"]) == 7
+    assert len(TABLE_COLUMNS["INVENTER"]) == 7
+    assert len(TABLE_COLUMNS["ATTORNEY"]) == 5
+    assert len(TABLE_COLUMNS["PRIORITY"]) == 4
