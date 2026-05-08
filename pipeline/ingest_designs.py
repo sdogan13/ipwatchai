@@ -421,7 +421,7 @@ def upsert_event(cur, event: Dict[str, Any], *, bulletin_no: Optional[str], bull
 # Issue-level orchestration
 # ---------------------------------------------------------------------------
 
-def ingest_issue(conn, issue_folder: Path, *, skip_events: bool = False) -> Dict[str, Any]:
+def ingest_issue(conn, issue_folder: Path, *, skip_events: bool = False, run_watchlist_scan: bool = True) -> Dict[str, Any]:
     metadata_path = issue_folder / "metadata.json"
     if not metadata_path.is_file():
         return {"status": "no_metadata", "issue": issue_folder.name}
@@ -431,6 +431,7 @@ def ingest_issue(conn, issue_folder: Path, *, skip_events: bool = False) -> Dict
     views_inserted = 0
     events_inserted = 0
     events_seen = 0
+    inserted_design_ids: List[str] = []
 
     bulletin_no = str(payload.get("bulletin_no")) if payload.get("bulletin_no") else None
     bulletin_date = parse_date_safe(payload.get("bulletin_date"))
@@ -454,6 +455,7 @@ def ingest_issue(conn, issue_folder: Path, *, skip_events: bool = False) -> Dict
                 row = _design_row(record, design, holder_id=holder, source_folder=issue_folder.name)
                 design_id = upsert_design(cur, row)
                 designs_inserted += 1
+                inserted_design_ids.append(str(design_id))
                 views_inserted += upsert_views(cur, design_id, design.get("views") or [])
 
         if not skip_events:
@@ -466,6 +468,21 @@ def ingest_issue(conn, issue_folder: Path, *, skip_events: bool = False) -> Dict
                         events_inserted += 1
     conn.commit()
 
+    if run_watchlist_scan and inserted_design_ids:
+        try:
+            from watchlist.design_scanner import trigger_design_watchlist_scan
+
+            scan_ref = f"BLT_{bulletin_no}" if bulletin_no else issue_folder.name
+            alerts = trigger_design_watchlist_scan(
+                inserted_design_ids,
+                source_type="bulletin",
+                source_reference=scan_ref,
+            )
+            logger.info("[+] %s: design-watchlist scan emitted %d alert(s)", issue_folder.name, alerts)
+        except Exception as exc:  # noqa: BLE001
+            # Never let a failed watchlist scan poison a successful ingest.
+            logger.warning("[!] %s: design-watchlist scan failed: %r", issue_folder.name, exc)
+
     logger.info(
         "[+] %s: designs=%d views=%d events_inserted=%d (events_seen=%d)",
         issue_folder.name, designs_inserted, views_inserted, events_inserted, events_seen,
@@ -477,6 +494,7 @@ def ingest_issue(conn, issue_folder: Path, *, skip_events: bool = False) -> Dict
         "views": views_inserted,
         "events_inserted": events_inserted,
         "events_seen": events_seen,
+        "design_ids": inserted_design_ids,
     }
 
 

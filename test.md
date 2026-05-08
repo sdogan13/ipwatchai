@@ -285,6 +285,9 @@ Current environment note:
 - `tests/browser/test_billing_browser.py`: pricing/checkout locale render coverage for Turkish and Arabic RTL, mobile viewport billing coverage, checkout registration, checkout login, checkout forgot-password reset/login recovery, and paid-checkout initialization browser coverage
 - `tests/browser/test_admin_browser.py`: admin-capable browser coverage for `/admin` navigation plus landing-page Education tester moderation controls
 - `tests/browser/test_design_search_browser.py`: dashboard "Tasarım Arama" tab activation, design quick-search submission, result-card render, and en/tr/ar locale label coverage
+- `tests/test_design_watchlist_service.py`: design watchlist CRUD service (Locarno normalization, halfvec literal, combined quota, dedupe by customer_application_no, update partial-set behavior, delete with alert-count reporting)
+- `tests/test_design_alert_service.py`: design alert formatter (severity bucketing, JSON/string score_details handling, datetime serialization), lifecycle transitions (acknowledge/resolve/dismiss with notes), and scanner-side `insert_alert_row` dedup behavior
+- `tests/test_design_scanner.py`: scanner scoring combiner weights for image vs text-only watchlists, Locarno overlap helper, end-to-end scan flow with mocked DB, and `trigger_design_watchlist_scan` exception-swallowing wrapper
 - `tests/test_browser_e2e.py`: aggregate browser smoke runner
 
 ## Planned Suite Structure

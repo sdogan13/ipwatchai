@@ -133,6 +133,8 @@ Search scoring response note:
 Portfolio and monitoring:
 - `/api/v1/watchlist`
 - `/api/v1/alerts`
+- `/api/v1/design-watchlist`
+- `/api/v1/design-alerts`
 - `/api/v1/reports`
 - `/api/v1/dashboard`
 - `/api/v1/education/progress`
@@ -140,6 +142,14 @@ Portfolio and monitoring:
 - `/api/v1/education/moderation` (admin and superadmin only)
 
 Watchlist similarity alerts exclude same-holder conflicts when the watched mark's `customer_application_no` can be resolved to a trademark holder identifier and the candidate trademark has the same `holder_tpe_client_id` or `holder_id`. Event alerts for the watched trademark remain visible.
+
+Design watchlist + alerts:
+- `POST /api/v1/design-watchlist` creates a tracked design (text + Locarno classes, optional `customer_application_no`, optional `reference_design_id` to clone embeddings from an existing design row); subject to the combined trademark+design watchlist quota (`subscription_plans.max_watchlist_items`)
+- `POST /api/v1/design-watchlist/{id}/image` uploads a reference image (max 10 MB; jpeg/png/webp) and embeds it inline with DINOv2 ViT-L/14, CLIP ViT-B/32, and HSV histogram; the watchlist row's per-signal embedding columns are updated and the next scan uses image+text combiner weights
+- `POST /api/v1/design-watchlist/{id}/scan` queues a full-corpus scan against the active design corpus for that single watchlist item
+- `GET /api/v1/design-alerts` lists design alerts with status / severity / `min_score` filters; severity buckets follow the trademark conventions (low / medium / high / critical) computed from the overall similarity score
+- design alert lifecycle endpoints (`/acknowledge`, `/resolve`, `/dismiss`) accept an optional `notes` body and stamp `acknowledged_by` / `resolved_by` from the current user
+- design alerts are generated automatically by the post-ingest hook in `pipeline/ingest_designs.py`; the conflict storage floor is `0.50` overall similarity, capped at 10 alerts per watchlist item per scan
 
 Reports:
 - `GET /api/v1/reports` lists organization reports

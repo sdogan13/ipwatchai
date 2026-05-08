@@ -75,6 +75,8 @@ Settings and commercial support:
 Primary monitoring tables:
 - `watchlist_mt`
 - `alerts_mt`
+- `design_watchlist_mt`
+- `design_alerts_mt`
 - `scan_jobs`
 - `scan_results`
 - `reports`
@@ -88,6 +90,10 @@ Primary monitoring tables:
 Notes:
 - `_mt` tables are the current multi-tenant watchlist/alert surface
 - `alerts_mt.score_details` stores the full V2 `score_pair()` diagnostic payload for new similarity alerts; legacy scalar score columns remain the compatibility and filtering surface
+- `design_watchlist_mt` mirrors `watchlist_mt` but with design-specific columns: `product_name`, `locarno_classes TEXT[]`, DINOv2 ViT-L/14 (1024-d) + CLIP ViT-B/32 (512-d) + HSV (512-d) embeddings, `reference_design_id` FK to `designs` for clone-from-existing
+- `design_alerts_mt` mirrors `alerts_mt` but stores design conflict refs (`conflicting_design_id` FK, `conflicting_locarno_classes`) and design-only similarity scores (`dino_/clip_/color_/text_similarity_score`); no phonetic / translation columns
+- design watchlist quota: rows count against the existing `subscription_plans.max_watchlist_items` budget alongside `watchlist_mt` rows (combined limit, not per-registry)
+- migration: `migrations/design_watchlist.sql` plus `migrations/run_design_watchlist_migration.py`
 - free/paid risk-report limits depend on organization-linked data; authenticated search risk reports consume `api_usage.reports_generated` and save a downloadable PDF row in `reports`, while other downloadable report types are not monthly-limited
 - `pending_risk_reports` stores short-lived anonymous landing-page risk-report PDFs keyed by a hashed claim token; the row is attached to a user's organization and copied into `reports` only after login and quota validation
 - report deletion is organization-scoped; deleting a report removes the `reports` row and cleans the stored file only when that file resolves under the configured `REPORT_DIR`
