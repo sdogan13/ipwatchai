@@ -4,17 +4,27 @@ Built one helper at a time. Each step adds its own test block so failures
 point cleanly at the unit under test.
 """
 
+from pathlib import Path
+
 import pytest
 
 from cd_extract_tasarim import (
+    DEFAULT_SEVEN_ZIP,
     TABLE_COLUMNS,
+    CDLayout,
     decode_hsqldb_escapes,
+    extract_cd_archive,
     parse_hsqldb_log,
     parse_hsqldb_log_line,
     resolve_design_images,
     split_locarno_codes,
 )
-from cd_extract_tasarim import _application_image_folder, _parse_sql_values
+from cd_extract_tasarim import (
+    _application_image_folder,
+    _locate_cd_layout,
+    _parse_sql_values,
+    _resolve_seven_zip,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -463,3 +473,180 @@ def test_resolve_design_images_empty_folder_returns_empty(tmp_path):
     """Folder exists but holds nothing relevant -> []."""
     (tmp_path / "2016_01059").mkdir()
     assert resolve_design_images("2016/01059", tmp_path) == []
+
+
+# ---------------------------------------------------------------------------
+# Step 2.6 — _resolve_seven_zip / _locate_cd_layout / extract_cd_archive
+# ---------------------------------------------------------------------------
+
+def test_resolve_seven_zip_explicit_override(tmp_path):
+    """Explicit override wins over env var and default."""
+    p = tmp_path / "custom7z.exe"
+    assert _resolve_seven_zip(p) == p
+
+
+def test_resolve_seven_zip_env_var_fallback(monkeypatch, tmp_path):
+    """``PIPELINE_SEVEN_ZIP_PATH`` env var beats the platform default."""
+    p = tmp_path / "env7z.exe"
+    monkeypatch.setenv("PIPELINE_SEVEN_ZIP_PATH", str(p))
+    assert _resolve_seven_zip() == p
+
+
+def test_resolve_seven_zip_platform_default(monkeypatch):
+    """No override and no env var -> hard-coded Windows default."""
+    monkeypatch.delenv("PIPELINE_SEVEN_ZIP_PATH", raising=False)
+    assert _resolve_seven_zip() == Path(DEFAULT_SEVEN_ZIP)
+
+
+def test_locate_cd_layout_modern_layout(tmp_path):
+    """Modern ``{N}_CD.rar`` extraction: log + images both inside cd_root."""
+    cd_root = tmp_path / "240"
+    cd_root.mkdir()
+    (cd_root / "idbulletin.log").write_text("", encoding="utf-8")
+    (cd_root / "idbulletin.script").write_text("", encoding="utf-8")
+    (cd_root / "images").mkdir()
+
+    layout = _locate_cd_layout(tmp_path)
+    assert layout.cd_root == cd_root
+    assert layout.log_path == cd_root / "idbulletin.log"
+    assert layout.images_root == cd_root / "images"
+
+
+def test_locate_cd_layout_verbose_layout(tmp_path):
+    """Verbose ``231 say_l_*.rar`` layout: log under setup/, images at root."""
+    setup = tmp_path / "setup"
+    setup.mkdir()
+    (setup / "idbulletin.log").write_text("", encoding="utf-8")
+    (setup / "idbulletin.script").write_text("", encoding="utf-8")
+    # images at archive root, not inside setup/
+    (tmp_path / "images").mkdir()
+    (tmp_path / "main.html").write_text("", encoding="utf-8")
+
+    layout = _locate_cd_layout(tmp_path)
+    assert layout.cd_root == setup
+    assert layout.log_path == setup / "idbulletin.log"
+    assert layout.images_root == tmp_path / "images"  # sibling of cd_root
+
+
+def test_locate_cd_layout_missing_log_raises(tmp_path):
+    """No ``idbulletin.log`` anywhere -> RuntimeError."""
+    (tmp_path / "garbage").mkdir()
+    with pytest.raises(RuntimeError, match="no idbulletin.log"):
+        _locate_cd_layout(tmp_path)
+
+
+def test_locate_cd_layout_multiple_logs_raises(tmp_path):
+    """Two ``idbulletin.log`` files -> we don't know which CD to pick."""
+    (tmp_path / "240").mkdir()
+    (tmp_path / "240" / "idbulletin.log").write_text("", encoding="utf-8")
+    (tmp_path / "242").mkdir()
+    (tmp_path / "242" / "idbulletin.log").write_text("", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="multiple idbulletin.log"):
+        _locate_cd_layout(tmp_path)
+
+
+def test_locate_cd_layout_missing_images_dir_returns_log_only_path(tmp_path):
+    """No images/ folder anywhere — layout still valid, images_root just
+    points at a missing path (the resolver tolerates that with [])."""
+    cd_root = tmp_path / "240"
+    cd_root.mkdir()
+    (cd_root / "idbulletin.log").write_text("", encoding="utf-8")
+    layout = _locate_cd_layout(tmp_path)
+    assert layout.cd_root == cd_root
+    assert not layout.images_root.exists()
+
+
+def test_extract_cd_archive_missing_rar_raises(tmp_path):
+    """Missing source archive -> FileNotFoundError before touching 7-Zip."""
+    with pytest.raises(FileNotFoundError, match="archive not found"):
+        extract_cd_archive(tmp_path / "missing.rar", tmp_path / "scratch")
+
+
+def test_extract_cd_archive_missing_seven_zip_raises(tmp_path):
+    """Missing 7-Zip exe -> FileNotFoundError with a clear message."""
+    rar = tmp_path / "fake.rar"
+    rar.write_bytes(b"")  # exists but empty — won't be opened, we fail earlier
+    fake_7z = tmp_path / "no_such_7z.exe"
+    with pytest.raises(FileNotFoundError, match="7-Zip not found"):
+        extract_cd_archive(rar, tmp_path / "scratch", seven_zip=fake_7z)
+
+
+def test_extract_cd_archive_seven_zip_failure_raises(monkeypatch, tmp_path):
+    """7-Zip non-zero / non-warning exit -> RuntimeError with stderr snippet."""
+    rar = tmp_path / "fake.rar"
+    rar.write_bytes(b"")
+    fake_7z = tmp_path / "fake7z.exe"
+    fake_7z.write_bytes(b"")  # passes is_file() check
+
+    class FakeResult:
+        def __init__(self):
+            self.returncode = 2
+            self.stderr = "Cannot open archive"
+            self.stdout = ""
+
+    monkeypatch.setattr(
+        "cd_extract_tasarim.subprocess.run",
+        lambda *a, **kw: FakeResult(),
+    )
+    with pytest.raises(RuntimeError, match=r"7-Zip exited 2 extracting fake\.rar.*Cannot open archive"):
+        extract_cd_archive(rar, tmp_path / "scratch", seven_zip=fake_7z)
+
+
+def test_extract_cd_archive_success_returns_cd_layout(monkeypatch, tmp_path):
+    """End-to-end happy path with a fake 7-Zip — verify the wrapper runs
+    _locate_cd_layout on the post-extraction tree."""
+    rar = tmp_path / "fake.rar"
+    rar.write_bytes(b"")
+    fake_7z = tmp_path / "fake7z.exe"
+    fake_7z.write_bytes(b"")
+    scratch = tmp_path / "scratch"
+
+    class FakeResult:
+        returncode = 0
+        stderr = ""
+        stdout = ""
+
+    def fake_run(cmd, *a, **kw):
+        # Simulate 7-Zip extracting a modern-layout CD into scratch
+        out = scratch / "240"
+        out.mkdir(parents=True)
+        (out / "idbulletin.log").write_text("", encoding="utf-8")
+        (out / "images").mkdir()
+        return FakeResult()
+
+    monkeypatch.setattr("cd_extract_tasarim.subprocess.run", fake_run)
+    layout = extract_cd_archive(rar, scratch, seven_zip=fake_7z)
+    assert isinstance(layout, CDLayout)
+    assert layout.log_path.name == "idbulletin.log"
+    assert layout.cd_root.name == "240"
+
+
+def test_extract_cd_archive_command_excludes_no_java_dir(monkeypatch, tmp_path):
+    """Tasarim CDs don't ship a JRE. The 7-Zip command must NOT carry
+    the ``-x!*/data/java*`` excludes the patent CD extractor uses."""
+    rar = tmp_path / "fake.rar"
+    rar.write_bytes(b"")
+    fake_7z = tmp_path / "fake7z.exe"
+    fake_7z.write_bytes(b"")
+    scratch = tmp_path / "scratch"
+
+    captured = {}
+
+    def fake_run(cmd, *a, **kw):
+        captured["cmd"] = cmd
+
+        class R:
+            returncode = 0
+            stderr = ""
+            stdout = ""
+        out = scratch / "240"
+        out.mkdir(parents=True)
+        (out / "idbulletin.log").write_text("", encoding="utf-8")
+        return R()
+
+    monkeypatch.setattr("cd_extract_tasarim.subprocess.run", fake_run)
+    extract_cd_archive(rar, scratch, seven_zip=fake_7z)
+    cmd = captured["cmd"]
+    assert all("data/java" not in arg for arg in cmd), cmd
+    # Sanity: required flags still present
+    assert "-y" in cmd and "-bso0" in cmd and "-bsp0" in cmd

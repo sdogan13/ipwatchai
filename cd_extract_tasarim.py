@@ -40,7 +40,10 @@ Built incrementally. Each helper has its own unit-test file.
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -370,3 +373,151 @@ def resolve_design_images(
 
     out.sort(key=lambda r: (int(r["design_no"]), int(r["view_no"])))
     return out
+
+
+# ---------------------------------------------------------------------------
+# Step 2.6 — 7-Zip archive extractor + dynamic layout resolution
+# ---------------------------------------------------------------------------
+
+# Default 7-Zip executable on Windows. Override via env var
+# ``PIPELINE_SEVEN_ZIP_PATH`` (matches the patent CD extractor's variable).
+DEFAULT_SEVEN_ZIP = "C:/Program Files/7-Zip/7z.exe"
+
+
+def _resolve_seven_zip(override: Optional[str | Path] = None) -> Path:
+    """Locate the 7-Zip executable, in priority:
+
+      1. explicit ``override`` argument
+      2. ``PIPELINE_SEVEN_ZIP_PATH`` environment variable
+      3. the platform default (``C:/Program Files/7-Zip/7z.exe`` on Windows)
+    """
+    if override is not None:
+        return Path(override)
+    env = os.environ.get("PIPELINE_SEVEN_ZIP_PATH")
+    if env:
+        return Path(env)
+    return Path(DEFAULT_SEVEN_ZIP)
+
+
+@dataclass(frozen=True)
+class CDLayout:
+    """Where the four interesting bits of a Tasarım CD landed after extraction.
+
+    Attributes:
+      cd_root:     directory containing ``idbulletin.log`` (and usually
+                   ``idbulletin.{script,inf,properties}``).
+      log_path:    full path to ``idbulletin.log``.
+      images_root: directory containing ``{year}_{appno}/`` per-application
+                   subfolders. May not exist if the CD ships without
+                   any image folder; the resolver is tolerant of that.
+
+    Why both ``cd_root`` and ``images_root``: the modern ``{N}_CD.rar``
+    layout puts ``images/`` directly under ``cd_root``, but the verbose
+    ``231 say_l_*.rar`` archive puts ``idbulletin.log`` under
+    ``setup/`` while ``images/`` sits at the archive root. This struct
+    captures both locations so the orchestrator can hand
+    ``resolve_design_images`` the right path without re-deriving it.
+    """
+
+    cd_root: Path
+    log_path: Path
+    images_root: Path
+
+
+def _locate_cd_layout(scratch_dir: str | Path) -> CDLayout:
+    """Discover the CD layout under ``scratch_dir`` after a 7-Zip extract.
+
+    Locates the single ``idbulletin.log`` file anywhere in the tree
+    (modern layout: ``scratch/{N}/idbulletin.log``; verbose layout:
+    ``scratch/setup/idbulletin.log``). The CD root is its parent.
+
+    For ``images_root``, prefers ``cd_root/images`` if it exists; falls
+    back to ``scratch_dir/images`` (the verbose layout); finally
+    defaults to ``cd_root/images`` even if missing — the resolver
+    handles a missing folder by returning ``[]``.
+
+    Raises:
+      RuntimeError: if no ``idbulletin.log`` is found.
+      RuntimeError: if more than one ``idbulletin.log`` is found
+                    (we wouldn't know which CD root to pick).
+    """
+    scratch = Path(scratch_dir)
+    log_paths = sorted(scratch.rglob("idbulletin.log"))
+    if not log_paths:
+        raise RuntimeError(f"no idbulletin.log found under {scratch}")
+    if len(log_paths) > 1:
+        raise RuntimeError(
+            f"multiple idbulletin.log files found under {scratch}: "
+            f"{[str(p.relative_to(scratch)) for p in log_paths]}"
+        )
+
+    log_path = log_paths[0]
+    cd_root = log_path.parent
+
+    # images_root candidates, in preference order
+    candidates = [cd_root / "images", scratch / "images"]
+    images_root = next((c for c in candidates if c.is_dir()), candidates[0])
+
+    return CDLayout(cd_root=cd_root, log_path=log_path, images_root=images_root)
+
+
+def extract_cd_archive(
+    rar_path: str | Path,
+    scratch_dir: str | Path,
+    *,
+    seven_zip: Optional[str | Path] = None,
+    timeout: Optional[int] = 600,
+) -> CDLayout:
+    """Extract a Tasarım CD ``.rar`` archive into ``scratch_dir``.
+
+    Unlike the patent CD bundles, Tasarım archives don't ship a JRE,
+    so there is no ``data/java/`` to exclude. Returns a ``CDLayout``
+    describing where the log and images landed — the layout differs
+    between the modern ``{N}_CD.rar`` archives and the verbose-named
+    legacy variant (see ``_locate_cd_layout``).
+
+    Raises:
+      - ``FileNotFoundError`` if ``rar_path`` is missing.
+      - ``FileNotFoundError`` if 7-Zip itself is not installed at the
+        resolved path.
+      - ``RuntimeError`` if 7-Zip exits with a fatal status (non-zero
+        and non-warning) or if no ``idbulletin.log`` is found after
+        extraction (or more than one).
+
+    7-Zip exit codes (per the official spec):
+      - 0 = ok
+      - 1 = warnings (non-fatal — usually file-locked or skipped items)
+      - 2 = fatal error
+      - 7 = command line error
+      - 8 = not enough memory
+      - 255 = user stopped
+    Only 0 and 1 are accepted.
+    """
+    rar = Path(rar_path)
+    if not rar.is_file():
+        raise FileNotFoundError(f"archive not found: {rar}")
+
+    seven = _resolve_seven_zip(seven_zip)
+    if not seven.is_file():
+        raise FileNotFoundError(f"7-Zip not found at {seven}")
+
+    scratch = Path(scratch_dir)
+    scratch.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        str(seven), "x",
+        str(rar),
+        f"-o{scratch}",
+        "-y",     # assume Yes for any 7-Zip prompts
+        "-bso0",  # silence stdout
+        "-bsp0",  # silence progress
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    if result.returncode not in (0, 1):
+        raise RuntimeError(
+            f"7-Zip exited {result.returncode} extracting {rar.name}: "
+            f"{(result.stderr or result.stdout).strip()[:500]}"
+        )
+
+    return _locate_cd_layout(scratch)
