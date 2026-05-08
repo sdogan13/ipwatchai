@@ -14137,6 +14137,170 @@ async def test_extracted_export_transfers_csv_route_delegates_to_service():
     )
 
 
+@pytest.mark.asyncio
+async def test_lead_service_get_bankruptcy_feed_data_formats_rows():
+    from services.lead_service import get_bankruptcy_feed_data
+
+    current_user = SimpleNamespace(id=uuid.uuid4(), organization_id=uuid.uuid4())
+    mock_db_cm = MagicMock()
+    mock_db = MagicMock()
+    mock_cursor = MagicMock()
+    mock_db.cursor.return_value = mock_cursor
+    mock_db_cm.__enter__.return_value = mock_db
+    mock_db_cm.__exit__.return_value = False
+    tm_id = uuid.uuid4()
+    mock_cursor.fetchone.side_effect = [{"cnt": 1}, {"cnt": 1}]
+    mock_cursor.fetchall.return_value = [
+        {
+            "id": tm_id,
+            "name": "BANKRUPT MARK",
+            "application_no": "2015/4242",
+            "registration_no": "TR-B-1",
+            "nice_class_numbers": [42],
+            "image_path": None,
+            "final_status": "Tescil Edildi",
+            "application_date": date(2015, 8, 1),
+            "bankruptcy_bulletin_no": "BLT_500",
+            "bankruptcy_date": date(2026, 2, 15),
+            "bankruptcy_details": "Court Bursa 2026/123 — bankruptcy declared",
+            "days_since_bankruptcy": 82,
+            "holder_name": "Doomed Holdings A.Ş.",
+            "holder_tpe_client_id": "H-3",
+            "attorney_name": "Agent Smith",
+            "attorney_no": "A-1",
+        }
+    ]
+
+    response = await get_bankruptcy_feed_data(
+        nice_class=42,
+        search="bank",
+        page=1,
+        limit=20,
+        current_user=current_user,
+        db_factory=MagicMock(return_value=mock_db_cm),
+        user_plan_getter=lambda db, user_id: {"plan_name": "professional"},
+        plan_limit_getter=lambda plan, key: 10,
+    )
+
+    assert response["total_count"] == 1
+    item = response["items"][0]
+    assert item["id"] == str(tm_id)
+    assert item["bankruptcy_date"] == "2026-02-15"
+    assert item["bankruptcy_details"].startswith("Court Bursa")
+    assert item["days_since_bankruptcy"] == 82
+    assert item["holder_name"] == "Doomed Holdings A.Ş."
+    bankruptcy_query_calls = [
+        call for call in mock_cursor.execute.call_args_list
+        if call.args and isinstance(call.args[0], str) and "trademark_events" in call.args[0]
+    ]
+    assert bankruptcy_query_calls
+    assert any("event_type = 'bankruptcy'" in call.args[0] for call in bankruptcy_query_calls)
+
+
+@pytest.mark.asyncio
+async def test_lead_service_export_bankruptcies_csv_data_streams_csv():
+    from services.lead_service import export_bankruptcies_csv_data
+
+    current_user = SimpleNamespace(id=uuid.uuid4(), organization_id=uuid.uuid4())
+    mock_db_cm = MagicMock()
+    mock_db = MagicMock()
+    mock_cursor = MagicMock()
+    mock_db.cursor.return_value = mock_cursor
+    mock_db_cm.__enter__.return_value = mock_db
+    mock_db_cm.__exit__.return_value = False
+    mock_cursor.fetchone.return_value = {"cnt": 1}
+    mock_cursor.fetchall.return_value = [
+        {
+            "name": "BANKRUPT MARK",
+            "application_no": "2015/4242",
+            "registration_no": "TR-B-1",
+            "holder_name": "Doomed Holdings A.Ş.",
+            "holder_tpe_client_id": "H-3",
+            "attorney_name": "Agent Smith",
+            "attorney_no": "A-1",
+            "nice_class_numbers": [42],
+            "final_status": "Tescil Edildi",
+            "bankruptcy_bulletin_no": "BLT_500",
+            "bankruptcy_date": date(2026, 2, 15),
+            "bankruptcy_details": "Court Bursa 2026/123",
+            "days_since_bankruptcy": 82,
+        }
+    ]
+
+    response = await export_bankruptcies_csv_data(
+        nice_class=42,
+        current_user=current_user,
+        db_factory=MagicMock(return_value=mock_db_cm),
+        user_plan_getter=lambda db, user_id: {"plan_name": "enterprise"},
+        plan_limit_getter=lambda plan, key: True if key == "can_export_csv_leads" else 10,
+        now_getter=lambda: datetime(2026, 5, 8, 14, 0, tzinfo=timezone.utc),
+    )
+
+    chunks = []
+    async for chunk in response.body_iterator:
+        if isinstance(chunk, bytes):
+            chunks.append(chunk)
+        else:
+            chunks.append(chunk.encode("utf-8"))
+    body = b"".join(chunks).decode("utf-8")
+
+    assert response.headers["content-disposition"] == "attachment; filename=bankruptcies_20260508.csv"
+    assert "Marka,Basvuru No,Tescil No,Iflas Sahibi,Sahip TPE No,Vekil,Vekil No,Siniflar,Durum,Iflas Tarihi" in body
+    assert "BANKRUPT MARK,2015/4242,TR-B-1,Doomed Holdings A.Ş.,H-3,Agent Smith,A-1,42,Tescil Edildi,2026-02-15,BLT_500,Court Bursa 2026/123,82" in body
+
+
+@pytest.mark.asyncio
+async def test_extracted_bankruptcy_feed_route_delegates_to_service():
+    from api.leads import get_bankruptcy_feed
+
+    current_user = MagicMock()
+    expected = {"total_count": 0, "page": 1, "limit": 20, "items": []}
+
+    with patch(
+        "api.leads.get_bankruptcy_feed_data",
+        new=AsyncMock(return_value=expected),
+    ) as mock_get_bankruptcy_feed_data:
+        response = await get_bankruptcy_feed(
+            nice_class=42,
+            search="bank",
+            page=1,
+            limit=20,
+            current_user=current_user,
+        )
+
+    assert response == expected
+    mock_get_bankruptcy_feed_data.assert_awaited_once_with(
+        nice_class=42,
+        search="bank",
+        page=1,
+        limit=20,
+        current_user=current_user,
+    )
+
+
+@pytest.mark.asyncio
+async def test_extracted_export_bankruptcies_csv_route_delegates_to_service():
+    from api.leads import export_bankruptcies_csv
+
+    current_user = MagicMock()
+    expected = StreamingResponse(iter([b"csv"]), media_type="text/csv")
+
+    with patch(
+        "api.leads.export_bankruptcies_csv_data",
+        new=AsyncMock(return_value=expected),
+    ) as mock_export_bankruptcies_csv_data:
+        response = await export_bankruptcies_csv(
+            nice_class=42,
+            current_user=current_user,
+        )
+
+    assert response is expected
+    mock_export_bankruptcies_csv_data.assert_awaited_once_with(
+        nice_class=42,
+        current_user=current_user,
+    )
+
+
 def test_payment_service_get_client_ip_prefers_proxy_headers():
     from services.payment_service import get_client_ip
     from starlette.requests import Request

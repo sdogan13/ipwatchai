@@ -327,6 +327,7 @@ window.AppAPI.loadLeadFeed = async function (page) {
 var currentRenewalPage = 1;
 var currentCancellationPage = 1;
 var currentTransferPage = 1;
+var currentBankruptcyPage = 1;
 var currentRadarMode = 'conflicts';
 
 window.AppAPI.switchRadarMode = function (mode) {
@@ -335,7 +336,8 @@ window.AppAPI.switchRadarMode = function (mode) {
         conflicts: { btn: 'radar-mode-conflicts', section: 'radar-conflicts-section' },
         renewals: { btn: 'radar-mode-renewals', section: 'radar-renewals-section' },
         cancellations: { btn: 'radar-mode-cancellations', section: 'radar-cancellations-section' },
-        transfers: { btn: 'radar-mode-transfers', section: 'radar-transfers-section' }
+        transfers: { btn: 'radar-mode-transfers', section: 'radar-transfers-section' },
+        bankruptcies: { btn: 'radar-mode-bankruptcies', section: 'radar-bankruptcies-section' }
     };
     Object.keys(modes).forEach(function (key) {
         var btn = document.getElementById(modes[key].btn);
@@ -359,6 +361,8 @@ window.AppAPI.switchRadarMode = function (mode) {
         loadCancellationFeed(1);
     } else if (mode === 'transfers') {
         loadTransferFeed(1);
+    } else if (mode === 'bankruptcies') {
+        loadBankruptcyFeed(1);
     }
 };
 
@@ -846,6 +850,149 @@ window.AppAPI.exportTransfersCSV = async function () {
     }
 };
 
+window.AppAPI.loadBankruptcyFeed = async function (page) {
+    if (page === undefined) page = 1;
+    currentBankruptcyPage = page;
+
+    var container = document.getElementById('bankruptcy-feed-cards');
+    var loading = document.getElementById('bankruptcy-feed-loading');
+    var empty = document.getElementById('bankruptcy-feed-empty');
+    var pagination = document.getElementById('bankruptcy-pagination');
+
+    loading.classList.remove('hidden');
+    container.innerHTML = '';
+    container.classList.add('hidden');
+    empty.classList.add('hidden');
+
+    var niceClass = document.getElementById('filter-bankruptcy-nice-class').value;
+    var searchEl = document.getElementById('filter-bankruptcy-search');
+    var search = searchEl ? searchEl.value.trim() : '';
+
+    var url = '/api/v1/leads/bankruptcies/feed?page=' + page + '&limit=' + LEADS_PER_PAGE;
+    if (niceClass) url += '&nice_class=' + niceClass;
+    if (search) url += '&search=' + encodeURIComponent(search);
+
+    try {
+        var response = await fetch(url, {
+            headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+        });
+        loading.classList.add('hidden');
+
+        if (response.status === 403) {
+            var denied = await _readApiErrorData(response);
+            showLeadUpgradePrompt(denied.detail || denied);
+            return;
+        }
+        if (!response.ok) throw new Error('Failed to load bankruptcies');
+
+        var data = await response.json();
+        var items = data.items || [];
+        var totalCount = data.total_count != null ? data.total_count : items.length;
+
+        if (items.length === 0) {
+            empty.classList.remove('hidden');
+            pagination.classList.add('hidden');
+            return;
+        }
+
+        container.innerHTML = items.map(renderBankruptcyCard).join('');
+        container.classList.remove('hidden');
+
+        var totalPages = Math.ceil(totalCount / LEADS_PER_PAGE);
+        pagination.classList.remove('hidden');
+
+        var totalInfoEl = document.getElementById('bankruptcy-total-info');
+        if (totalInfoEl) totalInfoEl.textContent = t('leads.total_results', { count: totalCount });
+        document.getElementById('bankruptcy-page-info').textContent = t('leads.page_of', { current: page, total: totalPages });
+        document.getElementById('bankruptcy-prev-btn').disabled = page === 1;
+        document.getElementById('bankruptcy-next-btn').disabled = page >= totalPages;
+
+    } catch (error) {
+        loading.classList.add('hidden');
+        console.error('Failed to load bankruptcies:', error);
+        showToast(t('leads.load_error'), 'error');
+    }
+};
+
+function renderBankruptcyCard(item) {
+    var displayName = getTrademarkDisplayName(item);
+    var thumbnail = window.AppComponents.renderThumbnail(item.image_path, displayName, item.application_no);
+    var classBadges = window.AppComponents.renderNiceClassBadges(item.nice_classes);
+    var turkpatentBtn = window.AppComponents.renderTurkpatentButton(item.application_no);
+    var regNo = window.AppComponents.renderRegistrationNo(item.registration_no);
+    var holderLink = window.AppComponents.renderHolderLink(item.holder_name, item.holder_tpe_client_id || null);
+    var attorneyLink = window.AppComponents.renderAttorneyLink(item.attorney_name, item.attorney_no);
+    var eventsBtn = window.AppComponents.renderEventsButton(item.application_no);
+
+    var statusHtml = '<span class="text-xs px-2 py-0.5 rounded-full font-medium" style="color:' + getStatusColor(item.status) + ';background:' + getStatusBg(item.status) + '">' + getStatusText(item.status) + '</span>';
+
+    var bankruptcyDateHtml = item.bankruptcy_date
+        ? '<div class="text-xs mt-0.5" style="color:var(--color-risk-critical-text)">'
+            + '<svg class="w-3 h-3 inline-block mr-0.5 -mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>'
+            + t('leads.bankruptcy_date') + ': ' + formatDateTRShort(item.bankruptcy_date)
+            + (item.days_since_bankruptcy != null ? ' &middot; ' + t('leads.days_since', { days: item.days_since_bankruptcy }) : '')
+            + '</div>'
+        : '';
+
+    var detailsHtml = item.bankruptcy_details
+        ? '<div class="text-xs mt-0.5 italic truncate" style="color:var(--color-text-muted)" data-bankruptcy-details>'
+            + escapeHtml(String(item.bankruptcy_details).slice(0, 160))
+            + '</div>'
+        : '';
+
+    var ribbonColor = window.AppComponents.getScoreColor(95);
+    var ribbon = '<div class="flex flex-col items-center gap-1 flex-shrink-0">'
+        + '<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold" style="' + ribbonColor + '" data-bankruptcy-pill>' + (t('leads.bankrupt_short') || 'IFLAS') + '</span>'
+        + '</div>';
+
+    var inner = '<div class="flex justify-between items-start gap-4">'
+        + '<div class="flex items-start gap-3 flex-1 min-w-0">'
+        + thumbnail
+        + '<div class="flex-1 min-w-0">'
+        + '<div class="font-semibold truncate" style="color:var(--color-text-primary)">' + escapeHtml(displayName) + '</div>'
+        + '<div class="mt-0.5">' + statusHtml + '</div>'
+        + bankruptcyDateHtml
+        + detailsHtml
+        + classBadges
+        + turkpatentBtn
+        + regNo
+        + holderLink
+        + attorneyLink
+        + '<div class="mt-1">' + eventsBtn + '</div>'
+        + '</div>'
+        + '</div>'
+        + ribbon
+        + '</div>';
+
+    return window.AppComponents.renderCardShell(inner, { riskLevel: 'critical' });
+}
+
+window.AppAPI.exportBankruptciesCSV = async function () {
+    try {
+        var niceClass = document.getElementById('filter-bankruptcy-nice-class').value;
+        var url = '/api/v1/leads/bankruptcies/export/csv?';
+        if (niceClass) url += 'nice_class=' + niceClass + '&';
+
+        var response = await fetch(url, {
+            headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+        });
+        if (response.status === 403) {
+            var denied = await _readApiErrorData(response);
+            showUpgradeModal(denied.detail || denied, 'csv_export');
+            return;
+        }
+        if (!response.ok) throw new Error('Export failed');
+
+        var blob = await response.blob();
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'bankruptcies_' + new Date().toISOString().slice(0, 10) + '.csv';
+        a.click();
+    } catch (error) {
+        showToast(t('common.error') + ': ' + error.message, 'error');
+    }
+};
+
 var switchRadarMode = window.AppAPI.switchRadarMode;
 var loadRenewalStats = window.AppAPI.loadRenewalStats;
 var loadRenewalFeed = window.AppAPI.loadRenewalFeed;
@@ -854,6 +1001,8 @@ var loadCancellationFeed = window.AppAPI.loadCancellationFeed;
 var exportCancellationsCSV = window.AppAPI.exportCancellationsCSV;
 var loadTransferFeed = window.AppAPI.loadTransferFeed;
 var exportTransfersCSV = window.AppAPI.exportTransfersCSV;
+var loadBankruptcyFeed = window.AppAPI.loadBankruptcyFeed;
+var exportBankruptciesCSV = window.AppAPI.exportBankruptciesCSV;
 
 window.AppAPI.showLeadDetail = async function (leadId) {
     currentLeadId = leadId;

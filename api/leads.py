@@ -10,10 +10,12 @@ from auth.authentication import CurrentUser, get_current_user
 from services.lead_service import (
     LEADS_PER_PAGE,
     dismiss_lead_data,
+    export_bankruptcies_csv_data,
     export_cancellations_csv_data,
     export_leads_csv_data,
     export_renewals_csv_data,
     export_transfers_csv_data,
+    get_bankruptcy_feed_data,
     get_cancellation_feed_data,
     get_lead_credits_data,
     get_lead_detail_data,
@@ -292,6 +294,36 @@ async def export_transfers_csv(
     """Export transfer leads as CSV."""
     return await export_transfers_csv_data(
         event_type=event_type,
+        nice_class=nice_class,
+        current_user=current_user,
+    )
+
+
+@router.get("/bankruptcies/feed")
+async def get_bankruptcy_feed(
+    nice_class: Optional[int] = Query(None, description="Filter by Nice class"),
+    search: Optional[str] = Query(None, description="Search brand name or holder name"),
+    page: int = Query(1, ge=1),
+    limit: int = Query(LEADS_PER_PAGE, ge=1, le=100),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Get the paginated bankruptcy lead feed (rare, high-LTV signal)."""
+    return await get_bankruptcy_feed_data(
+        nice_class=nice_class,
+        search=search,
+        page=page,
+        limit=limit,
+        current_user=current_user,
+    )
+
+
+@router.get("/bankruptcies/export/csv")
+async def export_bankruptcies_csv(
+    nice_class: Optional[int] = Query(None),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Export bankruptcy leads as CSV."""
+    return await export_bankruptcies_csv_data(
         nice_class=nice_class,
         current_user=current_user,
     )
