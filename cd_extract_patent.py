@@ -22,9 +22,15 @@ Built incrementally. Each helper has its own unit-test file.
 
 from __future__ import annotations
 
+import argparse
+import json
+import logging
 import os
 import re
+import shutil
 import subprocess
+import time
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -655,3 +661,194 @@ def cd_to_metadata(
         },
         "patents": patents,
     }
+
+
+# ---------------------------------------------------------------------------
+# Step 2.8 — CLI entrypoint
+# ---------------------------------------------------------------------------
+
+_LOCAL_PROJECT_ROOT = Path(__file__).resolve().parent
+_DEFAULT_BULLETINS_DIR = _LOCAL_PROJECT_ROOT / "bulletins" / "Patent__Faydali_Model"
+_DEFAULT_SCRATCH_DIR = _LOCAL_PROJECT_ROOT / "_scratch_cd"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - [PATENT-CD] - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger("turkpatent.cd_extract")
+
+
+@dataclass
+class CLIArgs:
+    rar_paths: List[Path]
+    out_dir: Path
+    scratch_dir: Path
+    seven_zip: Optional[Path]
+    keep_scratch: bool
+
+
+def metadata_filename(rar_path: Path) -> str:
+    """Return the canonical metadata.json name for a CD .rar.
+
+    e.g. ``2025_12_CD.rar`` -> ``2025_12_metadata.json``. Drops the
+    ``_CD`` suffix so the metadata lines up alphabetically next to its
+    sibling PDF (``2025_12.pdf``).
+    """
+    stem = rar_path.stem
+    if stem.endswith("_CD"):
+        stem = stem[:-3]
+    return f"{stem}_metadata.json"
+
+
+def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
+    """Parse CLI arguments for the CD-extractor entrypoint."""
+    parser = argparse.ArgumentParser(
+        prog="cd_extract_patent",
+        description="Extract a Patent / Faydalı Model CD bundle to metadata JSON.",
+    )
+    parser.add_argument(
+        "--rar",
+        action="append",
+        type=Path,
+        help="Path to a CD .rar archive. Repeat for multiple files.",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help=f"Process every YYYY_M_CD.rar in --bulletins-dir.",
+    )
+    parser.add_argument(
+        "--bulletins-dir",
+        type=Path,
+        default=_DEFAULT_BULLETINS_DIR,
+        help=f"Bulletins directory for --all and default --out-dir "
+             f"(default: {_DEFAULT_BULLETINS_DIR}).",
+    )
+    parser.add_argument(
+        "--out-dir",
+        type=Path,
+        default=None,
+        help="Where to write {YYYY_M}_metadata.json files "
+             "(default: --bulletins-dir).",
+    )
+    parser.add_argument(
+        "--scratch-dir",
+        type=Path,
+        default=_DEFAULT_SCRATCH_DIR,
+        help=f"Scratch folder for unrar output "
+             f"(default: {_DEFAULT_SCRATCH_DIR}; cleaned up after each CD "
+             f"unless --keep-scratch).",
+    )
+    parser.add_argument(
+        "--seven-zip",
+        type=Path,
+        default=None,
+        help="Override path to 7z.exe.",
+    )
+    parser.add_argument(
+        "--keep-scratch",
+        action="store_true",
+        help="Don't delete the per-CD scratch folder after extraction.",
+    )
+    ns = parser.parse_args(argv)
+
+    if ns.all and ns.rar:
+        parser.error("--rar and --all are mutually exclusive")
+
+    if ns.all:
+        rar_paths = sorted(ns.bulletins_dir.glob("*_CD.rar"))
+        if not rar_paths:
+            parser.error(f"--all matched no *_CD.rar files in {ns.bulletins_dir}")
+    elif ns.rar:
+        rar_paths = list(ns.rar)
+    else:
+        parser.error("provide --rar (one or more) or --all")
+
+    out_dir = ns.out_dir if ns.out_dir is not None else ns.bulletins_dir
+
+    return CLIArgs(
+        rar_paths=rar_paths,
+        out_dir=out_dir,
+        scratch_dir=ns.scratch_dir,
+        seven_zip=ns.seven_zip,
+        keep_scratch=ns.keep_scratch,
+    )
+
+
+def _process_one(
+    rar: Path,
+    out_dir: Path,
+    scratch_dir: Path,
+    seven_zip: Optional[Path],
+    keep_scratch: bool,
+) -> Dict[str, Any]:
+    """Run cd_to_metadata for a single archive and write its JSON sidecar."""
+    cd_scratch = scratch_dir / rar.stem
+    if cd_scratch.exists():
+        shutil.rmtree(cd_scratch, ignore_errors=True)
+    cd_scratch.mkdir(parents=True, exist_ok=True)
+
+    try:
+        doc = cd_to_metadata(rar, cd_scratch, seven_zip=seven_zip)
+    except Exception:
+        if not keep_scratch:
+            shutil.rmtree(cd_scratch, ignore_errors=True)
+        raise
+
+    out_path = out_dir / metadata_filename(rar)
+    out_path.write_text(
+        json.dumps(doc, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    if not keep_scratch:
+        shutil.rmtree(cd_scratch, ignore_errors=True)
+
+    return {
+        "rar": rar.name,
+        "out": out_path.name,
+        "stats": doc["stats"],
+    }
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    args = parse_argv(argv)
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    args.scratch_dir.mkdir(parents=True, exist_ok=True)
+
+    started = time.time()
+    succeeded: List[str] = []
+    failed: List[tuple[str, str]] = []
+
+    for rar in args.rar_paths:
+        if not rar.is_file():
+            logger.warning("[skip] %s: not found", rar)
+            failed.append((rar.name, "not found"))
+            continue
+
+        logger.info("[*] %s -> %s", rar.name, metadata_filename(rar))
+        try:
+            result = _process_one(
+                rar, args.out_dir, args.scratch_dir,
+                args.seven_zip, args.keep_scratch,
+            )
+            succeeded.append(rar.name)
+            s = result["stats"]
+            logger.info(
+                "[+] %s: %d patents, %d figures resolved, wrote %s",
+                rar.name, s["patents"], s["figures_resolved"], result["out"],
+            )
+        except Exception as e:
+            failed.append((rar.name, str(e)))
+            logger.error("[!] %s: %r", rar.name, e)
+
+    duration = time.time() - started
+    logger.info(
+        "Done in %.1fs: %d succeeded, %d failed",
+        duration, len(succeeded), len(failed),
+    )
+    return 0 if not failed else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
