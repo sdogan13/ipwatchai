@@ -11,9 +11,10 @@ from cd_extract_patent import (
     decode_hsqldb_escapes,
     parse_hsqldb_log,
     parse_hsqldb_log_line,
+    resolve_image_path,
     strip_ipc_html,
 )
-from cd_extract_patent import _parse_sql_values
+from cd_extract_patent import _parse_sql_values, _split_application_no
 
 
 # ---------------------------------------------------------------------------
@@ -476,3 +477,144 @@ def test_parse_log_accepts_str_or_path(tmp_path):
     a = parse_hsqldb_log(log)
     b = parse_hsqldb_log(str(log))
     assert a == b
+
+
+# ---------------------------------------------------------------------------
+# Step 2.5 — _split_application_no
+# ---------------------------------------------------------------------------
+
+def test_split_application_no_real_2017_format():
+    assert _split_application_no("2017/15048") == ("2017", "15048")
+
+
+def test_split_application_no_real_2021_padded_format():
+    assert _split_application_no("2021/000039") == ("2021", "000039")
+    assert _split_application_no("2021/011498") == ("2021", "011498")
+
+
+def test_split_application_no_strips_surrounding_whitespace():
+    assert _split_application_no("  2017/15048  ") == ("2017", "15048")
+
+
+def test_split_application_no_returns_none_for_malformed_inputs():
+    assert _split_application_no(None) is None
+    assert _split_application_no("") is None
+    assert _split_application_no("2017") is None         # no slash
+    assert _split_application_no("2017/") is None        # empty appno
+    assert _split_application_no("/15048") is None       # empty year
+    assert _split_application_no("2017/15048/extra") is None  # too many parts
+    assert _split_application_no("ABCD/15048") is None   # non-numeric year
+    assert _split_application_no("2017/abc") is None     # non-numeric appno
+
+
+# ---------------------------------------------------------------------------
+# Step 2.5 — resolve_image_path
+# ---------------------------------------------------------------------------
+
+def test_resolve_image_path_finds_exact_match_pre_2021(tmp_path):
+    """2017–2020: bare 5-digit names (15048.tif)."""
+    year_dir = tmp_path / "2017"
+    year_dir.mkdir()
+    (year_dir / "15048.tif").write_bytes(b"TIFF")
+    found = resolve_image_path("2017/15048", tmp_path)
+    assert found is not None
+    assert found.name == "15048.tif"
+    assert found.read_bytes() == b"TIFF"
+
+
+def test_resolve_image_path_finds_exact_match_post_2021(tmp_path):
+    """2021+: 6-digit zero-padded names (000039.tif)."""
+    year_dir = tmp_path / "2021"
+    year_dir.mkdir()
+    (year_dir / "000039.tif").write_bytes(b"TIFF")
+    found = resolve_image_path("2021/000039", tmp_path)
+    assert found is not None
+    assert found.name == "000039.tif"
+
+
+def test_resolve_image_path_falls_back_to_6_pad(tmp_path):
+    """If APPLICATIONNO has unpadded suffix but the file is 6-pad — find it."""
+    year_dir = tmp_path / "2021"
+    year_dir.mkdir()
+    (year_dir / "000039.tif").write_bytes(b"TIFF")
+    found = resolve_image_path("2021/39", tmp_path)
+    assert found is not None
+    assert found.name == "000039.tif"
+
+
+def test_resolve_image_path_falls_back_to_5_pad(tmp_path):
+    """If APPLICATIONNO has unpadded suffix but the file is 5-pad — find it."""
+    year_dir = tmp_path / "2017"
+    year_dir.mkdir()
+    (year_dir / "15048.tif").write_bytes(b"TIFF")
+    found = resolve_image_path("2017/15048", tmp_path)
+    assert found is not None
+
+
+def test_resolve_image_path_prefers_exact_over_padded(tmp_path):
+    """When BOTH exist, the exact (as-is) match wins to preserve fidelity."""
+    year_dir = tmp_path / "2021"
+    year_dir.mkdir()
+    (year_dir / "11498.tif").write_bytes(b"BARE")
+    (year_dir / "011498.tif").write_bytes(b"PADDED")
+    found = resolve_image_path("2021/11498", tmp_path)
+    assert found is not None
+    assert found.read_bytes() == b"BARE"
+
+
+def test_resolve_image_path_accepts_tiff_extension(tmp_path):
+    """Both .tif and .tiff are acceptable (.tif is preferred)."""
+    year_dir = tmp_path / "2019"
+    year_dir.mkdir()
+    (year_dir / "12345.tiff").write_bytes(b"TIFF")
+    found = resolve_image_path("2019/12345", tmp_path)
+    assert found is not None
+    assert found.suffix == ".tiff"
+
+
+def test_resolve_image_path_prefers_tif_over_tiff(tmp_path):
+    """When both extensions present at the same stem, .tif wins."""
+    year_dir = tmp_path / "2019"
+    year_dir.mkdir()
+    (year_dir / "12345.tif").write_bytes(b"DOT_TIF")
+    (year_dir / "12345.tiff").write_bytes(b"DOT_TIFF")
+    found = resolve_image_path("2019/12345", tmp_path)
+    assert found is not None
+    assert found.read_bytes() == b"DOT_TIF"
+
+
+def test_resolve_image_path_returns_none_when_year_dir_missing(tmp_path):
+    """No 2017/ folder at all — None, not crash."""
+    found = resolve_image_path("2017/15048", tmp_path)
+    assert found is None
+
+
+def test_resolve_image_path_returns_none_when_no_match_anywhere(tmp_path):
+    """Year folder exists but the file doesn't, in any padding."""
+    year_dir = tmp_path / "2017"
+    year_dir.mkdir()
+    (year_dir / "99999.tif").write_bytes(b"unrelated")
+    assert resolve_image_path("2017/15048", tmp_path) is None
+
+
+def test_resolve_image_path_returns_none_for_missing_root(tmp_path):
+    """images_root itself doesn't exist — None, not crash."""
+    ghost = tmp_path / "no_such_root"
+    assert resolve_image_path("2017/15048", ghost) is None
+
+
+def test_resolve_image_path_returns_none_for_malformed_application_no(tmp_path):
+    """Bad APPLICATIONNO — short-circuits before any filesystem check."""
+    assert resolve_image_path(None, tmp_path) is None
+    assert resolve_image_path("", tmp_path) is None
+    assert resolve_image_path("not-an-app-no", tmp_path) is None
+
+
+def test_resolve_image_path_accepts_str_or_path(tmp_path):
+    year_dir = tmp_path / "2017"
+    year_dir.mkdir()
+    (year_dir / "15048.tif").write_bytes(b"TIFF")
+    a = resolve_image_path("2017/15048", tmp_path)
+    b = resolve_image_path("2017/15048", str(tmp_path))
+    assert a == b
+    assert a is not None

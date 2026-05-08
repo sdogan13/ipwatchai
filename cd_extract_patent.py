@@ -268,3 +268,91 @@ def parse_hsqldb_log(log_path: str | Path) -> Dict[str, List[Dict[str, Any]]]:
             by_table.setdefault(result["table"], []).append(result["row"])
 
     return by_table
+
+
+# ---------------------------------------------------------------------------
+# Step 2.5 — image-path resolver
+# ---------------------------------------------------------------------------
+
+# Padding widths to try, in order. Empirically: 2017–2020 ship bare
+# numbers, 2021+ ship 6-digit zero-padded names. The 5- and 7-pad
+# entries are belt-and-braces against transitional bundles.
+_IMAGE_PAD_WIDTHS: List[int] = [6, 5, 7]
+_IMAGE_EXTENSIONS: List[str] = [".tif", ".tiff"]
+
+
+def _split_application_no(application_no: Optional[str]) -> Optional[tuple[str, str]]:
+    """Split ``2017/15048`` into ``("2017", "15048")``.
+
+    Returns ``None`` for any malformed shape (missing slash, empty parts,
+    extra slashes, non-numeric components).
+    """
+    if not application_no:
+        return None
+    parts = application_no.strip().split("/")
+    if len(parts) != 2:
+        return None
+    year, appno = parts[0].strip(), parts[1].strip()
+    if not year or not appno:
+        return None
+    if not year.isdigit() or not appno.isdigit():
+        return None
+    return year, appno
+
+
+def resolve_image_path(
+    application_no: Optional[str],
+    images_root: str | Path,
+) -> Optional[Path]:
+    """Find the figure file for a patent application inside an extracted CD.
+
+    The CD layout under ``data/`` is::
+
+        images/{year}/{appno}.tif
+
+    Naming convention varies by year: 2017–2020 use bare numbers
+    (``15048.tif``); 2021+ are zero-padded to 6 digits (``000039.tif``).
+
+    Resolution order (first match wins):
+      1. exact ``{year}/{appno}.tif``
+      2. ``{year}/{appno:0>6}.tif`` — modern 6-pad
+      3. ``{year}/{appno:0>5}.tif`` — legacy 5-pad
+      4. ``{year}/{appno:0>7}.tif`` — defensive 7-pad
+      5. each of the above with ``.tiff`` extension
+
+    Returns the resolved ``Path`` or ``None``. Empty / malformed
+    ``APPLICATIONNO`` and missing root directories return ``None``
+    rather than raising — figure presence is best-effort.
+
+    ``images_root`` is the folder containing the ``{year}/`` subfolders
+    (i.e. ``…/data/images/`` for an extracted CD).
+    """
+    parsed = _split_application_no(application_no)
+    if parsed is None:
+        return None
+    year, appno = parsed
+
+    root = Path(images_root)
+    year_dir = root / year
+    if not year_dir.is_dir():
+        return None
+
+    candidates: List[str] = []
+    seen: set = set()
+
+    def _add(name: str) -> None:
+        if name not in seen:
+            seen.add(name)
+            candidates.append(name)
+
+    _add(appno)
+    for width in _IMAGE_PAD_WIDTHS:
+        _add(appno.zfill(width))
+
+    for stem in candidates:
+        for ext in _IMAGE_EXTENSIONS:
+            candidate = year_dir / f"{stem}{ext}"
+            if candidate.is_file():
+                return candidate
+
+    return None
