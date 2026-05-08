@@ -1813,7 +1813,7 @@
     "optional": "(opsiyonel)",
     "visual_analysis": "Görsel + metin benzerliği",
     "remove_image": "Görseli kaldır",
-    "analysis_hint": "Görsel · Renk · Metin · Locarno",
+    "analysis_hint": "Görsel • Renk • Metin • Locarno",
     "locarno_classes_selected": "{count} seçili",
     "locarno_ai_no_credits": "AI kredisi tükendi. Devam etmek için planı yükseltin.",
     "designer_label": "Tasarımcı",

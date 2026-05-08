@@ -5,10 +5,9 @@ the top relevant Locarno top-level classes (01..32). Mirrors the public
 shape of ``services.creative_service.suggest_names_data`` but is much
 lighter — no DB validation, no caching, no batch sizing.
 
-Costs: 1 AI credit per successful suggestion call. Quota is enforced through
-the existing ``deduct_name_credit`` /
-``check_name_generation_eligibility`` helpers (same pool as Name Lab — keeps
-the credits model coherent for v1).
+No AI-credit gating: a single text-only Gemini completion is cheap and the
+feature is core to the Tasarım search UX. Abuse is bounded by the route-
+level rate limit (20/min) configured on the public endpoint.
 """
 from __future__ import annotations
 
@@ -40,6 +39,7 @@ class LocarnoSuggestion(BaseModel):
     name_tr: Optional[str] = None
     name_en: Optional[str] = None
     reason: Optional[str] = None
+    similarity: float = 0.0
 
 
 class LocarnoSuggestionResponse(BaseModel):
@@ -86,10 +86,14 @@ def _build_prompt(description: str, taxonomy: List[Dict[str, str]], *, language:
         "Given a free-text description of a product or design, choose the top {count} most relevant "
         "Locarno top-level classes from the list below.\n\n"
         "Return a JSON object with a single key \"suggestions\" containing an array of "
-        "objects with keys \"class_number\" (two-digit string from the list) and "
-        "\"reason\" (short justification, in {lang_label}). "
-        "Order by relevance descending. Only include classes that are actually relevant — "
+        "objects with keys:\n"
+        "  - class_number (two-digit string from the list)\n"
+        "  - confidence (number 0..1 — 1.0 = perfectly fits, 0.0 = irrelevant)\n"
+        "  - reason (short justification, in {lang_label})\n\n"
+        "Order by confidence descending. Only include classes that are actually relevant — "
         "if fewer than {count} are relevant, return fewer.\n\n"
+        "Expected JSON shape:\n"
+        '{{"suggestions":[{{"class_number":"26","confidence":0.92,"reason":"…"}}]}}\n\n'
         "Locarno classes:\n{taxonomy}\n\n"
         "Description: {description}\n"
     ).format(
@@ -100,13 +104,24 @@ def _build_prompt(description: str, taxonomy: List[Dict[str, str]], *, language:
     )
 
 
+def _coerce_confidence(value) -> float:
+    """Confidence -> 0..1 float. Mirrors nice_class_service._coerce_confidence."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if v != v:  # NaN
+        return 0.0
+    return max(0.0, min(1.0, v))
+
+
 def _parse_suggestions(
     raw: Dict[str, Any],
     taxonomy: List[Dict[str, str]],
     *,
     max_count: int,
 ) -> List[Dict[str, Any]]:
-    """Validate Gemini's response and enrich with localized names."""
+    """Validate the model's response, enrich with localized names + clamp confidence."""
     raw_items = raw.get("suggestions") if isinstance(raw, dict) else None
     if not isinstance(raw_items, list):
         return []
@@ -123,14 +138,19 @@ def _parse_suggestions(
             continue
         seen.add(cn)
         meta = by_class[cn]
+        confidence = _coerce_confidence(
+            item.get("confidence", item.get("similarity", item.get("score")))
+        )
         out.append({
             "class_number": cn,
             "name_tr": meta["name_tr"],
             "name_en": meta["name_en"],
             "reason": str(item.get("reason") or "").strip()[:300] or None,
+            "similarity": round(confidence, 4),
         })
         if len(out) >= max_count:
             break
+    out.sort(key=lambda c: c["similarity"], reverse=True)
     return out
 
 
@@ -143,31 +163,26 @@ async def suggest_locarno_classes_data(
     request: LocarnoSuggestionRequest,
     current_user,
     database_factory=Database,
+    qwen_client_getter=None,
     gemini_client_getter=None,
 ) -> LocarnoSuggestionResponse:
-    """Run Gemini against the Locarno taxonomy and return ranked suggestions."""
+    """Run Qwen-flash (primary) → Gemini-2.5-flash-lite (fallback) against the
+    Locarno taxonomy and return ranked suggestions.
+
+    No AI-credit gating: a single text-only call is cheap and the feature is
+    core to the Tasarım search UX. Abuse is bounded by the route-level rate
+    limit (20/min in app_design_search_routes.py).
+
+    Provider order mirrors ``services.nice_class_service.suggest_classes_data``:
+    Qwen is tried first; if it fails (auth, network, JSON parse), the Gemini
+    client is tried. Both failures → 503 with the combined error detail.
+    """
+    if qwen_client_getter is None:
+        from generative_ai.qwen_client import get_qwen_client
+        qwen_client_getter = get_qwen_client
     if gemini_client_getter is None:
         from generative_ai.gemini_client import get_gemini_client
         gemini_client_getter = get_gemini_client
-
-    # Quota / credit check — reuse Name Lab pool for v1
-    from services.creative_service import (
-        check_name_generation_eligibility,
-        deduct_name_credit,
-        increment_name_generation_usage,
-        _is_superadmin_user,
-    )
-
-    org_id = str(current_user.organization_id)
-    user_id = str(current_user.id)
-    is_superadmin = _is_superadmin_user(current_user)
-
-    if not is_superadmin:
-        with database_factory() as db:
-            can_generate, reason, details = check_name_generation_eligibility(db, org_id, 0)
-        if not can_generate:
-            status_code = 403 if reason == "upgrade_required" else 402
-            raise HTTPException(status_code=status_code, detail=details)
 
     # Load Locarno taxonomy from DB
     with database_factory() as db:
@@ -178,17 +193,6 @@ async def suggest_locarno_classes_data(
             detail={"error": "service_unavailable", "message": "Locarno taxonomy not loaded"},
         )
 
-    client = gemini_client_getter()
-    if not client.is_available():
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "error": "service_unavailable",
-                "message": "Sınıf önerme servisi şu anda kullanılamıyor.",
-                "message_en": "Class suggestion service is currently unavailable.",
-            },
-        )
-
     prompt = _build_prompt(
         description=request.description,
         taxonomy=taxonomy,
@@ -196,18 +200,46 @@ async def suggest_locarno_classes_data(
         count=request.count,
     )
 
+    raw = None
+    provider_errors = []
+
+    # 1) Qwen flash (primary)
     try:
-        raw = await client.generate_json(prompt=prompt, max_output_tokens=2048, temperature=0.2)
+        qwen_client = qwen_client_getter()
+        if qwen_client and qwen_client.is_available():
+            raw = await qwen_client.generate_json(
+                prompt=prompt, max_output_tokens=2048, temperature=0.2,
+                model="qwen-flash",
+            )
+        else:
+            provider_errors.append("qwen: not configured")
     except Exception as exc:  # noqa: BLE001
-        logger.error("locarno_suggest_failed: %s", exc)
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "error": "generation_failed",
-                "message": "Sınıf önerisi alınamadı. Lütfen tekrar deneyin.",
-                "message_en": f"Locarno suggestion failed: {exc}",
-            },
-        ) from exc
+        logger.warning("locarno_suggest_qwen_failed: %s", exc)
+        provider_errors.append(f"qwen: {exc}")
+        raw = None
+
+    # 2) Gemini fallback
+    if raw is None:
+        try:
+            gemini_client = gemini_client_getter()
+            if not gemini_client or not gemini_client.is_available():
+                provider_errors.append("gemini: not configured")
+                raise RuntimeError("no available providers")
+            raw = await gemini_client.generate_json(
+                prompt=prompt, max_output_tokens=2048, temperature=0.2,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.error("locarno_suggest_failed: providers=%s", provider_errors + [f"gemini: {exc}"])
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "generation_failed",
+                    "message": "Sınıf önerisi alınamadı. Lütfen tekrar deneyin.",
+                    "message_en": "Locarno suggestion failed: " + "; ".join(provider_errors + [str(exc)]),
+                },
+            ) from exc
 
     suggestions = _parse_suggestions(raw, taxonomy, max_count=request.count)
     if not suggestions:
@@ -220,20 +252,10 @@ async def suggest_locarno_classes_data(
             },
         )
 
-    # Deduct credit on successful response
-    credits_remaining = None
-    if not is_superadmin:
-        with database_factory() as db:
-            try:
-                deduct_name_credit(db, org_id, user_id, cost=1)
-                increment_name_generation_usage(db, org_id)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("locarno_suggest_credit_deduct_failed: %s", exc)
-
     return LocarnoSuggestionResponse(
         suggestions=[LocarnoSuggestion(**s) for s in suggestions],
         description=request.description,
         language=request.language,
         cached=False,
-        credits_remaining=credits_remaining,
+        credits_remaining=None,
     )

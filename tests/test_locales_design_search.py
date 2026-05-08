@@ -40,6 +40,8 @@ EXPECTED_DESIGN_SEARCH_KEYS = (
     "class_suggestion_failed",
     # Result-card additions: designer chip prefix
     "designer_label",
+    # Live DB record count rendered below the Tasarım Ara button
+    "stats_db_records",
 )
 
 

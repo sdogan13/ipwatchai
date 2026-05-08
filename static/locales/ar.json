@@ -1810,7 +1810,7 @@
     "optional": "(اختياري)",
     "visual_analysis": "تشابه بصري + نصي",
     "remove_image": "إزالة الصورة",
-    "analysis_hint": "بصري · لون · نص · لوكارنو",
+    "analysis_hint": "بصري • لون • نص • لوكارنو",
     "locarno_classes_selected": "{count} محدد",
     "locarno_ai_no_credits": "نفدت أرصدة الذكاء الاصطناعي. قم بترقية الخطة للمتابعة.",
     "designer_label": "المصمم",

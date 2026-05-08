@@ -736,8 +736,11 @@
       }
     });
 
-    // Focus event for the text query (show history dropdown)
-    document.addEventListener("focusin", function (e) {
+    // Click on the text query — open the history dropdown only on actual
+    // user interaction. (focusin would fire from programmatic focus()
+    // when the Search tab activates, leaving the dropdown hanging over
+    // the image upload zone.)
+    document.addEventListener("click", function (e) {
       var t = e.target;
       if (t && t.id === "design-search-input") {
         renderHistoryDropdown();

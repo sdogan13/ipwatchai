@@ -238,8 +238,15 @@
                                     </span>
                                     <span class="font-bold" x-text="cls.class_number"></span>
                                     <span class="opacity-80" x-text="t('nice_classes.' + cls.class_number)"></span>
-                                    <span class="opacity-50 text-[10px]"
-                                        x-text="Math.round(cls.similarity * 100) + '%'"></span>
+                                    <!-- Colored confidence badge: green ≥85%, blue ≥65%, amber ≥45%, gray <45% -->
+                                    <span class="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                                        :style="(function(){var s=cls.similarity||0;
+                                            if (s >= 0.85) return 'background:#dcfce7;color:#15803d';
+                                            if (s >= 0.65) return 'background:#dbeafe;color:#1d4ed8';
+                                            if (s >= 0.45) return 'background:#fef3c7;color:#a16207';
+                                            return 'background:var(--color-bg-muted);color:var(--color-text-muted)';
+                                        })()"
+                                        x-text="Math.round((cls.similarity||0) * 100) + '%'"></span>
                                 </button>
                             </template>
                         </div>
@@ -964,19 +971,18 @@
       <div class="rounded-xl shadow-sm border p-5"
            style="background:var(--color-bg-card);border-color:var(--color-border)">
 
-        <div class="mb-4">
-          <h2 class="text-lg font-semibold" style="color:var(--color-text-primary)"
-              x-text="t('design_search.panel_title')">Tasarım Arama</h2>
-        </div>
-
         <!-- Text query (with clear-× button + history dropdown) -->
         <div class="mb-3 relative">
           <div class="flex items-center rounded-xl overflow-hidden"
                style="background:var(--color-bg-card);border:2px solid var(--color-border)">
-            <svg class="w-6 h-6 ml-4 shrink-0" style="color:var(--color-text-muted)"
-                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-5 h-5 ml-4 shrink-0" style="color:var(--color-text-muted)" fill="none"
+                 stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    d="M4 6h16M4 12h16m-7 6h7M9 18L5 6l-1 0"/>
+              <text x="3" y="18" font-size="11" font-weight="bold" fill="currentColor"
+                    stroke="none" font-family="sans-serif">A</text>
+              <text x="13" y="18" font-size="8" font-weight="bold" fill="currentColor"
+                    stroke="none" font-family="sans-serif">a</text>
             </svg>
             <input type="text" id="design-search-input"
                    :placeholder="t('design_search.query_placeholder')"
@@ -1183,6 +1189,7 @@
                          class_number: s.class_number,
                          name: locale === 'en' ? (s.name_en || s.name_tr) : (s.name_tr || s.name_en),
                          reason: s.reason || '',
+                         similarity: typeof s.similarity === 'number' ? s.similarity : 0,
                        };
                      });
                      if (self.designSuggestedClasses.length === 0) {
@@ -1303,6 +1310,15 @@
                       </span>
                       <span class="font-bold" x-text="cls.class_number"></span>
                       <span class="opacity-80" x-text="cls.name"></span>
+                      <!-- Colored confidence badge: green ≥85%, blue ≥65%, amber ≥45%, gray <45% -->
+                      <span class="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                            :style="(function(){var s=cls.similarity||0;
+                                if (s >= 0.85) return 'background:#dcfce7;color:#15803d';
+                                if (s >= 0.65) return 'background:#dbeafe;color:#1d4ed8';
+                                if (s >= 0.45) return 'background:#fef3c7;color:#a16207';
+                                return 'background:var(--color-bg-muted);color:var(--color-text-muted)';
+                            })()"
+                            x-text="Math.round((cls.similarity||0) * 100) + '%'"></span>
                     </button>
                   </template>
                 </div>
@@ -1381,9 +1397,18 @@
                   x-text="t('design_search.reset')">Sıfırla</button>
         </div>
 
-        <!-- Analysis-types hint line -->
-        <p class="text-xs mt-3 text-center" style="color:var(--color-text-faint)"
-           x-text="t('design_search.analysis_hint')">Visual · Color · Text · Locarno</p>
+        <!-- Analysis-types hint line (matches Marka's landing.search_hint format) -->
+        <p class="mt-2 text-center text-sm px-1" style="color:var(--color-text-muted)"
+           x-text="t('design_search.analysis_hint')">Visual • Color • Text • Locarno</p>
+
+        <!-- Live design DB count (mirrors the Marka stats line; uses a separate
+             designCount populated from /api/v1/status statistics.total_designs) -->
+        <div x-show="designCount > 0" x-cloak
+             class="flex items-center justify-center gap-2 mt-4 text-sm"
+             style="color:var(--color-text-muted)">
+          <span class="inline-block w-2 h-2 rounded-full animate-pulse" style="background:#22c55e"></span>
+          <span x-text="designCount.toLocaleString() + ' ' + t('design_search.stats_db_records')"></span>
+        </div>
 
         <!-- Live design DB count (mirrors the Marka stats line; uses a separate
              designCount populated from /api/v1/status statistics.total_designs) -->

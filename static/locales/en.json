@@ -1808,7 +1808,7 @@
     "optional": "(optional)",
     "visual_analysis": "Visual + text similarity",
     "remove_image": "Remove image",
-    "analysis_hint": "Visual · Color · Text · Locarno",
+    "analysis_hint": "Visual • Color • Text • Locarno",
     "locarno_classes_selected": "{count} selected",
     "locarno_ai_no_credits": "AI credits exhausted. Upgrade to keep suggesting.",
     "designer_label": "Designer",
