@@ -32,6 +32,7 @@ from cd_extract_tasarim import (
     _layout_to_metadata,
     _locate_cd_layout,
     _parse_sql_values,
+    _persist_cd_images_for_app,
     _resolve_seven_zip,
 )
 
@@ -492,6 +493,106 @@ def test_resolve_design_images_empty_folder_returns_empty(tmp_path):
     """Folder exists but holds nothing relevant -> []."""
     (tmp_path / "2016_01059").mkdir()
     assert resolve_design_images("2016/01059", tmp_path) == []
+
+
+# ---------------------------------------------------------------------------
+# Step 2.5b — _persist_cd_images_for_app (canonical key shape)
+# ---------------------------------------------------------------------------
+
+def test_persist_cd_images_copies_files_and_returns_canonical_keys(tmp_path):
+    """End-to-end happy path: source files copied, returned image_path
+    values use the canonical ``{year}_{appno}/{d}_{v}.{ext}`` shape with
+    no archive-wrapper prefix."""
+    src = tmp_path / "src" / "2016_01059"
+    src.mkdir(parents=True)
+    (src / "1_1.jpg").write_bytes(b"jpeg-bytes-1")
+    (src / "1_2.jpg").write_bytes(b"jpeg-bytes-2")
+
+    dest = tmp_path / "dest"
+    out = _persist_cd_images_for_app("2016/01059", tmp_path / "src", dest)
+
+    assert len(out) == 2
+    assert out[0] == {"design_no": "1", "view_no": "1",
+                      "image_path": "2016_01059/1_1.jpg"}
+    assert out[1] == {"design_no": "1", "view_no": "2",
+                      "image_path": "2016_01059/1_2.jpg"}
+    # Files actually copied
+    assert (dest / "2016_01059" / "1_1.jpg").read_bytes() == b"jpeg-bytes-1"
+    assert (dest / "2016_01059" / "1_2.jpg").read_bytes() == b"jpeg-bytes-2"
+
+
+def test_persist_cd_images_creates_dest_folder_tree(tmp_path):
+    """``dest_root`` and the per-application subfolder are created if missing."""
+    src = tmp_path / "src" / "2015_06749"
+    src.mkdir(parents=True)
+    (src / "10_1.jpg").write_bytes(b"")
+
+    dest = tmp_path / "deeply" / "nested" / "dest"
+    out = _persist_cd_images_for_app("2015/06749", tmp_path / "src", dest)
+
+    assert (dest / "2015_06749" / "10_1.jpg").is_file()
+    assert out == [{"design_no": "10", "view_no": "1",
+                    "image_path": "2015_06749/10_1.jpg"}]
+
+
+def test_persist_cd_images_overwrites_existing_files(tmp_path):
+    """Re-runs (e.g. via --force) replace previously persisted bytes."""
+    src = tmp_path / "src" / "2016_01059"
+    src.mkdir(parents=True)
+    (src / "1_1.jpg").write_bytes(b"NEW")
+
+    dest = tmp_path / "dest"
+    (dest / "2016_01059").mkdir(parents=True)
+    (dest / "2016_01059" / "1_1.jpg").write_bytes(b"OLD")
+
+    _persist_cd_images_for_app("2016/01059", tmp_path / "src", dest)
+    assert (dest / "2016_01059" / "1_1.jpg").read_bytes() == b"NEW"
+
+
+def test_persist_cd_images_no_source_returns_empty(tmp_path):
+    """No matching images on disk -> [] and no destination side-effects.
+    Covers the Hague-design case (no image folder at all)."""
+    out = _persist_cd_images_for_app("DM/086402", tmp_path / "src",
+                                      tmp_path / "dest")
+    assert out == []
+    # No spurious DM_086402/ created
+    assert not (tmp_path / "dest" / "DM_086402").exists()
+
+
+def test_persist_cd_images_malformed_appno_returns_empty(tmp_path):
+    """Bad input never reaches disk."""
+    assert _persist_cd_images_for_app(None, tmp_path, tmp_path / "d") == []
+    assert _persist_cd_images_for_app("garbage", tmp_path, tmp_path / "d") == []
+    assert not (tmp_path / "d").exists()
+
+
+def test_persist_cd_images_preserves_jpeg_extension(tmp_path):
+    """``.jpeg`` (rare) and ``.JPG`` (uppercase) extensions pass through
+    verbatim — the canonical key includes the original suffix."""
+    src = tmp_path / "src" / "2016_01059"
+    src.mkdir(parents=True)
+    (src / "1_1.jpeg").write_bytes(b"")
+    (src / "2_1.JPG").write_bytes(b"")
+
+    dest = tmp_path / "dest"
+    out = _persist_cd_images_for_app("2016/01059", tmp_path / "src", dest)
+    keys = sorted(o["image_path"] for o in out)
+    assert keys == ["2016_01059/1_1.jpeg", "2016_01059/2_1.JPG"]
+    assert (dest / "2016_01059" / "1_1.jpeg").is_file()
+    assert (dest / "2016_01059" / "2_1.JPG").is_file()
+
+
+def test_persist_cd_images_multi_design_keeps_numeric_order(tmp_path):
+    """Output ordering matches resolve_design_images numeric sort
+    (design 10 after design 9, not alphabetic)."""
+    src = tmp_path / "src" / "2015_06749"
+    src.mkdir(parents=True)
+    for name in ["10_1.jpg", "1_1.jpg", "9_1.jpg", "2_1.jpg"]:
+        (src / name).write_bytes(b"")
+    out = _persist_cd_images_for_app("2015/06749", tmp_path / "src",
+                                      tmp_path / "dest")
+    order = [(o["design_no"], o["view_no"]) for o in out]
+    assert order == [("1", "1"), ("2", "1"), ("9", "1"), ("10", "1")]
 
 
 # ---------------------------------------------------------------------------

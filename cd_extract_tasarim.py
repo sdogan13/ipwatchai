@@ -382,6 +382,65 @@ def resolve_design_images(
 
 
 # ---------------------------------------------------------------------------
+# Step 2.5b — per-application image persistence (canonical key shape)
+# ---------------------------------------------------------------------------
+
+
+def _persist_cd_images_for_app(
+    application_no: Optional[str],
+    images_root: str | Path,
+    dest_root: str | Path,
+) -> List[Dict[str, str]]:
+    """Copy every view JPEG for one application into the canonical
+    ``cd_images/`` layout and return reference dicts for the orchestrator.
+
+    Source files are at ``images_root/{year}_{appno}/{d}_{v}.{ext}``
+    (whatever ``resolve_design_images`` finds). Destination layout
+    mirrors the per-application folder shape — *without* any archive
+    wrapper — so the resulting key is identical to what the PDF
+    extractor will emit, letting a future stage-3 reconciler match
+    PDF and CD images by a single string::
+
+        dest_root/{year}_{appno}/{d}_{v}.{ext}
+
+    Returns one dict per copied file::
+
+        {"design_no": str, "view_no": str,
+         "image_path": "{year}_{appno}/{d}_{v}.{ext}"}
+
+    Returns ``[]`` for malformed ``application_no``, missing
+    ``images_root``, or applications with zero matching images
+    (e.g. Hague designs).
+
+    File copies always overwrite — re-running the extractor with
+    ``--force`` refreshes the persisted set.
+    """
+    images = resolve_design_images(application_no, images_root)
+    if not images:
+        return []
+
+    folder_name = _application_image_folder(application_no)
+    if folder_name is None:
+        # Defensive — resolve_design_images already returned [] for this case.
+        return []
+
+    dest_folder = Path(dest_root) / folder_name
+    dest_folder.mkdir(parents=True, exist_ok=True)
+
+    out: List[Dict[str, str]] = []
+    for img in images:
+        src = img["image_path"]
+        dst = dest_folder / src.name
+        shutil.copyfile(src, dst)
+        out.append({
+            "design_no": img["design_no"],
+            "view_no": img["view_no"],
+            "image_path": f"{folder_name}/{src.name}",
+        })
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Step 2.6 — 7-Zip archive extractor + dynamic layout resolution
 # ---------------------------------------------------------------------------
 
