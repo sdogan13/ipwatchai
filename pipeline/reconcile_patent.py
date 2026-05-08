@@ -35,9 +35,23 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+import sys
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+# Reuse Stage 3's kind-code helpers — same publication_no shape on both
+# sources. Module-level import is safe: pdf_extract_patent's PyMuPDF
+# dependency is lazy (loaded only when parse_pdf runs), so importing
+# here doesn't drag in fitz.
+from pdf_extract_patent import classify_kind_code, extract_kind_code  # noqa: E402
 
 
 logging.basicConfig(
@@ -127,3 +141,135 @@ class CanonicalRecord:
     patent_type: Optional[str] = None           # CD-only numeric flag (e.g. "2")
     page_range: Optional[List[int]] = None      # PDF-only [start, end]
     source_format: str = "CD"
+
+
+# ---------------------------------------------------------------------------
+# Step 4.2 — normalize_cd_record
+# ---------------------------------------------------------------------------
+#
+# Converts one entry from the CD-side ``patents[]`` array into a
+# ``CanonicalRecord``. Renames CD's per-party ``title`` field to ``name``
+# (PDF convention), parses DD/MM/YYYY date strings into ISO, derives
+# ``kind_code`` + ``record_type`` from ``publication_no``, and wraps
+# the lone CD ``image_path`` into a single-element ``figures`` list.
+#
+# CD ``IPCCODE`` is already HTML-stripped by ``cd_extract_patent.py``
+# (Step 2.2 ``strip_ipc_html``), so ``ipc_codes`` arrives as a clean
+# list of code strings — just rename to ``ipc_classes``.
+
+_DMY_RE = re.compile(r"^\s*(\d{1,2})/(\d{1,2})/(\d{4})\s*$")
+
+
+def _dmy_to_iso(value: Optional[str]) -> Optional[str]:
+    """Convert a ``DD/MM/YYYY`` string to ``YYYY-MM-DD``.
+
+    Returns ``None`` for empty / unparseable input. Defensive — CD JSON
+    sometimes ships empty strings for unset dates.
+    """
+    if not value:
+        return None
+    match = _DMY_RE.match(value)
+    if not match:
+        return None
+    try:
+        return datetime.strptime(match.group(0).strip(), "%d/%m/%Y").date().isoformat()
+    except ValueError:
+        return None
+
+
+def _clean_str(value: Any) -> Optional[str]:
+    """Strip whitespace; return ``None`` for empty / non-string input."""
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _normalize_cd_party(party: Dict[str, Any]) -> Dict[str, Any]:
+    """Rename CD per-party ``title`` -> ``name``, drop empty fields.
+
+    CD holders/inventors carry ``title``, ``address``, ``state``,
+    ``postal_code``, ``city``, ``country``. PDF holders/inventors carry
+    ``name``, ``address``, ``country``. The canonical shape uses ``name``
+    everywhere; CD-only fields (state/postal_code/city) are preserved
+    when non-empty so Stage 5 can use them for holder dedup.
+    """
+    out: Dict[str, Any] = {"name": _clean_str(party.get("title")) or ""}
+    for key in ("address", "state", "postal_code", "city", "country"):
+        value = _clean_str(party.get(key))
+        if value:
+            out[key] = value
+    return out
+
+
+def _normalize_cd_attorney(attorney: Dict[str, Any]) -> Dict[str, Any]:
+    """Drop empty fields from a CD attorney dict; preserve order.
+
+    CD attorneys ship ``no``, ``name``, ``address``, ``firm``. All
+    optional except ``name``. PDF attorneys ship ``name`` + ``firm``
+    only — Stage 4 attorney precedence (CD list ⊃ PDF object) lives in
+    ``merge_records`` (step 4.4); this helper just normalises shape.
+    """
+    out: Dict[str, Any] = {}
+    for key in ("no", "name", "firm", "address"):
+        value = _clean_str(attorney.get(key))
+        if value:
+            out[key] = value
+    return out
+
+
+def _normalize_cd_priority(priority: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert CD priority date DD/MM/YYYY -> ISO; drop empty fields."""
+    out: Dict[str, Any] = {}
+    for key in ("priority_no", "country"):
+        value = _clean_str(priority.get(key))
+        if value:
+            out[key] = value
+    iso = _dmy_to_iso(priority.get("priority_date"))
+    if iso:
+        out["priority_date"] = iso
+    return out
+
+
+def _cd_figures(image_path: Optional[str]) -> List[Dict[str, Any]]:
+    """Wrap CD's lone ``image_path`` into the canonical ``figures`` list.
+
+    CD records carry at most one figure (the title-page TIFF resolved
+    by ``cd_extract_patent`` step 2.5). PDF records can carry many,
+    so the canonical shape is always a list.
+    """
+    cleaned = _clean_str(image_path)
+    if not cleaned:
+        return []
+    return [{"image_path": cleaned}]
+
+
+def normalize_cd_record(cd_record: Dict[str, Any]) -> CanonicalRecord:
+    """Convert a single CD ``patents[]`` entry into a ``CanonicalRecord``.
+
+    Pure transformation — no I/O, no DB, no fitz. The result has
+    ``source_format='CD'`` and is ready for ``merge_records`` to
+    combine with a matching PDF-side record.
+    """
+    publication_no = _clean_str(cd_record.get("publication_no"))
+    kind_code = extract_kind_code(publication_no)
+    record_type = classify_kind_code(kind_code).value if kind_code else None
+
+    return CanonicalRecord(
+        application_no=_clean_str(cd_record.get("application_no")),
+        application_date=_dmy_to_iso(cd_record.get("application_date")),
+        publication_no=publication_no,
+        publication_date=_dmy_to_iso(cd_record.get("publication_date")),
+        kind_code=kind_code,
+        record_type=record_type,
+        title=_clean_str(cd_record.get("title")),
+        abstract=_clean_str(cd_record.get("abstract")),
+        ipc_classes=list(cd_record.get("ipc_codes") or []),
+        holders=[_normalize_cd_party(h) for h in (cd_record.get("holders") or [])],
+        inventors=[_normalize_cd_party(i) for i in (cd_record.get("inventors") or [])],
+        attorneys=[_normalize_cd_attorney(a) for a in (cd_record.get("attorneys") or [])],
+        priorities=[_normalize_cd_priority(p) for p in (cd_record.get("priorities") or [])],
+        figures=_cd_figures(cd_record.get("image_path")),
+        patent_type=_clean_str(cd_record.get("patent_type")),
+        source_format="CD",
+    )
