@@ -671,7 +671,7 @@ def _collect_name_risk_inputs(
                 logger.warning("Risk engine check failed for %s: %s", name, exc)
 
             for candidate in engine_top_candidates[:AI_STUDIO_RISK_MAX_DB_CANDIDATES]:
-                candidate_scores = candidate.get("scores", {}) if isinstance(candidate, dict) else {}
+                candidate.get("scores", {}) if isinstance(candidate, dict) else {}
                 db_candidates.append(
                     {
                         "name": _safe_ai_text(candidate.get("name"), 220),

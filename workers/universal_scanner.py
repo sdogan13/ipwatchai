@@ -405,7 +405,7 @@ class UniversalScanner:
             processed = 0
             for item in items:
                 try:
-                    conflicts = self.scan_trademark(str(item['trademark_id']))
+                    self.scan_trademark(str(item['trademark_id']))
 
                     # Mark as completed
                     cur.execute("""

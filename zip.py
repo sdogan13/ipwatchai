@@ -839,14 +839,14 @@ def process_single_issue_archive_cd_style(
     tmb_files = dedupe_paths(tmb_files)
 
     for tmb in tmb_files:
-        dest = final_dir / tmb.name
+        final_dir / tmb.name
         move_file_with_collision_policy(tmb, final_dir)
         moved_any = True
 
     # 3. PDFs
     pdfs = [f for f in temp_dir.rglob("*.pdf") if f.is_file()]
     for pdf in pdfs:
-        dest = final_dir / pdf.name
+        final_dir / pdf.name
         move_file_with_collision_policy(pdf, final_dir)
         moved_any = True
 

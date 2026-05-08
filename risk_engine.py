@@ -1046,7 +1046,7 @@ class RiskEngine:
             dino_sim = float(r[16]) if r[16] is not None else 0.0
             color_sim = float(r[17]) if r[17] is not None else 0.0
             candidate_ocr = (r[18] or "").strip()
-            phon_match = bool(r[20]) if len(r) > 20 and r[20] is not None else False
+            bool(r[20]) if len(r) > 20 and r[20] is not None else False
             has_eg = bool(r[21]) if len(r) > 21 and r[21] is not None else False
             raw_extracted_goods = r[22] if len(r) > 22 else None
             query_logo_profile = getattr(self, "_last_query_logo_profile", None)

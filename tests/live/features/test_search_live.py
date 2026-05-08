@@ -389,12 +389,10 @@ def test_free_quick_search_daily_limit_gate():
     )
 
     name = "GET /api/v1/search/quick (free daily limit gate)"
-    final_response = None
     try:
         expected_limit = PLAN_FEATURES["free"]["max_daily_quick_searches"]
         for attempt in range(expected_limit + 1):
             response = session.client.get("/api/v1/search/quick", params={"query": "wosen"})
-            final_response = response
             if attempt < expected_limit:
                 if response.status_code != 200:
                     REPORTER.fail(f"{name} -> expected 200 before free limit, got {response.status_code}: {response.text[:200]}")

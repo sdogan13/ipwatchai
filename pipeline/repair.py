@@ -1325,7 +1325,7 @@ def run_live_status_repair(
         app_no=app_no,
         include_older_than_11_years=include_older,
     )
-    artifact_root = _live_artifact_root(artifact_dir)
+    _live_artifact_root(artifact_dir)
 
     decisions: list[dict] = []
     progress_rows: list[tuple] = []

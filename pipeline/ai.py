@@ -743,7 +743,6 @@ def process_batch(batch_data, stats):
             continue
 
     # Batch process CLIP embeddings with caching
-    clip_cache_hits = 0
     if clip_paths:
         clip_start = time.perf_counter()
         clip_embeddings = get_clip_embeddings_batch_cached(clip_paths)
@@ -883,7 +882,6 @@ def process_folder(folder_path):
 
     # Task 2: Visual & Color & OCR (only if images directory exists)
     if has_images:
-        visual_start = time.perf_counter()
         current_batch = []
         for i, rec in enumerate(tqdm(records_to_process, desc="   Extracting Features", leave=False)):
             img_path = get_image_path(folder_path, rec.get("IMAGE"))
@@ -983,7 +981,6 @@ def run_embedding_generation(root_dir=None, settings=None) -> dict:
 
     for folder in all_dirs:
         json_path = folder / "metadata.json"
-        img_dir = folder / "images"
 
         if not json_path.exists():
             skipped += 1

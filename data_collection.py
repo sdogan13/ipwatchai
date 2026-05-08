@@ -396,7 +396,7 @@ def _legacy_check_local_existence(folder: str, card_id: str, is_gazette: bool,
         # Detect gazette by "gazete" in name OR "gz_" directory prefix
         file_is_gazette = "gazete" in fn_lower or fn_lower.startswith("gz_")
         # Detect bulletin by "blt_" or "bülten" prefix (not gazette)
-        file_is_bulletin = fn_lower.startswith("blt_") or "bulten" in fn_lower or "bülten" in fn_lower
+        fn_lower.startswith("blt_") or "bulten" in fn_lower or "bülten" in fn_lower
 
         # Strict type checking to prevent GZ_485 matching BLT_485:
         if is_gazette and not file_is_gazette:

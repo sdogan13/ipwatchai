@@ -5,7 +5,6 @@ from dataclasses import dataclass, field
 
 try:
     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-    from playwright.sync_api import sync_playwright
 except ImportError as exc:  # pragma: no cover
     raise SystemExit("Missing dependency. Run: pip install playwright") from exc
 

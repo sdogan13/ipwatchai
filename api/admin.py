@@ -5,7 +5,7 @@ All endpoints require is_superadmin=True.
 import json
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Body, Query
+from fastapi import APIRouter, Depends, Body, Query
 
 from auth.authentication import CurrentUser, require_superadmin
 from database.crud import Database

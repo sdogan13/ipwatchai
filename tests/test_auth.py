@@ -157,7 +157,7 @@ class TestJWTTokens:
         mock_settings.auth.access_token_expire_minutes = 0  # Immediate expiry
         token = create_access_token(str(uuid.uuid4()), str(uuid.uuid4()), "user")
         # Token with 0 minutes → already expired
-        payload = decode_token(token)
+        decode_token(token)
         # May or may not be None depending on timing, but should not crash
         # With 0 minutes, it's a race condition. Let's test with negative via direct encode.
         from jose import jwt

@@ -2034,7 +2034,7 @@ class TestRepairCorruptMetadata:
                         return {"status": "success", "records": 1}
                     mock_regen.side_effect = write_regen
 
-                    result = _repair_corrupt_metadata(meta)
+                    _repair_corrupt_metadata(meta)
 
             backup = folder / "metadata.json.corrupt_backup"
             assert backup.exists(), "Backup file should be created"
@@ -2056,7 +2056,7 @@ class TestRepairCorruptMetadata:
                     return {"status": "success", "records": 1}
                 mock_regen.side_effect = write_regen
 
-                result = _repair_corrupt_metadata(meta)
+                _repair_corrupt_metadata(meta)
 
             assert (folder / "metadata.json.corrupt_backup").exists(), "Original backup preserved"
             assert (folder / "metadata.json.corrupt_backup.1").exists(), "Numbered backup created"

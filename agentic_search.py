@@ -1423,7 +1423,7 @@ async def intelligent_search(
 
         # Always count intelligent search usage
         with Database() as db:
-            new_count = increment_live_search_usage(
+            increment_live_search_usage(
                 db,
                 str(current_user.id),
                 str(current_user.organization_id)
@@ -1511,7 +1511,7 @@ async def intelligent_search_with_image(
 
         # Always count intelligent search usage
         with Database() as db:
-            new_count = increment_live_search_usage(
+            increment_live_search_usage(
                 db,
                 str(current_user.id),
                 str(current_user.organization_id)

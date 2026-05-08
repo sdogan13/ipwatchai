@@ -3254,7 +3254,7 @@ class TestGraduatedPhoneticInWaterfall:
             semantic_sim=0.20,
             phonetic_sim=1.0,
         )
-        total_full = bd_full.get("final_score", 0) if "final_score" in bd_full else _
+        bd_full.get("final_score", 0) if "final_score" in bd_full else _
 
         # Graduated 0.6 phonetic (new behavior)
         score_grad, bd_grad = compute_idf_weighted_score(

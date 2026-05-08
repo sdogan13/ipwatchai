@@ -329,7 +329,7 @@ def main() -> None:
             expected_limit = PLAN_FEATURES["free"]["max_daily_quick_searches"]
             if usage["limit"] != expected_limit:
                 raise AssertionError(f"expected free quick-search limit {expected_limit}, got {usage['limit']}")
-            FREE_BROWSER_QUICK_LIMIT = usage["limit"]
+            usage["limit"]
 
             _open_search_tab(page, free_browser_config.timeout_ms)
             with page.expect_response(

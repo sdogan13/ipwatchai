@@ -1,5 +1,4 @@
 import psycopg2, os
-from psycopg2.extras import RealDictCursor
 
 def check_sim():
     try:

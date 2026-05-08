@@ -1,11 +1,10 @@
 """Watchlist routes extracted from the legacy api.routes module."""
 
-import io
 import logging
 import re
 import threading
 from typing import List, Optional
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import pandas as pd
 from fastapi import (
@@ -14,26 +13,16 @@ from fastapi import (
     Depends,
     File,
     Form,
-    HTTPException,
     Query,
     UploadFile,
-    status,
 )
 from fastapi.responses import StreamingResponse
-from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font, PatternFill
 from pydantic import BaseModel as PydanticBaseModel, Field
 
 from auth.authentication import CurrentUser, get_current_user
-from database.crud import Database, WatchlistCRUD
 from models.schemas import (
-    ColumnAutoMappings,
     ColumnDetectionResponse,
-    FileUploadErrorItem,
     FileUploadResult,
-    FileUploadSkippedItem,
-    FileUploadSummary,
-    FileUploadWarning,
     PaginatedResponse,
     PortfolioPreviewRequest,
     PortfolioPreviewResponse,

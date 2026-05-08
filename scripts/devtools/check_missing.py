@@ -1,4 +1,4 @@
-import psycopg2, os
+import psycopg2
 from psycopg2.extras import RealDictCursor
 
 def check_missing_record():
@@ -11,7 +11,6 @@ def check_missing_record():
     )
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
-    query_name = "dogan patent"
     target_pattern = "%doganpatent%"
 
     print(f"Checking for records matching pattern: {target_pattern}")

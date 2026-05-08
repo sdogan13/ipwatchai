@@ -8,10 +8,8 @@ BEFORE any project code is imported.
 import sys
 import os
 import uuid
-import time
-import json
-from unittest.mock import MagicMock, patch, PropertyMock
-from datetime import datetime, date, timedelta
+from unittest.mock import MagicMock, patch
+from datetime import datetime, date
 
 import pytest
 

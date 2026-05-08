@@ -39,6 +39,30 @@ from .idf_scoring import (
     clear_cache,                  # Clear for testing
 )
 
+# Public surface for `from utils import X` consumers; declaring __all__
+# also silences F401 unused-import warnings on the barrel re-exports above.
+__all__ = [
+    "initialize_idf_scoring",
+    "initialize_idf_scoring_sync",
+    "calculate_text_similarity",
+    "calculate_adjusted_score",
+    "calculate_risk_score",
+    "calculate_combined_score",
+    "get_risk_level",
+    "get_word_weight",
+    "get_word_class",
+    "is_generic_word",
+    "get_word_idf",
+    "get_doc_frequency",
+    "normalize_turkish",
+    "tokenize",
+    "analyze_query",
+    "is_cache_loaded",
+    "get_cache_stats",
+    "get_most_common_words",
+    "clear_cache",
+]
+
 # ===============================================================
 # BACKWARD COMPATIBILITY
 # ===============================================================

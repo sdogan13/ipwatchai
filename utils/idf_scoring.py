@@ -757,7 +757,7 @@ def calculate_word_match_factor(query_words: List[str], result_words: List[str])
     result_words_norm = [normalize_turkish(w) for w in result_words]
 
     for qw in query_words:
-        qw_norm = normalize_turkish(qw)
+        normalize_turkish(qw)
         best_match = None
         best_score = 0.0
         match_type = 'none'
@@ -845,7 +845,7 @@ def calculate_coverage_factor(query_words: List[str], result_words: List[str],
     not_found_other = []
 
     for qw in query_words:
-        qw_norm = normalize_turkish(qw)
+        normalize_turkish(qw)
         word_weight = get_word_weight(qw)
         is_distinctive = word_weight >= WEIGHT_DISTINCTIVE
 

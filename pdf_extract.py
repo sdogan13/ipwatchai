@@ -709,7 +709,6 @@ def _parse_bulletin_pdf_v1(pdf_path: Path, output_dir: Path, bulletin_no: str, b
     all_records: List[Dict[str, Any]] = []
     image_count = 0
     # Track images per page for association with records
-    page_images: Dict[int, List[Tuple[float, bytes, str]]] = {}  # page_idx -> [(y_pos, img_bytes, ext)]
 
     for range_start, range_end in page_ranges:
         range_end = min(range_end, doc.page_count)
@@ -867,7 +866,6 @@ def parse_bulletin_pdf_v2(
 
     all_records: List[Dict[str, Any]] = []
     image_count = 0
-    current_app_no = None  # Track which record we're inside
 
     for range_start, range_end in page_ranges:
         range_end = min(range_end, doc.page_count)
