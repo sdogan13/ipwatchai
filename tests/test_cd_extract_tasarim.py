@@ -11,9 +11,10 @@ from cd_extract_tasarim import (
     decode_hsqldb_escapes,
     parse_hsqldb_log,
     parse_hsqldb_log_line,
+    resolve_design_images,
     split_locarno_codes,
 )
-from cd_extract_tasarim import _parse_sql_values
+from cd_extract_tasarim import _application_image_folder, _parse_sql_values
 
 
 # ---------------------------------------------------------------------------
@@ -365,3 +366,100 @@ def test_parse_hsqldb_log_accepts_path_or_str(tmp_path):
     )
     assert len(parse_hsqldb_log(log)["IDDESIGN"]) == 1
     assert len(parse_hsqldb_log(str(log))["IDDESIGN"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# Step 2.5 — _application_image_folder + resolve_design_images
+# ---------------------------------------------------------------------------
+
+def test_application_image_folder_happy_path():
+    """Standard ``YYYY/NNNNNN`` application_no -> ``YYYY_NNNNNN``."""
+    assert _application_image_folder("2016/01059") == "2016_01059"
+    assert _application_image_folder("2015/04124") == "2015_04124"
+    # Whitespace tolerance
+    assert _application_image_folder("  2016/01059  ") == "2016_01059"
+
+
+def test_application_image_folder_rejects_malformed():
+    """Anything not exactly ``digits/digits`` returns None."""
+    assert _application_image_folder(None) is None
+    assert _application_image_folder("") is None
+    assert _application_image_folder("2016") is None         # no slash
+    assert _application_image_folder("2016/") is None        # empty appno
+    assert _application_image_folder("/01059") is None       # empty year
+    assert _application_image_folder("2016/01/059") is None  # extra slash
+    assert _application_image_folder("ABCD/01059") is None   # non-numeric year
+    assert _application_image_folder("2016/abc") is None     # non-numeric appno
+
+
+def test_resolve_design_images_missing_root_returns_empty(tmp_path):
+    """Non-existent images_root yields empty list, not an error."""
+    assert resolve_design_images("2016/01059", tmp_path / "nope") == []
+
+
+def test_resolve_design_images_missing_app_folder_returns_empty(tmp_path):
+    """images_root exists but the application folder doesn't."""
+    (tmp_path / "2015_04124").mkdir()  # different app
+    assert resolve_design_images("2016/01059", tmp_path) == []
+
+
+def test_resolve_design_images_malformed_appno_returns_empty(tmp_path):
+    """Bad shape never even tries to look on disk."""
+    assert resolve_design_images(None, tmp_path) == []
+    assert resolve_design_images("garbage", tmp_path) == []
+
+
+def test_resolve_design_images_one_design_multi_view(tmp_path):
+    """Single design with two views — mirrors what 240/.../2015_04124 ships."""
+    folder = tmp_path / "2015_04124"
+    folder.mkdir()
+    (folder / "1_1.jpg").write_bytes(b"")
+    (folder / "1_2.jpg").write_bytes(b"")
+    out = resolve_design_images("2015/04124", tmp_path)
+    assert len(out) == 2
+    assert out[0]["design_no"] == "1" and out[0]["view_no"] == "1"
+    assert out[1]["design_no"] == "1" and out[1]["view_no"] == "2"
+    assert out[0]["image_path"].name == "1_1.jpg"
+
+
+def test_resolve_design_images_sorts_design_and_view_numerically(tmp_path):
+    """Design 10 must sort after design 9 (lexicographic ordering would
+    break this — ``"10_1"`` < ``"9_1"`` as strings)."""
+    folder = tmp_path / "2015_06749"
+    folder.mkdir()
+    for name in ["10_2.jpg", "9_1.jpg", "10_1.jpg", "9_2.jpg", "1_1.jpg"]:
+        (folder / name).write_bytes(b"")
+    out = resolve_design_images("2015/06749", tmp_path)
+    order = [(r["design_no"], r["view_no"]) for r in out]
+    assert order == [("1", "1"), ("9", "1"), ("9", "2"), ("10", "1"), ("10", "2")]
+
+
+def test_resolve_design_images_skips_non_matching_files(tmp_path):
+    """``Thumbs.db`` / ``.DS_Store`` / unrelated files don't show up."""
+    folder = tmp_path / "2016_01059"
+    folder.mkdir()
+    (folder / "1_1.jpg").write_bytes(b"")
+    (folder / "Thumbs.db").write_bytes(b"")
+    (folder / ".DS_Store").write_bytes(b"")
+    (folder / "readme.txt").write_bytes(b"")
+    (folder / "preview.png").write_bytes(b"")  # wrong extension
+    out = resolve_design_images("2016/01059", tmp_path)
+    assert len(out) == 1
+    assert out[0]["image_path"].name == "1_1.jpg"
+
+
+def test_resolve_design_images_accepts_jpeg_extension(tmp_path):
+    """Defensive: ``.jpeg`` (rare but legal) accepted alongside ``.jpg``."""
+    folder = tmp_path / "2016_01059"
+    folder.mkdir()
+    (folder / "1_1.jpeg").write_bytes(b"")
+    (folder / "2_1.JPG").write_bytes(b"")  # case-insensitive
+    out = resolve_design_images("2016/01059", tmp_path)
+    names = [r["image_path"].name for r in out]
+    assert names == ["1_1.jpeg", "2_1.JPG"]
+
+
+def test_resolve_design_images_empty_folder_returns_empty(tmp_path):
+    """Folder exists but holds nothing relevant -> []."""
+    (tmp_path / "2016_01059").mkdir()
+    assert resolve_design_images("2016/01059", tmp_path) == []

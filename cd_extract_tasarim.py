@@ -280,3 +280,93 @@ def parse_hsqldb_log(log_path: str | Path) -> Dict[str, List[Dict[str, Any]]]:
             by_table.setdefault(result["table"], []).append(result["row"])
 
     return by_table
+
+
+# ---------------------------------------------------------------------------
+# Step 2.5 — per-design image resolver
+# ---------------------------------------------------------------------------
+
+# Per-application image folder name: "2016/01059" -> "2016_01059".
+# Per-image filename: "{design_no}_{view_no}.jpg" (or .jpeg defensively).
+_VIEW_FILENAME_RE = re.compile(r"^(\d+)_(\d+)\.jpe?g$", re.IGNORECASE)
+
+
+def _application_image_folder(application_no: Optional[str]) -> Optional[str]:
+    """Convert ``"2016/01059"`` -> ``"2016_01059"``; return ``None`` for
+    any malformed shape (missing slash, empty parts, extra slashes,
+    non-numeric components).
+    """
+    if not application_no:
+        return None
+    parts = application_no.strip().split("/")
+    if len(parts) != 2:
+        return None
+    year, appno = parts[0].strip(), parts[1].strip()
+    if not year or not appno:
+        return None
+    if not year.isdigit() or not appno.isdigit():
+        return None
+    return f"{year}_{appno}"
+
+
+def resolve_design_images(
+    application_no: Optional[str],
+    images_root: str | Path,
+) -> List[Dict[str, Any]]:
+    """Find every per-view image file for a Tasarım design application.
+
+    Tasarım CD layout under the extracted CD root::
+
+        images/{year}_{appno}/{design_no}_{view_no}.jpg
+
+    A single application can carry multiple designs (``IDDESIGN.NO``)
+    and each design can have multiple views, so the resolver returns
+    a flat list rather than a single path::
+
+        [
+          {"design_no": "1", "view_no": "1", "image_path": Path(".../1_1.jpg")},
+          {"design_no": "1", "view_no": "2", "image_path": Path(".../1_2.jpg")},
+          {"design_no": "2", "view_no": "1", "image_path": Path(".../2_1.jpg")},
+          ...
+        ]
+
+    Sorted by ``(int(design_no), int(view_no))`` so design 9 view 1 comes
+    before design 10 view 1 (lexicographic sort would break this).
+
+    Returns ``[]`` for any of:
+      - empty / malformed ``application_no``
+      - missing ``images_root`` directory
+      - missing per-application folder
+      - present folder containing zero files matching the
+        ``{design}_{view}.jpg`` shape
+
+    Files in the folder that don't match the expected shape are
+    silently skipped — robust to stray ``Thumbs.db`` / ``.DS_Store``.
+
+    ``images_root`` is the folder containing the ``{year}_{appno}/``
+    subfolders (i.e. ``…/{N}/images/`` for a modern CD root, or
+    ``…/images/`` for the verbose-named variant).
+    """
+    folder_name = _application_image_folder(application_no)
+    if folder_name is None:
+        return []
+
+    folder = Path(images_root) / folder_name
+    if not folder.is_dir():
+        return []
+
+    out: List[Dict[str, Any]] = []
+    for entry in folder.iterdir():
+        if not entry.is_file():
+            continue
+        m = _VIEW_FILENAME_RE.match(entry.name)
+        if m is None:
+            continue
+        out.append({
+            "design_no": m.group(1),
+            "view_no": m.group(2),
+            "image_path": entry,
+        })
+
+    out.sort(key=lambda r: (int(r["design_no"]), int(r["view_no"])))
+    return out
