@@ -4,6 +4,7 @@ Built one helper at a time. Each step adds its own test block so failures
 point cleanly at the unit under test.
 """
 
+import json
 from pathlib import Path
 
 import pytest
@@ -42,11 +43,17 @@ from pdf_extract_patent import (
 )
 from pdf_extract_patent import (
     DEFAULT_BANNER_PAGE_THRESHOLD,
+    CLIArgs,
     build_figure_inventory,
     detect_banner_xrefs,
     extract_record_figures,
+    figures_dirname,
+    main,
+    metadata_filename,
+    parse_argv,
     parse_pdf,
 )
+from pdf_extract_patent import _metadata_is_fresh
 from pdf_extract_patent import (
     _build_global_text,
     _char_pos_to_page,
@@ -1490,3 +1497,211 @@ def test_parse_pdf_real_2025_08_writes_figures(tmp_path):
     fig0 = sample_with_fig["figures"][0]
     assert fig0["image_path"] is not None
     assert (tmp_path / Path(fig0["image_path"]).name).is_file()
+
+
+# ---------------------------------------------------------------------------
+# Step 3.8 — metadata_filename + figures_dirname
+# ---------------------------------------------------------------------------
+
+def test_metadata_filename_uses_pdf_infix():
+    """The PDF JSON sidecar must be DISTINCT from the CD-side
+    {YYYY_M}_metadata.json (Stage 4 reconciler reads both)."""
+    assert metadata_filename(Path("2025_08.pdf")) == "2025_08_pdf_metadata.json"
+    assert metadata_filename(Path("/abs/2024_07.pdf")) == "2024_07_pdf_metadata.json"
+
+
+def test_figures_dirname():
+    assert figures_dirname(Path("2025_08.pdf")) == "2025_08_figures"
+    assert figures_dirname(Path("/abs/2024_07.pdf")) == "2024_07_figures"
+
+
+# ---------------------------------------------------------------------------
+# Step 3.8 — _metadata_is_fresh
+# ---------------------------------------------------------------------------
+
+def test_metadata_is_fresh_returns_false_when_json_missing(tmp_path):
+    pdf = tmp_path / "2025_08.pdf"
+    pdf.write_bytes(b"%PDF-1.6")
+    json_path = tmp_path / "2025_08_pdf_metadata.json"
+    assert _metadata_is_fresh(pdf, json_path) is False
+
+
+def test_metadata_is_fresh_returns_false_when_json_empty(tmp_path):
+    pdf = tmp_path / "2025_08.pdf"
+    pdf.write_bytes(b"%PDF-1.6")
+    json_path = tmp_path / "2025_08_pdf_metadata.json"
+    json_path.write_text("", encoding="utf-8")
+    assert _metadata_is_fresh(pdf, json_path) is False
+
+
+def test_metadata_is_fresh_returns_true_when_json_newer_than_pdf(tmp_path):
+    pdf = tmp_path / "2025_08.pdf"
+    pdf.write_bytes(b"%PDF-1.6")
+    import os, time
+    # Force JSON mtime > PDF mtime
+    older = time.time() - 100
+    os.utime(pdf, (older, older))
+    json_path = tmp_path / "2025_08_pdf_metadata.json"
+    json_path.write_text("{}", encoding="utf-8")
+    assert _metadata_is_fresh(pdf, json_path) is True
+
+
+def test_metadata_is_fresh_returns_false_when_json_older_than_pdf(tmp_path):
+    import os, time
+    pdf = tmp_path / "2025_08.pdf"
+    pdf.write_bytes(b"%PDF-1.6")
+    json_path = tmp_path / "2025_08_pdf_metadata.json"
+    json_path.write_text("{}", encoding="utf-8")
+    # Force JSON mtime < PDF mtime
+    older = time.time() - 100
+    os.utime(json_path, (older, older))
+    assert _metadata_is_fresh(pdf, json_path) is False
+
+
+# ---------------------------------------------------------------------------
+# Step 3.8 — parse_argv
+# ---------------------------------------------------------------------------
+
+def test_parse_argv_with_explicit_pdf(tmp_path):
+    pdf = tmp_path / "2025_08.pdf"
+    pdf.write_bytes(b"")
+    args = parse_argv(["--pdf", str(pdf)])
+    assert args.pdf_paths == [pdf]
+    assert args.save_images is True
+    assert args.force is False
+
+
+def test_parse_argv_supports_repeated_pdf(tmp_path):
+    a = tmp_path / "2025_08.pdf"
+    b = tmp_path / "2024_07.pdf"
+    a.write_bytes(b""); b.write_bytes(b"")
+    args = parse_argv(["--pdf", str(a), "--pdf", str(b)])
+    assert args.pdf_paths == [a, b]
+
+
+def test_parse_argv_all_globs_bulletins_dir(tmp_path):
+    """--all picks up every *.pdf alphabetically."""
+    (tmp_path / "2025_08.pdf").write_bytes(b"")
+    (tmp_path / "2024_07.pdf").write_bytes(b"")
+    (tmp_path / "2025_12_CD.rar").write_bytes(b"")  # NOT picked up
+    args = parse_argv(["--all", "--bulletins-dir", str(tmp_path)])
+    names = [p.name for p in args.pdf_paths]
+    assert names == ["2024_07.pdf", "2025_08.pdf"]
+
+
+def test_parse_argv_all_errors_on_empty_dir(tmp_path):
+    """--all against an empty bulletins folder is a hard error."""
+    with pytest.raises(SystemExit):
+        parse_argv(["--all", "--bulletins-dir", str(tmp_path)])
+
+
+def test_parse_argv_rejects_no_input():
+    with pytest.raises(SystemExit):
+        parse_argv([])
+
+
+def test_parse_argv_rejects_pdf_and_all_together(tmp_path):
+    pdf = tmp_path / "2025_08.pdf"
+    pdf.write_bytes(b"")
+    with pytest.raises(SystemExit):
+        parse_argv(["--pdf", str(pdf), "--all", "--bulletins-dir", str(tmp_path)])
+
+
+def test_parse_argv_no_images_flag(tmp_path):
+    pdf = tmp_path / "2025_08.pdf"
+    pdf.write_bytes(b"")
+    args = parse_argv(["--pdf", str(pdf), "--no-images"])
+    assert args.save_images is False
+
+
+def test_parse_argv_force_flag(tmp_path):
+    pdf = tmp_path / "2025_08.pdf"
+    pdf.write_bytes(b"")
+    args = parse_argv(["--pdf", str(pdf), "--force"])
+    assert args.force is True
+
+
+def test_parse_argv_out_dir_defaults_to_bulletins_dir(tmp_path):
+    pdf = tmp_path / "2025_08.pdf"
+    pdf.write_bytes(b"")
+    args = parse_argv(["--pdf", str(pdf), "--bulletins-dir", str(tmp_path)])
+    assert args.out_dir == tmp_path
+
+
+def test_parse_argv_figures_root_defaults_to_out_dir(tmp_path):
+    pdf = tmp_path / "2025_08.pdf"
+    pdf.write_bytes(b"")
+    args = parse_argv(["--pdf", str(pdf), "--out-dir", str(tmp_path)])
+    assert args.figures_root == tmp_path
+
+
+def test_parse_argv_figures_root_explicit(tmp_path):
+    pdf = tmp_path / "src" / "2025_08.pdf"
+    pdf.parent.mkdir()
+    pdf.write_bytes(b"")
+    other = tmp_path / "fig_root"
+    args = parse_argv([
+        "--pdf", str(pdf),
+        "--figures-root", str(other),
+    ])
+    assert args.figures_root == other
+
+
+# ---------------------------------------------------------------------------
+# Step 3.8 — main returns nonzero on missing source
+# ---------------------------------------------------------------------------
+
+def test_main_returns_nonzero_on_missing_pdf(tmp_path):
+    """main() with --pdf pointing at a non-existent file logs a skip
+    and returns exit code 1."""
+    ghost = tmp_path / "no_such.pdf"
+    rc = main([
+        "--pdf", str(ghost),
+        "--out-dir", str(tmp_path),
+        "--no-images",
+    ])
+    assert rc == 1
+
+
+# ---------------------------------------------------------------------------
+# Step 3.8 — LIVE main smoke (skipped if real PDF absent)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(
+    not _REAL_PDF.is_file(),
+    reason=f"Real PDF {_REAL_PDF.name} not on disk; skipping integration smoke",
+)
+def test_main_real_2025_08_smoke(tmp_path):
+    """End-to-end CLI smoke against the real 2025_08.pdf, --no-images
+    so the test stays fast (~10s).
+
+    Verifies:
+      - exit code 0
+      - JSON sidecar lands at out_dir/2025_08_pdf_metadata.json
+      - sidecar size in megabyte range, valid JSON, expected stats
+      - re-running without --force is a no-op skip (exit 0, JSON unchanged mtime)
+    """
+    rc = main([
+        "--pdf", str(_REAL_PDF),
+        "--out-dir", str(tmp_path),
+        "--no-images",
+    ])
+    assert rc == 0
+
+    out_file = tmp_path / "2025_08_pdf_metadata.json"
+    assert out_file.is_file()
+    assert out_file.stat().st_size > 1_000_000  # several MB
+    payload = json.loads(out_file.read_text(encoding="utf-8"))
+    assert payload["bulletin_no"] == "2025-08"
+    assert payload["stats"]["records"] == 1613
+
+    # Re-run: should skip-if-fresh (exit 0, JSON mtime unchanged)
+    mtime_before = out_file.stat().st_mtime
+    rc2 = main([
+        "--pdf", str(_REAL_PDF),
+        "--out-dir", str(tmp_path),
+        "--no-images",
+    ])
+    assert rc2 == 0
+    mtime_after = out_file.stat().st_mtime
+    assert mtime_after == mtime_before  # not re-written

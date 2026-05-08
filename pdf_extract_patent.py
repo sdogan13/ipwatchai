@@ -30,8 +30,11 @@ CLI (lands in step 3.8)::
 
 from __future__ import annotations
 
+import argparse
+import json
 import logging
 import re
+import time
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -1178,3 +1181,234 @@ def parse_pdf(
         return payload
     finally:
         doc.close()
+
+
+# ---------------------------------------------------------------------------
+# Step 3.8 — CLI entrypoint
+# ---------------------------------------------------------------------------
+
+_LOCAL_PROJECT_ROOT = Path(__file__).resolve().parent
+_DEFAULT_BULLETINS_DIR = _LOCAL_PROJECT_ROOT / "bulletins" / "Patent__Faydali_Model"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - [PATENT-PDF] - %(levelname)s - %(message)s",
+)
+_cli_logger = logging.getLogger("turkpatent.pdf_extract_cli")
+
+
+@dataclass
+class CLIArgs:
+    pdf_paths: List[Path]
+    out_dir: Path
+    figures_root: Optional[Path]
+    save_images: bool
+    force: bool
+
+
+def metadata_filename(pdf_path: Path) -> str:
+    """``2025_08.pdf`` -> ``2025_08_pdf_metadata.json``.
+
+    The ``_pdf_`` infix distinguishes this from the CD-side
+    ``2025_12_metadata.json`` produced by ``cd_extract_patent`` so the
+    Stage 4 reconciler can read both as separate inputs.
+    """
+    return f"{pdf_path.stem}_pdf_metadata.json"
+
+
+def figures_dirname(pdf_path: Path) -> str:
+    """``2025_08.pdf`` -> ``2025_08_figures`` (folder name, no path)."""
+    return f"{pdf_path.stem}_figures"
+
+
+def _metadata_is_fresh(pdf_path: Path, json_path: Path) -> bool:
+    """True when ``json_path`` exists, is non-empty, and is at least
+    as recent as ``pdf_path``. Mirrors the tasarim freshness rule.
+    """
+    if not json_path.is_file():
+        return False
+    try:
+        if json_path.stat().st_size == 0:
+            return False
+        return json_path.stat().st_mtime >= pdf_path.stat().st_mtime
+    except OSError:
+        return False
+
+
+def parse_argv(argv: Optional[Sequence[str]] = None) -> CLIArgs:
+    """Parse CLI arguments for the PDF-extractor entrypoint."""
+    parser = argparse.ArgumentParser(
+        prog="pdf_extract_patent",
+        description=(
+            "Extract Patent / Faydalı Model bulletin PDF metadata "
+            "to JSON sidecars."
+        ),
+    )
+    parser.add_argument(
+        "--pdf",
+        action="append",
+        type=Path,
+        help="Path to a bulletin .pdf file. Repeat for multiple.",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Process every YYYY_M.pdf in --bulletins-dir.",
+    )
+    parser.add_argument(
+        "--bulletins-dir",
+        type=Path,
+        default=_DEFAULT_BULLETINS_DIR,
+        help=f"Bulletins directory for --all and default --out-dir "
+             f"(default: {_DEFAULT_BULLETINS_DIR}).",
+    )
+    parser.add_argument(
+        "--out-dir",
+        type=Path,
+        default=None,
+        help="Where to write {YYYY_M}_pdf_metadata.json files "
+             "(default: --bulletins-dir).",
+    )
+    parser.add_argument(
+        "--figures-root",
+        type=Path,
+        default=None,
+        help="Root directory for per-PDF figure folders. Defaults to "
+             "the same folder as the JSON sidecar; figures land in "
+             "{figures-root}/{YYYY_M}_figures/. Ignored when "
+             "--no-images is given.",
+    )
+    parser.add_argument(
+        "--no-images",
+        action="store_true",
+        help="Skip image extraction. Metadata is still produced with "
+             "figure xref / page / bbox info, but no PNG files are "
+             "written.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-extract even when {YYYY_M}_pdf_metadata.json is "
+             "newer than the source PDF.",
+    )
+    ns = parser.parse_args(argv)
+
+    if ns.all and ns.pdf:
+        parser.error("--pdf and --all are mutually exclusive")
+
+    if ns.all:
+        candidates = sorted(ns.bulletins_dir.glob("*.pdf"))
+        if not candidates:
+            parser.error(f"--all matched no *.pdf files in {ns.bulletins_dir}")
+        pdf_paths = candidates
+    elif ns.pdf:
+        pdf_paths = list(ns.pdf)
+    else:
+        parser.error("provide --pdf (one or more) or --all")
+
+    out_dir = ns.out_dir if ns.out_dir is not None else ns.bulletins_dir
+    figures_root = ns.figures_root if ns.figures_root is not None else out_dir
+
+    return CLIArgs(
+        pdf_paths=pdf_paths,
+        out_dir=out_dir,
+        figures_root=figures_root,
+        save_images=not ns.no_images,
+        force=ns.force,
+    )
+
+
+def _process_one(
+    pdf: Path,
+    out_dir: Path,
+    figures_root: Optional[Path],
+    *,
+    save_images: bool,
+    force: bool,
+) -> Dict[str, Any]:
+    """Run parse_pdf for a single PDF and write its JSON sidecar.
+
+    Returns a small status dict so the top-level loop can report
+    succeeded / skipped / failed counts.
+    """
+    if not pdf.is_file():
+        return {"status": "missing", "pdf": pdf.name}
+
+    json_path = out_dir / metadata_filename(pdf)
+    if not force and _metadata_is_fresh(pdf, json_path):
+        _cli_logger.info("[=] %s is fresh, skipping (use --force to override)",
+                         pdf.name)
+        return {"status": "skipped", "pdf": pdf.name, "out": json_path.name}
+
+    figures_dir: Optional[Path] = None
+    if save_images and figures_root is not None:
+        figures_dir = figures_root / figures_dirname(pdf)
+        figures_dir.mkdir(parents=True, exist_ok=True)
+
+    started = time.time()
+    payload = parse_pdf(pdf, figures_dir=figures_dir, save_images=save_images)
+    payload["extract_duration_seconds"] = round(time.time() - started, 1)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    json_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    s = payload["stats"]
+    _cli_logger.info(
+        "[+] %s: %d records (EP=%d), %d figures, wrote %s in %.1fs",
+        pdf.name, s["records"], s["ep_fascicles"], s["figures_total"],
+        json_path.name, payload["extract_duration_seconds"],
+    )
+    return {
+        "status": "ok",
+        "pdf": pdf.name,
+        "out": json_path.name,
+        "stats": s,
+    }
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    args = parse_argv(argv)
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+
+    started = time.time()
+    succeeded: List[str] = []
+    skipped: List[str] = []
+    failed: List[Tuple[str, str]] = []
+    missing: List[str] = []
+
+    for pdf in args.pdf_paths:
+        try:
+            result = _process_one(
+                pdf,
+                args.out_dir,
+                args.figures_root,
+                save_images=args.save_images,
+                force=args.force,
+            )
+        except Exception as e:
+            failed.append((pdf.name, repr(e)))
+            _cli_logger.error("[!] %s: %r", pdf.name, e)
+            continue
+
+        status = result.get("status")
+        if status == "ok":
+            succeeded.append(pdf.name)
+        elif status == "skipped":
+            skipped.append(pdf.name)
+        elif status == "missing":
+            missing.append(pdf.name)
+            _cli_logger.warning("[skip] %s: not found", pdf.name)
+
+    duration = time.time() - started
+    _cli_logger.info(
+        "Done in %.1fs: %d ok, %d skipped, %d missing, %d failed",
+        duration, len(succeeded), len(skipped), len(missing), len(failed),
+    )
+    return 0 if not (failed or missing) else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
