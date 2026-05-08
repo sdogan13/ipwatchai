@@ -1850,5 +1850,9 @@
     "error_generic": "Request failed. Please try again.",
     "error_image_too_large": "Image is too large (max 10 MB).",
     "error_invalid_input": "Invalid input."
+  },
+  "registry": {
+    "trademark": "Trademark",
+    "design": "Design"
   }
 }

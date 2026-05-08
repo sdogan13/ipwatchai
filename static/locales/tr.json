@@ -1855,5 +1855,9 @@
     "error_generic": "İstek başarısız. Lütfen tekrar deneyin.",
     "error_image_too_large": "Görsel çok büyük (maks 10 MB).",
     "error_invalid_input": "Geçersiz girdi."
+  },
+  "registry": {
+    "trademark": "Marka",
+    "design": "Tasarım"
   }
 }

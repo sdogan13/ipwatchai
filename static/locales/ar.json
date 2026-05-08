@@ -1852,5 +1852,9 @@
     "error_generic": "فشل الطلب. يرجى المحاولة مرة أخرى.",
     "error_image_too_large": "الصورة كبيرة جداً (الحد الأقصى 10 ميغابايت).",
     "error_invalid_input": "إدخال غير صالح."
+  },
+  "registry": {
+    "trademark": "علامة تجارية",
+    "design": "تصميم"
   }
 }
