@@ -86,13 +86,6 @@ Review:
 
 Do not move on until the staged change is coherent, documented, and reversible.
 
-### SHIP `/ship`
-
-Commit and merge only:
-- intended files
-- from a clean worktree
-- with an exact report of what changed and what was verified
-
 ## Section 2: Non-Negotiable Rules
 
 ### Implementation Rules
@@ -102,7 +95,6 @@ Commit and merge only:
 - Prefer the canonical implementation point over quick fixes in multiple places.
 - Optimize for correct behavior, not just a green test run.
 - Fix root causes instead of masking failures with shortcuts.
-- Keep one concern per commit.
 - Keep `main` stable.
 
 #### Localization / Internationalization Rule
@@ -225,26 +217,11 @@ Report verification honestly.
 - If a needed test could not be run, say so and explain why.
 - Do not imply broader coverage than was actually executed.
 
-### Git And Commit Rule
-
-- Do not use blanket `git add .` on a mixed worktree.
-- Stage by path or use `git add -p` for mixed files.
-- Do not mix refactor, feature work, infra cleanup, and unrelated docs in one commit unless they are inseparable.
-- Keep commits reviewable and reversible.
-- Avoid `--no-verify` unless the hook is blocking an intentional, already-verified change; if used, document why.
-- Do not merge with a dirty worktree.
-
 ## Section 3: Reference Checklists
 
 ### Documentation Sync Matrix
 
-Before commit, run:
-
-```powershell
-git diff --name-only --cached
-```
-
-Then check the changed paths against this map:
+Check the changed paths against this map:
 
 - app behavior, routes, auth, search, UI flow:
   check `README.md`, `docs/API_REFERENCE.md`, and `test.md` if tests or flows changed
