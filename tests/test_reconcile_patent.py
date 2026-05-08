@@ -28,7 +28,6 @@ from pipeline.reconcile_patent import (
     _normalize_pdf_party,
     _normalize_pdf_priority,
     _page_range_or_none,
-    _pick_longer_title,
     _process_one,
     _record_to_dict,
     classify_metadata_json,
@@ -554,23 +553,8 @@ def test_normalize_pdf_record_drops_holder_address_null() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Step 4.4 — merge_records (CD ↔ PDF precedence)
+# Step 4.4 — merge_records (CD-first precedence)
 # ---------------------------------------------------------------------------
-
-
-def test_pick_longer_title_pdf_wins_when_longer() -> None:
-    assert _pick_longer_title("Short", "Much longer title text") == "Much longer title text"
-
-
-def test_pick_longer_title_cd_wins_on_tie() -> None:
-    """Equal-length titles -> CD (it's the typed source)."""
-    assert _pick_longer_title("ABCDE", "VWXYZ") == "ABCDE"
-
-
-def test_pick_longer_title_falls_back_to_present_side() -> None:
-    assert _pick_longer_title("CD only", None) == "CD only"
-    assert _pick_longer_title(None, "PDF only") == "PDF only"
-    assert _pick_longer_title(None, None) is None
 
 
 def test_merge_figures_concats_with_dedup() -> None:
@@ -648,8 +632,8 @@ def _pdf_canonical() -> CanonicalRecord:
     )
 
 
-def test_merge_records_full_precedence() -> None:
-    """Walks the precedence table: every rule fires on a single record."""
+def test_merge_records_cd_first_precedence() -> None:
+    """CD wins on every overlapping field; PDF supplies only PDF-only ones."""
     merged = merge_records(_cd_canonical(), _pdf_canonical())
 
     # Structured fields -> CD wins
@@ -663,12 +647,18 @@ def test_merge_records_full_precedence() -> None:
     assert merged.attorneys == [{"no": "361", "name": "ERDEM KAYA"}]
     assert merged.priorities[0]["priority_no"] == "X"
 
-    # Title: PDF longer -> PDF wins
-    assert merged.title == "EMNİYET BELİRTEÇLİ ENJEKTÖR KİLİDİ VE KİLİTLEME YÖNTEMİ"
-    # Abstract: PDF wins (CD truncated)
-    assert merged.abstract.startswith("Full PDF abstract")
+    # CD-first: title and abstract come from CD even though PDF is longer.
+    # Rationale: PyMuPDF text extraction is noisy; CD's truncated-but-clean
+    # beats PDF's full-but-possibly-noisy. See patent_cd_first_precedence.
+    assert merged.title == "EMNİYET BELİRTEÇLİ ENJEKTÖR KİLİDİ"   # CD's shorter
+    assert merged.abstract == "CD truncated abstract..."           # CD's truncated
 
-    # PDF-only fields preserved
+    # CD-first on classification too (both happen to be UNKNOWN here, but
+    # the precedence direction matters for the next test).
+    assert merged.kind_code == "U3"
+    assert merged.record_type == "UNKNOWN"
+
+    # PDF-only fields preserved (CD doesn't carry these)
     assert merged.grant_date == "2025-12-22"
     assert merged.page_range == [120, 121]
 
@@ -682,6 +672,17 @@ def test_merge_records_full_precedence() -> None:
 
     # Source flag flipped
     assert merged.source_format == "BOTH"
+
+
+def test_merge_records_pdf_fills_when_cd_title_blank() -> None:
+    """CD-first means PDF DOES win when CD's value is empty/None."""
+    cd = _cd_canonical()
+    cd.title = None
+    cd.abstract = None
+    pdf = _pdf_canonical()
+    merged = merge_records(cd, pdf)
+    assert merged.title == "EMNİYET BELİRTEÇLİ ENJEKTÖR KİLİDİ VE KİLİTLEME YÖNTEMİ"
+    assert merged.abstract.startswith("Full PDF abstract")
 
 
 def test_merge_records_pdf_attorney_used_when_cd_empty() -> None:
@@ -869,11 +870,11 @@ def test_reconcile_metadata_pairs_overlap_on_application_no() -> None:
     app_nos = [r["application_no"] for r in doc["records"]]
     assert app_nos == ["2017/15048", "2018/22222", "2019/33333"]
 
-    # Spot-check the merged record
+    # Spot-check the merged record (CD-first precedence)
     both = doc["records"][0]
     assert both["source_format"] == "BOTH"
-    assert both["title"] == "PDF title is much longer than CD title"   # PDF longer
-    assert both["abstract"] == "Long PDF abstract."                     # PDF wins
+    assert both["title"] == "CD title"                  # CD wins (CD non-empty)
+    assert both["abstract"] == "Long PDF abstract."     # PDF fills (CD record had no abstract)
 
 
 def test_reconcile_metadata_raises_on_bulletin_mismatch() -> None:

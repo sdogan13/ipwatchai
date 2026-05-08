@@ -402,35 +402,22 @@ def normalize_pdf_record(pdf_record: Dict[str, Any]) -> CanonicalRecord:
 # Step 4.4 — merge_records (CD ↔ PDF precedence)
 # ---------------------------------------------------------------------------
 #
-# Precedence rules (locked decisions: bulletins/Patent__Faydali_Model/
-# PROCESSING_PLAN.md §d.2):
+# Precedence rule: **CD wins on every overlapping field.** PDF only fills
+# gaps and supplies fields CD doesn't carry. Rationale: PDF text comes
+# from PyMuPDF extraction which is noisy (encoding glitches, page-banner
+# contamination, ligature splits). CD is a typed HSQLDB row — clean even
+# when truncated. See ``patent_cd_first_precedence`` memory.
 #
 #                          | Source of truth
 #   -----------------------+-------------------------------------------
-#   structured fields      | CD  (HSQLDB rows are typed; PDF is regex)
-#   abstract               | PDF (CD truncates to VARCHAR(2000))
-#   title                  | longer of the two (CD truncates sometimes)
-#   kind_code, record_type | PDF (already classified upstream); CD as
-#                          | fallback when PDF didn't see this app
-#   grant_date             | PDF (CD has no grant_date concept)
+#   every overlapping      | CD  (PDF used only when CD is empty/None)
+#   field                  |
+#   grant_date             | PDF only (CD has no grant_date concept)
 #   page_range             | PDF only
 #   patent_type            | CD only
 #   figures                | union — CD TIFFs primary, PDF JPEGs added
 #                          | (paths never collide: .tif vs .jpg)
 #   source_format          | 'BOTH'
-
-
-def _pick_longer_title(cd_title: Optional[str], pdf_title: Optional[str]) -> Optional[str]:
-    """Return the longer non-empty title; tiebreak goes to CD.
-
-    CD is a clean DB row, PDF is text-extraction with possible OCR
-    artefacts — a tied length usually means CD got the canonical form.
-    """
-    if not pdf_title:
-        return cd_title
-    if not cd_title:
-        return pdf_title
-    return pdf_title if len(pdf_title) > len(cd_title) else cd_title
 
 
 def _merge_figures(
@@ -485,10 +472,10 @@ def merge_records(cd: CanonicalRecord, pdf: CanonicalRecord) -> CanonicalRecord:
         publication_no=cd.publication_no or pdf.publication_no,
         publication_date=cd.publication_date or pdf.publication_date,
         grant_date=pdf.grant_date,                     # PDF-only field
-        kind_code=pdf.kind_code or cd.kind_code,
-        record_type=pdf.record_type or cd.record_type,
-        title=_pick_longer_title(cd.title, pdf.title),
-        abstract=pdf.abstract or cd.abstract,          # PDF wins (CD truncates)
+        kind_code=cd.kind_code or pdf.kind_code,        # CD-first
+        record_type=cd.record_type or pdf.record_type,  # CD-first
+        title=cd.title or pdf.title,                    # CD-first
+        abstract=cd.abstract or pdf.abstract,           # CD-first (PyMuPDF noise)
         ipc_classes=cd.ipc_classes or pdf.ipc_classes,
         holders=cd.holders or pdf.holders,
         inventors=cd.inventors or pdf.inventors,
