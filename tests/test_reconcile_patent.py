@@ -891,18 +891,56 @@ def test_reconcile_metadata_accepts_format_difference() -> None:
     assert doc["bulletin_no"] == "2025/8"
 
 
-def test_reconcile_metadata_drops_records_without_application_no_from_index() -> None:
-    """Defensive: a CD row with blank application_no must not pair on falsy key."""
+def test_reconcile_metadata_does_not_merge_when_only_app_no_matches() -> None:
+    """A single application can be republished at different stages
+    in the same bulletin (B grant + A1 publication for app
+    2024/000746 in real 2025_08.pdf). Same application_no MUST NOT
+    cause a merge if publication_no differs — those are distinct
+    lifecycle events that need distinct rows.
+    """
     cd = _cd_doc(records=[
-        {"application_no": "", "publication_no": "TR x", "ipc_codes": [], "holders": []},
+        # CD has only the A1 publication (CD ships one row per app_no,
+        # with the latest publication_no — A1 in this case).
+        {"application_no": "2024/000746", "publication_no": "TR 2024 000746 A1",
+         "ipc_codes": [], "holders": []},
     ])
     pdf = _pdf_doc(records=[
-        {"application_no": "", "publication_no": "TR y", "kind_code": "B",
+        # PDF has both: the B grant and the A1 republication of same app.
+        {"application_no": "2024/000746", "publication_no": "TR 2024 000746 B",
+         "kind_code": "B", "record_type": "GRANTED_PATENT", "title": "G",
+         "abstract": "g", "ipc_classes": [], "holders": [], "inventors": [],
+         "priorities": [], "figures": []},
+        {"application_no": "2024/000746", "publication_no": "TR 2024 000746 A1",
+         "kind_code": "A1", "record_type": "PUBLISHED_APP", "title": "P",
+         "abstract": "p", "ipc_classes": [], "holders": [], "inventors": [],
+         "priorities": [], "figures": []},
+    ])
+    doc = reconcile_metadata(cd, pdf)
+
+    # CD's A1 merges with PDF's A1 (same publication_no).
+    # PDF's B stays PDF-only (CD never saw the grant).
+    # Result: 2 records total, 1 BOTH + 1 PDF-only.
+    assert doc["stats"]["records"] == 2
+    assert doc["stats"]["by_source_format"] == {"CD": 0, "PDF": 1, "BOTH": 1}
+
+    by_pub = {r["publication_no"]: r for r in doc["records"]}
+    assert by_pub["TR 2024 000746 A1"]["source_format"] == "BOTH"
+    assert by_pub["TR 2024 000746 B"]["source_format"] == "PDF"
+
+
+def test_reconcile_metadata_blank_keys_do_not_cross_pair() -> None:
+    """Defensive: blank publication_no AND blank application_no must
+    not produce a pair on falsy key. Each side's record stays separate.
+    """
+    cd = _cd_doc(records=[
+        {"application_no": "", "publication_no": "", "ipc_codes": [], "holders": []},
+    ])
+    pdf = _pdf_doc(records=[
+        {"application_no": "", "publication_no": "", "kind_code": "B",
          "record_type": "GRANTED_PATENT", "title": "x", "abstract": "y",
          "ipc_classes": [], "holders": [], "inventors": [], "priorities": [], "figures": []},
     ])
     doc = reconcile_metadata(cd, pdf)
-    # Both should appear separately (CD-only + PDF-only), NOT merged on blank
     assert doc["stats"]["by_source_format"]["BOTH"] == 0
 
 
@@ -1222,3 +1260,84 @@ def test_main_returns_one_on_failure(tmp_path: Path) -> None:
         "--out-dir", str(tmp_path),
     ])
     assert rc == 1
+
+
+# ---------------------------------------------------------------------------
+# Step 4.8 — real-data verification on bulletin 2025/8
+# ---------------------------------------------------------------------------
+#
+# Paired-month smoke against the on-disk JSONs produced by Stages 2 + 3:
+#   - 2025_07_metadata.json     (CD-side, bulletin 2025/8, 1914 patents)
+#   - 2025_08_pdf_metadata.json (PDF-side, bulletin 2025/8, 1613 records)
+#
+# Skips when the upstream JSONs aren't present (CI / fresh checkout).
+
+_BULLETINS_DIR = (
+    Path(__file__).resolve().parent.parent / "bulletins" / "Patent__Faydali_Model"
+)
+_REAL_CD_JSON = _BULLETINS_DIR / "2025_07_metadata.json"
+_REAL_PDF_JSON = _BULLETINS_DIR / "2025_08_pdf_metadata.json"
+
+
+@pytest.mark.skipif(
+    not (_REAL_CD_JSON.is_file() and _REAL_PDF_JSON.is_file()),
+    reason=f"Real paired JSONs not on disk; skipping integration smoke. "
+           f"Run cd_extract_patent + pdf_extract_patent first.",
+)
+def test_reconcile_metadata_real_bulletin_2025_8_smoke() -> None:
+    cd_doc = load_cd_metadata(_REAL_CD_JSON)
+    pdf_doc = load_pdf_metadata(_REAL_PDF_JSON)
+    out = reconcile_metadata(cd_doc=cd_doc, pdf_doc=pdf_doc)
+
+    # Provenance round-trips.
+    assert out["bulletin_no"] == "2025/8"
+    assert out["bulletin_date"] == "2025-08-21"
+    assert out["source_archive"] == "2025_07_CD.rar"
+    assert out["source_pdf"] == "2025_08.pdf"
+
+    stats = out["stats"]
+    bs = stats["by_source_format"]
+
+    # Math invariant 1: PDF reach. Every PDF record either merges with a
+    # CD row (BOTH) or stays PDF-only.
+    assert bs["BOTH"] + bs["PDF"] == 1613, (
+        "BOTH + PDF should equal PDF record count (1613). "
+        f"Got BOTH={bs['BOTH']} PDF={bs['PDF']}"
+    )
+
+    # Math invariant 2: CD reach. Every CD app/pub_no either merges with
+    # a PDF record (BOTH) or stays CD-only.
+    assert bs["BOTH"] + bs["CD"] == 1914, (
+        "BOTH + CD should equal CD record count (1914). "
+        f"Got BOTH={bs['BOTH']} CD={bs['CD']}"
+    )
+
+    # Headline: at least 60% of one side must merge — sanity that
+    # publication_no pairing actually works on real data.
+    assert bs["BOTH"] / 1613 > 0.6, (
+        f"BOTH/PDF ratio = {bs['BOTH'] / 1613:.2f}; "
+        "expected >0.6 — pairing may be broken"
+    )
+
+    # Headline: same-app, different-publication regression.
+    # In 2025_08.pdf, application 2024/000746 has both B and A1
+    # publications. After the publication_no-key merge, both must
+    # appear as separate canonical records — not merged into one.
+    target_records = [r for r in out["records"] if r["application_no"] == "2024/000746"]
+    pub_nos = {r["publication_no"] for r in target_records}
+    assert "TR 2024 000746 B" in pub_nos
+    assert "TR 2024 000746 A1" in pub_nos
+    # B is PDF-only (CD never sees the grant), A1 is BOTH (CD has the
+    # republication; PDF re-confirms it on a later page).
+    by_pub = {r["publication_no"]: r for r in target_records}
+    assert by_pub["TR 2024 000746 B"]["source_format"] == "PDF"
+    assert by_pub["TR 2024 000746 A1"]["source_format"] == "BOTH"
+
+    # Output sorted by application_no for diff stability.
+    app_nos = [r["application_no"] for r in out["records"]]
+    assert app_nos == sorted(app_nos)
+
+    # Determinism: re-reconciling the same docs produces the same
+    # records list (modulo reconciled_at). Aggregate stats are stable.
+    out2 = reconcile_metadata(cd_doc=cd_doc, pdf_doc=pdf_doc)
+    assert out2["stats"] == stats

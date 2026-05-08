@@ -634,25 +634,37 @@ def reconcile_metadata(
         if pdf_doc is not None else []
     )
 
-    cd_by_app: Dict[str, CanonicalRecord] = {}
+    # Merge key is ``publication_no`` (e.g. "TR 2024 000746 A1"), NOT
+    # ``application_no``. Reason: a single application can be re-published
+    # at multiple lifecycle stages in the same bulletin (e.g. 2024/000746
+    # appears as both B grant on p.312 and A1 publication on p.1850 in
+    # 2025_08.pdf). Merging by application_no would double-count those
+    # rows and produce inconsistent kind_code/record_type. Falls back
+    # to application_no only when publication_no is blank on either side.
+    def _merge_key(rec: CanonicalRecord) -> Optional[str]:
+        return rec.publication_no or rec.application_no
+
+    cd_by_pub: Dict[str, CanonicalRecord] = {}
     for rec in cd_records:
-        if rec.application_no:
-            cd_by_app[rec.application_no] = rec
+        key = _merge_key(rec)
+        if key:
+            cd_by_pub[key] = rec
 
     merged: List[CanonicalRecord] = []
     matched_keys: set = set()
 
     for pdf_rec in pdf_records:
-        cd_match = cd_by_app.get(pdf_rec.application_no) if pdf_rec.application_no else None
+        key = _merge_key(pdf_rec)
+        cd_match = cd_by_pub.get(key) if key else None
         if cd_match is not None:
             merged.append(merge_records(cd_match, pdf_rec))
-            matched_keys.add(pdf_rec.application_no)
+            matched_keys.add(key)
         else:
             merged.append(pdf_rec)
 
-    # CD-only records are everything in cd_by_app that PDF didn't claim.
-    for app_no, cd_rec in cd_by_app.items():
-        if app_no not in matched_keys:
+    # CD-only records are everything in cd_by_pub that PDF didn't claim.
+    for key, cd_rec in cd_by_pub.items():
+        if key not in matched_keys:
             merged.append(cd_rec)
 
     # Deterministic order by application_no — keeps diff-of-runs noise-free
