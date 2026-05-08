@@ -134,7 +134,7 @@
     "status_withdrawn": "Withdrawn",
     "status_refused": "Refused",
     "attorney_placeholder": "Attorney...",
-    "class_finder_toggle": "Select a class for more targeted results (optional)",
+    "class_finder_toggle": "Select a Nice class for more targeted results (optional)",
     "goods_description_placeholder": "Describe your goods or services...",
     "suggest_classes": "Suggest Classes",
     "suggesting": "Suggesting...",
@@ -1759,7 +1759,7 @@
   },
   "design_search": {
     "panel_title": "Design Search",
-    "query_placeholder": "Product name, e.g. Lamp",
+    "query_placeholder": "Design product name, e.g. Lamp",
     "locarno_label": "Locarno class",
     "locarno_placeholder": "e.g. 06-01, 26-05",
     "locarno_hint": "Comma-separated; leave empty to search all classes",
@@ -1782,7 +1782,7 @@
     "error_auth": "Please sign in to use design search.",
     "error_image_too_large": "Image is too large (max 10 MB).",
     "error_invalid_input": "Invalid input.",
-    "drop_image": "Drop image here or click to upload",
+    "drop_image": "Drop design here or click to upload",
     "optional": "(optional)",
     "visual_analysis": "Visual + text similarity",
     "remove_image": "Remove image",
@@ -1790,7 +1790,8 @@
     "locarno_classes_selected": "{count} selected",
     "locarno_ai_no_credits": "AI credits exhausted. Upgrade to keep suggesting.",
     "designer_label": "Designer",
-    "class_finder_toggle": "Select Locarno classes (optional)",
+    "stats_db_records": "designs analyzed in live database",
+    "class_finder_toggle": "Select a Locarno class for more targeted results (optional)",
     "class_label": "Class",
     "class_input_placeholder": "Describe your design in as much detail as possible for more accurate AI class suggestions.",
     "class_suggest_placeholder": "Describe your design (e.g. table lamp)",
@@ -1850,9 +1851,5 @@
     "error_generic": "Request failed. Please try again.",
     "error_image_too_large": "Image is too large (max 10 MB).",
     "error_invalid_input": "Invalid input."
-  },
-  "registry": {
-    "trademark": "Trademark",
-    "design": "Design"
   }
 }

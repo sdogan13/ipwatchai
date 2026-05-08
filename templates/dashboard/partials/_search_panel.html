@@ -1385,6 +1385,15 @@
         <p class="text-xs mt-3 text-center" style="color:var(--color-text-faint)"
            x-text="t('design_search.analysis_hint')">Visual · Color · Text · Locarno</p>
 
+        <!-- Live design DB count (mirrors the Marka stats line; uses a separate
+             designCount populated from /api/v1/status statistics.total_designs) -->
+        <div x-show="designCount > 0" x-cloak
+             class="flex items-center justify-center gap-2 mt-4 text-sm"
+             style="color:var(--color-text-muted)">
+          <span class="inline-block w-2 h-2 rounded-full animate-pulse" style="background:#22c55e"></span>
+          <span x-text="designCount.toLocaleString() + ' ' + t('design_search.stats_db_records')"></span>
+        </div>
+
         <!-- Status (errors / empty-query messages from JS) -->
         <p id="design-search-status" class="text-xs mt-2 text-center"
            style="color:var(--color-text-muted)"></p>

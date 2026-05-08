@@ -134,7 +134,7 @@
     "status_withdrawn": "Geri Çekildi",
     "status_refused": "Reddedildi",
     "attorney_placeholder": "Vekil...",
-    "class_finder_toggle": "Daha doğru sonuçlar için sınıf seçimi yapın (opsiyonel)",
+    "class_finder_toggle": "Daha doğru sonuçlar için Nice sınıf seçimi yapın (opsiyonel)",
     "goods_description_placeholder": "Mal veya hizmetlerinizi tanımlayin...",
     "suggest_classes": "Sınıf Öner",
     "suggesting": "Öneriliyor...",
@@ -1764,7 +1764,7 @@
   },
   "design_search": {
     "panel_title": "Tasarım Arama",
-    "query_placeholder": "Ürün adı, ör. Lamba",
+    "query_placeholder": "Tasarım ürün adı, ör. Lamba",
     "locarno_label": "Locarno sınıfı",
     "locarno_placeholder": "ör. 06-01, 26-05",
     "locarno_hint": "Virgülle ayırın; boş bırakmanız tüm sınıflarda arar",
@@ -1787,7 +1787,7 @@
     "error_auth": "Tasarım araması için giriş yapın.",
     "error_image_too_large": "Görsel çok büyük (maks 10 MB).",
     "error_invalid_input": "Geçersiz girdi.",
-    "drop_image": "Görseli buraya bırakın veya tıklayın",
+    "drop_image": "Tasarımı buraya bırakın veya tıklayın",
     "optional": "(opsiyonel)",
     "visual_analysis": "Görsel + metin benzerliği",
     "remove_image": "Görseli kaldır",
@@ -1795,7 +1795,8 @@
     "locarno_classes_selected": "{count} seçili",
     "locarno_ai_no_credits": "AI kredisi tükendi. Devam etmek için planı yükseltin.",
     "designer_label": "Tasarımcı",
-    "class_finder_toggle": "Locarno sınıfı seçin (opsiyonel)",
+    "stats_db_records": "tasarım canlı veritabanında analiz ediliyor",
+    "class_finder_toggle": "Daha doğru sonuçlar için Locarno sınıf seçimi yapın (opsiyonel)",
     "class_label": "Sınıf",
     "class_input_placeholder": "Daha doğru AI sınıf önerileri için tasarımınızı detaylı şekilde tarif edin.",
     "class_suggest_placeholder": "Tasarımınızı tarif edin (ör. masa lambası)",
@@ -1855,9 +1856,5 @@
     "error_generic": "İstek başarısız. Lütfen tekrar deneyin.",
     "error_image_too_large": "Görsel çok büyük (maks 10 MB).",
     "error_invalid_input": "Geçersiz girdi."
-  },
-  "registry": {
-    "trademark": "Marka",
-    "design": "Tasarım"
   }
 }

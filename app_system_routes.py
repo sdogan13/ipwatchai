@@ -92,10 +92,22 @@ def register_system_routes(app, settings):
                 row = cur.fetchone()
                 last_bulletin = row["latest"].isoformat() if row and row["latest"] else None
 
+                # Tasarım (design) live count — parallel to total_trademarks so
+                # the dashboard search panel can show a per-registry count.
+                design_count = 0
+                try:
+                    cur.execute(
+                        "SELECT COUNT(*) FROM designs WHERE registry_type = 'design'"
+                    )
+                    design_count = cur.fetchone()["count"]
+                except Exception:
+                    design_count = 0
+
                 return {
                     "status": "operational",
                     "statistics": {
                         "total_trademarks": trademark_count,
+                        "total_designs": design_count,
                         "last_bulletin_date": last_bulletin,
                     },
                     "timestamp": datetime.utcnow().isoformat(),
@@ -103,6 +115,10 @@ def register_system_routes(app, settings):
         except Exception:
             return {
                 "status": "error",
-                "statistics": {"total_trademarks": 0, "last_bulletin_date": None},
+                "statistics": {
+                    "total_trademarks": 0,
+                    "total_designs": 0,
+                    "last_bulletin_date": None,
+                },
                 "timestamp": datetime.utcnow().isoformat(),
             }

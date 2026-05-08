@@ -134,7 +134,7 @@
     "status_withdrawn": "مسحوب",
     "status_refused": "مرفوض",
     "attorney_placeholder": "وكيل...",
-    "class_finder_toggle": "اختر تصنيفًا لنتائج أكثر دقة (اختياري)",
+    "class_finder_toggle": "اختر تصنيف Nice لنتائج أكثر دقة (اختياري)",
     "goods_description_placeholder": "صف سلعك أو خدماتك...",
     "suggest_classes": "اقتراح فئات",
     "suggesting": "جاري الاقتراح...",
@@ -1761,7 +1761,7 @@
   },
   "design_search": {
     "panel_title": "بحث التصاميم",
-    "query_placeholder": "اسم المنتج، مثال: مصباح",
+    "query_placeholder": "اسم منتج التصميم، مثال: مصباح",
     "locarno_label": "تصنيف لوكارنو",
     "locarno_placeholder": "مثال: 06-01، 26-05",
     "locarno_hint": "افصل بين الأصناف بفاصلة؛ اتركها فارغة للبحث في جميع الأصناف",
@@ -1784,7 +1784,7 @@
     "error_auth": "يرجى تسجيل الدخول لاستخدام بحث التصاميم.",
     "error_image_too_large": "الصورة كبيرة جداً (الحد الأقصى 10 م.ب).",
     "error_invalid_input": "إدخال غير صالح.",
-    "drop_image": "أفلت الصورة هنا أو انقر للتحميل",
+    "drop_image": "أفلت التصميم هنا أو انقر للتحميل",
     "optional": "(اختياري)",
     "visual_analysis": "تشابه بصري + نصي",
     "remove_image": "إزالة الصورة",
@@ -1792,7 +1792,8 @@
     "locarno_classes_selected": "{count} محدد",
     "locarno_ai_no_credits": "نفدت أرصدة الذكاء الاصطناعي. قم بترقية الخطة للمتابعة.",
     "designer_label": "المصمم",
-    "class_finder_toggle": "اختر أصناف لوكارنو (اختياري)",
+    "stats_db_records": "تصميماً يتم تحليلها في قاعدة البيانات المباشرة",
+    "class_finder_toggle": "اختر تصنيف Locarno لنتائج أكثر دقة (اختياري)",
     "class_label": "صنف",
     "class_input_placeholder": "صف تصميمك بأكبر قدر من التفاصيل للحصول على اقتراحات أصناف أكثر دقة.",
     "class_suggest_placeholder": "صف تصميمك (مثال: مصباح طاولة)",
@@ -1852,9 +1853,5 @@
     "error_generic": "فشل الطلب. يرجى المحاولة مرة أخرى.",
     "error_image_too_large": "الصورة كبيرة جداً (الحد الأقصى 10 ميغابايت).",
     "error_invalid_input": "إدخال غير صالح."
-  },
-  "registry": {
-    "trademark": "علامة تجارية",
-    "design": "تصميم"
   }
 }

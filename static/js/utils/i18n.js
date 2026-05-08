@@ -33,7 +33,7 @@ window.AppI18n._locale = _safeStorageGet('app_locale') || 'tr';
 window.AppI18n._strings = {};
 window.AppI18n._ready = false;
 window.AppI18n._callbacks = [];
-window.AppI18n._localeAssetVersion = '51';
+window.AppI18n._localeAssetVersion = '55';
 window.AppI18n._localeBundleCachePrefix = 'app_locale_bundle::';
 window.AppI18n._requestToken = 0;
 
