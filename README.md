@@ -180,7 +180,8 @@ See `test.md` for the current test lanes and coverage expectations.
 ## Pipeline Notes
 
 Pipeline and data-collection code lives in:
-- `data_collection.py`
+- `data_collection.py` (Marka)
+- `data_collection_patent.py` (Patent / Faydalı Model)
 - `zip.py`
 - `pdf_extract.py`
 - `ingest_events.py`
@@ -189,6 +190,27 @@ Pipeline and data-collection code lives in:
 Operational helpers and maintenance scripts live in `scripts/`.
 
 If you run archive extraction locally on Windows, make sure `PIPELINE_SEVEN_ZIP_PATH` points to a working 7-Zip executable.
+
+### Patent / Faydalı Model collector
+
+`data_collection_patent.py` is the sister collector to `data_collection.py` (Marka) and `data_collection_tasarim.py` (Tasarım). It targets the TÜRKPATENT bulletin page in single-category mode for **Patent / Faydalı Model**, downloading both tracks each modern monthly issue ships:
+
+- the CD bundle (`{YYYY_M}_CD.rar`) — HSQLDB-backed structured data
+- the sidecar PDF (`{YYYY_M}.pdf`) — INID-coded bulletin with embedded figures
+
+Output lands flat under `bulletins/Patent__Faydali_Model/`, matching the existing on-disk convention.
+
+```powershell
+python data_collection_patent.py                     # both tracks, incremental, headless
+python data_collection_patent.py --full              # walk full archive
+python data_collection_patent.py --pdf-only          # PDF only (skip CD .rar)
+python data_collection_patent.py --cd-only           # CD only (skip PDF)
+python data_collection_patent.py --limit 1           # stop after 1 download
+python data_collection_patent.py --headless=false    # show browser
+python data_collection_patent.py --bulletins-root C:\path\to\elsewhere
+```
+
+Pure-helper unit tests live in `tests/test_data_collection_patent.py` and cover card-id normalization, recency window, per-track filename construction, completeness check (including the legacy multi-month bundle false-match guard), menu-item CD/PDF classification, and CLI argv parsing.
 
 ## Development Rules
 
