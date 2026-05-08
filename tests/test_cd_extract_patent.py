@@ -4,6 +4,7 @@ Built one helper at a time. Each step adds its own test block so failures
 point cleanly at the unit under test.
 """
 
+import json
 from pathlib import Path
 
 import pytest
@@ -15,7 +16,7 @@ from cd_extract_patent import (
     decode_hsqldb_escapes,
     extract_cd_archive,
     main,
-    CD_IMAGES_DIRNAME,
+    CD_FIGURES_DIRNAME,
     CD_METADATA_FILENAME,
     RAW_HSQLDB_FILES,
     _carry_cd_images,
@@ -901,10 +902,10 @@ def test_raw_hsqldb_filenames_constant():
     assert RAW_HSQLDB_FILES == ("ptbulletin.log", "ptbulletin.script", "ptbulletin.properties")
 
 
-def test_cd_images_dirname_constant():
-    """CD TIFFs land in ``images/`` inside the bulletin parent folder
-    (matches Marka's ``images/`` convention)."""
-    assert CD_IMAGES_DIRNAME == "images"
+def test_cd_figures_dirname_constant():
+    """CD TIFFs land in the same ``figures/`` directory as PDF-side
+    images so reconcile can dedup on a shared {year}_{appno} prefix."""
+    assert CD_FIGURES_DIRNAME == "figures"
 
 
 def _make_fake_cd_root_with_tiffs(tmp_path, year_to_appnos):
@@ -920,8 +921,9 @@ def _make_fake_cd_root_with_tiffs(tmp_path, year_to_appnos):
 
 def test_carry_cd_images_moves_tiffs_and_rewrites_paths(tmp_path):
     """Happy path: TIFFs move from cd_root/data/images/{year}/{appno}.tif
-    into parent/images/{year}/{appno}.tif; image_path values rewritten
-    to relative ``images/{year}/{appno}.tif``."""
+    into parent/figures/{year}_{appno}.tif (flat naming, matches PDF
+    prefix convention); image_path values rewritten to the relative
+    ``figures/{year}_{appno}.tif`` shape."""
     cd_root = _make_fake_cd_root_with_tiffs(
         tmp_path, {"2017": ["15048"], "2018": ["13083"]},
     )
@@ -936,17 +938,46 @@ def test_carry_cd_images_moves_tiffs_and_rewrites_paths(tmp_path):
         ],
     }
 
-    moved = _carry_cd_images(doc, cd_root, parent)
+    result = _carry_cd_images(doc, cd_root, parent)
 
-    assert moved == 2
-    # Files moved into parent/images/{year}/...
-    assert (parent / "images" / "2017" / "15048.tif").is_file()
-    assert (parent / "images" / "2018" / "13083.tif").is_file()
+    assert result == {"moved": 2, "pdf_dups_dropped": 0}
+    # Files moved into parent/figures/{year}_{appno}.tif (flat)
+    assert (parent / "figures" / "2017_15048.tif").is_file()
+    assert (parent / "figures" / "2018_13083.tif").is_file()
+    # Year subfolder is gone — naming is flat to match PDF convention
+    assert not (parent / "figures" / "2017").exists()
     # Source TIFFs gone from cd_root (move, not copy)
     assert not (cd_root / "data" / "images" / "2017" / "15048.tif").exists()
-    # image_path values rewritten to relative paths under the parent
-    assert doc["patents"][0]["image_path"] == "images/2017/15048.tif"
-    assert doc["patents"][1]["image_path"] == "images/2018/13083.tif"
+    # image_path values rewritten to flat relative paths under figures/
+    assert doc["patents"][0]["image_path"] == "figures/2017_15048.tif"
+    assert doc["patents"][1]["image_path"] == "figures/2018_13083.tif"
+
+
+def test_carry_cd_images_path_matches_pdf_prefix(tmp_path):
+    """Regression for the consistency goal: CD's image_path prefix
+    must match the PDF's image_path prefix on the same application_no
+    so a future merge step can dedup on the shared {year}_{appno} key.
+
+    Concrete: app 2023/018085 -> CD writes 'figures/2023_018085.tif',
+    PDF writes 'figures/2023_018085_p1847_2.png'. Both filenames
+    start with '2023_018085'. Without the flatten here, CD would
+    produce 'images/2023/018085.tif' which has no shared prefix.
+    """
+    cd_root = _make_fake_cd_root_with_tiffs(tmp_path, {"2023": ["018085"]})
+    parent = tmp_path / "PT_2025_8_2025-08-21"
+    parent.mkdir()
+    doc = {"patents": [
+        {"application_no": "2023/018085", "image_path": "data/images/2023/018085.tif"},
+    ]}
+
+    _carry_cd_images(doc, cd_root, parent)
+
+    cd_image_path = doc["patents"][0]["image_path"]
+    pdf_image_path = "figures/2023_018085_p1847_2.png"
+
+    cd_stem = Path(cd_image_path).stem        # "2023_018085"
+    pdf_stem = Path(pdf_image_path).stem      # "2023_018085_p1847_2"
+    assert pdf_stem.startswith(cd_stem + "_") or pdf_stem == cd_stem
 
 
 def test_carry_cd_images_handles_missing_tiff_by_nulling_path(tmp_path):
@@ -964,12 +995,99 @@ def test_carry_cd_images_handles_missing_tiff_by_nulling_path(tmp_path):
         ],
     }
 
-    moved = _carry_cd_images(doc, cd_root, parent)
+    result = _carry_cd_images(doc, cd_root, parent)
 
-    assert moved == 1                                          # only the present one
-    assert doc["patents"][0]["image_path"] == "images/2017/15048.tif"
+    assert result == {"moved": 1, "pdf_dups_dropped": 0}        # only the present one
+    assert doc["patents"][0]["image_path"] == "figures/2017_15048.tif"
     assert doc["patents"][1]["image_path"] is None             # missing -> nulled
     assert doc["patents"][2]["image_path"] is None             # was None, stays None
+
+
+def test_carry_cd_images_drops_pdf_png_duplicates(tmp_path):
+    """CD-first dedup: when a CD TIFF for app X is carried in, any
+    pre-existing PDF PNG in figures/ matching ``{year}_{appno}_p*.png``
+    is deleted. Visually verified on app 2023/018085 that the CD TIFF
+    and the PDF first-figure are the same drawing."""
+    cd_root = _make_fake_cd_root_with_tiffs(tmp_path, {"2023": ["018085"]})
+    parent = tmp_path / "PT_2025_8_2025-08-21"
+    figures_dir = parent / "figures"
+    figures_dir.mkdir(parents=True)
+
+    # Pre-existing PDF PNGs from an earlier pdf_extract run, plus an
+    # unrelated PNG for a different app that must NOT be touched.
+    duplicate_png = figures_dir / "2023_018085_p1847_2.png"
+    duplicate_png.write_bytes(b"\x89PNG\x00")
+    extra_png = figures_dir / "2023_018085_p1850_3.png"
+    extra_png.write_bytes(b"\x89PNG\x00")
+    unrelated_png = figures_dir / "2024_000702_p100_1.png"
+    unrelated_png.write_bytes(b"\x89PNG\x00")
+
+    doc = {
+        "patents": [
+            {"application_no": "2023/018085",
+             "image_path": "data/images/2023/018085.tif"},
+        ],
+    }
+
+    result = _carry_cd_images(doc, cd_root, parent)
+
+    assert result == {"moved": 1, "pdf_dups_dropped": 2}
+    # CD TIFF in place
+    assert (figures_dir / "2023_018085.tif").is_file()
+    # All PDF PNGs sharing the {year}_{appno} prefix were dropped...
+    assert not duplicate_png.exists()
+    assert not extra_png.exists()
+    # ...but PNGs for other apps stayed.
+    assert unrelated_png.exists()
+
+
+def test_carry_cd_images_nulls_pdf_metadata_paths_for_dropped_pngs(tmp_path):
+    """When PDF PNGs get dedup'd, the sibling pdf_metadata.json's
+    figure entries must have their image_path values nulled so they
+    don't point at deleted files. Other figure metadata (page, xref,
+    bbox) stays intact."""
+    cd_root = _make_fake_cd_root_with_tiffs(tmp_path, {"2023": ["018085"]})
+    parent = tmp_path / "PT_x"
+    figures_dir = parent / "figures"
+    figures_dir.mkdir(parents=True)
+    (figures_dir / "2023_018085_p1847_2.png").write_bytes(b"PNG")
+
+    pdf_meta_path = parent / "pdf_metadata.json"
+    pdf_meta_path.write_text(json.dumps({
+        "records": [
+            {
+                "application_no": "2023/018085",
+                "figures": [
+                    {"page": 1847, "xref": 555,
+                     "image_path": "figures/2023_018085_p1847_2.png"},
+                ],
+            },
+            {
+                "application_no": "2024/000702",
+                "figures": [
+                    {"page": 100, "xref": 100,
+                     "image_path": "figures/2024_000702_p100_1.png"},
+                ],
+            },
+        ],
+    }), encoding="utf-8")
+
+    doc = {"patents": [
+        {"application_no": "2023/018085",
+         "image_path": "data/images/2023/018085.tif"},
+    ]}
+
+    _carry_cd_images(doc, cd_root, parent)
+
+    pdf_after = json.loads(pdf_meta_path.read_text(encoding="utf-8"))
+    # The dropped PNG's image_path was nulled, but page/xref preserved
+    fig = pdf_after["records"][0]["figures"][0]
+    assert fig["image_path"] is None
+    assert fig["page"] == 1847
+    assert fig["xref"] == 555
+    # Unrelated figure entry stayed intact
+    other_fig = pdf_after["records"][1]["figures"][0]
+    assert other_fig["image_path"] == "figures/2024_000702_p100_1.png"
 
 
 def test_carry_cd_images_clears_unexpected_path_shape(tmp_path):
@@ -986,9 +1104,9 @@ def test_carry_cd_images_clears_unexpected_path_shape(tmp_path):
         ],
     }
 
-    moved = _carry_cd_images(doc, cd_root, parent)
+    result = _carry_cd_images(doc, cd_root, parent)
 
-    assert moved == 0
+    assert result == {"moved": 0, "pdf_dups_dropped": 0}
     assert doc["patents"][0]["image_path"] is None
     assert doc["patents"][1]["image_path"] is None
 
@@ -1111,23 +1229,25 @@ def test_main_real_2025_12_smoke(tmp_path):
     assert (parent / "ptbulletin.script").is_file()
     assert (parent / "ptbulletin.properties").is_file()
 
-    # CD TIFFs carried into images/, not left in scratch. Bulletin
-    # 2025/12 has hundreds of resolved figures per the earlier --all run.
-    images_dir = parent / "images"
-    assert images_dir.is_dir()
-    tif_count = sum(1 for _ in images_dir.rglob("*.tif"))
+    # CD TIFFs carried into figures/ (same dir as future PDF figures
+    # would land, naming consistent with PDF prefix convention).
+    figures_dir = parent / "figures"
+    assert figures_dir.is_dir()
+    tif_count = sum(1 for _ in figures_dir.glob("*.tif"))
     assert tif_count > 100, f"expected >100 TIFFs carried, got {tif_count}"
 
-    # image_path values inside cd_metadata.json now point under images/
-    # (relative to parent), not the dead data/images/ scratch path.
+    # image_path values inside cd_metadata.json point at the new
+    # figures/{year}_{appno}.tif location, not the dead scratch path.
     import json as _json
     payload = _json.loads(cd_meta.read_text(encoding="utf-8"))
     paths_with_image = [
         p["image_path"] for p in payload["patents"] if p.get("image_path")
     ]
     assert len(paths_with_image) > 100
-    assert all(p.startswith("images/") for p in paths_with_image), (
-        "image_path must be relative to the parent folder under images/"
+    assert all(p.startswith("figures/") and p.endswith(".tif")
+               for p in paths_with_image), (
+        "image_path must be figures/{year}_{appno}.tif relative to "
+        "the parent folder"
     )
 
     # Scratch should be cleaned by default

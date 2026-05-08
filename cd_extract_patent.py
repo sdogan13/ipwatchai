@@ -709,11 +709,12 @@ class CLIArgs:
 # These are the canonical filenames inside that folder.
 CD_METADATA_FILENAME = "cd_metadata.json"
 RAW_HSQLDB_FILES = ("ptbulletin.log", "ptbulletin.script", "ptbulletin.properties")
-# CD-side TIFFs land here (matches Marka's `images/` convention). Stored
-# as ``images/{year}/{appno}.tif`` to preserve the year-foldered shape
-# from the source archive. PDF-extracted figures live in a sibling
-# ``figures/`` dir (different file extensions; never collide).
-CD_IMAGES_DIRNAME = "images"
+# CD-side TIFFs land in the same ``figures/`` directory as PDF-side
+# JPEGs/PNGs so reconcile/merge can dedup on a shared {year}_{appno}
+# prefix (CD: figures/2017_15048.tif, PDF: figures/2017_15048_p120_2.png).
+# Filename is flat year-underscore-appno — matches the PDF naming shape
+# minus the page/idx tail.
+from patent_paths import FIGURES_DIRNAME as CD_FIGURES_DIRNAME  # noqa: E402
 
 
 def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
@@ -823,11 +824,11 @@ def _process_one(
         parent = bulletin_folder_path(out_dir, doc["bulletin_no"], doc["bulletin_date"])
         parent.mkdir(parents=True, exist_ok=True)
 
-        # Carry CD TIFFs into parent/images/ and rewrite each patent's
-        # image_path to be relative to the parent folder. Without this,
-        # cd_metadata.json's image_path values point inside the scratch
-        # dir which is about to be deleted.
-        figures_carried = _carry_cd_images(doc, cd_root, parent)
+        # Carry CD TIFFs into parent/figures/, rewrite image_paths,
+        # and drop any PDF PNGs in the same dir that duplicate them
+        # (CD-first dedup — visually verified the title-page TIFF and
+        # PDF first figure are the same drawing on app 2023/018085).
+        carry = _carry_cd_images(doc, cd_root, parent)
 
         (parent / CD_METADATA_FILENAME).write_text(
             json.dumps(doc, ensure_ascii=False, indent=2),
@@ -850,7 +851,8 @@ def _process_one(
         "rar": rar.name,
         "out": parent.name,
         "stats": doc["stats"],
-        "figures_carried": figures_carried,
+        "figures_carried": carry["moved"],
+        "pdf_dups_dropped": carry["pdf_dups_dropped"],
     }
 
 
@@ -858,30 +860,41 @@ def _carry_cd_images(
     doc: Dict[str, Any],
     cd_root: Path,
     parent: Path,
-) -> int:
-    """Move CD TIFFs from the scratch dir into ``parent/images/`` and
-    rewrite each patent's ``image_path`` to point at the new location.
+) -> Dict[str, int]:
+    """Move CD TIFFs from the scratch dir into ``parent/figures/`` and
+    drop any PDF PNGs that duplicate them.
 
     cd_to_metadata sets ``image_path`` to the path relative to cd_root
     (e.g. ``"data/images/2017/15048.tif"``). After this function runs,
-    each present TIFF lives at ``parent/images/{year}/{appno}.tif`` and
-    ``image_path`` is rewritten to ``"images/{year}/{appno}.tif"``
-    (relative to the parent folder).
+    each present TIFF lives at ``parent/figures/{year}_{appno}.tif``
+    and ``image_path`` is rewritten to ``"figures/{year}_{appno}.tif"``.
+
+    The flat ``{year}_{appno}.tif`` filename mirrors the PDF-side
+    convention (``figures/{year}_{appno}_p{page}_{idx}.png``) so a CD
+    TIFF for an application can be matched against PDF PNGs sharing
+    the ``{year}_{appno}`` prefix.
+
+    **CD-wins dedup** — for every TIFF carried, any pre-existing PDF
+    PNG in the same folder whose name starts with ``{year}_{appno}_p``
+    is deleted (they're known duplicates of the same drawing per
+    visual verification on app 2023/018085, 2026-05-09). If a sibling
+    pdf_metadata.json exists in the parent folder, the corresponding
+    figure entries' ``image_path`` values are nulled so they don't
+    point at deleted files.
 
     Patents with a missing-on-disk source TIFF keep their image_path
-    nulled — better to surface the gap than to leave a dead path.
+    nulled — better to surface the gap than leave a dead path.
 
-    Returns the count of TIFFs successfully carried.
+    Returns ``{"moved": int, "pdf_dups_dropped": int}``.
     """
-    images_root = parent / CD_IMAGES_DIRNAME
+    figures_root = parent / CD_FIGURES_DIRNAME
     moved = 0
+    dropped_pngs: List[str] = []   # the basenames deleted
+
     for patent in doc.get("patents", []):
         rel = patent.get("image_path")
         if not rel:
             continue
-        # cd_to_metadata produces "data/images/{year}/{appno}.tif"; only
-        # rewrite paths that match that shape — anything else is unknown
-        # and gets cleared so downstream code doesn't follow a dead path.
         rel_path = Path(rel)
         try:
             inside = rel_path.relative_to("data/images")
@@ -894,12 +907,40 @@ def _carry_cd_images(
             patent["image_path"] = None
             continue
 
-        dest = images_root / inside
+        new_name = "_".join(inside.parts)            # "{year}_{appno}.tif"
+        dest = figures_root / new_name
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(src), str(dest))
-        patent["image_path"] = (Path(CD_IMAGES_DIRNAME) / inside).as_posix()
+        patent["image_path"] = (Path(CD_FIGURES_DIRNAME) / new_name).as_posix()
         moved += 1
-    return moved
+
+        # Drop PDF PNG duplicates: figures/{year}_{appno}_p*.png
+        prefix = Path(new_name).stem + "_p"
+        for png in figures_root.glob(f"{prefix}*.png"):
+            png.unlink()
+            dropped_pngs.append(png.name)
+
+    # Update sibling pdf_metadata.json so its figure entries don't
+    # reference deleted PNGs. We null only the image_path fields whose
+    # value matches a path we just deleted; the rest of the figure
+    # metadata (page, xref, bbox, dims) stays intact.
+    pdf_meta = parent / "pdf_metadata.json"
+    if dropped_pngs and pdf_meta.is_file():
+        dropped_paths = {f"{CD_FIGURES_DIRNAME}/{name}" for name in dropped_pngs}
+        pdf_doc = json.loads(pdf_meta.read_text(encoding="utf-8"))
+        changed = False
+        for record in pdf_doc.get("records", []):
+            for fig in record.get("figures", []):
+                if fig.get("image_path") in dropped_paths:
+                    fig["image_path"] = None
+                    changed = True
+        if changed:
+            pdf_meta.write_text(
+                json.dumps(pdf_doc, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+    return {"moved": moved, "pdf_dups_dropped": len(dropped_pngs)}
 
 
 def main(argv: Optional[List[str]] = None) -> int:

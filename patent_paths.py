@@ -76,3 +76,15 @@ def bulletin_folder_path(
     when to ``mkdir(parents=True, exist_ok=True)``.
     """
     return Path(bulletins_dir) / bulletin_folder_name(bulletin_no, bulletin_date)
+
+
+# Both extractors deposit figures into the same subdirectory using
+# parallel filename conventions so reconcile/merge can dedup on a
+# common ``{year}_{appno}`` prefix:
+#
+#   CD  TIFF → figures/{year}_{appno}.tif
+#   PDF PNG  → figures/{year}_{appno}_p{page}_{idx}.png
+#
+# (The CD-vs-PDF dedup decision lives in reconcile_patent. The naming
+# convention here just gives merge logic a stable common key.)
+FIGURES_DIRNAME = "figures"
