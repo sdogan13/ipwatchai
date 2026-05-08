@@ -15,6 +15,7 @@ from pdf_extract_patent import (
     Holder,
     Inventor,
     PageKind,
+    PatentRecord,
     Priority,
     RecordType,
     classify_kind_code,
@@ -30,6 +31,7 @@ from pdf_extract_patent import (
     parse_attorney,
     parse_date_field,
     parse_ep_reference,
+    parse_full_bibliographic_record,
     parse_holders,
     parse_inid_block,
     parse_inventors,
@@ -37,6 +39,11 @@ from pdf_extract_patent import (
     parse_priorities,
     parse_publication_no,
     parse_title,
+)
+from pdf_extract_patent import (
+    _build_global_text,
+    _char_pos_to_page,
+    _find_record_boundaries,
 )
 
 
@@ -903,3 +910,267 @@ def test_parse_ep_reference_strips_internal_whitespace_in_numbers():
     ref = parse_ep_reference([], values_97)
     assert ref is not None
     assert ref.ep_publication_no == "EP3885497B1"
+
+
+# ---------------------------------------------------------------------------
+# Step 3.5 — _build_global_text + _char_pos_to_page
+# ---------------------------------------------------------------------------
+
+def test_build_global_text_concatenates_with_inter_page_newlines():
+    pages = ["abc", "de", "f"]
+    full, starts = _build_global_text(pages)
+    # 'abc' + '\n' + 'de' + '\n' + 'f' = 9 chars
+    assert full == "abc\nde\nf"
+    assert starts == [0, 4, 7]
+
+
+def test_build_global_text_empty_input():
+    full, starts = _build_global_text([])
+    assert full == ""
+    assert starts == []
+
+
+def test_build_global_text_preserves_inner_newlines():
+    """A page's own newlines are kept (parse_inid_block depends on them)."""
+    pages = ["a\nb", "c\nd"]
+    full, starts = _build_global_text(pages)
+    assert full == "a\nb\nc\nd"
+    assert starts == [0, 4]
+
+
+def test_char_pos_to_page_basic_lookup():
+    """page_starts = [0, 4, 7] from _build_global_text(['abc','de','f'])."""
+    starts = [0, 4, 7]
+    assert _char_pos_to_page(0, starts) == 0
+    assert _char_pos_to_page(2, starts) == 0
+    assert _char_pos_to_page(3, starts) == 0  # last char of page 0 ('c')
+    assert _char_pos_to_page(4, starts) == 1  # first char of page 1
+    assert _char_pos_to_page(7, starts) == 2  # first char of page 2
+    assert _char_pos_to_page(99, starts) == 2  # past end -> last page
+
+
+def test_char_pos_to_page_empty_input():
+    """Defensive: empty page_starts -> 0 (won't be reached on real docs)."""
+    assert _char_pos_to_page(0, []) == 0
+
+
+# ---------------------------------------------------------------------------
+# Step 3.5 — _find_record_boundaries
+# ---------------------------------------------------------------------------
+
+def test_find_record_boundaries_finds_each_11_with_valid_pub_no():
+    """Three records on three pages — boundaries returned in order, with
+    correct page-range mapping."""
+    pages = [
+        # page 0 (1-indexed 1) — record A
+        "(11) TR 2022 014462 B\n(12) Patent Belgesi\n(54) Title A\n",
+        # page 1 (1-indexed 2) — record B
+        "(11) TR 2024 000746 A1\n(12) Patent Başvurusu\n(54) Title B\n",
+        # page 2 (1-indexed 3) — record C
+        "(11) TR 2025 010866 T4\n(12) AVRUPA PATENT\n(54) Title C\n",
+    ]
+    full, starts = _build_global_text(pages)
+    bounds = _find_record_boundaries(full, starts)
+    assert len(bounds) == 3
+    # Pages
+    assert [b[2] for b in bounds] == [1, 2, 3]
+    assert [b[3] for b in bounds] == [1, 2, 3]
+
+
+def test_find_record_boundaries_rejects_legend_page_false_match():
+    """Legend page has '(12) Başvurunun Türü' but no real (11) — must
+    yield zero records. The boundary regex requires a publication-number
+    shape after (11)."""
+    legend_text = (
+        "(11-10)\nYayın Numarası-Patent numarası\n"
+        "(12)\nBaşvurunun Türü\n"
+        "(21)\nBaşvuru Numarası\n"
+    )
+    full, starts = _build_global_text([legend_text])
+    assert _find_record_boundaries(full, starts) == []
+
+
+def test_find_record_boundaries_rejects_57_abstract_inline_11():
+    """An abstract with mid-line '(11)' figure call-outs is NOT a record
+    boundary — we already proved this in step 3.1, here we re-verify
+    at the boundary-finder layer."""
+    text = (
+        "(11) TR 2022 014462 B\n"
+        "(57) Özet\n"
+        "Bu buluş bir kapı (11) ve bir gövde (12) içerir.\n"
+    )
+    full, starts = _build_global_text([text])
+    bounds = _find_record_boundaries(full, starts)
+    assert len(bounds) == 1
+    # The single boundary is at the leading (11) — not at the abstract's
+    # mid-line (11) reference.
+
+
+def test_find_record_boundaries_handles_two_records_per_page():
+    """Multiple records may share a page — the slice ends just before
+    the NEXT record's (11)."""
+    one_page = (
+        "(11) TR 2022 014462 B\n(54) Title A\n(57) Özet A\n"
+        "(11) TR 2024 000746 A1\n(54) Title B\n"
+    )
+    full, starts = _build_global_text([one_page])
+    bounds = _find_record_boundaries(full, starts)
+    assert len(bounds) == 2
+    # Both boundaries report the same page
+    assert all(b[2] == 1 and b[3] == 1 for b in bounds)
+    # Slices don't overlap
+    assert bounds[0][1] == bounds[1][0]
+
+
+def test_find_record_boundaries_returns_empty_on_no_records():
+    full, starts = _build_global_text(["AÇIKLAMALAR\nBu bülten...\n"])
+    assert _find_record_boundaries(full, starts) == []
+
+
+# ---------------------------------------------------------------------------
+# Step 3.5 — parse_full_bibliographic_record
+# ---------------------------------------------------------------------------
+
+# Real granted-patent record block captured from page 200 of 2025_08.pdf.
+# All real Turkish characters, all per-INID parsers exercised end-to-end.
+_REAL_RECORD_BLOCK = (
+    "(11) TR 2022 014462 B\n"
+    "(12) Patent Belgesi\n"
+    "(43) Başvuru Yayın Tarihi\n"
+    "2024/04/22, 2024/4 Nolu Bülten\n"
+    "(10) Başvuru Yayın No\n"
+    "TR 2022 014462 A2\n"
+    "(21) Başvuru Numarası\n"
+    "2022/014462\n"
+    "(22) Başvuru Tarihi\n"
+    "2022/09/20\n"
+    "(45) Patent Belgesinin Veriliş Tarihi\n"
+    "2025/08/21\n"
+    "(51) Buluşun tasnif sınıfları\n"
+    "F25B 9/14\n"
+    "F25D 17/04\n"
+    "F25D 23/04\n"
+    "(74) Vekil\n"
+    "EMİN KORHAN DERİCİOĞLU (ANKARA PATENT\n"
+    "BÜROSU ANONİM ŞİRKETİ)\n"
+    "(73) Patent Sahibi\n"
+    "ARÇELİK ANONİM ŞİRKETİ\n"
+    "SÜTLÜCE MAH. KARAAĞAÇ CAD. 6  Beyoğlu\n"
+    "İstanbul TÜRKİYE\n"
+    "(72) Buluşu Yapanlar\n"
+    "NİHAL YILMAZ\n"
+    "AYLİN MET ÖZYURT\n"
+    "(54) Buluş Başlığı\n"
+    "NEM KONTROLLÜ HAZNEYE SAHİP BİR BUZDOLABI\n"
+    "(57) Özet\n"
+    "Bu buluş, bir gövde (2), gövdeye (2) erişim sağlayan bir kapı (3) ile ilgilidir.\n"
+)
+
+
+def test_parse_full_bibliographic_record_real_granted_patent():
+    rec = parse_full_bibliographic_record(
+        _REAL_RECORD_BLOCK, record_index=1, page_range=(200, 200),
+    )
+    assert rec is not None
+    assert rec.record_index == 1
+    assert rec.page_range == [200, 200]
+    assert rec.publication_no == "TR 2022 014462 B"
+    assert rec.kind_code == "B"
+    assert rec.record_type is RecordType.GRANTED_PATENT
+    assert rec.publication_kind_label == "Patent Belgesi"
+    assert rec.application_no == "2022/014462"
+    assert rec.application_date == "2022-09-20"
+    assert rec.publication_date == "2024-04-22"
+    assert rec.grant_date == "2025-08-21"
+    assert rec.ipc_classes == ["F25B 9/14", "F25D 17/04", "F25D 23/04"]
+    assert rec.title == "NEM KONTROLLÜ HAZNEYE SAHİP BİR BUZDOLABI"
+    assert rec.abstract is not None and "kapı (3)" in rec.abstract
+    # Holders
+    assert len(rec.holders) == 1
+    assert rec.holders[0].name == "ARÇELİK ANONİM ŞİRKETİ"
+    assert rec.holders[0].country == "TÜRKİYE"
+    # Inventors
+    assert [i.name for i in rec.inventors] == ["NİHAL YILMAZ", "AYLİN MET ÖZYURT"]
+    # Attorney
+    assert rec.attorney is not None
+    assert rec.attorney.name == "EMİN KORHAN DERİCİOĞLU"
+    assert rec.attorney.firm == "ANKARA PATENT BÜROSU ANONİM ŞİRKETİ"
+    # No priorities, no EP reference
+    assert rec.priorities == []
+    assert rec.ep_reference is None
+    assert rec.figures == []  # populated in step 3.6
+
+
+def test_parse_full_bibliographic_record_returns_none_for_invalid_block():
+    """A block without a valid (11) publication number -> None."""
+    bad_block = "(12) Some label\n(54) A title\n"
+    rec = parse_full_bibliographic_record(
+        bad_block, record_index=1, page_range=(1, 1),
+    )
+    assert rec is None
+
+
+def test_parse_full_bibliographic_record_handles_pending_app_71():
+    """Pending applications use (71) Başvuru Sahipleri instead of (73)."""
+    block = (
+        "(11) TR 2024 000746 A1\n"
+        "(12) Patent Başvurusu\n"
+        "(21) Başvuru Numarası\n"
+        "2024/000746\n"
+        "(22) Başvuru Tarihi\n"
+        "2024/01/22\n"
+        "(71) Başvuru Sahipleri\n"
+        "EMİNE YILDIRIM\n"
+        "AHMET ÇARHAN\n"
+        "(54) Buluş Başlığı\n"
+        "Test Başlığı\n"
+    )
+    rec = parse_full_bibliographic_record(block, record_index=1, page_range=(1850, 1850))
+    assert rec is not None
+    assert rec.record_type is RecordType.PUBLISHED_APP
+    assert [h.name for h in rec.holders] == ["EMİNE YILDIRIM", "AHMET ÇARHAN"]
+
+
+def test_parse_full_bibliographic_record_handles_ep_fascicle():
+    """T4-kind records that are EP fascicles get an ep_reference populated."""
+    block = (
+        "(11) TR 2025 010866 T4\n"
+        "(12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ\n"
+        "(21) Başvuru Numarası\n"
+        "2025/010866\n"
+        "(96) Başvuru Tarihi\n"
+        "2021/03/23\n"
+        "(97) EP Yayın No\n"
+        "EP3885497B1\n"
+        "(97) EP Yayın Tarihi\n"
+        "2025/06/04\n"
+        "(96) EP Başvuru No\n"
+        "EP21164305.1\n"
+    )
+    rec = parse_full_bibliographic_record(block, record_index=99, page_range=(1000, 1000))
+    assert rec is not None
+    assert rec.kind_code == "T4"
+    assert rec.record_type is RecordType.GRANTED_PATENT
+    ep = rec.ep_reference
+    assert ep is not None
+    assert ep.ep_application_date == "2021-03-23"
+    assert ep.ep_application_no == "EP21164305.1"
+    assert ep.ep_publication_no == "EP3885497B1"
+    assert ep.ep_publication_date == "2025-06-04"
+
+
+def test_patent_record_dataclass_fields_all_present():
+    """Sanity: the dataclass exposes every field downstream stages need."""
+    r = PatentRecord(
+        record_index=1, page_range=[1, 1],
+        publication_no="TR 2022 014462 B", kind_code="B",
+        record_type=RecordType.GRANTED_PATENT,
+    )
+    # Defaults
+    assert r.title is None and r.abstract is None
+    assert r.ipc_classes == []
+    assert r.holders == [] and r.inventors == []
+    assert r.attorney is None
+    assert r.priorities == []
+    assert r.ep_reference is None
+    assert r.figures == []

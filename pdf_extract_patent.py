@@ -710,3 +710,172 @@ def parse_ep_reference(
             found_any = True
 
     return ref if found_any else None
+
+
+# ---------------------------------------------------------------------------
+# Step 3.5 — PatentRecord dataclass + record boundary finder + orchestrator
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class PatentRecord:
+    """One full-bibliographic patent record from the PDF body."""
+
+    record_index: int
+    page_range: List[int]                  # [start_page, end_page] 1-indexed inclusive
+    publication_no: str                    # e.g. 'TR 2022 014462 B'
+    kind_code: str                         # e.g. 'B'
+    record_type: RecordType                # GRANTED_PATENT / GRANTED_UM / …
+    publication_kind_label: Optional[str] = None  # (12) free text
+    application_no: Optional[str] = None         # (21) 'YYYY/NNNNNN'
+    application_date: Optional[str] = None       # (22) ISO YYYY-MM-DD
+    publication_date: Optional[str] = None       # (43) for apps
+    grant_date: Optional[str] = None             # (45) for grants
+    title: Optional[str] = None                  # (54)
+    abstract: Optional[str] = None               # (57) — newlines preserved
+    ipc_classes: List[str] = field(default_factory=list)              # (51)
+    holders: List[Holder] = field(default_factory=list)               # (73) or (71)
+    inventors: List[Inventor] = field(default_factory=list)           # (72)
+    attorney: Optional[Attorney] = None                               # (74)
+    priorities: List[Priority] = field(default_factory=list)          # (30)
+    ep_reference: Optional[EPReference] = None                        # dual (96)/(97)
+    figures: List[Dict[str, object]] = field(default_factory=list)    # populated in step 3.6
+
+
+# Boundary-detection regex. Anchored at the start of a line, validates
+# the publication-number shape directly after (11). Legend-page false
+# matches like '(12) Başvurunun Türü' are filtered out by construction.
+# The capturing group around the (11) token lets us recover the actual
+# token start via ``m.start(1)`` — the outer ``(?:^|\n)[ \t]*`` would
+# otherwise shift ``m.start()`` onto the previous page's trailing \n.
+_RECORD_BOUNDARY_RE = re.compile(
+    r"(?:^|\n)[ \t]*(\(11\)[ \t]+TR[ \t]+\d{4}[ \t]+\d{4,7}[ \t]+[A-Z]\d?)",
+    re.MULTILINE,
+)
+
+
+def _build_global_text(page_texts: Sequence[str]) -> Tuple[str, List[int]]:
+    """Concatenate per-page text into a single string with ``\\n`` between pages.
+
+    Returns ``(full_text, page_starts)`` where ``page_starts[i]`` is the
+    character offset in ``full_text`` at which page ``i`` (0-indexed)
+    begins. Inter-page newlines are accounted for in the offsets.
+    """
+    parts: List[str] = []
+    page_starts: List[int] = []
+    cursor = 0
+    for i, text in enumerate(page_texts):
+        page_starts.append(cursor)
+        parts.append(text)
+        cursor += len(text)
+        if i + 1 < len(page_texts):
+            parts.append("\n")
+            cursor += 1
+    return "".join(parts), page_starts
+
+
+def _char_pos_to_page(pos: int, page_starts: Sequence[int]) -> int:
+    """Binary-search the 0-indexed page that contains ``pos``."""
+    if not page_starts:
+        return 0
+    lo, hi = 0, len(page_starts) - 1
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if page_starts[mid] <= pos:
+            lo = mid
+        else:
+            hi = mid - 1
+    return lo
+
+
+def _find_record_boundaries(
+    full_text: str,
+    page_starts: Sequence[int],
+) -> List[Tuple[int, int, int, int]]:
+    """Return ``(start_pos, end_pos, start_page, end_page)`` per record.
+
+    ``start_pos`` is the position of the leading ``(11)`` in
+    ``full_text``. ``end_pos`` is the position of the next record's
+    ``(11)`` (or ``len(full_text)`` for the last record).
+    Pages are 1-indexed inclusive ranges.
+
+    Boundary regex requires a valid publication number shape, so
+    legend-page or stray ``(11)`` false matches drop out automatically.
+    """
+    matches = list(_RECORD_BOUNDARY_RE.finditer(full_text))
+    out: List[Tuple[int, int, int, int]] = []
+    for i, m in enumerate(matches):
+        # m.start(1) is the position of the actual ``(`` token, not the
+        # preceding ``\n`` that the outer alternation matched.
+        start = m.start(1)
+        end = matches[i + 1].start(1) if i + 1 < len(matches) else len(full_text)
+        start_page = _char_pos_to_page(start, page_starts) + 1
+        end_page = _char_pos_to_page(max(start, end - 1), page_starts) + 1
+        out.append((start, end, start_page, end_page))
+    return out
+
+
+def parse_full_bibliographic_record(
+    block_text: str,
+    *,
+    record_index: int,
+    page_range: Tuple[int, int],
+) -> Optional[PatentRecord]:
+    """Parse one record block (slice from one ``(11)`` to the next) into
+    a populated ``PatentRecord``.
+
+    Returns ``None`` when the block doesn't yield a valid publication
+    number — that's the second-line validation gate for spurious
+    boundary matches that slipped through the regex.
+    """
+    fields = parse_inid_block(block_text)
+    if "11" not in fields or not fields["11"]:
+        return None
+
+    pub_no = parse_publication_no(fields["11"][0])
+    if not pub_no:
+        return None
+
+    kind = extract_kind_code(pub_no) or ""
+    record = PatentRecord(
+        record_index=record_index,
+        page_range=[page_range[0], page_range[1]],
+        publication_no=pub_no,
+        kind_code=kind,
+        record_type=classify_kind_code(kind),
+    )
+
+    if "12" in fields and fields["12"]:
+        record.publication_kind_label = clean_text(fields["12"][0]) or None
+    if "21" in fields and fields["21"]:
+        record.application_no = parse_application_no(fields["21"][0])
+    if "22" in fields and fields["22"]:
+        record.application_date = parse_date_field(fields["22"][0])
+    if "43" in fields and fields["43"]:
+        record.publication_date = parse_date_field(fields["43"][0])
+    if "45" in fields and fields["45"]:
+        record.grant_date = parse_date_field(fields["45"][0])
+    if "51" in fields and fields["51"]:
+        record.ipc_classes = parse_ipc_classes(fields["51"][0])
+    if "54" in fields and fields["54"]:
+        record.title = parse_title(fields["54"][0])
+    if "57" in fields and fields["57"]:
+        record.abstract = parse_abstract(fields["57"][0])
+
+    # (73) for granted records, (71) for pending apps — same shape.
+    holders_raw = fields.get("73") or fields.get("71") or []
+    if holders_raw:
+        record.holders = parse_holders(holders_raw[0])
+
+    if "72" in fields and fields["72"]:
+        record.inventors = parse_inventors(fields["72"][0])
+    if "74" in fields and fields["74"]:
+        record.attorney = parse_attorney(fields["74"][0])
+    if "30" in fields:
+        record.priorities = parse_priorities(fields["30"])
+
+    record.ep_reference = parse_ep_reference(
+        fields.get("96", []), fields.get("97", []),
+    )
+
+    return record
