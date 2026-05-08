@@ -33,14 +33,16 @@ CLI (lands in step 4.7)::
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import re
 import sys
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -669,5 +671,255 @@ def reconcile_metadata(
         "stats": _build_stats(merged),
         "records": [_record_to_dict(r) for r in merged],
     }
+
+
+# ---------------------------------------------------------------------------
+# Step 4.7 — CLI entrypoint + filename derivation
+# ---------------------------------------------------------------------------
+#
+# CLI mirrors cd_extract_patent (step 2.8) and pdf_extract_patent (step 3.8):
+#
+#   python -m pipeline.reconcile_patent \
+#     --cd-json bulletins/Patent__Faydali_Model/2025_07_metadata.json \
+#     --pdf-json bulletins/Patent__Faydali_Model/2025_08_pdf_metadata.json
+#
+#   python -m pipeline.reconcile_patent --all
+#
+# Output filename comes from the *canonical bulletin_no* of the merged
+# document (e.g. bulletin "2025/8" -> "2025_08_metadata.json"), NOT from
+# either input's filename stem. This guarantees the unified file lands
+# at the bulletin-month name even when the CD's filename has a 1-month
+# offset (see patent_cd_filename_offset memory).
+#
+# The unified output COULD overwrite the CD-side intermediate (it shares
+# the `_metadata.json` suffix with no infix). The locked JSON-naming
+# decision permits that — once unified is written, Stage 5 ingests from
+# unified, the CD intermediate is no longer needed. ``--force`` is
+# required to overwrite an existing file.
+
+_DEFAULT_BULLETINS_DIR = (
+    PROJECT_ROOT / "bulletins" / "Patent__Faydali_Model"
+)
+
+
+@dataclass
+class CLIArgs:
+    cd_json: Optional[Path]
+    pdf_json: Optional[Path]
+    out_dir: Path
+    bulletins_dir: Path
+    all_mode: bool
+    force: bool
+
+
+def unified_filename(bulletin_no: Optional[str]) -> str:
+    """Derive the canonical unified output filename from bulletin_no.
+
+    Examples:
+      ``"2025/8"``  -> ``"2025_08_metadata.json"``
+      ``"2025-08"`` -> ``"2025_08_metadata.json"``
+      ``"2025/12"`` -> ``"2025_12_metadata.json"``
+
+    Raises ``ValueError`` if bulletin_no can't be parsed — the CLI must
+    not silently write to a wrong filename.
+    """
+    canonical = _normalise_bulletin_no(bulletin_no)
+    if not canonical:
+        raise ValueError(f"cannot derive filename from bulletin_no={bulletin_no!r}")
+    match = re.match(r"^(\d{4})/(\d{1,2})$", canonical)
+    if not match:
+        raise ValueError(f"cannot derive filename from bulletin_no={bulletin_no!r}")
+    year, month = match.group(1), match.group(2).zfill(2)
+    return f"{year}_{month}_metadata.json"
+
+
+def classify_metadata_json(path: Path) -> str:
+    """Discriminate file type by top-level keys.
+
+    Returns ``"cd"``, ``"pdf"``, or ``"unified"``. ``"pdf"`` is for
+    files matching the ``_pdf_metadata.json`` stem (handled by filename
+    since the file_classify_metadata test below could collide with
+    unified). Used by --all to skip already-reconciled outputs on
+    re-runs.
+
+    Raises ``ValueError`` for files that don't look like any known
+    metadata shape.
+    """
+    if path.name.endswith("_pdf_metadata.json"):
+        return "pdf"
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        raise ValueError(f"{path}: cannot read JSON ({e})")
+    if not isinstance(doc, dict):
+        raise ValueError(f"{path}: top-level JSON is not an object")
+    if "patents" in doc:
+        return "cd"
+    if "records" in doc:
+        # Distinguish unified output (has reconciled_at) from a stray
+        # PDF-shaped doc renamed without _pdf_ infix.
+        return "unified" if "reconciled_at" in doc else "pdf"
+    raise ValueError(f"{path}: not a recognised CD/PDF/unified metadata doc")
+
+
+def _group_by_bulletin(
+    bulletins_dir: Path,
+) -> Dict[str, Dict[str, Path]]:
+    """Walk a bulletins dir, group CD + PDF JSONs by canonical bulletin_no.
+
+    Returns ``{bulletin_no: {"cd": Path, "pdf": Path}}``. Unified outputs
+    from prior runs are skipped — a re-run produces the same output and
+    using the prior unified file as input would compound stats blocks
+    incorrectly.
+    """
+    groups: Dict[str, Dict[str, Path]] = {}
+    for path in sorted(bulletins_dir.glob("*_metadata.json")):
+        try:
+            kind = classify_metadata_json(path)
+        except ValueError as exc:
+            logger.warning("[skip] %s: %s", path.name, exc)
+            continue
+        if kind == "unified":
+            continue
+        # Read enough to extract bulletin_no without re-classifying.
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("[skip] %s: cannot read JSON (%s)", path.name, exc)
+            continue
+        bulletin = _normalise_bulletin_no(doc.get("bulletin_no"))
+        if not bulletin:
+            logger.warning("[skip] %s: missing bulletin_no", path.name)
+            continue
+        groups.setdefault(bulletin, {})[kind] = path
+    return groups
+
+
+def _process_one(
+    cd_path: Optional[Path],
+    pdf_path: Optional[Path],
+    out_dir: Path,
+    force: bool,
+) -> Dict[str, Any]:
+    """Reconcile one (cd, pdf) pair and write the unified output.
+
+    At least one of ``cd_path`` / ``pdf_path`` must be set. Returns a
+    summary dict so ``main`` can report aggregate progress.
+    """
+    cd_doc = load_cd_metadata(cd_path) if cd_path else None
+    pdf_doc = load_pdf_metadata(pdf_path) if pdf_path else None
+    unified = reconcile_metadata(cd_doc=cd_doc, pdf_doc=pdf_doc)
+
+    out_path = out_dir / unified_filename(unified["bulletin_no"])
+    if out_path.exists() and not force:
+        # The CD intermediate uses the same filename pattern; overwriting
+        # silently would surprise the caller.
+        raise FileExistsError(
+            f"{out_path} already exists; pass --force to overwrite"
+        )
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(
+        json.dumps(unified, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return {
+        "out": out_path.name,
+        "bulletin_no": unified["bulletin_no"],
+        "stats": unified["stats"],
+    }
+
+
+def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
+    parser = argparse.ArgumentParser(
+        prog="pipeline.reconcile_patent",
+        description="Reconcile Patent CD-side and PDF-side metadata JSON.",
+    )
+    parser.add_argument("--cd-json", type=Path, default=None,
+                        help="Path to a CD-side {YYYY_M}_metadata.json.")
+    parser.add_argument("--pdf-json", type=Path, default=None,
+                        help="Path to a PDF-side {YYYY_M}_pdf_metadata.json.")
+    parser.add_argument("--all", action="store_true", dest="all_mode",
+                        help="Reconcile every bulletin in --bulletins-dir.")
+    parser.add_argument("--bulletins-dir", type=Path,
+                        default=_DEFAULT_BULLETINS_DIR,
+                        help=f"Directory to scan for --all (default: "
+                             f"{_DEFAULT_BULLETINS_DIR}).")
+    parser.add_argument("--out-dir", type=Path, default=None,
+                        help="Where to write unified {YYYY_M}_metadata.json "
+                             "(default: --bulletins-dir).")
+    parser.add_argument("--force", action="store_true",
+                        help="Overwrite existing unified output files.")
+    ns = parser.parse_args(argv)
+
+    if ns.all_mode and (ns.cd_json or ns.pdf_json):
+        parser.error("--all is mutually exclusive with --cd-json/--pdf-json")
+    if not ns.all_mode and not (ns.cd_json or ns.pdf_json):
+        parser.error("provide --cd-json and/or --pdf-json, or use --all")
+
+    out_dir = ns.out_dir if ns.out_dir is not None else ns.bulletins_dir
+
+    return CLIArgs(
+        cd_json=ns.cd_json,
+        pdf_json=ns.pdf_json,
+        out_dir=out_dir,
+        bulletins_dir=ns.bulletins_dir,
+        all_mode=ns.all_mode,
+        force=ns.force,
+    )
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    args = parse_argv(argv)
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    started = time.time()
+    succeeded: List[str] = []
+    failed: List[Tuple[str, str]] = []
+
+    if args.all_mode:
+        groups = _group_by_bulletin(args.bulletins_dir)
+        if not groups:
+            logger.warning("--all: no metadata JSON files found in %s", args.bulletins_dir)
+            return 1
+        for bulletin, paths in sorted(groups.items()):
+            label = f"bulletin {bulletin}"
+            try:
+                result = _process_one(
+                    paths.get("cd"), paths.get("pdf"),
+                    args.out_dir, args.force,
+                )
+                succeeded.append(label)
+                logger.info(
+                    "[+] %s -> %s (%d records: %s)",
+                    label, result["out"], result["stats"]["records"],
+                    result["stats"]["by_source_format"],
+                )
+            except Exception as exc:
+                failed.append((label, str(exc)))
+                logger.error("[!] %s: %r", label, exc)
+    else:
+        label = f"{args.cd_json or '(no CD)'} + {args.pdf_json or '(no PDF)'}"
+        try:
+            result = _process_one(args.cd_json, args.pdf_json, args.out_dir, args.force)
+            succeeded.append(label)
+            logger.info(
+                "[+] %s -> %s (%d records: %s)",
+                label, result["out"], result["stats"]["records"],
+                result["stats"]["by_source_format"],
+            )
+        except Exception as exc:
+            failed.append((label, str(exc)))
+            logger.error("[!] %s: %r", label, exc)
+
+    duration = time.time() - started
+    logger.info(
+        "Done in %.1fs: %d succeeded, %d failed", duration,
+        len(succeeded), len(failed),
+    )
+    return 0 if not failed else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
 
 

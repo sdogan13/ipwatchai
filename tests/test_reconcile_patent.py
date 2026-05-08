@@ -12,28 +12,35 @@ from pathlib import Path
 import pytest
 
 from pipeline.reconcile_patent import (
+    CLIArgs,
     CanonicalRecord,
+    _build_stats,
     _cd_figures,
     _dmy_to_iso,
+    _group_by_bulletin,
+    _merge_figures,
+    _normalise_bulletin_no,
     _normalize_cd_attorney,
     _normalize_cd_party,
     _normalize_cd_priority,
-    _build_stats,
-    _merge_figures,
-    _normalise_bulletin_no,
     _normalize_pdf_attorney_to_list,
     _normalize_pdf_figure,
     _normalize_pdf_party,
     _normalize_pdf_priority,
     _page_range_or_none,
     _pick_longer_title,
+    _process_one,
     _record_to_dict,
+    classify_metadata_json,
     load_cd_metadata,
     load_pdf_metadata,
+    main,
     merge_records,
     normalize_cd_record,
     normalize_pdf_record,
+    parse_argv,
     reconcile_metadata,
+    unified_filename,
 )
 
 
@@ -990,3 +997,228 @@ def test_reconcile_metadata_one_side_empty_records_list_still_pairs() -> None:
     doc = reconcile_metadata(cd, pdf)        # both present, PDF empty
     assert doc["stats"]["records"] == 1
     assert doc["stats"]["by_source_format"]["CD"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Step 4.7 — CLI entrypoint + filename derivation
+# ---------------------------------------------------------------------------
+
+
+def test_unified_filename_canonical_cases() -> None:
+    """bulletin_no -> canonical {YYYY_MM}_metadata.json filename."""
+    assert unified_filename("2025/8") == "2025_08_metadata.json"
+    assert unified_filename("2025-08") == "2025_08_metadata.json"
+    assert unified_filename("2025/12") == "2025_12_metadata.json"
+    assert unified_filename("2025-12") == "2025_12_metadata.json"
+
+
+def test_unified_filename_raises_on_invalid() -> None:
+    with pytest.raises(ValueError, match="cannot derive filename"):
+        unified_filename(None)
+    with pytest.raises(ValueError, match="cannot derive filename"):
+        unified_filename("")
+    with pytest.raises(ValueError, match="cannot derive filename"):
+        unified_filename("not-a-bulletin")
+
+
+def test_classify_metadata_json_distinguishes_kinds(tmp_path: Path) -> None:
+    cd_path = _write_json(tmp_path, "x_metadata.json", {
+        "bulletin_no": "2025/8",
+        "bulletin_date": "2025-08-21",
+        "patents": [],
+        "stats": {},
+    })
+    pdf_path = _write_json(tmp_path, "x_pdf_metadata.json", {
+        "bulletin_no": "2025-08",
+        "bulletin_date": "2025-08-21",
+        "records": [],
+        "stats": {},
+    })
+    unified_path = _write_json(tmp_path, "x_unified_metadata.json", {
+        "bulletin_no": "2025/8",
+        "records": [],
+        "reconciled_at": "2026-05-08T22:00:00+00:00",
+        "stats": {},
+    })
+
+    assert classify_metadata_json(cd_path) == "cd"
+    assert classify_metadata_json(pdf_path) == "pdf"     # by suffix
+    assert classify_metadata_json(unified_path) == "unified"
+
+
+def test_classify_metadata_json_raises_on_unknown_shape(tmp_path: Path) -> None:
+    bad = _write_json(tmp_path, "weird_metadata.json", {"unrelated": True})
+    with pytest.raises(ValueError, match="not a recognised"):
+        classify_metadata_json(bad)
+
+
+def test_group_by_bulletin_pairs_cd_and_pdf(tmp_path: Path) -> None:
+    """The headline --all behaviour: pair across filename offset by bulletin_no."""
+    # Mimic the real disk shape: 2025_07_metadata.json IS bulletin 2025/8.
+    _write_json(tmp_path, "2025_07_metadata.json", {
+        "bulletin_no": "2025/8",
+        "bulletin_date": "2025-08-21",
+        "patents": [],
+        "stats": {},
+    })
+    _write_json(tmp_path, "2025_08_pdf_metadata.json", {
+        "bulletin_no": "2025-08",        # different format, same bulletin
+        "bulletin_date": "2025-08-21",
+        "records": [],
+        "stats": {},
+    })
+    # Plus a CD-only month.
+    _write_json(tmp_path, "2025_11_metadata.json", {
+        "bulletin_no": "2025/12",
+        "bulletin_date": "2025-12-22",
+        "patents": [],
+        "stats": {},
+    })
+    # Plus a stray unified output from a prior run — must be skipped.
+    _write_json(tmp_path, "2025_08_metadata.json", {
+        "bulletin_no": "2025/8",
+        "records": [],
+        "reconciled_at": "2026-05-08T22:00:00+00:00",
+        "stats": {},
+    })
+
+    groups = _group_by_bulletin(tmp_path)
+
+    assert "2025/8" in groups
+    assert "cd" in groups["2025/8"]
+    assert "pdf" in groups["2025/8"]
+    assert groups["2025/8"]["cd"].name == "2025_07_metadata.json"
+    assert groups["2025/8"]["pdf"].name == "2025_08_pdf_metadata.json"
+    assert "2025/12" in groups
+    assert "cd" in groups["2025/12"]
+    assert "pdf" not in groups["2025/12"]
+
+
+def test_process_one_writes_unified_with_canonical_filename(tmp_path: Path) -> None:
+    cd_path = _write_json(tmp_path, "2025_07_metadata.json", {
+        "bulletin_no": "2025/8",
+        "bulletin_date": "2025-08-21",
+        "source_archive": "2025_07_CD.rar",
+        "patents": [{
+            "application_no": "X1",
+            "publication_no": "TR X1 B",
+            "ipc_codes": [],
+            "holders": [],
+        }],
+        "stats": {},
+    })
+    pdf_path = _write_json(tmp_path, "2025_08_pdf_metadata.json", {
+        "bulletin_no": "2025-08",
+        "bulletin_date": "2025-08-21",
+        "source_pdf": "2025_08.pdf",
+        "records": [{
+            "application_no": "X1", "publication_no": "TR X1 B",
+            "kind_code": "B", "record_type": "GRANTED_PATENT",
+            "title": "T", "abstract": "A", "ipc_classes": [],
+            "holders": [], "inventors": [], "priorities": [], "figures": [],
+        }],
+        "stats": {},
+    })
+
+    result = _process_one(cd_path, pdf_path, tmp_path, force=False)
+
+    out_path = tmp_path / "2025_08_metadata.json"
+    assert out_path.exists()
+    assert result["out"] == "2025_08_metadata.json"        # filename comes from bulletin_no
+    assert result["bulletin_no"] == "2025/8"
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+    assert payload["stats"]["records"] == 1
+    assert payload["stats"]["by_source_format"]["BOTH"] == 1
+
+
+def test_process_one_refuses_to_overwrite_without_force(tmp_path: Path) -> None:
+    """Overwriting the CD intermediate (or any prior unified) needs --force."""
+    pdf_path = _write_json(tmp_path, "2025_08_pdf_metadata.json", {
+        "bulletin_no": "2025-08",
+        "bulletin_date": "2025-08-21",
+        "records": [],
+        "stats": {},
+    })
+    # Pre-create the would-be output to simulate a prior run.
+    target = tmp_path / "2025_08_metadata.json"
+    target.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(FileExistsError, match="--force"):
+        _process_one(None, pdf_path, tmp_path, force=False)
+
+
+def test_process_one_overwrites_with_force(tmp_path: Path) -> None:
+    pdf_path = _write_json(tmp_path, "2025_08_pdf_metadata.json", {
+        "bulletin_no": "2025-08",
+        "bulletin_date": "2025-08-21",
+        "records": [],
+        "stats": {},
+    })
+    target = tmp_path / "2025_08_metadata.json"
+    target.write_text("STALE", encoding="utf-8")
+
+    _process_one(None, pdf_path, tmp_path, force=True)
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert payload["bulletin_no"] == "2025/8"
+
+
+def test_parse_argv_single_pair_mode() -> None:
+    args = parse_argv([
+        "--cd-json", "a.json",
+        "--pdf-json", "b.json",
+        "--out-dir", "/tmp/out",
+    ])
+    assert args.cd_json == Path("a.json")
+    assert args.pdf_json == Path("b.json")
+    assert args.out_dir == Path("/tmp/out")
+    assert args.all_mode is False
+
+
+def test_parse_argv_all_mode_default_out() -> None:
+    args = parse_argv(["--all", "--bulletins-dir", "/data/bulletins"])
+    assert args.all_mode is True
+    assert args.bulletins_dir == Path("/data/bulletins")
+    assert args.out_dir == Path("/data/bulletins")     # default = bulletins_dir
+
+
+def test_parse_argv_no_args_errors() -> None:
+    with pytest.raises(SystemExit):
+        parse_argv([])
+
+
+def test_parse_argv_all_and_pair_mutex() -> None:
+    with pytest.raises(SystemExit):
+        parse_argv(["--all", "--cd-json", "a.json"])
+
+
+def test_main_returns_zero_on_success(tmp_path: Path) -> None:
+    """End-to-end: CLI args -> file written -> exit 0."""
+    cd_path = _write_json(tmp_path, "2025_07_metadata.json", {
+        "bulletin_no": "2025/8",
+        "bulletin_date": "2025-08-21",
+        "patents": [],
+        "stats": {},
+    })
+    pdf_path = _write_json(tmp_path, "2025_08_pdf_metadata.json", {
+        "bulletin_no": "2025-08",
+        "bulletin_date": "2025-08-21",
+        "records": [],
+        "stats": {},
+    })
+
+    rc = main([
+        "--cd-json", str(cd_path),
+        "--pdf-json", str(pdf_path),
+        "--out-dir", str(tmp_path),
+    ])
+    assert rc == 0
+    assert (tmp_path / "2025_08_metadata.json").exists()
+
+
+def test_main_returns_one_on_failure(tmp_path: Path) -> None:
+    """Missing input -> non-zero exit (don't mask failures)."""
+    rc = main([
+        "--cd-json", str(tmp_path / "missing.json"),
+        "--out-dir", str(tmp_path),
+    ])
+    assert rc == 1
