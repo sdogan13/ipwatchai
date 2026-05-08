@@ -45,12 +45,14 @@ from pdf_extract_patent import (
     build_figure_inventory,
     detect_banner_xrefs,
     extract_record_figures,
+    parse_pdf,
 )
 from pdf_extract_patent import (
     _build_global_text,
     _char_pos_to_page,
     _find_record_boundaries,
     _normalize_appno_for_filename,
+    _record_to_dict,
 )
 
 
@@ -1343,3 +1345,148 @@ def test_extract_record_figures_dry_run_real_pdf(tmp_path):
     assert sampled_with_figures > 0, \
         "expected at least 1 of the first 50 records to have a figure"
     doc.close()
+
+
+# ---------------------------------------------------------------------------
+# Step 3.7 — _record_to_dict
+# ---------------------------------------------------------------------------
+
+def test_record_to_dict_drops_none_optionals():
+    """Unset attorney / ep_reference must NOT appear as 'attorney': null."""
+    rec = PatentRecord(
+        record_index=1, page_range=[1, 1],
+        publication_no="TR 2022 014462 B", kind_code="B",
+        record_type=RecordType.GRANTED_PATENT,
+    )
+    d = _record_to_dict(rec)
+    assert "attorney" not in d
+    assert "ep_reference" not in d
+
+
+def test_record_to_dict_keeps_attorney_when_set():
+    rec = PatentRecord(
+        record_index=1, page_range=[1, 1],
+        publication_no="TR 2022 014462 B", kind_code="B",
+        record_type=RecordType.GRANTED_PATENT,
+        attorney=Attorney(name="Jane Doe", firm="DOE LAW"),
+    )
+    d = _record_to_dict(rec)
+    assert d["attorney"] == {"name": "Jane Doe", "firm": "DOE LAW"}
+
+
+def test_record_to_dict_coerces_record_type_to_plain_string():
+    """JSON consumers expect 'GRANTED_PATENT', not <RecordType.GRANTED_PATENT>."""
+    rec = PatentRecord(
+        record_index=1, page_range=[1, 1],
+        publication_no="TR 2022 014462 B", kind_code="B",
+        record_type=RecordType.GRANTED_PATENT,
+    )
+    d = _record_to_dict(rec)
+    assert d["record_type"] == "GRANTED_PATENT"
+    assert isinstance(d["record_type"], str)
+
+
+def test_record_to_dict_serializes_full_record_to_json():
+    """End-to-end: dataclass -> dict -> json.dumps without crashing."""
+    import json
+    rec = PatentRecord(
+        record_index=42, page_range=[200, 200],
+        publication_no="TR 2022 014462 B", kind_code="B",
+        record_type=RecordType.GRANTED_PATENT,
+        title="Test", abstract="Body",
+        ipc_classes=["F25B 9/14"],
+        holders=[Holder(name="ACME", country="TR")],
+        inventors=[Inventor(name="JANE")],
+        attorney=Attorney(name="DOE", firm="DOE LAW"),
+        priorities=[Priority(priority_no="X", priority_date="2024-01-01", country="DE")],
+        ep_reference=EPReference(
+            ep_application_no="EP1", ep_application_date="2021-01-01",
+            ep_publication_no="EP2", ep_publication_date="2022-01-01",
+        ),
+    )
+    s = json.dumps(_record_to_dict(rec), ensure_ascii=False)
+    assert "GRANTED_PATENT" in s
+    assert "TR 2022 014462 B" in s
+
+
+# ---------------------------------------------------------------------------
+# Step 3.7 — parse_pdf (LIVE end-to-end)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(
+    not _REAL_PDF.is_file(),
+    reason=f"Real PDF {_REAL_PDF.name} not on disk; skipping integration smoke",
+)
+def test_parse_pdf_real_2025_08_dry_run():
+    """End-to-end smoke: full 2025_08.pdf -> dict, no image files written.
+
+    Hard checks anchored to numbers verified in earlier sub-steps:
+      - bulletin_no == '2025-08', bulletin_date == '2025-08-21'
+      - 1,613 records, 0 unparseable boundaries
+      - 840 GRANTED_PATENT / 468 PUBLISHED_APP / 171 PUBLISHED_UM_APP /
+        134 GRANTED_UM
+      - 572 EP fascicles
+      - 2 banner xrefs dropped
+      - one specific record (2017/15048 first granted patent on page 200)
+        has the expected populated fields
+      - JSON-serialisable end-to-end
+    """
+    payload = parse_pdf(_REAL_PDF, save_images=False)
+
+    # Header
+    assert payload["bulletin_no"]   == "2025-08"
+    assert payload["bulletin_date"] == "2025-08-21"
+    assert payload["source_pdf"]    == "2025_08.pdf"
+    assert payload["page_count"]    == 1976
+
+    # Stats
+    s = payload["stats"]
+    assert s["records"]              == 1613
+    assert s["by_record_type"]["GRANTED_PATENT"]   == 840
+    assert s["by_record_type"]["PUBLISHED_APP"]    == 468
+    assert s["by_record_type"]["PUBLISHED_UM_APP"] == 171
+    assert s["by_record_type"]["GRANTED_UM"]       == 134
+    assert s["ep_fascicles"]         == 572
+    assert s["banner_xrefs_dropped"] == 2
+    assert s["boundaries_unparseable"] == 0
+
+    # Record list shape
+    records = payload["records"]
+    assert len(records) == 1613
+    sample = next(r for r in records if r["publication_no"] == "TR 2022 014462 B")
+    assert sample["record_type"] == "GRANTED_PATENT"
+    assert sample["application_no"] == "2022/014462"
+    assert sample["title"] == "NEM KONTROLLÜ HAZNEYE SAHİP BİR BUZDOLABI"
+    assert sample["ipc_classes"] == ["F25B 9/14", "F25D 17/04", "F25D 23/04"]
+
+    # JSON-serialisable
+    import json
+    out = json.dumps(payload, ensure_ascii=False)
+    assert len(out) > 100_000  # several MB expected
+
+
+@pytest.mark.skipif(
+    not _REAL_PDF.is_file(),
+    reason=f"Real PDF {_REAL_PDF.name} not on disk; skipping integration smoke",
+)
+def test_parse_pdf_real_2025_08_writes_figures(tmp_path):
+    """parse_pdf with save_images=True actually writes some PNG files."""
+    payload = parse_pdf(
+        _REAL_PDF,
+        figures_dir=tmp_path,
+        save_images=True,
+    )
+    # At least 100 figures should land (real has ~190 unique drawings)
+    written = list(tmp_path.glob("*.png"))
+    assert len(written) >= 100, f"only {len(written)} figures written"
+    # Each non-empty
+    for p in written[:5]:
+        assert p.stat().st_size > 0
+    # Figure metadata in payload references real files
+    sample_with_fig = next(
+        (r for r in payload["records"] if r["figures"]), None
+    )
+    assert sample_with_fig is not None
+    fig0 = sample_with_fig["figures"][0]
+    assert fig0["image_path"] is not None
+    assert (tmp_path / Path(fig0["image_path"]).name).is_file()

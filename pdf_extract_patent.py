@@ -33,7 +33,8 @@ from __future__ import annotations
 import logging
 import re
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
@@ -1054,3 +1055,126 @@ def extract_record_figures(
             figures.append(entry)
 
     return figures
+
+
+# ---------------------------------------------------------------------------
+# Step 3.7 — parse_pdf orchestrator
+# ---------------------------------------------------------------------------
+
+
+def _record_to_dict(record: PatentRecord) -> Dict[str, Any]:
+    """Serialize a ``PatentRecord`` for JSON, dropping unset optionals.
+
+    Notes:
+      - ``RecordType`` is a ``str``-Enum so it survives ``json.dumps``,
+        but ``asdict()`` keeps the Enum instance — we coerce to its
+        plain string value here so downstream consumers can compare
+        cleanly with ``record_type == "GRANTED_PATENT"``.
+      - ``attorney`` and ``ep_reference`` get popped when ``None`` so
+        the JSON stays focused; readers can ``record.get("attorney")``.
+    """
+    d = asdict(record)
+    rt = d.get("record_type")
+    if hasattr(rt, "value"):
+        d["record_type"] = rt.value
+    if d.get("attorney") is None:
+        d.pop("attorney", None)
+    if d.get("ep_reference") is None:
+        d.pop("ep_reference", None)
+    return d
+
+
+def parse_pdf(
+    pdf_path: str | Path,
+    *,
+    figures_dir: Optional[str | Path] = None,
+    save_images: bool = True,
+    banner_threshold: int = DEFAULT_BANNER_PAGE_THRESHOLD,
+) -> Dict[str, Any]:
+    """End-to-end Patent / Faydalı Model PDF -> JSON-ready metadata dict.
+
+    Pipeline:
+      1. open doc
+      2. extract_bulletin_metadata (cover page Sayı / Yayım Tarihi)
+      3. build global text + page_starts
+      4. find record boundaries (validated against the (11) pub-no shape)
+      5. build figure inventory + detect banner xrefs
+      6. for each boundary: parse_full_bibliographic_record, extract
+         non-banner figures, attach to record
+      7. assemble payload + stats
+
+    Returns a JSON-serialisable dict with ``bulletin_no``,
+    ``bulletin_date``, ``source_pdf``, ``page_count``, ``extracted_at``,
+    ``stats`` and ``records`` (a list of per-record dicts).
+
+    ``save_images=False`` is a dry-run mode — figure metadata is still
+    populated (page, xref, width, height) but no image files are
+    written. Useful for stats / pipeline shape verification.
+
+    ``figures_dir`` defaults to ``None`` (no images saved). Pass an
+    explicit path to enable image extraction.
+    """
+    fitz = _get_fitz()
+    pdf = Path(pdf_path)
+    doc = fitz.open(str(pdf))
+
+    figures_path = Path(figures_dir) if figures_dir is not None else None
+    images_should_save = save_images and figures_path is not None
+
+    try:
+        bulletin_no, bulletin_date = extract_bulletin_metadata(doc)
+
+        page_texts = [doc[i].get_text("text") for i in range(doc.page_count)]
+        full_text, page_starts = _build_global_text(page_texts)
+        boundaries = _find_record_boundaries(full_text, page_starts)
+
+        inventory = build_figure_inventory(doc)
+        banner_xrefs = detect_banner_xrefs(inventory, threshold=banner_threshold)
+
+        records: List[PatentRecord] = []
+        figure_total = 0
+        for i, (start, end, start_page, end_page) in enumerate(boundaries):
+            block = full_text[start:end]
+            record = parse_full_bibliographic_record(
+                block,
+                record_index=i + 1,
+                page_range=(start_page, end_page),
+            )
+            if record is None:
+                continue
+            record.figures = extract_record_figures(
+                doc, record,
+                banner_xrefs=banner_xrefs,
+                figures_dir=figures_path,
+                save_images=images_should_save,
+            )
+            figure_total += len(record.figures)
+            records.append(record)
+
+        type_counts: Dict[str, int] = {}
+        for r in records:
+            key = r.record_type.value
+            type_counts[key] = type_counts.get(key, 0) + 1
+
+        ep_fascicles = sum(1 for r in records if r.ep_reference is not None)
+
+        payload: Dict[str, Any] = {
+            "bulletin_no":     bulletin_no,
+            "bulletin_date":   bulletin_date,
+            "source_pdf":      pdf.name,
+            "page_count":      doc.page_count,
+            "extracted_at":    datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "stats": {
+                "records":               len(records),
+                "by_record_type":        type_counts,
+                "ep_fascicles":          ep_fascicles,
+                "figures_total":         figure_total,
+                "banner_xrefs_dropped":  len(banner_xrefs),
+                "boundaries_found":      len(boundaries),
+                "boundaries_unparseable": len(boundaries) - len(records),
+            },
+            "records": [_record_to_dict(r) for r in records],
+        }
+        return payload
+    finally:
+        doc.close()
