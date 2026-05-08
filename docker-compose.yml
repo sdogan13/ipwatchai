@@ -117,6 +117,9 @@ services:
       - ./legacy_main.py:/app/legacy_main.py:ro
       - ./app_admin_scoring_routes.py:/app/app_admin_scoring_routes.py:ro
       - ./app_assets.py:/app/app_assets.py:ro
+      - ./app_design_alert_routes.py:/app/app_design_alert_routes.py:ro
+      - ./app_design_search_routes.py:/app/app_design_search_routes.py:ro
+      - ./app_design_watchlist_routes.py:/app/app_design_watchlist_routes.py:ro
       - ./app_enhanced_search_routes.py:/app/app_enhanced_search_routes.py:ro
       - ./app_errors.py:/app/app_errors.py:ro
       - ./app_factory.py:/app/app_factory.py:ro
@@ -130,6 +133,7 @@ services:
       - ./app_public_portfolio_routes.py:/app/app_public_portfolio_routes.py:ro
       - ./app_public_search_routes.py:/app/app_public_search_routes.py:ro
       - ./app_rate_limit.py:/app/app_rate_limit.py:ro
+      - ./app_registry_search_routes.py:/app/app_registry_search_routes.py:ro
       - ./app_router_registry.py:/app/app_router_registry.py:ro
       - ./app_search_meta_routes.py:/app/app_search_meta_routes.py:ro
       - ./app_system_routes.py:/app/app_system_routes.py:ro
