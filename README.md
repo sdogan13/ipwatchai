@@ -180,7 +180,6 @@ See `test.md` for the current test lanes and coverage expectations.
 ## Pipeline Notes
 
 Pipeline and data-collection code lives in:
-- `data_collection.py`
 - `zip.py`
 - `pdf_extract.py`
 - `ingest_events.py`
