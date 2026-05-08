@@ -6,7 +6,7 @@ point cleanly at the unit under test.
 
 import pytest
 
-from cd_extract_patent import decode_hsqldb_escapes
+from cd_extract_patent import decode_hsqldb_escapes, strip_ipc_html
 
 
 # ---------------------------------------------------------------------------
@@ -95,3 +95,77 @@ def test_decode_hsqldb_escapes_idempotent_on_already_decoded_text():
     """Decoding decoded text is a no-op."""
     decoded = "EMNİYET BELİRTEÇLİ"
     assert decode_hsqldb_escapes(decoded) == decoded
+
+
+# ---------------------------------------------------------------------------
+# Step 2.2 — strip_ipc_html
+# ---------------------------------------------------------------------------
+
+def test_strip_ipc_html_handles_real_multi_class_value():
+    """Real 4-class IPCCODE captured from 2025_12 ptbulletin.log."""
+    raw = "<html><p>A61M 5/31</p><p>A61J 1/14</p><p>A61M 39/02</p><p>A61M 5/50</p></html>"
+    assert strip_ipc_html(raw) == ["A61M 5/31", "A61J 1/14", "A61M 39/02", "A61M 5/50"]
+
+
+def test_strip_ipc_html_handles_real_single_class_value():
+    """Single-class records are common (e.g. utility models)."""
+    raw = "<html><p>B01D 21/24</p></html>"
+    assert strip_ipc_html(raw) == ["B01D 21/24"]
+
+
+def test_strip_ipc_html_preserves_no_space_codes():
+    """Codes legitimately appear without internal whitespace.
+
+    Real samples from 2025_12: ``G01H13/00``, ``A46B5/00``, ``A47L13/255``.
+    """
+    raw = "<html><p>G01H13/00</p><p>A46B5/00</p><p>A47L13/255</p></html>"
+    assert strip_ipc_html(raw) == ["G01H13/00", "A46B5/00", "A47L13/255"]
+
+
+def test_strip_ipc_html_handles_5_class_record():
+    """Real 5-class IPCCODE — checks order is preserved."""
+    raw = "<html><p>H02N 2/00</p><p>G06N 3/06</p><p>H04M 1/00</p><p>G06F 3/00</p><p>A61B 5/00</p></html>"
+    assert strip_ipc_html(raw) == [
+        "H02N 2/00", "G06N 3/06", "H04M 1/00", "G06F 3/00", "A61B 5/00",
+    ]
+
+
+def test_strip_ipc_html_returns_empty_list_for_none_or_empty():
+    assert strip_ipc_html(None) == []
+    assert strip_ipc_html("") == []
+    assert strip_ipc_html("   ") == []
+
+
+def test_strip_ipc_html_returns_empty_for_wrapper_with_no_p_tags():
+    """Defensive: malformed HTML (wrapper present but no <p>) → []."""
+    assert strip_ipc_html("<html></html>") == []
+    assert strip_ipc_html("<html>A61M 5/31</html>") == []
+    assert strip_ipc_html("<div>A61M 5/31</div>") == []
+
+
+def test_strip_ipc_html_passes_through_plain_text_as_single_element():
+    """Forward-defense: callers passing already-extracted code → [code].
+
+    Not produced by the CD bundle, but lets the helper compose with
+    other call sites without surprising None-equivalent behaviour.
+    """
+    assert strip_ipc_html("A61M 5/31") == ["A61M 5/31"]
+    assert strip_ipc_html("  G01H13/00  ") == ["G01H13/00"]
+
+
+def test_strip_ipc_html_trims_inner_whitespace_only_at_edges():
+    """Whitespace inside the code itself (between subgroup parts) stays."""
+    raw = "<html><p>  E04C 3/34  </p></html>"
+    assert strip_ipc_html(raw) == ["E04C 3/34"]
+
+
+def test_strip_ipc_html_skips_empty_p_tags():
+    """A bare <p></p> in the wrapper is filtered out, not surfaced as ''."""
+    raw = "<html><p>A61M 5/31</p><p></p><p>A61J 1/14</p></html>"
+    assert strip_ipc_html(raw) == ["A61M 5/31", "A61J 1/14"]
+
+
+def test_strip_ipc_html_is_case_insensitive_on_tags():
+    """Defensive: HTML tag case is irrelevant in the spec."""
+    raw = "<HTML><P>A61M 5/31</P><P>A61J 1/14</P></HTML>"
+    assert strip_ipc_html(raw) == ["A61M 5/31", "A61J 1/14"]
