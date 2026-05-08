@@ -26,10 +26,9 @@
   var HISTORY_MAX = 20;
   var HISTORY_SUGGEST = 10;
 
-  // Locarno picker state — module scope, populated on first panel open
-  var _locarnoCatalogue = null;       // [{class_number, name_tr, name_en}, ...]
-  var _locarnoCataloguePromise = null;
-  var _locarnoSelected = [];          // sorted top-level codes
+  // Locarno picker is now Alpine-driven (see _search_panel.html x-data block).
+  // The hidden #design-search-locarno input is updated by Alpine; this module
+  // only reads its value when running a search.
 
   function $(id) { return document.getElementById(id); }
   function show(el) { if (el) el.classList.remove("hidden"); }
@@ -201,21 +200,90 @@
   }
 
   // ---------------------------------------------------------------
-  // Result rendering (unchanged shape from prior version)
+  // Result rendering — feature parity with the trademark card
   // ---------------------------------------------------------------
+
+  function _riskBucket(pct) {
+    // Mirrors getScoreRiskLevel in result-card.js (bucketed 4-tier).
+    if (pct >= 85) return "critical";
+    if (pct >= 65) return "high";
+    if (pct >= 35) return "medium";
+    return "low";
+  }
+
+  function _riskBorderStyle(level) {
+    var map = {
+      critical: "border-color:var(--color-risk-critical-border,#dc2626);box-shadow:0 0 0 1px var(--color-risk-critical-border,#dc2626) inset",
+      high:     "border-color:var(--color-risk-high-border,#ea580c)",
+      medium:   "border-color:var(--color-risk-medium-border,#d97706)",
+      low:      "border-color:var(--color-risk-low-border,#0891b2)",
+    };
+    return map[level] || "border-color:var(--color-border)";
+  }
+
+  // Small set of common Turkish design statuses → bg/text colors.
+  function _statusColors(status) {
+    var s = String(status || "").toLowerCase();
+    if (s.indexOf("yayında") >= 0)        return { bg: "#dbeafe", color: "#1e40af" };
+    if (s.indexOf("tescil") >= 0)         return { bg: "#dcfce7", color: "#166534" };
+    if (s.indexOf("yenilen") >= 0)        return { bg: "#dcfce7", color: "#166534" };
+    if (s.indexOf("hükümsüz") >= 0)       return { bg: "#fef2f2", color: "#991b1b" };
+    if (s.indexOf("iptal") >= 0)          return { bg: "#fef2f2", color: "#991b1b" };
+    if (s.indexOf("süresi doldu") >= 0)   return { bg: "#f3f4f6", color: "#6b7280" };
+    if (s.indexOf("devred") >= 0)         return { bg: "#fef3c7", color: "#92400e" };
+    if (s.indexOf("ertelen") >= 0)        return { bg: "#fef3c7", color: "#92400e" };
+    return { bg: "var(--color-bg-muted)", color: "var(--color-text-secondary)" };
+  }
+
+  function _formatDateShort(iso) {
+    if (!iso) return "";
+    try {
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return iso;
+      return d.toLocaleDateString();
+    } catch (e) { return iso; }
+  }
+
+  // TÜRKPATENT design portal URL — public lookup by application number.
+  function _turkpatentDesignUrl(applicationNo) {
+    if (!applicationNo) return "";
+    return "https://www.turkpatent.gov.tr/arastirma-yap?form=design&_q=" + encodeURIComponent(applicationNo);
+  }
+
+  function _signalBar(label, value) {
+    var v = Math.round(Math.max(0, Math.min(1, Number(value) || 0)) * 100);
+    return (
+      '<div class="flex items-center gap-2 text-[10px]" style="color:var(--color-text-faint)">' +
+        '<span class="font-mono w-12 shrink-0">' + escapeHtml(label) + '</span>' +
+        '<div class="flex-1 h-1 rounded-full overflow-hidden" style="background:var(--color-bg-muted)">' +
+          '<div class="h-full bg-indigo-400" style="width:' + v + '%"></div>' +
+        '</div>' +
+        '<span class="font-mono w-8 text-right shrink-0">' + v + '%</span>' +
+      '</div>'
+    );
+  }
 
   function renderResultCard(row) {
     var title = row.product_name_tr || row.product_name_en
               || row.application_no || row.registration_no || "—";
-    var holder = row.holder && row.holder.name ? row.holder.name : "";
-    var locarno = (row.locarno_classes || []).join(", ");
-    var sim = typeof row.similarity === "number" ? row.similarity.toFixed(1) : "—";
+    var holder = (row.holder && row.holder.name) ? row.holder.name : "";
+    var holderTpe = (row.holder && row.holder.tpe_client_id) ? row.holder.tpe_client_id : "";
+    var locarno = row.locarno_classes || [];
+    var designers = row.designers || [];
+    var simNum = typeof row.similarity === "number" ? Number(row.similarity) : 0;
+    var simStr = simNum.toFixed(1);
+    var simPct = Math.round(simNum);
+    var risk = _riskBucket(simPct);
     var imgUrl = row.image_url || "";
     var appLine = row.application_no
       ? row.application_no + (row.design_index ? " · #" + row.design_index : "")
-      : (row.registration_no || "");
-    var bulletinLabel = row.bulletin_no ? "Bülten " + row.bulletin_no : "";
-    var statusLabel = row.current_status || "";
+      : "";
+    var statusColors = _statusColors(row.current_status);
+    var tpUrl = _turkpatentDesignUrl(row.application_no);
+    var isExact = simPct >= 99;
+    var isAlreadyWatched = (typeof window.isInDesignWatchlist === "function")
+      ? !!window.isInDesignWatchlist(row.application_no)
+      : false;
 
     var imgHtml = imgUrl
       ? '<img src="' + escapeHtml(imgUrl) +
@@ -228,36 +296,168 @@
         'style="background:var(--color-bg-muted);color:var(--color-text-faint)">' +
         escapeHtml(t("design_search.no_image", "No image")) + "</div>";
 
-    var simBar =
-      '<div class="w-full h-1.5 rounded-full overflow-hidden mt-2" style="background:var(--color-bg-muted)">' +
-      '<div class="h-full bg-indigo-500" style="width:' + Math.min(100, Number(sim) || 0) + '%"></div>' +
-      "</div>";
+    // Top-right: similarity category badge (like Marka card)
+    var simBadgeBgMap = { critical: "#dc2626", high: "#ea580c", medium: "#d97706", low: "#0891b2" };
+    var simBadge =
+      '<div class="flex flex-col items-end gap-0.5 shrink-0">' +
+        '<span class="px-2 py-0.5 rounded-full text-xs font-semibold" ' +
+          'style="background:' + simBadgeBgMap[risk] + ';color:white">' + simPct + '%</span>' +
+        (isExact
+          ? '<span class="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-bold" ' +
+            'style="background:#fef2f2;color:#991b1b">' +
+              '<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>' +
+              escapeHtml(t("scores.exact_match", "Exact match")) +
+            '</span>'
+          : '') +
+      '</div>';
+
+    // Score breakdown bars (per-signal: dinov2/clip/color/text)
+    var bd = row.similarity_breakdown || {};
+    var bdHtml = "";
+    if (bd && (bd.dinov2_sim || bd.clip_sim || bd.color_sim || bd.text_sim)) {
+      bdHtml =
+        '<div class="mt-2 space-y-1 pt-2" style="border-top:1px solid var(--color-border-light, var(--color-border))">' +
+          (bd.dinov2_sim ? _signalBar("DINOv2", bd.dinov2_sim) : "") +
+          (bd.clip_sim   ? _signalBar("CLIP",   bd.clip_sim)   : "") +
+          (bd.color_sim  ? _signalBar("Color",  bd.color_sim)  : "") +
+          (bd.text_sim   ? _signalBar("Text",   bd.text_sim)   : "") +
+        '</div>';
+    }
+
+    // Locarno chips
+    var locarnoChips = locarno.length === 0 ? "" :
+      '<div class="mt-1.5 flex flex-wrap gap-1">' +
+        locarno.map(function (c) {
+          return '<span class="inline-block text-[10px] font-mono px-1.5 py-0.5 rounded" ' +
+            'style="background:var(--color-bg-muted);color:var(--color-text-secondary)">' +
+            escapeHtml(c) + '</span>';
+        }).join("") +
+      '</div>';
+
+    // Designer chips
+    var designerChips = designers.length === 0 ? "" :
+      '<div class="mt-1 text-xs" style="color:var(--color-text-secondary)">' +
+        '<span style="color:var(--color-text-faint)">' +
+          escapeHtml(t("design_search.designer_label", "Designer")) + ':</span> ' +
+        escapeHtml(designers.slice(0, 2).join(", ")) +
+        (designers.length > 2 ? ' <span style="color:var(--color-text-faint)">+' + (designers.length - 2) + '</span>' : '') +
+      '</div>';
+
+    // Holder line — clickable when modal helper exists
+    var holderHtml = "";
+    if (holder) {
+      var holderInner = '<span style="color:var(--color-text-secondary)">' + escapeHtml(holder) + '</span>';
+      if (holderTpe && typeof window.openHolderPortfolio === "function") {
+        holderInner = '<button type="button" onclick="window.openHolderPortfolio(' +
+          JSON.stringify(holderTpe).replace(/"/g, '&quot;') + ', this)" ' +
+          'class="text-left hover:underline" style="color:var(--color-primary)">' +
+          escapeHtml(holder) + '</button>';
+      }
+      holderHtml = '<div class="text-xs"><span style="color:var(--color-text-faint)">' +
+        escapeHtml(t("design_search.holder_label", "Holder")) + ':</span> ' +
+        holderInner + '</div>';
+    }
+
+    // Bulletin chip
+    var bulletinHtml = "";
+    if (row.bulletin_no) {
+      bulletinHtml = '<span class="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded" ' +
+        'style="background:var(--color-bg-muted);color:var(--color-text-faint)">' +
+        escapeHtml(t("common.bulletin_label", "Bülten")) + ' ' + escapeHtml(row.bulletin_no) +
+        (row.bulletin_date ? ' · ' + escapeHtml(_formatDateShort(row.bulletin_date)) : '') +
+        '</span>';
+    }
+
+    // Application date row
+    var appDateHtml = row.application_date
+      ? '<div class="text-xs" style="color:var(--color-text-faint)">' +
+        escapeHtml(t("common.application_date", "Application date")) + ' ' +
+        escapeHtml(_formatDateShort(row.application_date)) +
+        '</div>'
+      : "";
+
+    // Registration number
+    var regNoHtml = row.registration_no
+      ? '<div class="text-xs"><span style="color:var(--color-text-faint)">№</span> ' +
+        '<span class="font-mono" style="color:var(--color-text-secondary)">' +
+        escapeHtml(row.registration_no) + '</span></div>'
+      : "";
+
+    // Action row: TÜRKPATENT external link + Add to design watchlist
+    var tpBtn = tpUrl
+      ? '<a href="' + tpUrl + '" target="_blank" rel="noopener" ' +
+        'class="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded hover:opacity-80 transition-opacity" ' +
+        'style="background:var(--color-bg-muted);color:var(--color-text-secondary);border:1px solid var(--color-border)" ' +
+        'onclick="event.stopPropagation()">' +
+          '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>' +
+          'TÜRKPATENT' +
+        '</a>'
+      : "";
+
+    var watchlistBtn = "";
+    if (row.application_no) {
+      if (isAlreadyWatched) {
+        watchlistBtn = '<span class="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded" ' +
+          'style="background:#dcfce7;color:#166534">' +
+          '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>' +
+          escapeHtml(t("watchlist.already_watching", "Already watching")) + '</span>';
+      } else {
+        var wlPayload = JSON.stringify({
+          product_name: title,
+          customer_application_no: row.application_no,
+          locarno_classes: locarno,
+        }).replace(/"/g, '&quot;');
+        watchlistBtn = '<button type="button" data-design-add-watchlist ' +
+          'data-payload="' + wlPayload + '" ' +
+          'class="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded hover:opacity-80 transition-opacity" ' +
+          'style="background:#dbeafe;color:#1e40af">' +
+          '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>' +
+          escapeHtml(t("watchlist.add_to_watchlist", "Add to watchlist")) + '</button>';
+      }
+    }
+
+    var actionRow = (tpBtn || watchlistBtn)
+      ? '<div class="mt-2 flex flex-wrap items-center gap-1.5">' + tpBtn + watchlistBtn + '</div>'
+      : "";
 
     return (
-      '<article class="rounded-lg border p-3 transition-shadow hover:shadow" ' +
-      'style="border-color:var(--color-border);background:var(--color-bg-card)" ' +
+      '<article class="rounded-lg border-2 p-3 transition-shadow hover:shadow" ' +
+      'style="' + _riskBorderStyle(risk) + ';background:var(--color-bg-card)" ' +
       'data-design-id="' + escapeHtml(row.id || "") + '">' +
         imgHtml +
+
+        // Title + similarity badge row
         '<div class="mt-2 flex items-start justify-between gap-2">' +
-          '<h4 class="text-sm font-semibold leading-snug" style="color:var(--color-text-primary)">' +
-            escapeHtml(title) + "</h4>" +
-          '<span class="text-xs font-mono shrink-0" style="color:var(--color-text-muted)">' +
-            sim + "%</span>" +
-        "</div>" +
-        simBar +
-        '<dl class="mt-2 space-y-1 text-xs" style="color:var(--color-text-secondary)">' +
-          (appLine ? '<div><dt class="inline">' + escapeHtml(t("design_search.appno_label", "App")) +
-            ':</dt> <dd class="inline font-mono">' + escapeHtml(appLine) + "</dd></div>" : "") +
-          (holder ? '<div><dt class="inline">' + escapeHtml(t("design_search.holder_label", "Holder")) +
-            ':</dt> <dd class="inline">' + escapeHtml(holder) + "</dd></div>" : "") +
-          (locarno ? '<div><dt class="inline">' + escapeHtml(t("design_search.locarno_label", "Locarno")) +
-            ':</dt> <dd class="inline">' + escapeHtml(locarno) + "</dd></div>" : "") +
-          (bulletinLabel ? '<div><dt class="inline" style="color:var(--color-text-faint)">' +
-            escapeHtml(bulletinLabel) + "</dt></div>" : "") +
-          (statusLabel ? '<div><dt class="inline" style="color:var(--color-text-faint)">' +
-            escapeHtml(statusLabel) + "</dt></div>" : "") +
-        "</dl>" +
-      "</article>"
+          '<h4 class="text-sm font-semibold leading-snug min-w-0 truncate" ' +
+            'style="color:var(--color-text-primary)" title="' + escapeHtml(title) + '">' +
+            escapeHtml(title) + '</h4>' +
+          simBadge +
+        '</div>' +
+
+        // Status badge + bulletin chip row
+        '<div class="mt-1 flex flex-wrap items-center gap-1.5">' +
+          (row.current_status
+            ? '<span class="text-[10px] px-2 py-0.5 rounded-full font-medium" ' +
+              'style="background:' + statusColors.bg + ';color:' + statusColors.color + '">' +
+              escapeHtml(row.current_status) + '</span>'
+            : '') +
+          bulletinHtml +
+        '</div>' +
+
+        // Identity rows
+        (appLine
+          ? '<div class="mt-1.5 text-xs"><span style="color:var(--color-text-faint)">' +
+            escapeHtml(t("design_search.appno_label", "App")) + ':</span> ' +
+            '<span class="font-mono" style="color:var(--color-text-secondary)">' + escapeHtml(appLine) + '</span></div>'
+          : '') +
+        regNoHtml +
+        appDateHtml +
+        holderHtml +
+        designerChips +
+        locarnoChips +
+        bdHtml +
+        actionRow +
+      '</article>'
     );
   }
 
@@ -350,13 +550,21 @@
     var img = $("design-search-image");
     if (q) q.value = "";
     if (img) img.value = "";
-    // Clear Locarno picker selection (also clears the hidden input)
-    clearLocarnoSelection();
-    setLocarnoPanelOpen(false);
-    var aiInput = $("design-search-locarno-ai-input");
-    if (aiInput) aiInput.value = "";
-    renderLocarnoAiSuggestions([]);
-    showLocarnoAiError("");
+    // Clear Locarno picker via its Alpine x-data (selection + open + AI input)
+    var locarnoHidden = $("design-search-locarno");
+    var pickerRoot = locarnoHidden && locarnoHidden.closest && locarnoHidden.closest("[x-data]");
+    if (pickerRoot && pickerRoot._x_dataStack && pickerRoot._x_dataStack[0]) {
+      try {
+        var s = pickerRoot._x_dataStack[0];
+        s.designSelectedClasses = [];
+        s.designClassInput = "";
+        s.designSuggestedClasses = [];
+        s.designClassError = "";
+        s.designClassOpen = false;
+        if (locarnoHidden) locarnoHidden.value = "";
+      } catch (e) {}
+    }
+    if (locarnoHidden) locarnoHidden.value = "";
     // Notify Alpine drag-drop wrapper to clear its preview
     var dragRoot = q && q.closest && q.closest("[x-data]");
     if (dragRoot && dragRoot._x_dataStack && dragRoot._x_dataStack[0]) {
@@ -370,225 +578,45 @@
   }
 
   // ---------------------------------------------------------------
-  // Locarno class picker
+  // Add-to-watchlist (called from result card delegation)
   // ---------------------------------------------------------------
 
-  function loadLocarnoCatalogue() {
-    if (_locarnoCatalogue) return Promise.resolve(_locarnoCatalogue);
-    if (_locarnoCataloguePromise) return _locarnoCataloguePromise;
-    _locarnoCataloguePromise = fetch(API_LOCARNO_LIST, { method: "GET" })
-      .then(function (r) { return r.ok ? r.json() : { items: [] }; })
-      .then(function (payload) {
-        _locarnoCatalogue = (payload && payload.items) || [];
-        return _locarnoCatalogue;
-      })
-      .catch(function () { _locarnoCatalogue = []; return _locarnoCatalogue; });
-    return _locarnoCataloguePromise;
-  }
-
-  function localizedLocarnoName(c) {
-    var locale = (window.AppI18n && window.AppI18n.locale) || "tr";
-    if (locale === "en") return c.name_en || c.name_tr || c.class_number;
-    return c.name_tr || c.name_en || c.class_number;
-  }
-
-  function syncLocarnoHiddenInput() {
-    var inp = $("design-search-locarno");
-    if (inp) inp.value = _locarnoSelected.join(",");
-  }
-
-  function renderLocarnoChips() {
-    var emptyLabel = $("design-search-locarno-empty-label");
-    var chipsRow = $("design-search-locarno-chips");
-    var countBadge = $("design-search-locarno-count");
-    if (!chipsRow || !emptyLabel || !countBadge) return;
-    if (_locarnoSelected.length === 0) {
-      show(emptyLabel);
-      hide(chipsRow);
-      hide(countBadge);
-      chipsRow.innerHTML = "";
-      return;
-    }
-    hide(emptyLabel);
-    show(chipsRow);
-    show(countBadge);
-    countBadge.textContent = (window.AppI18n && window.AppI18n.t)
-      ? window.AppI18n.t("design_search.locarno_classes_selected", { count: _locarnoSelected.length })
-      : (_locarnoSelected.length + " selected");
-    var byNumber = {};
-    (_locarnoCatalogue || []).forEach(function (c) { byNumber[c.class_number] = c; });
-    chipsRow.innerHTML = _locarnoSelected.slice(0, 6).map(function (cn) {
-      var meta = byNumber[cn];
-      var name = meta ? localizedLocarnoName(meta) : "";
-      var label = cn + (name ? " · " + name : "");
-      return (
-        '<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full" ' +
-        'style="background:var(--color-primary-light);color:var(--color-primary)">' +
-        escapeHtml(label) +
-        '<span data-locarno-remove data-class-number="' + escapeHtml(cn) + '" ' +
-        'class="ml-1 cursor-pointer hover:opacity-80" style="font-size:13px;line-height:1">×</span>' +
-        '</span>'
-      );
-    }).join("") + (
-      _locarnoSelected.length > 6
-        ? '<span class="text-xs px-2 py-0.5 rounded-full" style="background:var(--color-bg-card);color:var(--color-text-muted)">+' + (_locarnoSelected.length - 6) + '</span>'
-        : ""
-    );
-  }
-
-  function renderLocarnoGrid() {
-    var grid = $("design-search-locarno-grid");
-    if (!grid) return;
-    var items = _locarnoCatalogue || [];
-    var selectedSet = {};
-    _locarnoSelected.forEach(function (cn) { selectedSet[cn] = true; });
-    grid.innerHTML = items.map(function (c) {
-      var name = localizedLocarnoName(c);
-      var isSel = !!selectedSet[c.class_number];
-      var bg = isSel ? "var(--color-primary-light)" : "var(--color-bg-card)";
-      var color = isSel ? "var(--color-primary)" : "var(--color-text-primary)";
-      var border = isSel ? "var(--color-primary)" : "var(--color-border)";
-      return (
-        '<button type="button" data-locarno-toggle data-class-number="' + escapeHtml(c.class_number) + '" ' +
-        'class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left transition-all hover:opacity-90" ' +
-        'style="background:' + bg + ';color:' + color + ';border:1px solid ' + border + '">' +
-        '<span class="font-mono text-xs px-1.5 py-0.5 rounded" style="background:var(--color-bg-muted);color:var(--color-text-secondary)">' +
-        escapeHtml(c.class_number) + '</span>' +
-        '<span class="truncate">' + escapeHtml(name) + '</span>' +
-        (isSel ? '<svg class="w-4 h-4 ml-auto shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color:var(--color-primary)"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>' : '') +
-        '</button>'
-      );
-    }).join("");
-  }
-
-  function toggleLocarno(cn) {
-    if (!cn) return;
-    var i = _locarnoSelected.indexOf(cn);
-    if (i >= 0) _locarnoSelected.splice(i, 1);
-    else _locarnoSelected.push(cn);
-    _locarnoSelected.sort();
-    syncLocarnoHiddenInput();
-    renderLocarnoChips();
-    renderLocarnoGrid();
-  }
-
-  function setLocarnoPanelOpen(open) {
-    var panel = $("design-search-locarno-panel");
-    var chevron = $("design-search-locarno-chevron");
-    if (!panel) return;
-    if (open) {
-      show(panel);
-      if (chevron) chevron.style.transform = "rotate(180deg)";
-      loadLocarnoCatalogue().then(renderLocarnoGrid);
-    } else {
-      hide(panel);
-      if (chevron) chevron.style.transform = "";
-    }
-  }
-
-  function isLocarnoPanelOpen() {
-    var panel = $("design-search-locarno-panel");
-    return !!(panel && !panel.classList.contains("hidden"));
-  }
-
-  function clearLocarnoSelection() {
-    _locarnoSelected = [];
-    syncLocarnoHiddenInput();
-    renderLocarnoChips();
-    renderLocarnoGrid();
-  }
-
-  // ---- AI suggest ----
-
-  function showLocarnoAiError(text) {
-    var el = $("design-search-locarno-ai-error");
-    if (!el) return;
-    if (text) { el.textContent = text; show(el); }
-    else { el.textContent = ""; hide(el); }
-  }
-
-  function setLocarnoAiBusy(busy) {
-    var btn = $("design-search-locarno-ai-button");
-    var label = $("design-search-locarno-ai-button-label");
-    if (!btn) return;
-    btn.disabled = !!busy;
-    if (label) {
-      label.textContent = busy
-        ? t("design_search.locarno_ai_loading", "Suggesting…")
-        : t("design_search.locarno_ai_button", "Suggest classes");
-    }
-  }
-
-  function renderLocarnoAiSuggestions(suggestions) {
-    var row = $("design-search-locarno-ai-suggestions");
-    if (!row) return;
-    if (!suggestions || suggestions.length === 0) {
-      row.innerHTML = "";
-      hide(row);
-      return;
-    }
-    row.innerHTML = suggestions.map(function (s) {
-      var name = localizedLocarnoName(s);
-      var alreadySelected = _locarnoSelected.indexOf(s.class_number) >= 0;
-      var bg = alreadySelected ? "var(--color-primary-light)" : "var(--color-bg-muted)";
-      var color = alreadySelected ? "var(--color-primary)" : "var(--color-text-primary)";
-      return (
-        '<button type="button" data-locarno-suggest-add data-class-number="' + escapeHtml(s.class_number) + '" ' +
-        'class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs hover:opacity-90 transition-opacity" ' +
-        'style="background:' + bg + ';color:' + color + '" ' +
-        (s.reason ? 'title="' + escapeHtml(s.reason) + '"' : '') + '>' +
-        '<span class="font-mono">' + escapeHtml(s.class_number) + '</span>' +
-        '<span>' + escapeHtml(name) + '</span>' +
-        (alreadySelected ? '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>' : '<span class="text-xs">+</span>') +
-        '</button>'
-      );
-    }).join("");
-    show(row);
-  }
-
-  async function runLocarnoAiSuggest() {
-    var input = $("design-search-locarno-ai-input");
-    var description = (input && input.value || "").trim();
-    if (description.length < 2) {
-      showLocarnoAiError(t("design_search.error_invalid_input", "Provide a short description"));
-      return;
-    }
-    showLocarnoAiError("");
-    setLocarnoAiBusy(true);
+  async function addDesignToWatchlist(btn, payload) {
+    if (!payload || !payload.product_name) return;
+    var originalLabel = btn.innerHTML;
+    btn.disabled = true;
+    btn.style.opacity = "0.6";
     try {
       var headers = { "Content-Type": "application/json" };
       var token = getAuthToken();
       if (token) headers["Authorization"] = "Bearer " + token;
-      var resp = await fetch(API_LOCARNO_SUGGEST, {
-        method: "POST",
-        headers: headers,
-        body: JSON.stringify({
-          description: description,
-          language: (window.AppI18n && window.AppI18n.locale) || "tr",
-          count: 5,
-        }),
+      var resp = await fetch("/api/v1/design-watchlist", {
+        method: "POST", headers: headers, body: JSON.stringify(payload),
       });
-      var payload = null;
-      try { payload = await resp.json(); } catch (e) {}
-      if (!resp.ok) {
-        if (resp.status === 401 || resp.status === 403) {
-          showLocarnoAiError(t("design_search.error_auth", "Please sign in"));
-        } else if (resp.status === 402) {
-          showLocarnoAiError(t("design_search.locarno_ai_no_credits", "AI credits exhausted"));
-        } else {
-          var msg = (payload && payload.detail && (payload.detail.message || payload.detail.message_en)) ||
-                    t("design_search.locarno_ai_error", "Could not generate suggestions");
-          showLocarnoAiError(msg);
+      if (resp.ok) {
+        // Swap the button to "Already watching"
+        btn.outerHTML = '<span class="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded" ' +
+          'style="background:#dcfce7;color:#166534">' +
+          '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>' +
+          escapeHtml(t("watchlist.already_watching", "Already watching")) + '</span>';
+        if (window.AppToast && typeof window.AppToast.success === "function") {
+          window.AppToast.success(t("watchlist.add_to_watchlist", "Added to watchlist"));
         }
-        return;
+      } else {
+        var detail = null;
+        try { detail = (await resp.json()).detail; } catch (e) {}
+        var msg = (detail && (detail.message || detail.message_en)) || "Failed";
+        btn.innerHTML = originalLabel;
+        btn.disabled = false;
+        btn.style.opacity = "";
+        if (window.AppToast && typeof window.AppToast.error === "function") {
+          window.AppToast.error(msg);
+        }
       }
-      // Make sure catalogue is loaded so localized names render
-      await loadLocarnoCatalogue();
-      renderLocarnoAiSuggestions((payload && payload.suggestions) || []);
     } catch (e) {
-      showLocarnoAiError(t("design_search.error_network", "Network error"));
-    } finally {
-      setLocarnoAiBusy(false);
+      btn.innerHTML = originalLabel;
+      btn.disabled = false;
+      btn.style.opacity = "";
     }
   }
 
@@ -637,46 +665,19 @@
         return;
       }
 
-      // Locarno picker — toggle bar
-      if (t.closest("#design-search-locarno-toggle")) {
-        e.preventDefault();
-        setLocarnoPanelOpen(!isLocarnoPanelOpen());
-        return;
-      }
-      // Locarno chip remove (×) in collapsed bar
-      var rmChip = t.closest("[data-locarno-remove]");
-      if (rmChip) {
+      // (Locarno picker click handlers live in the Alpine x-data block now.)
+
+      // Result card: Add to design watchlist
+      var addBtn = t.closest("[data-design-add-watchlist]");
+      if (addBtn) {
         e.preventDefault();
         e.stopPropagation();
-        toggleLocarno(rmChip.getAttribute("data-class-number"));
-        return;
-      }
-      // Locarno class toggle in expanded grid
-      var grid = t.closest("[data-locarno-toggle]");
-      if (grid) {
-        e.preventDefault();
-        toggleLocarno(grid.getAttribute("data-class-number"));
-        return;
-      }
-      // AI suggest — submit
-      if (t.closest("#design-search-locarno-ai-button")) {
-        e.preventDefault();
-        runLocarnoAiSuggest();
-        return;
-      }
-      // AI suggestion chip click → add to selection
-      var aiChip = t.closest("[data-locarno-suggest-add]");
-      if (aiChip) {
-        e.preventDefault();
-        toggleLocarno(aiChip.getAttribute("data-class-number"));
-        // Re-render suggestions so the "added" tick updates
-        var row = $("design-search-locarno-ai-suggestions");
-        if (row && !row.classList.contains("hidden")) {
-          var current = Array.prototype.slice.call(row.querySelectorAll("[data-locarno-suggest-add]")).map(function (b) {
-            var meta = (_locarnoCatalogue || []).filter(function (c) { return c.class_number === b.getAttribute("data-class-number"); })[0];
-            return meta || { class_number: b.getAttribute("data-class-number") };
-          });
-          renderLocarnoAiSuggestions(current);
+        var rawPayload = addBtn.getAttribute("data-payload") || "{}";
+        try {
+          var payload = JSON.parse(rawPayload.replace(/&quot;/g, '"'));
+          addDesignToWatchlist(addBtn, payload);
+        } catch (err) {
+          // Fail silently — invalid payload, shouldn't happen
         }
         return;
       }
@@ -721,10 +722,7 @@
         if (e.key === "Enter") { e.preventDefault(); runSearch(); }
         else if (e.key === "Escape") { hideHistory(); }
       }
-      if (t.id === "design-search-locarno-ai-input" && e.key === "Enter") {
-        e.preventDefault();
-        runLocarnoAiSuggest();
-      }
+      // (Locarno AI Enter is handled by Alpine @keydown.enter on its input.)
     });
 
     // Input event for the text query (track + auto-suggest + clear-on-empty)

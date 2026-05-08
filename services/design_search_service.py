@@ -233,7 +233,8 @@ def _retrieve_color_candidates_via_views(
 HYDRATE_COLS = (
     "d.id::text AS design_id, d.registry_type, d.application_no, d.design_index, d.registration_no, "
     "d.product_name_tr, d.product_name_en, d.locarno_classes, d.section, "
-    "d.bulletin_no, d.bulletin_date, d.current_status, d.designers, "
+    "d.bulletin_no, d.bulletin_date, d.application_date, d.filing_date, d.registration_date, "
+    "d.current_status, d.designers, d.attorney_name, d.attorney_firm, "
     "d.hague_reference, d.deferred_publication, d.source_issue_folder, "
     "d.holder_id, h.name AS holder_name, h.tpe_client_id, h.country AS holder_country, "
     "(SELECT image_path FROM design_views dv "
@@ -271,6 +272,9 @@ def _result_row(record: Dict[str, Any], *, similarity: float, breakdown: Dict[st
         }
     image_url = design_image_url(record.get("first_image_path"), record.get("source_issue_folder"))
     bulletin_date = record.get("bulletin_date")
+    application_date = record.get("application_date")
+    filing_date = record.get("filing_date")
+    registration_date = record.get("registration_date")
     return {
         "id": record["design_id"],
         "registry_type": record.get("registry_type") or "design",
@@ -284,8 +288,13 @@ def _result_row(record: Dict[str, Any], *, similarity: float, breakdown: Dict[st
         "current_status": record.get("current_status"),
         "bulletin_no": record.get("bulletin_no"),
         "bulletin_date": bulletin_date.isoformat() if bulletin_date else None,
+        "application_date": application_date.isoformat() if application_date else None,
+        "filing_date": filing_date.isoformat() if filing_date else None,
+        "registration_date": registration_date.isoformat() if registration_date else None,
         "holder": holder,
         "designers": list(record.get("designers") or []),
+        "attorney_name": record.get("attorney_name"),
+        "attorney_firm": record.get("attorney_firm"),
         "image_url": image_url,
         "similarity": round(similarity * 100.0, 2),
         "similarity_breakdown": {k: round(float(v or 0.0), 4) for k, v in breakdown.items()},

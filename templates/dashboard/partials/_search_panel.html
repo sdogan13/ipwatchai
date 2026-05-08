@@ -1072,72 +1072,295 @@
                  class="hidden" @change="designHandleSelect($event)">
         </div>
 
-        <!-- Locarno class picker (collapsible bar + expanded grid + AI suggest) -->
-        <div class="mb-3">
-          <!-- Collapsed bar / chips -->
-          <button type="button" id="design-search-locarno-toggle"
-                  class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm transition-all hover:opacity-90"
-                  style="background:var(--color-bg-muted);border:1px solid var(--color-border)">
-            <svg class="w-5 h-5 shrink-0" style="color:var(--color-text-muted)"
+        <!-- ===== Locarno Class Finder (collapsible) — exact mirror of the Marka picker ===== -->
+        <div class="mb-3"
+             x-data="{
+               designClassOpen: false,
+               designSelectedClasses: [],
+               designAllClasses: [],
+               designClassInput: '',
+               designSuggestedClasses: [],
+               designSuggesting: false,
+               designClassError: '',
+               designBrowseFilter: '',
+               designBrowseLoading: false,
+               _designSyncHidden() {
+                 var inp = document.getElementById('design-search-locarno');
+                 if (inp) inp.value = this.designSelectedClasses.join(',');
+               },
+               _padLocarno(n) {
+                 n = String(n).trim();
+                 if (!n) return '';
+                 if (/^\d{1,2}$/.test(n)) return n.length === 1 ? '0' + n : n;
+                 return '';
+               },
+               removeDesignClass(num) {
+                 var i = this.designSelectedClasses.indexOf(num);
+                 if (i >= 0) this.designSelectedClasses.splice(i, 1);
+                 this._designSyncHidden();
+               },
+               selectDesignClass(cls) {
+                 var num = String(cls.class_number);
+                 var i = this.designSelectedClasses.indexOf(num);
+                 if (i === -1) this.designSelectedClasses.push(num);
+                 else this.designSelectedClasses.splice(i, 1);
+                 this.designSelectedClasses.sort();
+                 this._designSyncHidden();
+               },
+               toggleDesignBrowseClass(num) {
+                 num = String(num);
+                 var i = this.designSelectedClasses.indexOf(num);
+                 if (i === -1) this.designSelectedClasses.push(num);
+                 else this.designSelectedClasses.splice(i, 1);
+                 this.designSelectedClasses.sort();
+                 this._designSyncHidden();
+               },
+               loadDesignAllClasses() {
+                 if (this.designBrowseLoading || this.designAllClasses.length > 0) return;
+                 this.designBrowseLoading = true;
+                 var self = this;
+                 var locale = (window.AppI18n && window.AppI18n.locale) || 'tr';
+                 fetch('/api/v1/locarno-classes')
+                   .then(function(r){ return r.ok ? r.json() : { items: [] }; })
+                   .then(function(data){
+                     self.designAllClasses = (data.items || []).map(function(c){
+                       return { number: c.class_number, name: locale === 'en' ? (c.name_en || c.name_tr) : (c.name_tr || c.name_en) };
+                     });
+                   })
+                   .catch(function(){ self.designAllClasses = []; })
+                   .finally(function(){ self.designBrowseLoading = false; });
+               },
+               submitDesignClassInput() {
+                 var input = (this.designClassInput || '').trim();
+                 if (!input) return;
+                 this.designClassError = '';
+                 var parts = input.split(/[,\s]+/).filter(function(p){ return p.length > 0; });
+                 var self = this;
+                 var asNumbers = parts.map(function(p){ return self._padLocarno(p); });
+                 var allValid = asNumbers.length > 0 && asNumbers.every(function(p){
+                   return p && parseInt(p, 10) >= 1 && parseInt(p, 10) <= 32;
+                 });
+                 if (allValid) {
+                   var added = 0;
+                   asNumbers.forEach(function(p){
+                     if (self.designSelectedClasses.indexOf(p) === -1) { self.designSelectedClasses.push(p); added++; }
+                   });
+                   self.designSelectedClasses.sort();
+                   if (added === 0) {
+                     this.designClassError = this.t('design_search.invalid_class_number');
+                   }
+                   this._designSyncHidden();
+                   this.designClassInput = this.designSelectedClasses.join(', ');
+                 } else {
+                   this.suggestDesignClasses();
+                 }
+               },
+               suggestDesignClasses() {
+                 var desc = (this.designClassInput || '').trim();
+                 if (!desc) return;
+                 if (desc.length < 3) { this.designClassError = this.t('design_search.description_too_short'); return; }
+                 this.designSuggesting = true;
+                 this.designClassError = '';
+                 this.designSuggestedClasses = [];
+                 var self = this;
+                 var token = (window.AppAuth && window.AppAuth.getAuthToken && window.AppAuth.getAuthToken()) || '';
+                 var headers = { 'Content-Type': 'application/json' };
+                 if (token) headers['Authorization'] = 'Bearer ' + token;
+                 var locale = (window.AppI18n && window.AppI18n.locale) || 'tr';
+                 fetch('/api/v1/tools/suggest-locarno-classes', {
+                   method: 'POST', headers: headers,
+                   body: JSON.stringify({ description: desc, language: locale, count: 5 }),
+                 })
+                   .then(function(r){
+                     if (r.status === 402) { self.designClassError = self.t('design_search.locarno_ai_no_credits'); return null; }
+                     if (!r.ok) throw new Error('failed');
+                     return r.json();
+                   })
+                   .then(function(data){
+                     if (!data) return;
+                     self.designSuggestedClasses = (data.suggestions || []).map(function(s){
+                       return {
+                         class_number: s.class_number,
+                         name: locale === 'en' ? (s.name_en || s.name_tr) : (s.name_tr || s.name_en),
+                         reason: s.reason || '',
+                       };
+                     });
+                     if (self.designSuggestedClasses.length === 0) {
+                       self.designClassError = self.t('design_search.no_class_suggestions');
+                     }
+                   })
+                   .catch(function(){
+                     self.designSuggestedClasses = [];
+                     if (!self.designClassError) self.designClassError = self.t('design_search.class_suggestion_failed');
+                   })
+                   .finally(function(){ self.designSuggesting = false; });
+               },
+               get filteredDesignClasses() {
+                 if (!this.designBrowseFilter.trim()) return this.designAllClasses;
+                 var q = this.designBrowseFilter.trim().toLowerCase();
+                 return this.designAllClasses.filter(function(cls){
+                   return String(cls.number).indexOf(q) !== -1 ||
+                     (cls.name || '').toLowerCase().indexOf(q) !== -1;
+                 });
+               },
+             }">
+
+          <!-- Hidden field carries the comma-joined selection for the form payload -->
+          <input type="hidden" id="design-search-locarno" value="" />
+
+          <!-- Toggle header bar with selected chips -->
+          <button @click="designClassOpen = !designClassOpen; if(designClassOpen && designAllClasses.length === 0) loadDesignAllClasses()"
+              type="button"
+              class="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all"
+              :style="'background:' + (designClassOpen || designSelectedClasses.length > 0 ? 'var(--color-primary-light)' : 'var(--color-bg-muted)') + ';border:1px solid ' + (designClassOpen ? 'var(--color-primary)' : 'var(--color-border)') + ';color:' + (designClassOpen || designSelectedClasses.length > 0 ? 'var(--color-primary)' : 'var(--color-text-secondary)')">
+            <div class="flex items-center gap-2 min-w-0 flex-1">
+              <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z" />
+              </svg>
+              <!-- Label when no classes selected -->
+              <span x-show="designSelectedClasses.length === 0"
+                    x-text="t('design_search.class_finder_toggle')"></span>
+              <!-- Selected class chips inline in the bar -->
+              <div x-show="designSelectedClasses.length > 0" x-cloak
+                   class="flex items-center flex-wrap gap-1.5 min-w-0">
+                <template x-for="num in designSelectedClasses" :key="num">
+                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold text-white"
+                        style="background:var(--color-primary)" @click.stop>
+                    <span x-text="t('design_search.class_label') + ' ' + num"></span>
+                    <button @click.stop="removeDesignClass(num)" class="hover:opacity-70 leading-none">&times;</button>
+                  </span>
+                </template>
+              </div>
+            </div>
+            <svg class="w-4 h-4 shrink-0 transition-transform" :class="designClassOpen ? 'rotate-180' : ''"
                  fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                    d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/>
-            </svg>
-            <!-- No-selection label -->
-            <span id="design-search-locarno-empty-label"
-                  class="flex-1 text-left" style="color:var(--color-text-secondary)"
-                  x-text="t('design_search.locarno_finder_toggle')">Locarno sınıfı seçin (opsiyonel)</span>
-            <!-- Selection chips (rendered by JS) -->
-            <span id="design-search-locarno-chips" class="flex-1 flex flex-wrap gap-1.5 hidden"></span>
-            <!-- Selected count badge -->
-            <span id="design-search-locarno-count" class="hidden text-xs px-2 py-0.5 rounded-full font-medium"
-                  style="background:var(--color-primary-light);color:var(--color-primary)"></span>
-            <svg id="design-search-locarno-chevron" class="w-4 h-4 shrink-0 transition-transform" style="color:var(--color-text-muted)"
-                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
             </svg>
           </button>
 
-          <!-- Hidden text field — JS writes the comma-joined selection here so the
-               existing search payload format is unchanged. -->
-          <input type="hidden" id="design-search-locarno" value="" />
+          <!-- Expandable body -->
+          <div x-show="designClassOpen" x-cloak x-collapse class="mt-2 rounded-xl overflow-hidden"
+               style="border:1px solid var(--color-border);background:var(--color-bg-card)">
 
-          <!-- Expanded panel -->
-          <div id="design-search-locarno-panel"
-               class="hidden mt-2 rounded-xl overflow-hidden"
-               style="background:var(--color-bg-card);border:1px solid var(--color-border)">
-
-            <!-- AI suggest row -->
-            <div class="p-3" style="border-bottom:1px solid var(--color-border)">
-              <div class="flex items-stretch gap-2">
-                <input type="text" id="design-search-locarno-ai-input"
-                       :placeholder="t('design_search.locarno_ai_placeholder')"
-                       class="flex-1 px-3 py-2 rounded-lg text-sm outline-none"
-                       style="background:var(--color-bg-card);border:1px solid var(--color-border);color:var(--color-text-primary)"
-                       maxlength="500" />
-                <button type="button" id="design-search-locarno-ai-button"
-                        class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-amber-500 text-white hover:bg-amber-600 transition-colors disabled:opacity-50">
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                          d="M13 10V3L4 14h7v7l9-11h-7z"/>
+            <!-- AI Suggestion input -->
+            <div class="p-4">
+              <p class="text-xs mb-2" style="color:var(--color-text-muted)"
+                 x-text="t('design_search.class_input_placeholder')"></p>
+              <div class="flex gap-2">
+                <input type="text" x-model="designClassInput"
+                       :placeholder="t('design_search.class_suggest_placeholder')"
+                       class="flex-1 px-3 py-2.5 rounded-lg text-sm outline-none"
+                       style="border:1px solid var(--color-border);color:var(--color-text-primary);background:var(--color-bg-input,var(--color-bg-card))"
+                       @keydown.enter.prevent="submitDesignClassInput()"
+                       @input="if(!designClassInput.trim()) designSuggestedClasses = []">
+                <!-- Sınıf Öner button: only when no classes selected -->
+                <button x-show="designSelectedClasses.length === 0" @click="submitDesignClassInput()"
+                        :disabled="designSuggesting || !designClassInput.trim()"
+                        class="px-4 py-2.5 rounded-lg text-sm font-medium text-white whitespace-nowrap disabled:opacity-50 flex items-center gap-1.5"
+                        style="background:var(--color-primary)">
+                  <svg x-show="designSuggesting" x-cloak class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
-                  <span id="design-search-locarno-ai-button-label"
-                        x-text="t('design_search.locarno_ai_button')">Sınıf Öner</span>
+                  <svg x-show="!designSuggesting" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                  <span x-text="designSuggesting ? t('design_search.suggesting') : t('design_search.suggest_classes')">Sınıf Öner</span>
+                </button>
+                <!-- Tamam button: when classes are selected -->
+                <button x-show="designSelectedClasses.length > 0" x-cloak @click="designClassOpen = false"
+                        class="px-5 py-2.5 rounded-lg text-sm font-medium text-white whitespace-nowrap flex items-center gap-1.5"
+                        style="background:#22c55e">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                  </svg>
+                  <span x-text="t('common.done')">Done</span>
                 </button>
               </div>
-              <p id="design-search-locarno-ai-error" class="hidden text-xs mt-2"
-                 style="color:var(--color-text-error,#dc2626)"></p>
-              <!-- AI suggestions row -->
-              <div id="design-search-locarno-ai-suggestions" class="hidden mt-3 flex flex-wrap gap-2"></div>
+
+              <!-- AI Suggestion chips -->
+              <div x-show="designSuggestedClasses.length > 0" x-cloak x-transition class="mt-3">
+                <p class="text-[11px] uppercase tracking-wide mb-2 font-medium"
+                   style="color:var(--color-text-faint)" x-text="t('design_search.click_to_select')"></p>
+                <div class="flex flex-wrap gap-2">
+                  <template x-for="cls in designSuggestedClasses" :key="cls.class_number">
+                    <button @click="selectDesignClass(cls)"
+                            class="group flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+                            :title="cls.reason || ''"
+                            :style="designSelectedClasses.includes(cls.class_number)
+                                    ? 'background:var(--color-primary);color:white;box-shadow:0 2px 8px rgba(99,102,241,0.3)'
+                                    : 'background:var(--color-bg-muted);color:var(--color-text-secondary);border:1px solid var(--color-border)'">
+                      <!-- Checkbox indicator -->
+                      <span x-show="!designSelectedClasses.includes(cls.class_number)"
+                            class="w-3.5 h-3.5 flex-shrink-0 rounded border inline-flex items-center justify-center"
+                            style="border-color:var(--color-text-faint)"></span>
+                      <span x-show="designSelectedClasses.includes(cls.class_number)"
+                            class="w-3.5 h-3.5 flex-shrink-0 rounded bg-white inline-flex items-center justify-center">
+                        <svg class="w-2.5 h-2.5" fill="none" stroke="var(--color-primary)" stroke-width="3" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      </span>
+                      <span class="font-bold" x-text="cls.class_number"></span>
+                      <span class="opacity-80" x-text="cls.name"></span>
+                    </button>
+                  </template>
+                </div>
+              </div>
+
+              <!-- Class error -->
+              <div x-show="designClassError" x-cloak class="mt-2 px-3 py-2 rounded-lg text-xs"
+                   style="background:var(--color-risk-high-bg,#fef2f2);color:var(--color-risk-high-text,#991b1b)">
+                <span x-text="designClassError"></span>
+              </div>
             </div>
 
-            <!-- Browse-all 32 classes -->
-            <div class="p-3">
-              <p class="text-xs font-medium mb-2 uppercase tracking-wide"
-                 style="color:var(--color-text-faint)"
-                 x-text="t('design_search.locarno_browse_all')">All classes</p>
-              <div id="design-search-locarno-grid"
-                   class="grid grid-cols-1 sm:grid-cols-2 gap-1.5"></div>
+            <!-- Divider -->
+            <div class="px-4">
+              <div style="border-top:1px solid var(--color-border)"></div>
+            </div>
+
+            <!-- Browse All 32 Classes -->
+            <div class="p-4">
+              <div class="flex items-center justify-between mb-2">
+                <p class="text-xs font-medium" style="color:var(--color-text-secondary)"
+                   x-text="t('design_search.class_tab_browse')">Tüm Sınıflar</p>
+                <input type="text" x-model="designBrowseFilter"
+                       :placeholder="t('design_search.browse_filter_placeholder')"
+                       class="w-40 px-2.5 py-1.5 rounded-lg text-xs outline-none"
+                       style="border:1px solid var(--color-border);color:var(--color-text-primary);background:var(--color-bg-input,var(--color-bg-card))">
+              </div>
+              <div class="max-h-[220px] overflow-y-auto rounded-lg" style="scrollbar-width:thin">
+                <div x-show="designBrowseLoading" class="text-center py-6">
+                  <svg class="w-5 h-5 animate-spin mx-auto" style="color:var(--color-primary)" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                </div>
+                <div x-show="!designBrowseLoading" class="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                  <template x-for="cls in filteredDesignClasses" :key="cls.number">
+                    <button @click="toggleDesignBrowseClass(cls.number)"
+                            class="flex items-center gap-2 px-3 py-2 rounded-lg text-left text-xs transition-all"
+                            :style="designSelectedClasses.includes(cls.number)
+                                    ? 'background:var(--color-primary);color:white'
+                                    : 'color:var(--color-text-secondary)'"
+                            :class="!designSelectedClasses.includes(cls.number) ? 'hover:bg-[var(--color-bg-muted)]' : ''">
+                      <!-- Checkbox indicator -->
+                      <span x-show="!designSelectedClasses.includes(cls.number)"
+                            class="w-3.5 h-3.5 flex-shrink-0 rounded border inline-flex items-center justify-center"
+                            style="border-color:var(--color-text-faint)"></span>
+                      <span x-show="designSelectedClasses.includes(cls.number)"
+                            class="w-3.5 h-3.5 flex-shrink-0 rounded bg-white inline-flex items-center justify-center">
+                        <svg class="w-2.5 h-2.5" fill="none" stroke="var(--color-primary)" stroke-width="3" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      </span>
+                      <span class="font-bold w-6 text-center flex-shrink-0" x-text="cls.number"></span>
+                      <span class="flex-1 truncate" x-text="cls.name"></span>
+                    </button>
+                  </template>
+                </div>
+              </div>
             </div>
           </div>
         </div>

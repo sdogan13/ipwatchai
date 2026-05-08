@@ -26,11 +26,20 @@ EXPECTED_DESIGN_SEARCH_KEYS = (
     # Polished form additions: drag-drop image zone, optional badge,
     # visual-analysis subtitle, remove button, analysis-types hint line
     "drop_image", "optional", "visual_analysis", "remove_image", "analysis_hint",
-    # Locarno class picker: collapsed-bar prompt, count chip, expanded panel
-    # header, AI suggest input/button + loading/error/quota messages
-    "locarno_finder_toggle", "locarno_classes_selected", "locarno_browse_all",
-    "locarno_ai_placeholder", "locarno_ai_button", "locarno_ai_loading",
-    "locarno_ai_error", "locarno_ai_no_credits",
+    # Locarno class picker (Marka-mirroring naming): collapsed-bar count chip
+    # plus exact-mirror keys class_finder_toggle / class_label /
+    # class_input_placeholder / class_suggest_placeholder / suggesting /
+    # suggest_classes / click_to_select / class_tab_browse /
+    # browse_filter_placeholder / invalid_class_number /
+    # description_too_short / no_class_suggestions / class_suggestion_failed
+    "locarno_classes_selected", "locarno_ai_no_credits",
+    "class_finder_toggle", "class_label", "class_input_placeholder",
+    "class_suggest_placeholder", "suggesting", "suggest_classes",
+    "click_to_select", "class_tab_browse", "browse_filter_placeholder",
+    "invalid_class_number", "description_too_short", "no_class_suggestions",
+    "class_suggestion_failed",
+    # Result-card additions: designer chip prefix
+    "designer_label",
 )
 
 
