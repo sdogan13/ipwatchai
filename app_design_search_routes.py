@@ -265,3 +265,53 @@ def register_design_search_routes(app, limiter):
             query=query, image=image, locarno=locarno, limit=limit,
             user_id=user_id, organization_id=org_id,
         )
+
+    # ---- Locarno class catalogue + AI suggest ----
+
+    @app.get("/api/v1/locarno-classes", tags=["Design Search"])
+    @limiter.limit("60/minute")
+    async def list_locarno_classes(request: Request):
+        """Return the 32 top-level Locarno classes with localized names.
+
+        Public endpoint, no auth, no cost. Cache-friendly: the lookup table
+        only changes on schema bootstrap.
+        """
+        from database.crud import Database
+        with Database() as db:
+            cur = db.cursor()
+            cur.execute(
+                """
+                SELECT class_number, name_tr, name_en
+                FROM locarno_classes_lookup
+                ORDER BY class_number ASC
+                """
+            )
+            rows = cur.fetchall()
+        items = []
+        for r in rows:
+            items.append({
+                "class_number": r["class_number"] if isinstance(r, dict) else r[0],
+                "name_tr": r["name_tr"] if isinstance(r, dict) else r[1],
+                "name_en": r["name_en"] if isinstance(r, dict) else r[2],
+            })
+        return {"items": items, "total": len(items)}
+
+    @app.post("/api/v1/tools/suggest-locarno-classes", tags=["Design Search"])
+    @limiter.limit("20/minute")
+    async def suggest_locarno_classes_route(
+        request: Request,
+        current_user=Depends(get_current_user),
+    ):
+        from services.locarno_suggest_service import (
+            LocarnoSuggestionRequest,
+            suggest_locarno_classes_data,
+        )
+        body = await request.json()
+        try:
+            payload = LocarnoSuggestionRequest(**body)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return await suggest_locarno_classes_data(
+            request=payload,
+            current_user=current_user,
+        )

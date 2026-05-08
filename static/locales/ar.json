@@ -367,7 +367,11 @@
     "email_watched": "العلامة المراقبة:",
     "email_deadline": "موعد الاعتراض:",
     "email_risk": "التشابه:",
-    "email_closing": "أرجو التكرم بالمساعدة."
+    "email_closing": "أرجو التكرم بالمساعدة.",
+    "published": "نُشر",
+    "deadline": "الموعد النهائي",
+    "expired": "منتهي",
+    "days_left": "متبقي {days} يوم"
   },
   "timeline": {
     "elapsed": "{days}/{total} يوم منقضي",
@@ -1779,7 +1783,20 @@
     "error_quota": "وصلت إلى الحد اليومي للبحث. حاول غداً.",
     "error_auth": "يرجى تسجيل الدخول لاستخدام بحث التصاميم.",
     "error_image_too_large": "الصورة كبيرة جداً (الحد الأقصى 10 م.ب).",
-    "error_invalid_input": "إدخال غير صالح."
+    "error_invalid_input": "إدخال غير صالح.",
+    "drop_image": "أفلت الصورة هنا أو انقر للتحميل",
+    "optional": "(اختياري)",
+    "visual_analysis": "تشابه بصري + نصي",
+    "remove_image": "إزالة الصورة",
+    "analysis_hint": "بصري · لون · نص · لوكارنو",
+    "locarno_finder_toggle": "اختر أصناف لوكارنو (اختياري)",
+    "locarno_classes_selected": "{count} محدد",
+    "locarno_browse_all": "جميع الأصناف",
+    "locarno_ai_placeholder": "صف تصميمك (مثال: مصباح طاولة)",
+    "locarno_ai_button": "اقترح أصنافاً",
+    "locarno_ai_loading": "جارٍ الاقتراح…",
+    "locarno_ai_error": "تعذّر إنشاء الاقتراحات. يرجى المحاولة مرة أخرى.",
+    "locarno_ai_no_credits": "نفدت أرصدة الذكاء الاصطناعي. قم بترقية الخطة للمتابعة."
   },
   "design_watchlist": {
     "panel_title": "متابعة التصاميم",

@@ -86,6 +86,22 @@ def normalize_locarno_filter(values: Optional[Sequence[str]]) -> Optional[List[s
     return out or None
 
 
+def _locarno_filter_clause(*, table_alias: str = "") -> str:
+    """SQL clause that matches a Locarno filter against ``designs``.
+
+    Top-level filter values (e.g. '07') match designs whose ``locarno_classes``
+    contains '07' OR any '07-XX' subclass. Subclass filter values ('07-02')
+    still require exact match. Called with ``table_alias='d'`` when the
+    designs table is aliased in the calling SQL.
+    """
+    col = f"{table_alias}.locarno_classes" if table_alias else "locarno_classes"
+    return (
+        f" AND ({col} && %(locarno)s::text[]"
+        f" OR EXISTS (SELECT 1 FROM unnest({col}) c"
+        f" WHERE split_part(c, '-', 1) = ANY(%(locarno)s::text[])))"
+    )
+
+
 def cap_limit(value: Any, *, public: bool = False) -> int:
     """Coerce a limit param into the allowed range."""
     try:
@@ -131,7 +147,7 @@ def _retrieve_text_candidates(
     """Trigram + ILIKE retrieval over product_name_tr."""
     if not query:
         return []
-    locarno_clause = " AND locarno_classes && %(locarno)s::text[]" if locarno else ""
+    locarno_clause = _locarno_filter_clause() if locarno else ""
     sql = f"""
         SELECT id::text AS design_id,
                similarity(LOWER(COALESCE(product_name_tr,'')), LOWER(%(q)s)) AS sim
@@ -161,7 +177,7 @@ def _retrieve_vector_candidates(
     locarno: Optional[List[str]], limit: int, sim_field: str,
 ) -> List[DesignCandidate]:
     """Cosine retrieval against one of the design aggregate vector columns."""
-    locarno_clause = " AND locarno_classes && %(locarno)s::text[]" if locarno else ""
+    locarno_clause = _locarno_filter_clause() if locarno else ""
     sql = f"""
         SELECT id::text AS design_id,
                1 - ({column} <=> %(vec)s::halfvec) AS sim
@@ -189,7 +205,7 @@ def _retrieve_color_candidates_via_views(
 ) -> List[DesignCandidate]:
     """Color HSV is per-view only; for design-level retrieval take the
     minimum distance across the design's views."""
-    locarno_clause = " AND d.locarno_classes && %(locarno)s::text[]" if locarno else ""
+    locarno_clause = _locarno_filter_clause(table_alias="d") if locarno else ""
     sql = f"""
         SELECT d.id::text AS design_id,
                1 - MIN(dv.color_hsv <=> %(vec)s::halfvec) AS sim

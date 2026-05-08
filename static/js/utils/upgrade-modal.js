@@ -399,7 +399,7 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
                     : t('pricing.f_ai_credits', { n: plan.monthly_ai_credits });
             case 'name_suggestions_per_session':
                 return isUnlimited(plan.name_suggestions_per_session)
-                    ? t('pricing.f_unlimited_name_suggestions')
+                    ? t('pricing.f_unlimited_suggestions')
                     : t('pricing.f_name_suggestions', { n: plan.name_suggestions_per_session });
             case 'daily_lead_views':
                 return isUnlimited(plan.daily_lead_views)

@@ -367,7 +367,11 @@
     "email_watched": "Watched Trademark:",
     "email_deadline": "Opposition Deadline:",
     "email_risk": "Similarity:",
-    "email_closing": "I kindly request your assistance."
+    "email_closing": "I kindly request your assistance.",
+    "published": "Published",
+    "deadline": "Deadline",
+    "expired": "Expired",
+    "days_left": "{days} days left"
   },
   "timeline": {
     "elapsed": "{days}/{total} days elapsed",
@@ -1777,7 +1781,20 @@
     "error_quota": "Daily search limit reached. Try again tomorrow.",
     "error_auth": "Please sign in to use design search.",
     "error_image_too_large": "Image is too large (max 10 MB).",
-    "error_invalid_input": "Invalid input."
+    "error_invalid_input": "Invalid input.",
+    "drop_image": "Drop image here or click to upload",
+    "optional": "(optional)",
+    "visual_analysis": "Visual + text similarity",
+    "remove_image": "Remove image",
+    "analysis_hint": "Visual · Color · Text · Locarno",
+    "locarno_finder_toggle": "Select Locarno classes (optional)",
+    "locarno_classes_selected": "{count} selected",
+    "locarno_browse_all": "All classes",
+    "locarno_ai_placeholder": "Describe your design (e.g. table lamp)",
+    "locarno_ai_button": "Suggest classes",
+    "locarno_ai_loading": "Suggesting…",
+    "locarno_ai_error": "Could not generate suggestions. Please try again.",
+    "locarno_ai_no_credits": "AI credits exhausted. Upgrade to keep suggesting."
   },
   "design_watchlist": {
     "panel_title": "Design Watchlist",

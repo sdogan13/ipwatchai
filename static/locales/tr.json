@@ -411,7 +411,11 @@
     "email_watched": "İzlenen Marka:",
     "email_deadline": "İtiraz Son Tarih:",
     "email_risk": "Benzerlik:",
-    "email_closing": "Bilgilendirmenizi rica ederim."
+    "email_closing": "Bilgilendirmenizi rica ederim.",
+    "published": "Yayınlandı",
+    "deadline": "Son Tarih",
+    "expired": "Süresi Doldu",
+    "days_left": "{days} gün kaldı"
   },
   "leads": {
     "title": "Opposition Radar",
@@ -1782,7 +1786,20 @@
     "error_quota": "Günlük arama limitinize ulaştınız. Yarın tekrar deneyin.",
     "error_auth": "Tasarım araması için giriş yapın.",
     "error_image_too_large": "Görsel çok büyük (maks 10 MB).",
-    "error_invalid_input": "Geçersiz girdi."
+    "error_invalid_input": "Geçersiz girdi.",
+    "drop_image": "Görseli buraya bırakın veya tıklayın",
+    "optional": "(opsiyonel)",
+    "visual_analysis": "Görsel + metin benzerliği",
+    "remove_image": "Görseli kaldır",
+    "analysis_hint": "Görsel · Renk · Metin · Locarno",
+    "locarno_finder_toggle": "Locarno sınıfı seçin (opsiyonel)",
+    "locarno_classes_selected": "{count} seçili",
+    "locarno_browse_all": "Tüm sınıflar",
+    "locarno_ai_placeholder": "Tasarımınızı tarif edin (ör. masa lambası)",
+    "locarno_ai_button": "Sınıf Öner",
+    "locarno_ai_loading": "Öneriliyor…",
+    "locarno_ai_error": "Öneri alınamadı. Lütfen tekrar deneyin.",
+    "locarno_ai_no_credits": "AI kredisi tükendi. Devam etmek için planı yükseltin."
   },
   "design_watchlist": {
     "panel_title": "Tasarım Takibi",

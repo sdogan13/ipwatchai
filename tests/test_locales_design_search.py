@@ -23,6 +23,14 @@ EXPECTED_DESIGN_SEARCH_KEYS = (
     "appno_label", "holder_label",
     "error_empty", "error_generic", "error_network",
     "error_quota", "error_auth", "error_image_too_large", "error_invalid_input",
+    # Polished form additions: drag-drop image zone, optional badge,
+    # visual-analysis subtitle, remove button, analysis-types hint line
+    "drop_image", "optional", "visual_analysis", "remove_image", "analysis_hint",
+    # Locarno class picker: collapsed-bar prompt, count chip, expanded panel
+    # header, AI suggest input/button + loading/error/quota messages
+    "locarno_finder_toggle", "locarno_classes_selected", "locarno_browse_all",
+    "locarno_ai_placeholder", "locarno_ai_button", "locarno_ai_loading",
+    "locarno_ai_error", "locarno_ai_no_credits",
 )
 
 
