@@ -193,3 +193,38 @@ def test_search_designs_empty_query_returns_error():
     assert res["total"] == 0
     assert res["results"] == []
     assert res["error"] == "design_search.empty_query"
+
+
+# ---------------------------------------------------------------------------
+# Route registration — verifies the three paths attach to a FastAPI app
+# ---------------------------------------------------------------------------
+
+def test_register_design_search_routes_attaches_three_paths():
+    from fastapi import FastAPI
+    from slowapi import Limiter
+    from slowapi.util import get_remote_address
+
+    from app_design_search_routes import register_design_search_routes
+
+    app = FastAPI()
+    limiter = Limiter(key_func=get_remote_address)
+    app.state.limiter = limiter
+
+    register_design_search_routes(app, limiter)
+
+    paths = {(getattr(r, "path", None), tuple(sorted(getattr(r, "methods", set()) or [])))
+             for r in app.routes}
+
+    expected = {
+        ("/api/v1/design-image/{image_path:path}", ("GET",)),
+        ("/api/v1/design-search/public", ("GET",)),
+        ("/api/v1/design-search/public", ("POST",)),
+        ("/api/v1/design-search/quick", ("POST",)),
+    }
+    for path, methods in expected:
+        # FastAPI may include HEAD on GET routes; check subset relation
+        matching = [
+            (p, m) for (p, m) in paths
+            if p == path and set(methods).issubset(set(m))
+        ]
+        assert matching, f"expected {path} {methods} not registered; got: {paths}"

@@ -85,6 +85,7 @@ from app_enhanced_search_routes import (
     get_status_code,
     register_enhanced_search_routes,
 )
+from app_design_search_routes import register_design_search_routes
 from app_image_routes import find_trademark_image, register_trademark_image_routes
 from app_image_search_routes import register_image_search_routes
 from app_middleware import configure_middleware
@@ -208,6 +209,9 @@ public_search, public_search_post, _do_public_search = register_public_search_ro
     max_image_size=MAX_IMAGE_SIZE,
     validate_image_magic_bytes=validate_image_magic_bytes,
 )
+
+# Design (Tasarım) search routes — sister to the trademark search above.
+register_design_search_routes(app, limiter)
 
 # Lazy load AI models only when needed
 _ai_models_loaded = False
