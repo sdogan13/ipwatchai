@@ -34,6 +34,7 @@ import argparse
 import json
 import logging
 import re
+import shutil
 import time
 from collections import Counter
 from dataclasses import asdict, dataclass, field
@@ -1201,24 +1202,16 @@ _cli_logger = logging.getLogger("turkpatent.pdf_extract_cli")
 class CLIArgs:
     pdf_paths: List[Path]
     out_dir: Path
-    figures_root: Optional[Path]
     save_images: bool
     force: bool
 
 
-def metadata_filename(pdf_path: Path) -> str:
-    """``2025_08.pdf`` -> ``2025_08_pdf_metadata.json``.
-
-    The ``_pdf_`` infix distinguishes this from the CD-side
-    ``2025_12_metadata.json`` produced by ``cd_extract_patent`` so the
-    Stage 4 reconciler can read both as separate inputs.
-    """
-    return f"{pdf_path.stem}_pdf_metadata.json"
-
-
-def figures_dirname(pdf_path: Path) -> str:
-    """``2025_08.pdf`` -> ``2025_08_figures`` (folder name, no path)."""
-    return f"{pdf_path.stem}_figures"
+# PDF-side artifacts land in the bulletin parent folder
+# (PT_{YYYY}_{M}_{date}/) — see patent_paths.bulletin_folder_name.
+# These are the canonical filenames inside that folder.
+PDF_METADATA_FILENAME = "pdf_metadata.json"
+BULLETIN_PDF_FILENAME = "bulletin.pdf"
+FIGURES_DIRNAME = "figures"
 
 
 def _metadata_is_fresh(pdf_path: Path, json_path: Path) -> bool:
@@ -1266,17 +1259,9 @@ def parse_argv(argv: Optional[Sequence[str]] = None) -> CLIArgs:
         "--out-dir",
         type=Path,
         default=None,
-        help="Where to write {YYYY_M}_pdf_metadata.json files "
-             "(default: --bulletins-dir).",
-    )
-    parser.add_argument(
-        "--figures-root",
-        type=Path,
-        default=None,
-        help="Root directory for per-PDF figure folders. Defaults to "
-             "the same folder as the JSON sidecar; figures land in "
-             "{figures-root}/{YYYY_M}_figures/. Ignored when "
-             "--no-images is given.",
+        help="Bulletins root under which PT_{YYYY}_{M}_{date}/ folders "
+             "are created (default: --bulletins-dir). Each PDF's "
+             "outputs land in its bulletin's parent folder.",
     )
     parser.add_argument(
         "--no-images",
@@ -1288,8 +1273,8 @@ def parse_argv(argv: Optional[Sequence[str]] = None) -> CLIArgs:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Re-extract even when {YYYY_M}_pdf_metadata.json is "
-             "newer than the source PDF.",
+        help="Re-extract even when pdf_metadata.json in the bulletin "
+             "folder is newer than the source PDF.",
     )
     ns = parser.parse_args(argv)
 
@@ -1307,12 +1292,10 @@ def parse_argv(argv: Optional[Sequence[str]] = None) -> CLIArgs:
         parser.error("provide --pdf (one or more) or --all")
 
     out_dir = ns.out_dir if ns.out_dir is not None else ns.bulletins_dir
-    figures_root = ns.figures_root if ns.figures_root is not None else out_dir
 
     return CLIArgs(
         pdf_paths=pdf_paths,
         out_dir=out_dir,
-        figures_root=figures_root,
         save_images=not ns.no_images,
         force=ns.force,
     )
@@ -1321,50 +1304,82 @@ def parse_argv(argv: Optional[Sequence[str]] = None) -> CLIArgs:
 def _process_one(
     pdf: Path,
     out_dir: Path,
-    figures_root: Optional[Path],
     *,
     save_images: bool,
     force: bool,
 ) -> Dict[str, Any]:
-    """Run parse_pdf for a single PDF and write its JSON sidecar.
+    """Run parse_pdf for a single PDF and write all outputs into its
+    bulletin's PT_{YYYY}_{M}_{date}/ parent folder.
+
+    Outputs:
+      - ``pdf_metadata.json`` — the parsed JSON
+      - ``bulletin.pdf`` — copy of the source PDF (Marka convention)
+      - ``figures/`` — extracted images (skipped when save_images=False)
 
     Returns a small status dict so the top-level loop can report
     succeeded / skipped / failed counts.
     """
+    from patent_paths import bulletin_folder_path  # local import; avoids cycles
+
     if not pdf.is_file():
         return {"status": "missing", "pdf": pdf.name}
 
-    json_path = out_dir / metadata_filename(pdf)
+    # Cheap probe of the cover page to learn bulletin_no + date BEFORE
+    # the full parse — the parent folder name depends on those, and the
+    # full parse needs to know where to write its figures.
+    fitz = _get_fitz()
+    with fitz.open(str(pdf)) as doc:
+        bulletin_no, bulletin_date = extract_bulletin_metadata(doc)
+
+    if not bulletin_no or not bulletin_date:
+        _cli_logger.error(
+            "[!] %s: could not extract bulletin_no/date from cover page "
+            "(no=%r, date=%r)", pdf.name, bulletin_no, bulletin_date,
+        )
+        return {"status": "failed", "pdf": pdf.name,
+                "error": "missing bulletin metadata on cover page"}
+
+    parent = bulletin_folder_path(out_dir, bulletin_no, bulletin_date)
+    json_path = parent / PDF_METADATA_FILENAME
+
     if not force and _metadata_is_fresh(pdf, json_path):
         _cli_logger.info("[=] %s is fresh, skipping (use --force to override)",
                          pdf.name)
         return {"status": "skipped", "pdf": pdf.name, "out": json_path.name}
 
+    parent.mkdir(parents=True, exist_ok=True)
+
     figures_dir: Optional[Path] = None
-    if save_images and figures_root is not None:
-        figures_dir = figures_root / figures_dirname(pdf)
+    if save_images:
+        figures_dir = parent / FIGURES_DIRNAME
         figures_dir.mkdir(parents=True, exist_ok=True)
 
     started = time.time()
     payload = parse_pdf(pdf, figures_dir=figures_dir, save_images=save_images)
     payload["extract_duration_seconds"] = round(time.time() - started, 1)
 
-    out_dir.mkdir(parents=True, exist_ok=True)
     json_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
+    # Copy source PDF as bulletin.pdf for self-containment of the parent
+    # folder. Skip the copy if the destination already matches in size —
+    # cheap idempotency that avoids the ~50 MB rewrite on re-runs.
+    bulletin_pdf = parent / BULLETIN_PDF_FILENAME
+    if not bulletin_pdf.is_file() or bulletin_pdf.stat().st_size != pdf.stat().st_size:
+        shutil.copy2(pdf, bulletin_pdf)
+
     s = payload["stats"]
     _cli_logger.info(
-        "[+] %s: %d records (EP=%d), %d figures, wrote %s in %.1fs",
+        "[+] %s: %d records (EP=%d), %d figures, wrote %s/%s in %.1fs",
         pdf.name, s["records"], s["ep_fascicles"], s["figures_total"],
-        json_path.name, payload["extract_duration_seconds"],
+        parent.name, json_path.name, payload["extract_duration_seconds"],
     )
     return {
         "status": "ok",
         "pdf": pdf.name,
-        "out": json_path.name,
+        "out": parent.name,
         "stats": s,
     }
 
@@ -1384,7 +1399,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             result = _process_one(
                 pdf,
                 args.out_dir,
-                args.figures_root,
                 save_images=args.save_images,
                 force=args.force,
             )

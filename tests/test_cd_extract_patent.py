@@ -15,7 +15,8 @@ from cd_extract_patent import (
     decode_hsqldb_escapes,
     extract_cd_archive,
     main,
-    metadata_filename,
+    CD_METADATA_FILENAME,
+    RAW_HSQLDB_FILES,
     parse_argv,
     parse_bulletin_inf,
     parse_hsqldb_log,
@@ -882,18 +883,20 @@ def test_cd_to_metadata_real_2025_12_smoke(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Step 2.8 — metadata_filename + parse_argv + main
+# Step 2.8 — output filenames + parse_argv + main
 # ---------------------------------------------------------------------------
 
-def test_metadata_filename_strips_cd_suffix():
-    """A CD .rar's metadata sidecar matches its sibling PDF's stem."""
-    assert metadata_filename(Path("2025_12_CD.rar")) == "2025_12_metadata.json"
-    assert metadata_filename(Path("/abs/path/2024_07_CD.rar")) == "2024_07_metadata.json"
+def test_cd_metadata_filename_constant():
+    """The CD-side JSON always lands at ``cd_metadata.json`` inside the
+    bulletin's parent folder. The folder name varies (PT_{Y}_{M}_{date})
+    but the inner filename is fixed — Stage 5 ingest can rely on it."""
+    assert CD_METADATA_FILENAME == "cd_metadata.json"
 
 
-def test_metadata_filename_passthrough_when_no_cd_suffix():
-    """Defensive: .rar without _CD still gets a sensible name."""
-    assert metadata_filename(Path("legacy_bundle.rar")) == "legacy_bundle_metadata.json"
+def test_raw_hsqldb_filenames_constant():
+    """The raw HSQLDB files copied alongside cd_metadata.json. Used by
+    Stage 5 (DB ingest) for re-extraction without re-unzipping."""
+    assert RAW_HSQLDB_FILES == ("ptbulletin.log", "ptbulletin.script", "ptbulletin.properties")
 
 
 def test_parse_argv_with_explicit_rar(tmp_path):
@@ -989,7 +992,8 @@ def test_main_returns_nonzero_on_missing_archive(tmp_path):
 )
 def test_main_real_2025_12_smoke(tmp_path):
     """End-to-end CLI smoke: run main() against the real CD and verify
-    the metadata.json sidecar lands with the documented shape."""
+    the bulletin parent folder lands with cd_metadata.json + raw HSQLDB
+    files."""
     out_dir = tmp_path / "out"
     scratch = tmp_path / "scratch"
     rc = main([
@@ -999,9 +1003,19 @@ def test_main_real_2025_12_smoke(tmp_path):
     ])
     assert rc == 0
 
-    out_file = out_dir / "2025_12_metadata.json"
-    assert out_file.is_file()
-    assert out_file.stat().st_size > 100_000  # several MB expected
+    # 2025_12_CD.rar carries bulletin 2025/12 (no offset for this month —
+    # see patent_cd_filename_offset memory).
+    parent = out_dir / "PT_2025_12_2025-12-22"
+    assert parent.is_dir()
+
+    cd_meta = parent / "cd_metadata.json"
+    assert cd_meta.is_file()
+    assert cd_meta.stat().st_size > 100_000  # several MB expected
+
+    # Raw HSQLDB files alongside, ready for Stage 5 re-ingest
+    assert (parent / "ptbulletin.log").is_file()
+    assert (parent / "ptbulletin.script").is_file()
+    assert (parent / "ptbulletin.properties").is_file()
 
     # Scratch should be cleaned by default
     assert not (scratch / "2025_12_CD").exists()

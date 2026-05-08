@@ -47,9 +47,10 @@ from pdf_extract_patent import (
     build_figure_inventory,
     detect_banner_xrefs,
     extract_record_figures,
-    figures_dirname,
+    BULLETIN_PDF_FILENAME,
+    FIGURES_DIRNAME,
     main,
-    metadata_filename,
+    PDF_METADATA_FILENAME,
     parse_argv,
     parse_pdf,
 )
@@ -1503,16 +1504,16 @@ def test_parse_pdf_real_2025_08_writes_figures(tmp_path):
 # Step 3.8 — metadata_filename + figures_dirname
 # ---------------------------------------------------------------------------
 
-def test_metadata_filename_uses_pdf_infix():
-    """The PDF JSON sidecar must be DISTINCT from the CD-side
-    {YYYY_M}_metadata.json (Stage 4 reconciler reads both)."""
-    assert metadata_filename(Path("2025_08.pdf")) == "2025_08_pdf_metadata.json"
-    assert metadata_filename(Path("/abs/2024_07.pdf")) == "2024_07_pdf_metadata.json"
+def test_pdf_metadata_filename_constant_canonical():
+    """The PDF JSON inside the bulletin parent folder is always
+    pdf_metadata.json — distinct from CD's cd_metadata.json so the
+    reconciler can read both as separate inputs."""
+    assert PDF_METADATA_FILENAME == "pdf_metadata.json"
 
 
-def test_figures_dirname():
-    assert figures_dirname(Path("2025_08.pdf")) == "2025_08_figures"
-    assert figures_dirname(Path("/abs/2024_07.pdf")) == "2024_07_figures"
+def test_figures_dirname_constant_canonical():
+    """Figures land in figures/ inside the bulletin parent folder."""
+    assert FIGURES_DIRNAME == "figures"
 
 
 # ---------------------------------------------------------------------------
@@ -1628,25 +1629,6 @@ def test_parse_argv_out_dir_defaults_to_bulletins_dir(tmp_path):
     assert args.out_dir == tmp_path
 
 
-def test_parse_argv_figures_root_defaults_to_out_dir(tmp_path):
-    pdf = tmp_path / "2025_08.pdf"
-    pdf.write_bytes(b"")
-    args = parse_argv(["--pdf", str(pdf), "--out-dir", str(tmp_path)])
-    assert args.figures_root == tmp_path
-
-
-def test_parse_argv_figures_root_explicit(tmp_path):
-    pdf = tmp_path / "src" / "2025_08.pdf"
-    pdf.parent.mkdir()
-    pdf.write_bytes(b"")
-    other = tmp_path / "fig_root"
-    args = parse_argv([
-        "--pdf", str(pdf),
-        "--figures-root", str(other),
-    ])
-    assert args.figures_root == other
-
-
 # ---------------------------------------------------------------------------
 # Step 3.8 — main returns nonzero on missing source
 # ---------------------------------------------------------------------------
@@ -1677,9 +1659,12 @@ def test_main_real_2025_08_smoke(tmp_path):
 
     Verifies:
       - exit code 0
-      - JSON sidecar lands at out_dir/2025_08_pdf_metadata.json
+      - bulletin parent folder lands at PT_2025_8_2025-08-21/ under out_dir
+      - pdf_metadata.json + bulletin.pdf inside; figures/ skipped due to
+        --no-images
       - sidecar size in megabyte range, valid JSON, expected stats
-      - re-running without --force is a no-op skip (exit 0, JSON unchanged mtime)
+      - re-running without --force is a no-op skip (exit 0, JSON mtime
+        unchanged)
     """
     rc = main([
         "--pdf", str(_REAL_PDF),
@@ -1688,20 +1673,31 @@ def test_main_real_2025_08_smoke(tmp_path):
     ])
     assert rc == 0
 
-    out_file = tmp_path / "2025_08_pdf_metadata.json"
-    assert out_file.is_file()
-    assert out_file.stat().st_size > 1_000_000  # several MB
-    payload = json.loads(out_file.read_text(encoding="utf-8"))
+    parent = tmp_path / "PT_2025_8_2025-08-21"
+    assert parent.is_dir()
+
+    json_path = parent / "pdf_metadata.json"
+    assert json_path.is_file()
+    assert json_path.stat().st_size > 1_000_000  # several MB
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
     assert payload["bulletin_no"] == "2025-08"
     assert payload["stats"]["records"] == 1613
 
+    # bulletin.pdf is a copy of the source
+    bulletin_pdf = parent / "bulletin.pdf"
+    assert bulletin_pdf.is_file()
+    assert bulletin_pdf.stat().st_size == _REAL_PDF.stat().st_size
+
+    # No figures/ subdir because --no-images
+    assert not (parent / "figures").exists()
+
     # Re-run: should skip-if-fresh (exit 0, JSON mtime unchanged)
-    mtime_before = out_file.stat().st_mtime
+    mtime_before = json_path.stat().st_mtime
     rc2 = main([
         "--pdf", str(_REAL_PDF),
         "--out-dir", str(tmp_path),
         "--no-images",
     ])
     assert rc2 == 0
-    mtime_after = out_file.stat().st_mtime
+    mtime_after = json_path.stat().st_mtime
     assert mtime_after == mtime_before  # not re-written

@@ -454,19 +454,28 @@ def extract_cd_archive(
             f"{(result.stderr or result.stdout).strip()[:500]}"
         )
 
-    # Identify the extracted CD root. Modern CDs (2017+) wrap their
-    # contents in a single top-level folder named after the bulletin
-    # month (e.g. `2025_8/data/ptbulletin.log`). Some older CDs
-    # (verified on 2015_12_CD.rar, 2016_1_CD.rar) flatten the archive
-    # and write `data/` directly into the scratch dir with no wrapper —
-    # check for that case first so the caller's `cd_root / "data"`
-    # doesn't double the path.
+    return _resolve_cd_root(scratch, rar.name)
+
+
+def _resolve_cd_root(scratch: Path, source_label: str = "<unknown>") -> Path:
+    """Locate the CD root folder inside an extracted scratch dir.
+
+    Modern CDs (2017+) wrap their contents in a single top-level folder
+    named after the bulletin month (e.g. ``scratch/2025_8/data/...``).
+    Some older CDs (verified on 2015_12_CD.rar, 2016_1_CD.rar) flatten
+    the archive — ``data/`` lands directly under ``scratch`` with no
+    wrapper. Check for the no-wrapper case first so callers' subsequent
+    ``cd_root / "data"`` joins don't double up.
+
+    Used by ``extract_cd_archive`` (post-7-Zip) and by ``_process_one``
+    (post-extraction, to copy raw HSQLDB files into the parent folder).
+    """
     if (scratch / "data" / "ptbulletin.log").is_file():
         return scratch
 
     candidates = [p for p in scratch.iterdir() if p.is_dir()]
     if not candidates:
-        raise RuntimeError(f"no folders found in {scratch} after extracting {rar.name}")
+        raise RuntimeError(f"no folders found in {scratch} after extracting {source_label}")
 
     if len(candidates) == 1:
         return candidates[0]
@@ -695,17 +704,11 @@ class CLIArgs:
     keep_scratch: bool
 
 
-def metadata_filename(rar_path: Path) -> str:
-    """Return the canonical metadata.json name for a CD .rar.
-
-    e.g. ``2025_12_CD.rar`` -> ``2025_12_metadata.json``. Drops the
-    ``_CD`` suffix so the metadata lines up alphabetically next to its
-    sibling PDF (``2025_12.pdf``).
-    """
-    stem = rar_path.stem
-    if stem.endswith("_CD"):
-        stem = stem[:-3]
-    return f"{stem}_metadata.json"
+# Each bulletin's CD-side artifacts live in a parent folder named for
+# the bulletin (PT_{YYYY}_{M}_{date}/) — see patent_paths.bulletin_folder_name.
+# These are the canonical filenames inside that folder.
+CD_METADATA_FILENAME = "cd_metadata.json"
+RAW_HSQLDB_FILES = ("ptbulletin.log", "ptbulletin.script", "ptbulletin.properties")
 
 
 def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
@@ -790,7 +793,16 @@ def _process_one(
     seven_zip: Optional[Path],
     keep_scratch: bool,
 ) -> Dict[str, Any]:
-    """Run cd_to_metadata for a single archive and write its JSON sidecar."""
+    """Extract one CD archive into its bulletin parent folder.
+
+    Writes ``out_dir/PT_{Y}_{M}_{date}/cd_metadata.json`` and copies the
+    raw HSQLDB files (``ptbulletin.log``, ``.script``, ``.properties``)
+    into the same folder. The parent folder is created if it doesn't
+    yet exist; if a sibling stage (PDF extract, reconcile) already
+    created it, the CD outputs land alongside.
+    """
+    from patent_paths import bulletin_folder_path  # local import; avoids cycles
+
     cd_scratch = scratch_dir / rar.stem
     if cd_scratch.exists():
         shutil.rmtree(cd_scratch, ignore_errors=True)
@@ -798,23 +810,34 @@ def _process_one(
 
     try:
         doc = cd_to_metadata(rar, cd_scratch, seven_zip=seven_zip)
+        # Find cd_root again so we can copy raw files. cd_to_metadata
+        # already extracted into cd_scratch; _resolve_cd_root reuses
+        # extract_cd_archive's layout-detection logic.
+        cd_root = _resolve_cd_root(cd_scratch, source_label=rar.name)
+
+        parent = bulletin_folder_path(out_dir, doc["bulletin_no"], doc["bulletin_date"])
+        parent.mkdir(parents=True, exist_ok=True)
+
+        (parent / CD_METADATA_FILENAME).write_text(
+            json.dumps(doc, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        for fname in RAW_HSQLDB_FILES:
+            src = cd_root / "data" / fname
+            if src.is_file():
+                shutil.copy2(src, parent / fname)
     except Exception:
         if not keep_scratch:
             shutil.rmtree(cd_scratch, ignore_errors=True)
         raise
-
-    out_path = out_dir / metadata_filename(rar)
-    out_path.write_text(
-        json.dumps(doc, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
 
     if not keep_scratch:
         shutil.rmtree(cd_scratch, ignore_errors=True)
 
     return {
         "rar": rar.name,
-        "out": out_path.name,
+        "out": parent.name,
         "stats": doc["stats"],
     }
 
@@ -834,7 +857,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             failed.append((rar.name, "not found"))
             continue
 
-        logger.info("[*] %s -> %s", rar.name, metadata_filename(rar))
+        logger.info("[*] %s -> PT_<bulletin>/%s", rar.name, CD_METADATA_FILENAME)
         try:
             result = _process_one(
                 rar, args.out_dir, args.scratch_dir,

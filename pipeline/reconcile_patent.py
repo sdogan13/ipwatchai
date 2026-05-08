@@ -711,118 +711,85 @@ class CLIArgs:
     force: bool
 
 
-def unified_filename(bulletin_no: Optional[str]) -> str:
-    """Derive the canonical unified output filename from bulletin_no.
-
-    Examples:
-      ``"2025/8"``  -> ``"2025_08_unified_metadata.json"``
-      ``"2025-08"`` -> ``"2025_08_unified_metadata.json"``
-      ``"2025/12"`` -> ``"2025_12_unified_metadata.json"``
-
-    The ``_unified_`` infix is required because the CD-filename-offset
-    (see patent_cd_filename_offset memory) means a unified output's
-    bulletin-derived filename can collide with a DIFFERENT bulletin's
-    CD intermediate. Concrete: bulletin 2024/1 unified would write to
-    ``2024_01_metadata.json``, which is the CD intermediate for
-    bulletin 2024/2 (CD filename offset). The infix prevents that
-    silent overwrite. Symmetric with ``_pdf_metadata.json``.
-
-    Raises ``ValueError`` if bulletin_no can't be parsed — the CLI must
-    not silently write to a wrong filename.
-    """
-    canonical = _normalise_bulletin_no(bulletin_no)
-    if not canonical:
-        raise ValueError(f"cannot derive filename from bulletin_no={bulletin_no!r}")
-    match = re.match(r"^(\d{4})/(\d{1,2})$", canonical)
-    if not match:
-        raise ValueError(f"cannot derive filename from bulletin_no={bulletin_no!r}")
-    year, month = match.group(1), match.group(2).zfill(2)
-    return f"{year}_{month}_unified_metadata.json"
+# The unified output lives inside its bulletin's PT_{Y}_{M}_{date}/
+# parent folder, so it can use the simple canonical filename without
+# any infix — no collision is possible since each bulletin has its own
+# folder. Stage 5 ingest reads metadata.json from each PT_ folder.
+UNIFIED_METADATA_FILENAME = "metadata.json"
+CD_METADATA_FILENAME = "cd_metadata.json"
+PDF_METADATA_FILENAME = "pdf_metadata.json"
 
 
 def classify_metadata_json(path: Path) -> str:
-    """Discriminate file type by filename suffix + top-level keys.
+    """Discriminate file type by canonical filename inside a bulletin folder.
 
     Returns ``"cd"``, ``"pdf"``, or ``"unified"``.
 
-    Filename suffixes are checked first because they're unambiguous and
-    avoid one JSON parse:
-      - ``*_pdf_metadata.json``     -> ``"pdf"``
-      - ``*_unified_metadata.json`` -> ``"unified"``
-      - everything else: parse and inspect top-level keys.
+    The Marka-style folder layout (one bulletin per PT_{Y}_{M}_{date}/)
+    means every JSON in the pipeline has a fixed canonical name:
+      - ``cd_metadata.json``      → ``"cd"``
+      - ``pdf_metadata.json``     → ``"pdf"``
+      - ``metadata.json``         → ``"unified"``
 
-    Raises ``ValueError`` for files that don't look like any known
-    metadata shape.
+    Raises ``ValueError`` for any other filename so flat-layout
+    leftovers (``*_pdf_metadata.json`` from a pre-refactor run) fail
+    loudly instead of being silently misclassified.
     """
-    if path.name.endswith("_pdf_metadata.json"):
-        return "pdf"
-    if path.name.endswith("_unified_metadata.json"):
-        return "unified"
-    try:
-        doc = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as e:
-        raise ValueError(f"{path}: cannot read JSON ({e})")
-    if not isinstance(doc, dict):
-        raise ValueError(f"{path}: top-level JSON is not an object")
-    if "patents" in doc:
+    name = path.name
+    if name == CD_METADATA_FILENAME:
         return "cd"
-    if "records" in doc and "reconciled_at" in doc:
-        # Defensive: a unified file without the canonical suffix can
-        # still be identified by its content — happens if a user passes
-        # --out-dir to a different directory and renames manually.
+    if name == PDF_METADATA_FILENAME:
+        return "pdf"
+    if name == UNIFIED_METADATA_FILENAME:
         return "unified"
-    raise ValueError(f"{path}: not a recognised CD/PDF/unified metadata doc")
+    raise ValueError(
+        f"{path}: not a canonical metadata filename "
+        f"(expected one of {CD_METADATA_FILENAME!r}, "
+        f"{PDF_METADATA_FILENAME!r}, {UNIFIED_METADATA_FILENAME!r})"
+    )
 
 
 def _group_by_bulletin(
     bulletins_dir: Path,
 ) -> Dict[str, Dict[str, Dict[str, Any]]]:
-    """Walk a bulletins dir, group CD + PDF JSON DOCS by canonical bulletin_no.
+    """Walk PT_*/ folders under bulletins_dir, group CD + PDF docs by bulletin_no.
 
-    Returns ``{bulletin_no: {"cd": <doc>, "pdf": <doc>}}``. Critically,
-    we load and KEEP each doc's parsed JSON in memory rather than just
-    its path, because:
+    Returns ``{bulletin_no: {"cd": <doc>, "pdf": <doc>}}`` mapping each
+    bulletin's canonical number to its loaded source docs. Each
+    ``PT_{Y}_{M}_{date}/`` folder may contain ``cd_metadata.json``,
+    ``pdf_metadata.json``, and (after a prior reconcile) ``metadata.json``
+    — the unified file is skipped here because feeding a previous
+    unified back as input would compound stats blocks.
 
-      1. CD filenames don't reliably encode bulletin_no (see
-         CD-filename-offset memory): ``2024_01_CD.rar`` is bulletin
-         2024/2.
-      2. Unified outputs derive their filename from the canonical
-         ``bulletin_no``: bulletin 2024/1 writes to
-         ``2024_01_metadata.json``.
-      3. As --all processes bulletins, the unified for 2024/1
-         OVERWRITES the on-disk file at ``2024_01_metadata.json``.
-         A path-only snapshot would then re-read that file when
-         processing bulletin 2024/2 and find a unified doc instead
-         of a CD doc — which is exactly the failure mode observed
-         on 2026-05-08.
+    The function pre-loads every doc into memory (rather than storing
+    paths) because Stage 4's --all loop writes back into each PT_
+    folder — re-reading paths after writes produces a unified doc when
+    we wanted the original CD/PDF source.
 
-    Pre-loading every doc decouples read from write. Memory cost is
-    bounded by total CD+PDF JSON size on disk (~500 MB for the full
-    historical archive), which is fine for a dev machine.
-
-    Unified outputs from prior runs are skipped at scan time — re-running
-    --all on a partially-reconciled directory must not feed the prior
-    output back as input.
+    Memory cost: ~500 MB across the full 113-bulletin archive,
+    acceptable for a dev workflow.
     """
     groups: Dict[str, Dict[str, Dict[str, Any]]] = {}
-    for path in sorted(bulletins_dir.glob("*_metadata.json")):
-        try:
-            kind = classify_metadata_json(path)
-        except ValueError as exc:
-            logger.warning("[skip] %s: %s", path.name, exc)
+
+    for parent in sorted(p for p in bulletins_dir.iterdir() if p.is_dir()):
+        if not parent.name.startswith("PT_"):
             continue
-        if kind == "unified":
-            continue
-        try:
-            doc = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("[skip] %s: cannot read JSON (%s)", path.name, exc)
-            continue
-        bulletin = _normalise_bulletin_no(doc.get("bulletin_no"))
-        if not bulletin:
-            logger.warning("[skip] %s: missing bulletin_no", path.name)
-            continue
-        groups.setdefault(bulletin, {})[kind] = doc
+        for kind, fname in (("cd", CD_METADATA_FILENAME),
+                             ("pdf", PDF_METADATA_FILENAME)):
+            path = parent / fname
+            if not path.is_file():
+                continue
+            try:
+                doc = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                logger.warning("[skip] %s: cannot read JSON (%s)", path, exc)
+                continue
+            bulletin = _normalise_bulletin_no(doc.get("bulletin_no"))
+            if not bulletin:
+                logger.warning("[skip] %s: missing bulletin_no", path)
+                continue
+            groups.setdefault(bulletin, {})[kind] = doc
+
     return groups
 
 
@@ -834,24 +801,34 @@ def _process_pair(
 ) -> Dict[str, Any]:
     """Reconcile already-loaded CD + PDF docs and write the unified output.
 
+    Writes ``out_dir/PT_{Y}_{M}_{date}/metadata.json``. The parent
+    folder is created if needed; existing CD / PDF metadata in the same
+    folder is left untouched. ``--force`` is required to overwrite an
+    existing unified file.
+
     At least one of ``cd_doc`` / ``pdf_doc`` must be set. Returns a
     summary dict so ``main`` can report aggregate progress.
     """
+    from patent_paths import bulletin_folder_path  # local import; avoids cycles
+
     unified = reconcile_metadata(cd_doc=cd_doc, pdf_doc=pdf_doc)
 
-    out_path = out_dir / unified_filename(unified["bulletin_no"])
+    parent = bulletin_folder_path(
+        out_dir, unified["bulletin_no"], unified["bulletin_date"],
+    )
+    out_path = parent / UNIFIED_METADATA_FILENAME
     if out_path.exists() and not force:
         raise FileExistsError(
             f"{out_path} already exists; pass --force to overwrite"
         )
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(
         json.dumps(unified, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     return {
-        "out": out_path.name,
+        "out": f"{parent.name}/{out_path.name}",
         "bulletin_no": unified["bulletin_no"],
         "stats": unified["stats"],
     }
