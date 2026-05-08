@@ -31,8 +31,9 @@ CLI (lands in step 3.8)::
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 
 def _get_fitz():
@@ -351,3 +352,361 @@ def parse_inid_block(text: str) -> Dict[str, List[str]]:
         value = text[value_start:value_end].strip()
         out.setdefault(code, []).append(value)
     return out
+
+
+# ---------------------------------------------------------------------------
+# Step 3.4 — schema dataclasses
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Holder:
+    """A patent holder / applicant (INID 73 / 71)."""
+    name: str
+    address: Optional[str] = None
+    country: Optional[str] = None
+
+
+@dataclass
+class Inventor:
+    """A natural-person inventor (INID 72)."""
+    name: str
+
+
+@dataclass
+class Attorney:
+    """The agent / law firm representing the applicant (INID 74)."""
+    name: str
+    firm: Optional[str] = None
+
+
+@dataclass
+class Priority:
+    """One priority claim (INID 30 + sub-codes 31/32/33)."""
+    priority_no: Optional[str] = None
+    priority_date: Optional[str] = None  # ISO YYYY-MM-DD
+    country: Optional[str] = None
+
+
+@dataclass
+class EPReference:
+    """European Patent fascicle metadata (dual (96) / (97) INID values)."""
+    ep_application_no: Optional[str] = None
+    ep_application_date: Optional[str] = None
+    ep_publication_no: Optional[str] = None
+    ep_publication_date: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Step 3.4 — pure per-INID field parsers
+# ---------------------------------------------------------------------------
+
+# Address indicators that distinguish "single entity with a multi-line
+# postal address" from "list of natural-person names". Captures common
+# Turkish address abbreviations + the presence of any digit (street
+# number, postal code).
+_ADDRESS_HINT_RE = re.compile(
+    r"\d|MAH\.|MH\.|CAD\.|SK\.|SOK\.|BLV\.|BLK\.|NO[:.]",
+    re.IGNORECASE,
+)
+
+# IPC class shape: e.g. ``F25B 9/14`` (with space) or ``H02G3/12`` (no space).
+_IPC_CODE_RE = re.compile(r"\b([A-H]\d{2}[A-Z])\s?(\d+/\d+)")
+
+# EP publication-no shape: e.g. ``EP3885497B1``.
+_EP_PUB_NO_RE = re.compile(r"\b(EP\s*\d{5,}\s*[A-Z]\d?)\b", re.IGNORECASE)
+
+# EP application-no shape: e.g. ``EP21164305.1``.
+_EP_APP_NO_RE = re.compile(r"\b(EP\s*\d{5,}(?:\.\d+)?)\b", re.IGNORECASE)
+
+
+def _strip_label_line(value: Optional[str]) -> str:
+    """Drop the first line if it looks like a Turkish field label.
+
+    Many INID values render the human-readable label on the first line
+    and the data on subsequent lines (e.g. ``Başvuru Tarihi\\n2022/09/20``).
+    The label is alpha-only and reasonably short. Pure-data values
+    (e.g. ``TR 2022 014462 B``) are returned unchanged.
+    """
+    if not value:
+        return ""
+    lines = value.splitlines()
+    if not lines:
+        return ""
+    first = lines[0].strip()
+    # Heuristic: a label line has no digits AND is short (< 60 chars).
+    # The (51) IPC value's first line "Buluşun tasnif sınıfları" fits;
+    # so does (54) "Buluş Başlığı", (57) "Özet", (73) "Patent Sahibi",
+    # (72) "Buluşu Yapanlar", (74) "Vekil".
+    if first and not any(c.isdigit() for c in first) and len(first) < 60:
+        return "\n".join(lines[1:]).strip()
+    return value.strip()
+
+
+def parse_publication_no(value: Optional[str]) -> Optional[str]:
+    """Extract the publication number from an (11) or (10) value.
+
+    e.g. ``'TR 2022 014462 B'`` -> ``'TR 2022 014462 B'``
+         ``'Yayın No\\nTR 2022 014462 A2'`` -> ``'TR 2022 014462 A2'``
+
+    Returns ``None`` when the value doesn't contain the publication
+    number shape — the caller can treat this as a parse failure.
+    """
+    if not value:
+        return None
+    m = _PUBLICATION_NO_RE.search(value)
+    if not m:
+        return None
+    yyyy, num, kind = m.group(1), m.group(2), m.group(3)
+    return f"TR {yyyy} {num} {kind}"
+
+
+_APPLICATION_NO_RE = re.compile(r"\b(\d{4})/(\d{4,7})\b")
+
+
+def parse_application_no(value: Optional[str]) -> Optional[str]:
+    """Extract the application number from an (21) value.
+
+    ``'Başvuru Numarası\\n2022/014462'`` -> ``'2022/014462'``.
+    """
+    if not value:
+        return None
+    m = _APPLICATION_NO_RE.search(value)
+    return f"{m.group(1)}/{m.group(2)}" if m else None
+
+
+def parse_date_field(value: Optional[str]) -> Optional[str]:
+    """Pull the first ``YYYY/MM/DD`` date out of an INID value and
+    return ISO ``YYYY-MM-DD``. Wraps ``normalize_iso_date``.
+    """
+    return normalize_iso_date(value)
+
+
+def parse_ipc_classes(value: Optional[str]) -> List[str]:
+    """Extract IPC class strings from a (51) value.
+
+    Real shapes from 2025_08.pdf:
+      ``'Buluşun tasnif sınıfları\\nF25B 9/14\\nF25D 17/04\\nF25D 23/04'``
+      -> ``['F25B 9/14', 'F25D 17/04', 'F25D 23/04']``
+
+    Codes WITHOUT internal whitespace (``H02G3/12``) are normalised back
+    to ``H02G 3/12`` so all output is consistent. Order is preserved;
+    duplicates are dropped.
+    """
+    if not value:
+        return []
+    seen: List[str] = []
+    for m in _IPC_CODE_RE.finditer(value):
+        code = f"{m.group(1)} {m.group(2)}"
+        if code not in seen:
+            seen.append(code)
+    return seen
+
+
+def parse_title(value: Optional[str]) -> Optional[str]:
+    """Extract the title from a (54) value.
+
+    Drops the leading ``Buluş Başlığı`` label line (when present), joins
+    any continuation lines into a single string, collapses whitespace.
+    Returns ``None`` for empty input.
+    """
+    if not value:
+        return None
+    body = _strip_label_line(value)
+    return clean_text(body) or None
+
+
+def parse_abstract(value: Optional[str]) -> Optional[str]:
+    """Extract the abstract from a (57) value.
+
+    Drops the leading ``Özet`` label, but PRESERVES embedded newlines
+    so figure call-outs like ``…bir kapı (3)\\n…`` keep their intended
+    sentence structure when reading downstream.
+    """
+    if not value:
+        return None
+    body = _strip_label_line(value)
+    if not body:
+        return None
+    # collapse runs of internal whitespace per-line, but keep newlines
+    cleaned_lines = [re.sub(r"[ \t]+", " ", l).strip() for l in body.splitlines()]
+    cleaned_lines = [l for l in cleaned_lines if l]
+    return "\n".join(cleaned_lines) or None
+
+
+def _is_likely_country_token(token: str) -> bool:
+    """A trailing token looks like a country marker if it's all-caps
+    and at least 4 chars (avoids matching house-numbers or 'NO')."""
+    return bool(token) and token.isupper() and len(token) >= 4 and token.isalpha()
+
+
+def parse_holders(value: Optional[str]) -> List[Holder]:
+    """Parse a (71) / (73) holder block.
+
+    Two real shapes:
+
+      - Single entity with multi-line postal address (typical for (73)
+        granted-patent rows)::
+
+            Patent Sahibi
+            ARÇELİK ANONİM ŞİRKETİ
+            SÜTLÜCE MAH. KARAAĞAÇ CAD. 6  Beyoğlu
+            İstanbul TÜRKİYE
+
+      - List of natural-person names (typical for (71) pending-app rows)::
+
+            Başvuru Sahipleri
+            EMİNE YILDIRIM
+            ZEYNEP ERVA YILDIRIM
+            AHMET ÇARHAN
+
+    Heuristic: if any line after the first looks like an address
+    (digits or MAH./CAD./SK. abbreviations), treat the whole thing
+    as a single entity. Otherwise treat each line as a separate holder.
+    """
+    body = _strip_label_line(value)
+    if not body:
+        return []
+
+    lines = [clean_text(l) for l in body.splitlines() if l.strip()]
+    if not lines:
+        return []
+
+    # Single entity with address?
+    if len(lines) >= 2 and any(_ADDRESS_HINT_RE.search(l) for l in lines[1:]):
+        name = lines[0]
+        address_lines = lines[1:]
+        country: Optional[str] = None
+        if address_lines:
+            tail_tokens = address_lines[-1].split()
+            if tail_tokens and _is_likely_country_token(tail_tokens[-1]):
+                country = tail_tokens[-1]
+                # drop the country word from the address tail
+                address_lines = address_lines[:-1] + [" ".join(tail_tokens[:-1])]
+                address_lines = [l for l in address_lines if l]
+        address = " ".join(address_lines).strip() or None
+        return [Holder(name=name, address=address, country=country)]
+
+    # Otherwise: list of name-only entities
+    return [Holder(name=l) for l in lines]
+
+
+def parse_inventors(value: Optional[str]) -> List[Inventor]:
+    """Parse a (72) inventor block — a list of natural-person names.
+
+    The block is always shaped as a label line followed by one name
+    per line (no addresses). Empty input -> empty list.
+    """
+    body = _strip_label_line(value)
+    if not body:
+        return []
+    out: List[Inventor] = []
+    for raw in body.splitlines():
+        name = clean_text(raw)
+        if name:
+            out.append(Inventor(name=name))
+    return out
+
+
+def parse_attorney(value: Optional[str]) -> Optional[Attorney]:
+    """Parse a (74) ``Vekil`` block: ``NAME (FIRM)``.
+
+    The firm clause often line-wraps mid-name, so we join all post-label
+    lines into one string before regex-matching.
+    """
+    body = _strip_label_line(value)
+    if not body:
+        return None
+    text = clean_text(body)
+    if not text:
+        return None
+    m = re.match(r"^\s*(.*?)\s*\(([^)]*)\)?\s*$", text)
+    if m:
+        name = m.group(1).strip()
+        firm = m.group(2).strip().rstrip(")") or None
+        if name:
+            return Attorney(name=name, firm=firm)
+    return Attorney(name=text)
+
+
+# Priority data row: ``2020/03/24  DE  DE 202010203797``
+# Date | country (2-letter) | number-with-optional-prefix
+_PRIORITY_ROW_RE = re.compile(
+    r"(\d{4}/\d{2}/\d{2})\s+([A-Z]{2})\s+(.+?)(?=\s*$)",
+    re.MULTILINE,
+)
+
+
+def parse_priorities(values_30: Sequence[str]) -> List[Priority]:
+    """Parse priority claims from (30) Rüçhan Bilgileri values.
+
+    Real shape (from real EP fascicle on page 1000 of 2025_08.pdf)::
+
+        Rüçhan Bilgileri (32) (33) (31)
+        2020/03/24  DE  DE 202010203797
+
+    The (32)/(33)/(31) sub-codes in the header row are column labels
+    for date / country / number. The data rows that follow may be
+    empty (no priorities) or contain one or more rows.
+
+    Returns an empty list for unparseable / empty input.
+    """
+    out: List[Priority] = []
+    if not values_30:
+        return out
+    for raw in values_30:
+        body = _strip_label_line(raw)
+        if not body:
+            continue
+        for m in _PRIORITY_ROW_RE.finditer(body):
+            date_raw, country, number = m.group(1), m.group(2), m.group(3).strip()
+            iso = normalize_iso_date(date_raw)
+            if iso is None:
+                continue
+            out.append(Priority(
+                priority_no=number or None,
+                priority_date=iso,
+                country=country,
+            ))
+    return out
+
+
+def parse_ep_reference(
+    values_96: Sequence[str],
+    values_97: Sequence[str],
+) -> Optional[EPReference]:
+    """Parse the EP-fascicle dual (96) / (97) values.
+
+    These INID codes carry BOTH a date and a number, ordered by the PDF
+    in unpredictable sequence. We classify each value by content
+    shape — one with a ``YYYY/MM/DD`` date is the date, one with an
+    ``EP…`` token is the number.
+
+    Returns ``None`` when no EP-shape data is present in any value
+    (i.e. this isn't an EP fascicle record).
+    """
+    ref = EPReference()
+    found_any = False
+
+    for raw in values_96 or []:
+        date = normalize_iso_date(raw)
+        if date and ref.ep_application_date is None:
+            ref.ep_application_date = date
+            found_any = True
+            continue
+        m = _EP_APP_NO_RE.search(raw)
+        if m and ref.ep_application_no is None:
+            ref.ep_application_no = re.sub(r"\s+", "", m.group(1)).upper()
+            found_any = True
+
+    for raw in values_97 or []:
+        date = normalize_iso_date(raw)
+        if date and ref.ep_publication_date is None:
+            ref.ep_publication_date = date
+            found_any = True
+            continue
+        m = _EP_PUB_NO_RE.search(raw)
+        if m and ref.ep_publication_no is None:
+            ref.ep_publication_no = re.sub(r"\s+", "", m.group(1)).upper()
+            found_any = True
+
+    return ref if found_any else None
