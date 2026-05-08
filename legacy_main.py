@@ -86,6 +86,7 @@ from app_enhanced_search_routes import (
     register_enhanced_search_routes,
 )
 from app_design_search_routes import register_design_search_routes
+from app_registry_search_routes import register_registry_search_routes
 from app_image_routes import find_trademark_image, register_trademark_image_routes
 from app_image_search_routes import register_image_search_routes
 from app_middleware import configure_middleware
@@ -212,6 +213,9 @@ public_search, public_search_post, _do_public_search = register_public_search_ro
 
 # Design (Tasarım) search routes — sister to the trademark search above.
 register_design_search_routes(app, limiter)
+
+# Cross-registry unified search — discovery surface across both registries.
+register_registry_search_routes(app, limiter)
 
 # Lazy load AI models only when needed
 _ai_models_loaded = False
