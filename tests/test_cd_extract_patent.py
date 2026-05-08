@@ -9,6 +9,7 @@ import pytest
 from cd_extract_patent import (
     TABLE_COLUMNS,
     decode_hsqldb_escapes,
+    parse_hsqldb_log,
     parse_hsqldb_log_line,
     strip_ipc_html,
 )
@@ -359,3 +360,119 @@ def test_table_columns_match_known_arities():
     assert len(TABLE_COLUMNS["INVENTER"]) == 7
     assert len(TABLE_COLUMNS["ATTORNEY"]) == 5
     assert len(TABLE_COLUMNS["PRIORITY"]) == 4
+
+
+# ---------------------------------------------------------------------------
+# Step 2.4 — parse_hsqldb_log (whole-file wrapper)
+# ---------------------------------------------------------------------------
+
+# Self-contained synthetic log fixture mirroring the shape of a real
+# HSQLDB ptbulletin.log header + a few INSERTs across all five tables.
+_SYNTHETIC_LOG = (
+    'CREATE USER SA PASSWORD "" ADMIN\n'
+    "/*C1*/CONNECT USER SA\n"
+    "CREATE TABLE PATENT ( APPLICATIONNO VARCHAR ( 20 ) )\n"
+    "INSERT INTO PATENT VALUES("
+    "'2024/01001','01/01/2024','','','<html><p>A61M 5/31</p></html>',"
+    "'TR 2024 01001 A1','71','22/01/2025',"
+    "'TEST BA\\u015eLI\\u011eI','1','Bir test \\u00f6zeti.','','')\n"
+    "INSERT INTO HOLDER VALUES('2024/01001','ACME LTD','','','','','TR')\n"
+    "INSERT INTO INVENTER VALUES('2024/01001','JANE DOE','','','','','')\n"
+    "INSERT INTO ATTORNEY VALUES('2024/01001','99','J. SMITH','','SMITH IP')\n"
+    "INSERT INTO PRIORITY VALUES('2024/01001','EP12345','15/12/2023','EP')\n"
+    "INSERT INTO PATENT VALUES("
+    "'2024/01002','02/01/2024','','','<html><p>B01D 21/24</p></html>',"
+    "'TR 2024 01002 A2','71','22/01/2025',"
+    "'YA\\u011e SIYIRMA','2','Apostrof: O''Brien','','')\n"
+    "DISCONNECT\n"
+)
+
+
+def _write_log(tmp_path, body: str):
+    p = tmp_path / "ptbulletin.log"
+    p.write_text(body, encoding="utf-8")
+    return p
+
+
+def test_parse_log_groups_inserts_by_table(tmp_path):
+    log = _write_log(tmp_path, _SYNTHETIC_LOG)
+    out = parse_hsqldb_log(log)
+    assert set(out.keys()) == {"PATENT", "HOLDER", "INVENTER", "ATTORNEY", "PRIORITY"}
+    assert len(out["PATENT"]) == 2
+    assert len(out["HOLDER"]) == 1
+    assert len(out["INVENTER"]) == 1
+    assert len(out["ATTORNEY"]) == 1
+    assert len(out["PRIORITY"]) == 1
+
+
+def test_parse_log_propagates_decoded_values(tmp_path):
+    log = _write_log(tmp_path, _SYNTHETIC_LOG)
+    out = parse_hsqldb_log(log)
+    assert out["PATENT"][0]["PATENTTITLE"] == "TEST BAŞLIĞI"
+    assert out["PATENT"][0]["IPCCODE"] == ["A61M 5/31"]
+    assert out["PATENT"][1]["PATENTABSTRACT"] == "Apostrof: O'Brien"
+
+
+def test_parse_log_skips_non_insert_header_lines(tmp_path):
+    """The 4 header lines (CREATE USER, CONNECT, CREATE TABLE, DISCONNECT)
+    must not produce rows."""
+    log = _write_log(tmp_path, _SYNTHETIC_LOG)
+    out = parse_hsqldb_log(log)
+    total = sum(len(v) for v in out.values())
+    assert total == 6  # 2 PATENT + 1 HOLDER + 1 INVENTER + 1 ATTORNEY + 1 PRIORITY
+
+
+def test_parse_log_returns_empty_dict_for_no_inserts(tmp_path):
+    log = _write_log(tmp_path,
+        'CREATE USER SA PASSWORD "" ADMIN\n'
+        "/*C1*/CONNECT USER SA\n"
+        "CREATE TABLE PATENT ( APPLICATIONNO VARCHAR ( 20 ) )\n"
+        "DISCONNECT\n"
+    )
+    assert parse_hsqldb_log(log) == {}
+
+
+def test_parse_log_returns_empty_dict_for_empty_file(tmp_path):
+    log = _write_log(tmp_path, "")
+    assert parse_hsqldb_log(log) == {}
+
+
+def test_parse_log_handles_crlf_line_endings(tmp_path):
+    """Real CD logs are written on Windows with CRLF — verify the wrapper
+    is byte-faithful and doesn't leak \\r into row values."""
+    log = _write_log(tmp_path, _SYNTHETIC_LOG.replace("\n", "\r\n"))
+    out = parse_hsqldb_log(log)
+    assert out["PRIORITY"][0]["COUNTRYNO"] == "EP"  # not "EP\r"
+
+
+def test_parse_log_raises_with_line_number_on_bad_row(tmp_path):
+    """Column-count mismatch surfaces with the offending line number so
+    real CD failures are debuggable."""
+    bad_body = (
+        "CREATE TABLE PATENT (APPLICATIONNO VARCHAR ( 20 ))\n"
+        "INSERT INTO PATENT VALUES('a','b')\n"  # only 2 columns; expect 13
+    )
+    log = _write_log(tmp_path, bad_body)
+    with pytest.raises(ValueError, match=r"line 2"):
+        parse_hsqldb_log(log)
+
+
+def test_parse_log_omits_tables_with_zero_rows(tmp_path):
+    """A log with only PATENT inserts must not surface empty INVENTER /
+    HOLDER lists — keys are present iff rows exist."""
+    body = (
+        "INSERT INTO PATENT VALUES("
+        "'2024/01001','01/01/2024','','','<html><p>A61M 5/31</p></html>',"
+        "'TR 2024 01001 A1','71','22/01/2025','x','1','y','','')\n"
+    )
+    log = _write_log(tmp_path, body)
+    out = parse_hsqldb_log(log)
+    assert list(out.keys()) == ["PATENT"]
+    assert "HOLDER" not in out
+
+
+def test_parse_log_accepts_str_or_path(tmp_path):
+    log = _write_log(tmp_path, _SYNTHETIC_LOG)
+    a = parse_hsqldb_log(log)
+    b = parse_hsqldb_log(str(log))
+    assert a == b
