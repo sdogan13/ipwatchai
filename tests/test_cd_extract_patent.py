@@ -14,6 +14,9 @@ from cd_extract_patent import (
     cd_to_metadata,
     decode_hsqldb_escapes,
     extract_cd_archive,
+    main,
+    metadata_filename,
+    parse_argv,
     parse_bulletin_inf,
     parse_hsqldb_log,
     parse_hsqldb_log_line,
@@ -837,3 +840,129 @@ def test_cd_to_metadata_real_2025_12_smoke(tmp_path):
     # JSON-serialisable end-to-end (no Path / datetime objects leaking)
     import json
     json.dumps(doc, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
+# Step 2.8 — metadata_filename + parse_argv + main
+# ---------------------------------------------------------------------------
+
+def test_metadata_filename_strips_cd_suffix():
+    """A CD .rar's metadata sidecar matches its sibling PDF's stem."""
+    assert metadata_filename(Path("2025_12_CD.rar")) == "2025_12_metadata.json"
+    assert metadata_filename(Path("/abs/path/2024_07_CD.rar")) == "2024_07_metadata.json"
+
+
+def test_metadata_filename_passthrough_when_no_cd_suffix():
+    """Defensive: .rar without _CD still gets a sensible name."""
+    assert metadata_filename(Path("legacy_bundle.rar")) == "legacy_bundle_metadata.json"
+
+
+def test_parse_argv_with_explicit_rar(tmp_path):
+    rar = tmp_path / "2025_12_CD.rar"
+    rar.write_bytes(b"")  # placeholder; parse_argv doesn't dereference
+    args = parse_argv(["--rar", str(rar)])
+    assert args.rar_paths == [rar]
+    assert args.out_dir == args.bulletins_dir if hasattr(args, "bulletins_dir") else True
+    assert args.keep_scratch is False
+
+
+def test_parse_argv_supports_repeated_rar(tmp_path):
+    a = tmp_path / "2025_12_CD.rar"
+    b = tmp_path / "2024_07_CD.rar"
+    a.write_bytes(b""); b.write_bytes(b"")
+    args = parse_argv(["--rar", str(a), "--rar", str(b)])
+    assert args.rar_paths == [a, b]
+
+
+def test_parse_argv_all_globs_bulletins_dir(tmp_path):
+    """--all picks up every *_CD.rar in --bulletins-dir, alphabetically."""
+    (tmp_path / "2025_12_CD.rar").write_bytes(b"")
+    (tmp_path / "2024_07_CD.rar").write_bytes(b"")
+    (tmp_path / "2025_12.pdf").write_bytes(b"")  # NOT picked up
+    args = parse_argv(["--all", "--bulletins-dir", str(tmp_path)])
+    names = [p.name for p in args.rar_paths]
+    assert names == ["2024_07_CD.rar", "2025_12_CD.rar"]
+
+
+def test_parse_argv_all_errors_on_empty_dir(tmp_path):
+    """--all against an empty bulletins folder is a hard error."""
+    with pytest.raises(SystemExit):
+        parse_argv(["--all", "--bulletins-dir", str(tmp_path)])
+
+
+def test_parse_argv_rejects_no_input():
+    """Neither --rar nor --all -> argparse error."""
+    with pytest.raises(SystemExit):
+        parse_argv([])
+
+
+def test_parse_argv_rejects_rar_and_all_together(tmp_path):
+    rar = tmp_path / "2025_12_CD.rar"
+    rar.write_bytes(b"")
+    with pytest.raises(SystemExit):
+        parse_argv(["--rar", str(rar), "--all", "--bulletins-dir", str(tmp_path)])
+
+
+def test_parse_argv_out_dir_defaults_to_bulletins_dir(tmp_path):
+    rar = tmp_path / "2025_12_CD.rar"
+    rar.write_bytes(b"")
+    args = parse_argv(["--rar", str(rar), "--bulletins-dir", str(tmp_path)])
+    assert args.out_dir == tmp_path
+
+
+def test_parse_argv_out_dir_explicit_override(tmp_path):
+    rar = tmp_path / "src" / "2025_12_CD.rar"
+    rar.parent.mkdir()
+    rar.write_bytes(b"")
+    other = tmp_path / "elsewhere"
+    args = parse_argv(["--rar", str(rar), "--out-dir", str(other)])
+    assert args.out_dir == other
+
+
+def test_parse_argv_keep_scratch_flag(tmp_path):
+    rar = tmp_path / "2025_12_CD.rar"
+    rar.write_bytes(b"")
+    args = parse_argv(["--rar", str(rar), "--keep-scratch"])
+    assert args.keep_scratch is True
+
+
+def test_main_returns_nonzero_on_missing_archive(tmp_path):
+    """main() with --rar pointing at a non-existent file logs a skip and
+    returns exit code 1."""
+    ghost = tmp_path / "no_such_CD.rar"
+    rc = main([
+        "--rar", str(ghost),
+        "--out-dir", str(tmp_path),
+        "--scratch-dir", str(tmp_path / "scratch"),
+    ])
+    assert rc == 1
+
+
+# ----- Live main() smoke (skipped if real CD absent) -----
+
+@pytest.mark.skipif(
+    not _REAL_CD.is_file(),
+    reason=f"Real CD {_REAL_CD.name} not on disk; skipping integration smoke",
+)
+@pytest.mark.skipif(
+    not Path(DEFAULT_SEVEN_ZIP).is_file(),
+    reason="7-Zip not installed at the platform default path",
+)
+def test_main_real_2025_12_smoke(tmp_path):
+    """End-to-end CLI smoke: run main() against the real CD and verify
+    the metadata.json sidecar lands with the documented shape."""
+    out_dir = tmp_path / "out"
+    scratch = tmp_path / "scratch"
+    rc = main([
+        "--rar", str(_REAL_CD),
+        "--out-dir", str(out_dir),
+        "--scratch-dir", str(scratch),
+    ])
+    assert rc == 0
+
+    out_file = out_dir / "2025_12_metadata.json"
+    assert out_file.is_file()
+    assert out_file.stat().st_size > 100_000  # several MB expected
+
+    # Scratch should be cleaned by default
+    assert not (scratch / "2025_12_CD").exists()
