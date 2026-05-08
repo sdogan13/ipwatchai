@@ -23,6 +23,7 @@ Built incrementally. Each helper has its own unit-test file.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
@@ -232,3 +233,38 @@ def parse_hsqldb_log_line(line: Optional[str]) -> Optional[Dict[str, Any]]:
             row[col] = decode_hsqldb_escapes(raw)
 
     return {"table": table, "row": row}
+
+
+# ---------------------------------------------------------------------------
+# Step 2.4 — full-file parser
+# ---------------------------------------------------------------------------
+
+def parse_hsqldb_log(log_path: str | Path) -> Dict[str, List[Dict[str, Any]]]:
+    """Parse a complete HSQLDB ``ptbulletin.log`` file into per-table rows.
+
+    Iterates lines through ``parse_hsqldb_log_line`` and groups recognised
+    inserts by uppercase table name. Tables with zero parsed rows are
+    omitted from the returned dict. Non-INSERT lines (CREATE TABLE,
+    CONNECT, DISCONNECT, comments) are silently skipped.
+
+    Returns ``{"PATENT": [row, ...], "HOLDER": [...], ...}``.
+
+    Re-raises ``ValueError`` from the line parser, but with the offending
+    line number prefixed so a malformed line is easy to locate in a
+    15,000-line file. Reads the file with UTF-8 encoding (HSQLDB writes
+    ASCII + ``\\uXXXX`` escapes, so this is safe).
+    """
+    path = Path(log_path)
+    by_table: Dict[str, List[Dict[str, Any]]] = {}
+
+    with path.open("r", encoding="utf-8") as f:
+        for line_no, line in enumerate(f, start=1):
+            try:
+                result = parse_hsqldb_log_line(line)
+            except ValueError as e:
+                raise ValueError(f"{path.name} line {line_no}: {e}") from None
+            if result is None:
+                continue
+            by_table.setdefault(result["table"], []).append(result["row"])
+
+    return by_table
