@@ -6,6 +6,7 @@ point cleanly at the unit under test.
 
 import json
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
@@ -918,9 +919,15 @@ def _build_pre_extracted_cd(tmp_path: Path) -> CDLayout:
 
 def test_layout_to_metadata_full_join(tmp_path):
     """End-to-end shape check on a hand-built CD with three dossiers
-    spanning the realistic value space (turkish, multi-design, Hague)."""
+    spanning the realistic value space (turkish, multi-design, Hague).
+
+    Also asserts cd_images/ is populated on disk — _layout_to_metadata
+    is the data-extraction step that *both* writes JSON and persists
+    image files for the canonical TS folder.
+    """
     layout = _build_pre_extracted_cd(tmp_path)
-    doc = _layout_to_metadata(layout, "240_CD.rar", tmp_path)
+    cd_images_dest = tmp_path / "out_cd_images"
+    doc = _layout_to_metadata(layout, "240_CD.rar", cd_images_dest)
 
     # Top-level metadata
     assert doc["bulletin_no"] == "240"
@@ -942,11 +949,22 @@ def test_layout_to_metadata_full_join(tmp_path):
     apps = [d["application_no"] for d in doc["dossiers"]]
     assert apps == ["2016/01059", "2015/06749", "DM/086402"]
 
+    # Files actually persisted to cd_images_dest
+    assert (cd_images_dest / "2016_01059" / "1_1.jpg").is_file()
+    assert (cd_images_dest / "2016_01059" / "1_2.jpg").is_file()
+    assert (cd_images_dest / "2015_06749" / "1_1.jpg").is_file()
+    assert (cd_images_dest / "2015_06749" / "1_2.jpg").is_file()
+    assert (cd_images_dest / "2015_06749" / "1_3.jpg").is_file()
+    # Hague design has no image folder
+    assert not (cd_images_dest / "DM_086402").exists()
+
 
 def test_layout_to_metadata_first_dossier_full_shape(tmp_path):
-    """Walk every emitted field for the first dossier."""
+    """Walk every emitted field for the first dossier — including the
+    canonical key shape for image_path (no archive-wrapper prefix)."""
     layout = _build_pre_extracted_cd(tmp_path)
-    doc = _layout_to_metadata(layout, "240_CD.rar", tmp_path)
+    cd_images_dest = tmp_path / "out_cd_images"
+    doc = _layout_to_metadata(layout, "240_CD.rar", cd_images_dest)
 
     d = doc["dossiers"][0]
     assert d["application_no"] == "2016/01059"
@@ -971,15 +989,16 @@ def test_layout_to_metadata_first_dossier_full_shape(tmp_path):
     assert des["no"] == "1"
     assert des["product_name"] == "Profil "
     assert len(des["views"]) == 2
-    assert des["views"][0] == {"view_no": "1", "image_path": "240/images/2016_01059/1_1.jpg"}
-    assert des["views"][1] == {"view_no": "2", "image_path": "240/images/2016_01059/1_2.jpg"}
+    # Canonical key shape — no "240/images/" prefix (the locked decision)
+    assert des["views"][0] == {"view_no": "1", "image_path": "2016_01059/1_1.jpg"}
+    assert des["views"][1] == {"view_no": "2", "image_path": "2016_01059/1_2.jpg"}
 
 
 def test_layout_to_metadata_design_without_images_emits_empty_views(tmp_path):
     """The 2015/06749 fixture has 2 designs but only design 1 has images.
     Design 2 must still be emitted with views=[]."""
     layout = _build_pre_extracted_cd(tmp_path)
-    doc = _layout_to_metadata(layout, "240_CD.rar", tmp_path)
+    doc = _layout_to_metadata(layout, "240_CD.rar", tmp_path / "out_cd_images")
 
     multi = next(d for d in doc["dossiers"] if d["application_no"] == "2015/06749")
     assert len(multi["designs"]) == 2
@@ -990,14 +1009,18 @@ def test_layout_to_metadata_design_without_images_emits_empty_views(tmp_path):
 
 def test_layout_to_metadata_hague_dossier_emits_with_no_views(tmp_path):
     """Hague (DM/...) dossiers have no image folder. Must still appear
-    in the dossiers list with views=[]."""
+    in the dossiers list with views=[] and create no spurious cd_images
+    subfolder."""
     layout = _build_pre_extracted_cd(tmp_path)
-    doc = _layout_to_metadata(layout, "240_CD.rar", tmp_path)
+    cd_images_dest = tmp_path / "out_cd_images"
+    doc = _layout_to_metadata(layout, "240_CD.rar", cd_images_dest)
 
     hague = next(d for d in doc["dossiers"] if d["application_no"] == "DM/086402")
     assert len(hague["designs"]) == 1
     assert hague["designs"][0]["views"] == []
     assert hague["locarno_codes"] == ["21-02"]
+    # And no DM_086402 (or DM/086402) folder created
+    assert not (cd_images_dest / "DM_086402").exists()
 
 
 def test_layout_to_metadata_annotations_emitted_as_sibling_array(tmp_path):
@@ -1005,7 +1028,7 @@ def test_layout_to_metadata_annotations_emitted_as_sibling_array(tmp_path):
     nested inside their own dossier (they reference different
     applications than the bulletin's own dossiers)."""
     layout = _build_pre_extracted_cd(tmp_path)
-    doc = _layout_to_metadata(layout, "240_CD.rar", tmp_path)
+    doc = _layout_to_metadata(layout, "240_CD.rar", tmp_path / "out_cd_images")
 
     assert len(doc["annotations"]) == 1
     a = doc["annotations"][0]
@@ -1027,9 +1050,11 @@ def test_cd_to_metadata_uses_extract_then_layout(monkeypatch, tmp_path):
     )
     fake_rar = tmp_path / "240_CD.rar"
     fake_rar.write_bytes(b"")
-    doc = cd_to_metadata(fake_rar, tmp_path)
+    doc = cd_to_metadata(fake_rar, tmp_path / "scratch", tmp_path / "cd_images")
     assert doc["source_archive"] == "240_CD.rar"
     assert doc["stats"]["dossiers"] == 3
+    # Persistence side-effect happened
+    assert (tmp_path / "cd_images" / "2016_01059" / "1_1.jpg").is_file()
 
 
 # ---------------------------------------------------------------------------
@@ -1125,32 +1150,71 @@ def test_parse_argv_explicit_overrides(tmp_path):
     assert args.force is True
 
 
-def _fake_cd_to_metadata(bulletin_no="240", bulletin_date="2016-03-09",
-                         dossiers_count=1, designs_count=1, images_count=1):
-    """Return a fake cd_to_metadata that produces a controllable doc."""
-    def _impl(rar, scratch, **kw):
+def _wire_fake_pipeline(
+    monkeypatch,
+    bulletin_no: Optional[str] = "240",
+    bulletin_date_iso: Optional[str] = "2016-03-09",
+    bulletin_date_dmy: str = "09.03.2016",
+    write_inf: bool = True,
+):
+    """Mock extract_cd_archive (returns a tiny on-disk CDLayout) and
+    _layout_to_metadata (returns a canned doc) so CLI tests exercise
+    the orchestration shape of _process_one without 7-Zip or real
+    HSQLDB parsing.
+
+    ``write_inf=False`` simulates a CD whose idbulletin.inf is missing
+    or malformed so parse_bulletin_inf returns Nones — covers the
+    "can't compute TS folder" failure path.
+    """
+    def fake_extract(rar, scratch, **kw):
+        scratch = Path(scratch)
+        scratch.mkdir(parents=True, exist_ok=True)
+        cd_root = scratch / "cd"
+        cd_root.mkdir()
+        if write_inf:
+            (cd_root / "idbulletin.inf").write_text(
+                f"NO={bulletin_no}\nDATE={bulletin_date_dmy}\n",
+                encoding="utf-8",
+            )
+        # Empty log + missing images dir is fine; _layout_to_metadata is mocked.
+        (cd_root / "idbulletin.log").write_text("", encoding="utf-8")
+        return CDLayout(
+            cd_root=cd_root,
+            log_path=cd_root / "idbulletin.log",
+            images_root=cd_root / "images",
+        )
+
+    def fake_layout(layout, source_archive_name, cd_images_dest):
+        # Persist a sentinel image so we can verify cd_images_dest plumbing
+        Path(cd_images_dest).mkdir(parents=True, exist_ok=True)
+        (Path(cd_images_dest) / "_sentinel.txt").write_text(
+            "wired", encoding="utf-8"
+        )
         return {
             "bulletin_no": bulletin_no,
-            "bulletin_date": bulletin_date,
-            "source_archive": Path(rar).name,
+            "bulletin_date": bulletin_date_iso,
+            "source_archive": source_archive_name,
             "extracted_at": "2026-05-08T00:00:00+00:00",
             "stats": {
-                "dossiers": dossiers_count, "designs": designs_count,
-                "holders": 0, "designers": 0, "annotations": 0,
-                "images_resolved": images_count, "designs_without_images": 0,
+                "dossiers": 1, "designs": 1, "holders": 0,
+                "designers": 0, "annotations": 0,
+                "images_resolved": 1, "designs_without_images": 0,
             },
             "dossiers": [], "annotations": [],
         }
-    return _impl
+
+    monkeypatch.setattr("cd_extract_tasarim.extract_cd_archive", fake_extract)
+    monkeypatch.setattr("cd_extract_tasarim._layout_to_metadata", fake_layout)
 
 
-def test_main_writes_to_TS_folder(monkeypatch, tmp_path):
-    """End-to-end: CLI on one rar produces TS_{N}_{date}/cd_metadata.json."""
+def test_main_writes_to_TS_folder_with_cd_images_dir(monkeypatch, tmp_path):
+    """CLI on one rar produces TS_{N}_{date}/cd_metadata.json AND a
+    cd_images/ folder next to it (the canonical layout)."""
     rar = tmp_path / "240_CD.rar"
     rar.write_bytes(b"")
     out_root = tmp_path / "out"
 
-    monkeypatch.setattr("cd_extract_tasarim.cd_to_metadata", _fake_cd_to_metadata())
+    _wire_fake_pipeline(monkeypatch)
 
     rc = main([
         "--rar", str(rar),
@@ -1158,15 +1222,17 @@ def test_main_writes_to_TS_folder(monkeypatch, tmp_path):
         "--scratch-dir", str(tmp_path / "scratch"),
     ])
     assert rc == 0
-    expected = out_root / "TS_240_2016-03-09" / "cd_metadata.json"
-    assert expected.is_file()
-    doc = json.loads(expected.read_text(encoding="utf-8"))
+    issue_folder = out_root / "TS_240_2016-03-09"
+    assert (issue_folder / CD_METADATA_FILENAME).is_file()
+    # cd_images folder created next to cd_metadata.json
+    assert (issue_folder / "cd_images" / "_sentinel.txt").read_text(encoding="utf-8") == "wired"
+    doc = json.loads((issue_folder / CD_METADATA_FILENAME).read_text(encoding="utf-8"))
     assert doc["bulletin_no"] == "240"
-    assert doc["bulletin_date"] == "2016-03-09"
 
 
 def test_main_skips_existing_without_force(monkeypatch, tmp_path):
-    """Pre-existing cd_metadata.json -> skip with warning, return 0."""
+    """Pre-existing cd_metadata.json -> skip with warning, return 0;
+    cd_images/ NOT recreated (skip short-circuits before persistence)."""
     rar = tmp_path / "240_CD.rar"
     rar.write_bytes(b"")
     out_root = tmp_path / "out"
@@ -1175,7 +1241,7 @@ def test_main_skips_existing_without_force(monkeypatch, tmp_path):
     existing = folder / CD_METADATA_FILENAME
     existing.write_text('{"original":"keepme"}', encoding="utf-8")
 
-    monkeypatch.setattr("cd_extract_tasarim.cd_to_metadata", _fake_cd_to_metadata())
+    _wire_fake_pipeline(monkeypatch)
 
     rc = main([
         "--rar", str(rar),
@@ -1185,10 +1251,13 @@ def test_main_skips_existing_without_force(monkeypatch, tmp_path):
     assert rc == 0  # skip is not a failure
     # Original file untouched
     assert json.loads(existing.read_text(encoding="utf-8")) == {"original": "keepme"}
+    # No cd_images/ folder created since persistence was skipped
+    assert not (folder / "cd_images").exists()
 
 
 def test_main_force_overwrites_existing(monkeypatch, tmp_path):
-    """``--force`` replaces an existing cd_metadata.json."""
+    """``--force`` replaces an existing cd_metadata.json AND populates
+    cd_images/ from scratch."""
     rar = tmp_path / "240_CD.rar"
     rar.write_bytes(b"")
     out_root = tmp_path / "out"
@@ -1197,7 +1266,7 @@ def test_main_force_overwrites_existing(monkeypatch, tmp_path):
     existing = folder / CD_METADATA_FILENAME
     existing.write_text('{"original":"replaceme"}', encoding="utf-8")
 
-    monkeypatch.setattr("cd_extract_tasarim.cd_to_metadata", _fake_cd_to_metadata())
+    _wire_fake_pipeline(monkeypatch)
 
     rc = main([
         "--rar", str(rar),
@@ -1208,6 +1277,7 @@ def test_main_force_overwrites_existing(monkeypatch, tmp_path):
     assert rc == 0
     doc = json.loads(existing.read_text(encoding="utf-8"))
     assert doc["bulletin_no"] == "240"
+    assert (folder / "cd_images" / "_sentinel.txt").is_file()
 
 
 def test_main_returns_1_when_archive_missing(monkeypatch, tmp_path):
@@ -1220,15 +1290,15 @@ def test_main_returns_1_when_archive_missing(monkeypatch, tmp_path):
     assert rc == 1
 
 
-def test_main_returns_1_when_cd_to_metadata_raises(monkeypatch, tmp_path):
-    """An exception from cd_to_metadata is logged, not re-raised; rc=1."""
+def test_main_returns_1_when_extract_raises(monkeypatch, tmp_path):
+    """An exception from extract_cd_archive is logged, not re-raised; rc=1."""
     rar = tmp_path / "240_CD.rar"
     rar.write_bytes(b"")
 
     def boom(*a, **kw):
         raise RuntimeError("simulated 7-Zip explosion")
 
-    monkeypatch.setattr("cd_extract_tasarim.cd_to_metadata", boom)
+    monkeypatch.setattr("cd_extract_tasarim.extract_cd_archive", boom)
     rc = main([
         "--rar", str(rar),
         "--out-dir", str(tmp_path / "out"),
@@ -1237,15 +1307,13 @@ def test_main_returns_1_when_cd_to_metadata_raises(monkeypatch, tmp_path):
     assert rc == 1
 
 
-def test_main_refuses_when_bulletin_metadata_missing(monkeypatch, tmp_path):
-    """If parse_bulletin_inf returned None for either field, we cannot
-    compute the TS_{N}_{date} folder. Treat as failure (return 1)."""
+def test_main_refuses_when_bulletin_inf_missing(monkeypatch, tmp_path):
+    """If parse_bulletin_inf returned None for either field (e.g. no
+    idbulletin.inf in the archive), we cannot compute the TS_{N}_{date}
+    folder. Treat as failure (return 1)."""
     rar = tmp_path / "240_CD.rar"
     rar.write_bytes(b"")
-    monkeypatch.setattr(
-        "cd_extract_tasarim.cd_to_metadata",
-        _fake_cd_to_metadata(bulletin_no=None, bulletin_date=None),
-    )
+    _wire_fake_pipeline(monkeypatch, write_inf=False)
     rc = main([
         "--rar", str(rar),
         "--out-dir", str(tmp_path / "out"),
@@ -1255,22 +1323,48 @@ def test_main_refuses_when_bulletin_metadata_missing(monkeypatch, tmp_path):
 
 
 def test_main_processes_multiple_rars(monkeypatch, tmp_path):
-    """Two --rar flags -> two TS folders written, rc=0."""
+    """Two --rar flags -> two TS folders written, rc=0. Each rar gets
+    a layout matching its own bulletin_no derived from filename."""
     a = tmp_path / "240_CD.rar"
     a.write_bytes(b"")
     b = tmp_path / "242_CD.rar"
     b.write_bytes(b"")
 
-    docs = {
-        "240_CD.rar": ("240", "2016-03-09"),
-        "242_CD.rar": ("242", "2016-04-24"),
+    by_archive = {
+        "240_CD.rar": ("240", "2016-03-09", "09.03.2016"),
+        "242_CD.rar": ("242", "2016-04-24", "24.04.2016"),
     }
 
-    def fake(rar, scratch, **kw):
-        no, date = docs[Path(rar).name]
-        return _fake_cd_to_metadata(no, date)(rar, scratch, **kw)
+    def fake_extract(rar, scratch, **kw):
+        no, _iso, dmy = by_archive[Path(rar).name]
+        scratch = Path(scratch)
+        scratch.mkdir(parents=True, exist_ok=True)
+        cd_root = scratch / "cd"
+        cd_root.mkdir()
+        (cd_root / "idbulletin.inf").write_text(
+            f"NO={no}\nDATE={dmy}\n", encoding="utf-8"
+        )
+        (cd_root / "idbulletin.log").write_text("", encoding="utf-8")
+        return CDLayout(cd_root=cd_root,
+                        log_path=cd_root / "idbulletin.log",
+                        images_root=cd_root / "images")
 
-    monkeypatch.setattr("cd_extract_tasarim.cd_to_metadata", fake)
+    def fake_layout(layout, source_archive_name, cd_images_dest):
+        no, iso, _dmy = by_archive[source_archive_name]
+        Path(cd_images_dest).mkdir(parents=True, exist_ok=True)
+        return {
+            "bulletin_no": no, "bulletin_date": iso,
+            "source_archive": source_archive_name,
+            "extracted_at": "2026-05-08T00:00:00+00:00",
+            "stats": {"dossiers": 1, "designs": 1, "holders": 0,
+                      "designers": 0, "annotations": 0,
+                      "images_resolved": 1, "designs_without_images": 0},
+            "dossiers": [], "annotations": [],
+        }
+
+    monkeypatch.setattr("cd_extract_tasarim.extract_cd_archive", fake_extract)
+    monkeypatch.setattr("cd_extract_tasarim._layout_to_metadata", fake_layout)
+
     rc = main([
         "--rar", str(a), "--rar", str(b),
         "--out-dir", str(tmp_path / "out"),
@@ -1279,3 +1373,44 @@ def test_main_processes_multiple_rars(monkeypatch, tmp_path):
     assert rc == 0
     assert (tmp_path / "out" / "TS_240_2016-03-09" / CD_METADATA_FILENAME).is_file()
     assert (tmp_path / "out" / "TS_242_2016-04-24" / CD_METADATA_FILENAME).is_file()
+
+
+def test_main_real_persistence_with_pre_built_layout(monkeypatch, tmp_path):
+    """Wider integration test: only mock extract_cd_archive (return a
+    real, hand-built CDLayout); let parse_bulletin_inf and the real
+    _layout_to_metadata run, including _persist_cd_images_for_app.
+
+    Verifies the canonical TS folder ends up holding both cd_metadata.json
+    and cd_images/{year}_{appno}/{d}_{v}.jpg with real bytes.
+    """
+    layout = _build_pre_extracted_cd(tmp_path)
+    monkeypatch.setattr(
+        "cd_extract_tasarim.extract_cd_archive",
+        lambda rar, scratch, **kw: layout,
+    )
+
+    rar = tmp_path / "240_CD.rar"
+    rar.write_bytes(b"")
+    out_root = tmp_path / "out"
+
+    rc = main([
+        "--rar", str(rar),
+        "--out-dir", str(out_root),
+        "--scratch-dir", str(tmp_path / "scratch"),
+    ])
+    assert rc == 0
+
+    issue_folder = out_root / "TS_240_2016-03-09"
+    assert (issue_folder / CD_METADATA_FILENAME).is_file()
+    # All five real images persisted with canonical key shape
+    assert (issue_folder / "cd_images" / "2016_01059" / "1_1.jpg").is_file()
+    assert (issue_folder / "cd_images" / "2016_01059" / "1_2.jpg").is_file()
+    assert (issue_folder / "cd_images" / "2015_06749" / "1_1.jpg").is_file()
+    assert (issue_folder / "cd_images" / "2015_06749" / "1_2.jpg").is_file()
+    assert (issue_folder / "cd_images" / "2015_06749" / "1_3.jpg").is_file()
+    # Hague design produced no folder
+    assert not (issue_folder / "cd_images" / "DM_086402").exists()
+    # JSON image_path values use the canonical key shape
+    doc = json.loads((issue_folder / CD_METADATA_FILENAME).read_text(encoding="utf-8"))
+    first_dossier = doc["dossiers"][0]
+    assert first_dossier["designs"][0]["views"][0]["image_path"] == "2016_01059/1_1.jpg"

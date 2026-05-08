@@ -692,20 +692,23 @@ def _group_by_application_no(rows: List[Dict[str, Any]]) -> Dict[str, List[Dict[
 def _layout_to_metadata(
     layout: CDLayout,
     source_archive_name: str,
-    scratch_dir: str | Path,
+    cd_images_dest: str | Path,
 ) -> Dict[str, Any]:
-    """Build the canonical metadata dict from a pre-extracted CD layout.
+    """Build the canonical metadata dict from a pre-extracted CD layout
+    AND persist every resolved view JPEG into ``cd_images_dest``.
 
     Pure data-shaping over an already-extracted CD: parses the inf and
-    log, joins parties + designs + images by ``APPLICATIONNO``, and
-    assembles the document. Factored out of ``cd_to_metadata`` so tests
-    can exercise the full join without mocking 7-Zip.
+    log, joins parties + designs + images by ``APPLICATIONNO``, copies
+    each design view from the scratch ``layout.images_root`` to
+    ``cd_images_dest/{year}_{appno}/{d}_{v}.{ext}``, and assembles the
+    final document. Factored out of ``cd_to_metadata`` so tests can
+    exercise the full join without mocking 7-Zip.
 
-    Image paths are rendered relative to ``scratch_dir`` with forward
-    slashes — the orchestrator's caller chose ``scratch_dir``, so
-    rendering against it produces stable, portable strings.
+    JSON ``image_path`` values use the canonical
+    ``{year}_{appno}/{d}_{v}.{ext}`` key shape — same shape the PDF
+    extractor will emit, so a future stage-3 reconciler can match
+    PDF and CD images by a single string.
     """
-    scratch = Path(scratch_dir)
     inf = parse_bulletin_inf(layout.cd_root / "idbulletin.inf")
     rows = parse_hsqldb_log(layout.log_path)
 
@@ -720,16 +723,14 @@ def _layout_to_metadata(
     for d in rows.get("IDDOSSIER", []):
         app_no = d.get("APPLICATIONNO", "")
 
-        # Resolve all images for this application, then bucket by design_no.
+        # Persist images for this application and bucket by design_no.
+        # _persist_cd_images_for_app emits the canonical key shape and
+        # handles the Hague (no-images) case by returning [].
         images_by_design: Dict[str, List[Dict[str, str]]] = {}
-        for img in resolve_design_images(app_no, layout.images_root):
-            try:
-                rel = img["image_path"].relative_to(scratch).as_posix()
-            except ValueError:
-                rel = str(img["image_path"])
+        for img in _persist_cd_images_for_app(app_no, layout.images_root, cd_images_dest):
             images_by_design.setdefault(img["design_no"], []).append({
                 "view_no": img["view_no"],
-                "image_path": rel,
+                "image_path": img["image_path"],
             })
             images_resolved += 1
 
@@ -788,28 +789,31 @@ def _layout_to_metadata(
 def cd_to_metadata(
     rar_path: str | Path,
     scratch_dir: str | Path,
+    cd_images_dest: str | Path,
     *,
     seven_zip: Optional[str | Path] = None,
 ) -> Dict[str, Any]:
-    """Extract a Tasarım CD ``.rar`` and produce a fully joined JSON-ready dict.
+    """Extract a Tasarım CD ``.rar``, persist its images, and produce
+    a fully joined JSON-ready dict.
 
     Pipeline:
       1. ``extract_cd_archive`` (no Java exclude; dynamic layout)
       2. ``parse_bulletin_inf`` for issue header
       3. ``parse_hsqldb_log`` over ``idbulletin.log``
       4. group HOLDER / DESIGNER / DESIGN rows by APPLICATIONNO
-      5. join + resolve per-design view images via ``resolve_design_images``
+      5. join + persist per-design view images via
+         ``_persist_cd_images_for_app`` into ``cd_images_dest``
       6. emit IDANNOTATION as a sibling ``annotations`` array
-      7. assemble the final document
+      7. assemble the final document with canonical ``{year}_{appno}/{d}_{v}.{ext}``
+         image_path keys
 
-    The CD's extracted folder is left in place under ``scratch_dir`` —
-    the caller is responsible for cleanup, since downstream stages
-    (image embedding, future stage-3 reconciler) typically still need
-    the JPEGs on disk.
+    The CD's extracted folder under ``scratch_dir`` becomes safe to
+    delete after this call — every JPEG referenced by the returned
+    document has been copied into ``cd_images_dest``.
     """
     rar = Path(rar_path)
     layout = extract_cd_archive(rar, scratch_dir, seven_zip=seven_zip)
-    return _layout_to_metadata(layout, rar.name, scratch_dir)
+    return _layout_to_metadata(layout, rar.name, cd_images_dest)
 
 
 # ---------------------------------------------------------------------------
@@ -959,12 +963,21 @@ def _process_one(
     keep_scratch: bool,
     force: bool,
 ) -> Dict[str, Any]:
-    """Extract one CD .rar, write its cd_metadata.json sidecar, return a
-    small summary dict for the run-level report.
+    """Extract one CD .rar, persist its images and JSON sidecar to the
+    canonical ``TS_{N}_{date}/`` folder, return a run-level summary dict.
 
-    Returns ``{"rar": str, "out": str|None, "stats": dict, "skipped": bool}``.
-    A skipped entry (existing file, no --force) carries ``out`` and
-    ``skipped=True`` but no ``stats`` (cd_to_metadata is not run).
+    Returns ``{"rar": str, "out": str, "stats": dict|None, "skipped": bool}``.
+    A skipped entry (existing file, no --force) sets ``skipped=True`` and
+    omits ``stats`` (the orchestrator is not run).
+
+    Order of operations:
+      1. Extract the archive into scratch.
+      2. Parse ``idbulletin.inf`` for bulletin_no + bulletin_date.
+      3. Compute issue folder + out_path; honour --force/skip.
+      4. Persist images into ``issue_folder/cd_images/`` and build the
+         metadata document (single ``_layout_to_metadata`` call).
+      5. Write ``cd_metadata.json`` next to ``cd_images/``.
+      6. Wipe scratch unless --keep-scratch.
     """
     cd_scratch = scratch_dir / rar.stem
     if cd_scratch.exists():
@@ -972,46 +985,41 @@ def _process_one(
     cd_scratch.mkdir(parents=True, exist_ok=True)
 
     try:
-        doc = cd_to_metadata(rar, cd_scratch, seven_zip=seven_zip)
-    except Exception:
-        if not keep_scratch:
-            shutil.rmtree(cd_scratch, ignore_errors=True)
-        raise
+        layout = extract_cd_archive(rar, cd_scratch, seven_zip=seven_zip)
+        inf = parse_bulletin_inf(layout.cd_root / "idbulletin.inf")
+        bulletin_no = inf["bulletin_no"]
+        bulletin_date = inf["bulletin_date"]
+        if not bulletin_no or not bulletin_date:
+            raise RuntimeError(
+                f"{rar.name}: cannot resolve TS_*_* folder — bulletin_no="
+                f"{bulletin_no!r}, bulletin_date={bulletin_date!r}"
+            )
 
-    bulletin_no = doc.get("bulletin_no")
-    bulletin_date = doc.get("bulletin_date")
-    if not bulletin_no or not bulletin_date:
-        if not keep_scratch:
-            shutil.rmtree(cd_scratch, ignore_errors=True)
-        raise RuntimeError(
-            f"{rar.name}: cannot resolve TS_*_* folder — bulletin_no="
-            f"{bulletin_no!r}, bulletin_date={bulletin_date!r}"
+        issue_folder = out_root / issue_folder_name(bulletin_no, bulletin_date)
+        out_path = issue_folder / CD_METADATA_FILENAME
+
+        if out_path.exists() and not force:
+            logger.warning("[skip] %s already exists; pass --force to overwrite", out_path)
+            return {"rar": rar.name, "out": str(out_path), "skipped": True}
+
+        issue_folder.mkdir(parents=True, exist_ok=True)
+        cd_images_dest = issue_folder / "cd_images"
+
+        doc = _layout_to_metadata(layout, rar.name, cd_images_dest)
+        out_path.write_text(
+            json.dumps(doc, ensure_ascii=False, indent=2),
+            encoding="utf-8",
         )
 
-    issue_folder = out_root / issue_folder_name(bulletin_no, bulletin_date)
-    out_path = issue_folder / CD_METADATA_FILENAME
-
-    if out_path.exists() and not force:
-        logger.warning("[skip] %s already exists; pass --force to overwrite", out_path)
+        return {
+            "rar": rar.name,
+            "out": str(out_path),
+            "stats": doc["stats"],
+            "skipped": False,
+        }
+    finally:
         if not keep_scratch:
             shutil.rmtree(cd_scratch, ignore_errors=True)
-        return {"rar": rar.name, "out": str(out_path), "skipped": True}
-
-    issue_folder.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(
-        json.dumps(doc, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-
-    if not keep_scratch:
-        shutil.rmtree(cd_scratch, ignore_errors=True)
-
-    return {
-        "rar": rar.name,
-        "out": str(out_path),
-        "stats": doc["stats"],
-        "skipped": False,
-    }
 
 
 def main(argv: Optional[List[str]] = None) -> int:
