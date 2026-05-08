@@ -427,34 +427,48 @@ class CDLayout:
 def _locate_cd_layout(scratch_dir: str | Path) -> CDLayout:
     """Discover the CD layout under ``scratch_dir`` after a 7-Zip extract.
 
-    Locates the single ``idbulletin.log`` file anywhere in the tree
-    (modern layout: ``scratch/{N}/idbulletin.log``; verbose layout:
-    ``scratch/setup/idbulletin.log``). The CD root is its parent.
+    Locates the canonical ``idbulletin.log`` anywhere in the tree:
 
-    For ``images_root``, prefers ``cd_root/images`` if it exists; falls
-    back to ``scratch_dir/images`` (the verbose layout); finally
-    defaults to ``cd_root/images`` even if missing — the resolver
-    handles a missing folder by returning ``[]``.
+      - modern ``{N}_CD.rar``:   ``scratch/{N}/idbulletin.log``
+      - verbose ``231 say_l_*``: ``scratch/setup/idbulletin.log``
+
+    Modern archives ship **two** logs — the canonical one and an
+    apparent duplicate at ``{N}/setup/idbulletin.log``. We pick the
+    shallower path (fewest directory components from ``scratch``) as
+    the CD root and ignore deeper duplicates. If two logs sit at the
+    same shallowest depth, that's a real ambiguity we refuse to guess.
+
+    For ``images_root``, prefer ``cd_root/images`` if it exists; fall
+    back to ``scratch/images`` (verbose layout); otherwise default
+    to ``cd_root/images`` even if missing — the resolver tolerates a
+    missing folder by returning ``[]``.
 
     Raises:
       RuntimeError: if no ``idbulletin.log`` is found.
-      RuntimeError: if more than one ``idbulletin.log`` is found
-                    (we wouldn't know which CD root to pick).
+      RuntimeError: if two or more ``idbulletin.log`` files are tied
+                    for the shallowest path (we wouldn't know which
+                    CD root to pick).
     """
     scratch = Path(scratch_dir)
-    log_paths = sorted(scratch.rglob("idbulletin.log"))
+    log_paths = list(scratch.rglob("idbulletin.log"))
     if not log_paths:
         raise RuntimeError(f"no idbulletin.log found under {scratch}")
-    if len(log_paths) > 1:
+
+    def depth(p: Path) -> int:
+        return len(p.relative_to(scratch).parts)
+
+    log_paths.sort(key=lambda p: (depth(p), str(p)))
+    shallowest = depth(log_paths[0])
+    tied = [p for p in log_paths if depth(p) == shallowest]
+    if len(tied) > 1:
         raise RuntimeError(
-            f"multiple idbulletin.log files found under {scratch}: "
-            f"{[str(p.relative_to(scratch)) for p in log_paths]}"
+            f"multiple idbulletin.log files at depth {shallowest} under "
+            f"{scratch}: {[str(p.relative_to(scratch)) for p in tied]}"
         )
 
     log_path = log_paths[0]
     cd_root = log_path.parent
 
-    # images_root candidates, in preference order
     candidates = [cd_root / "images", scratch / "images"]
     images_root = next((c for c in candidates if c.is_dir()), candidates[0])
 

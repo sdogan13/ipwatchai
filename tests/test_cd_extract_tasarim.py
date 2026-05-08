@@ -535,14 +535,35 @@ def test_locate_cd_layout_missing_log_raises(tmp_path):
         _locate_cd_layout(tmp_path)
 
 
-def test_locate_cd_layout_multiple_logs_raises(tmp_path):
-    """Two ``idbulletin.log`` files -> we don't know which CD to pick."""
+def test_locate_cd_layout_multiple_logs_at_same_depth_raises(tmp_path):
+    """Two ``idbulletin.log`` files tied for shallowest depth -> ambiguous."""
     (tmp_path / "240").mkdir()
     (tmp_path / "240" / "idbulletin.log").write_text("", encoding="utf-8")
     (tmp_path / "242").mkdir()
     (tmp_path / "242" / "idbulletin.log").write_text("", encoding="utf-8")
     with pytest.raises(RuntimeError, match="multiple idbulletin.log"):
         _locate_cd_layout(tmp_path)
+
+
+def test_locate_cd_layout_modern_layout_with_setup_duplicate(tmp_path):
+    """Modern ``{N}_CD.rar`` archives carry a duplicate log at
+    ``{N}/setup/idbulletin.log`` alongside the canonical
+    ``{N}/idbulletin.log``. Real-data finding from 240_CD.rar.
+
+    The shallower path wins; the deeper one is ignored.
+    """
+    cd_root = tmp_path / "240"
+    cd_root.mkdir()
+    (cd_root / "idbulletin.log").write_text("real", encoding="utf-8")
+    (cd_root / "images").mkdir()
+    setup = cd_root / "setup"
+    setup.mkdir()
+    (setup / "idbulletin.log").write_text("duplicate", encoding="utf-8")
+
+    layout = _locate_cd_layout(tmp_path)
+    assert layout.cd_root == cd_root
+    assert layout.log_path == cd_root / "idbulletin.log"
+    assert layout.log_path.read_text(encoding="utf-8") == "real"
 
 
 def test_locate_cd_layout_missing_images_dir_returns_log_only_path(tmp_path):
