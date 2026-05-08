@@ -908,3 +908,85 @@ def test_reconcile_metadata_record_count_deterministic_sort() -> None:
     pdf = _pdf_doc(records=[])
     doc = reconcile_metadata(cd, pdf)
     assert [r["application_no"] for r in doc["records"]] == ["2017/00001", "2017/99999"]
+
+
+# ---------------------------------------------------------------------------
+# Step 4.6 — edge cases (CD-only / PDF-only / both-missing)
+# ---------------------------------------------------------------------------
+
+
+def test_reconcile_metadata_cd_only() -> None:
+    """Pre-PDF-cutover months ship CD only. Output must still be canonical."""
+    cd = _cd_doc(records=[
+        {
+            "application_no": "2014/00001",
+            "publication_no": "TR 2014 00001 B",
+            "title": "Old grant",
+            "ipc_codes": ["A01B 1/00"],
+            "holders": [{"title": "ANCIENT CO"}],
+        },
+    ])
+
+    doc = reconcile_metadata(cd_doc=cd, pdf_doc=None)
+
+    assert doc["bulletin_no"] == "2025/8"
+    assert doc["source_archive"] == "2025_07_CD.rar"
+    assert doc["source_pdf"] is None
+    assert doc["stats"]["records"] == 1
+    assert doc["stats"]["by_source_format"] == {"CD": 1, "PDF": 0, "BOTH": 0}
+    assert doc["records"][0]["application_no"] == "2014/00001"
+    assert doc["records"][0]["source_format"] == "CD"
+
+
+def test_reconcile_metadata_pdf_only() -> None:
+    """Rare: a month where the CD download failed. Should still reconcile."""
+    pdf = _pdf_doc(records=[
+        {
+            "application_no": "2025/00001",
+            "publication_no": "TR 2025 00001 B",
+            "kind_code": "B",
+            "record_type": "GRANTED_PATENT",
+            "title": "PDF only",
+            "abstract": "abstract",
+            "ipc_classes": [],
+            "holders": [],
+            "inventors": [],
+            "priorities": [],
+            "figures": [],
+        }
+    ])
+
+    doc = reconcile_metadata(cd_doc=None, pdf_doc=pdf)
+
+    assert doc["bulletin_no"] == "2025/8"
+    assert doc["source_archive"] is None
+    assert doc["source_pdf"] == "2025_08.pdf"
+    assert doc["stats"]["by_source_format"] == {"CD": 0, "PDF": 1, "BOTH": 0}
+    assert doc["records"][0]["source_format"] == "PDF"
+
+
+def test_reconcile_metadata_raises_when_both_missing() -> None:
+    with pytest.raises(ValueError, match="requires at least one of"):
+        reconcile_metadata(cd_doc=None, pdf_doc=None)
+
+
+def test_reconcile_metadata_cd_only_skips_bulletin_check() -> None:
+    """No bulletin_no equivalence to check when only one side is present —
+    must not raise even when the other side would have been mismatched."""
+    cd = _cd_doc(bulletin_no="2025/8")
+    # No pdf_doc — just verify no spurious mismatch error
+    doc = reconcile_metadata(cd_doc=cd, pdf_doc=None)
+    assert doc["bulletin_no"] == "2025/8"
+
+
+def test_reconcile_metadata_one_side_empty_records_list_still_pairs() -> None:
+    """Empty records[] is not the same as None: the side IS present, just empty.
+    Should NOT trigger the "both None" guard, and should still validate
+    bulletin_no equivalence."""
+    cd = _cd_doc(records=[
+        {"application_no": "X", "publication_no": "x", "ipc_codes": [], "holders": []},
+    ])
+    pdf = _pdf_doc(records=[])
+    doc = reconcile_metadata(cd, pdf)        # both present, PDF empty
+    assert doc["stats"]["records"] == 1
+    assert doc["stats"]["by_source_format"]["CD"] == 1

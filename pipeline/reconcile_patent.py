@@ -582,37 +582,55 @@ def _record_to_dict(rec: CanonicalRecord) -> Dict[str, Any]:
 
 
 def reconcile_metadata(
-    cd_doc: Dict[str, Any],
-    pdf_doc: Dict[str, Any],
+    cd_doc: Optional[Dict[str, Any]] = None,
+    pdf_doc: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Merge two per-bulletin metadata docs into one canonical doc.
 
     Inputs are the dicts returned by ``load_cd_metadata`` and
-    ``load_pdf_metadata``. Output is a JSON-ready dict with:
+    ``load_pdf_metadata``. Either can be ``None`` for single-side
+    reconcile (CD-only month — common in 2015–2017 when PDFs hadn't
+    started shipping yet; or PDF-only month — rare, but happens when
+    the CD download failed).
+
+    Output is a JSON-ready dict with:
 
       - ``bulletin_no``, ``bulletin_date``, ``source_archive``,
-        ``source_pdf`` — provenance preserved from both upstream docs.
+        ``source_pdf`` — provenance preserved from each upstream doc;
+        absent side is reflected as ``None``.
       - ``records`` — list of canonical-shape dicts, sorted by
         ``application_no`` for deterministic output.
       - ``stats`` — record count, by_source_format distribution,
         by_record_type distribution, total figures.
 
-    Raises ``ValueError`` when the two docs describe different
-    bulletins (``bulletin_no`` mismatch). Step 4.6 adds support for
-    single-side reconcile (CD-only or PDF-only month).
+    Raises:
+      - ``ValueError`` when both docs are ``None``.
+      - ``ValueError`` when the two docs describe different
+        bulletins (``bulletin_no`` mismatch).
     """
-    cd_bulletin = cd_doc.get("bulletin_no")
-    pdf_bulletin = pdf_doc.get("bulletin_no")
-    # Normalise format mismatch: CD ships "2025/8", PDF ships "2025-08"
-    # (this is a real shape diff observed on bulletin 2025/8 paired data).
-    if _normalise_bulletin_no(cd_bulletin) != _normalise_bulletin_no(pdf_bulletin):
-        raise ValueError(
-            f"bulletin_no mismatch: CD={cd_bulletin!r} PDF={pdf_bulletin!r} "
-            f"(reconcile would silently produce wrong overlap; aborting)"
-        )
+    if cd_doc is None and pdf_doc is None:
+        raise ValueError("reconcile_metadata requires at least one of cd_doc / pdf_doc")
 
-    cd_records = [normalize_cd_record(p) for p in cd_doc.get("patents", [])]
-    pdf_records = [normalize_pdf_record(r) for r in pdf_doc.get("records", [])]
+    cd_bulletin = cd_doc.get("bulletin_no") if cd_doc else None
+    pdf_bulletin = pdf_doc.get("bulletin_no") if pdf_doc else None
+
+    # Bulletin equivalence check applies only when both sides are present.
+    # CD ships "2025/8", PDF ships "2025-08" — both canonicalise to "2025/8".
+    if cd_doc is not None and pdf_doc is not None:
+        if _normalise_bulletin_no(cd_bulletin) != _normalise_bulletin_no(pdf_bulletin):
+            raise ValueError(
+                f"bulletin_no mismatch: CD={cd_bulletin!r} PDF={pdf_bulletin!r} "
+                f"(reconcile would silently produce wrong overlap; aborting)"
+            )
+
+    cd_records = (
+        [normalize_cd_record(p) for p in cd_doc.get("patents", [])]
+        if cd_doc is not None else []
+    )
+    pdf_records = (
+        [normalize_pdf_record(r) for r in pdf_doc.get("records", [])]
+        if pdf_doc is not None else []
+    )
 
     cd_by_app: Dict[str, CanonicalRecord] = {}
     for rec in cd_records:
@@ -641,9 +659,12 @@ def reconcile_metadata(
 
     return {
         "bulletin_no": _normalise_bulletin_no(cd_bulletin or pdf_bulletin),
-        "bulletin_date": cd_doc.get("bulletin_date") or pdf_doc.get("bulletin_date"),
-        "source_archive": cd_doc.get("source_archive"),
-        "source_pdf": pdf_doc.get("source_pdf"),
+        "bulletin_date": (
+            (cd_doc.get("bulletin_date") if cd_doc else None)
+            or (pdf_doc.get("bulletin_date") if pdf_doc else None)
+        ),
+        "source_archive": cd_doc.get("source_archive") if cd_doc else None,
+        "source_pdf": pdf_doc.get("source_pdf") if pdf_doc else None,
         "reconciled_at": _utcnow_iso(),
         "stats": _build_stats(merged),
         "records": [_record_to_dict(r) for r in merged],
