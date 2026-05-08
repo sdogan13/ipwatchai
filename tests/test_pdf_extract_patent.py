@@ -11,7 +11,10 @@ import pytest
 from pdf_extract_patent import (
     PATENT_INID_CODES,
     clean_text,
+    extract_bulletin_metadata,
+    extract_bulletin_metadata_from_text,
     normalize_iso_date,
+    normalize_tr_date,
     parse_inid_block,
 )
 
@@ -226,3 +229,181 @@ def test_patent_inid_codes_set_matches_documented_whitelist():
         "96", "97",
     }
     assert PATENT_INID_CODES == expected
+
+
+# ---------------------------------------------------------------------------
+# Step 3.2 — normalize_tr_date
+# ---------------------------------------------------------------------------
+
+def test_normalize_tr_date_real_cover_page_format():
+    """Cover-page format on 2025_08.pdf page 1: '21.08.2025'."""
+    assert normalize_tr_date("21.08.2025") == "2025-08-21"
+    assert normalize_tr_date("01.01.2024") == "2024-01-01"
+
+
+def test_normalize_tr_date_extracts_from_label_prefix():
+    """The cover page renders 'Yayım Tarihi  21.08.2025' across lines."""
+    raw = "Yayım Tarihi  \n21.08.2025"
+    assert normalize_tr_date(raw) == "2025-08-21"
+
+
+def test_normalize_tr_date_returns_none_for_missing_or_bad():
+    assert normalize_tr_date(None) is None
+    assert normalize_tr_date("") is None
+    assert normalize_tr_date("no date here") is None
+
+
+def test_normalize_tr_date_does_not_match_body_yyyy_format():
+    """Body dates like '2024/04/22' are NOT a TR cover-page format and
+    must NOT be decoded by this helper. Sanity guard against the two
+    formats accidentally aliasing each other."""
+    assert normalize_tr_date("2024/04/22") is None
+
+
+def test_normalize_iso_date_does_not_match_cover_page_format():
+    """And the reverse — the body parser must reject DD.MM.YYYY."""
+    assert normalize_iso_date("21.08.2025") is None
+
+
+# ---------------------------------------------------------------------------
+# Step 3.2 — extract_bulletin_metadata_from_text (pure)
+# ---------------------------------------------------------------------------
+
+def test_extract_bulletin_metadata_real_cover_page_text():
+    """Real text captured from page 1 of 2025_08.pdf."""
+    page1 = (
+        "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+        "Sayı 2025-08 \n"
+        "Yayım Tarihi  \n"
+        "21.08.2025\n"
+    )
+    no, date = extract_bulletin_metadata_from_text(page1)
+    assert no == "2025-08"
+    assert date == "2025-08-21"
+
+
+def test_extract_bulletin_metadata_handles_dotless_i():
+    """The Turkish ı vs i variation must not break the match."""
+    page = "Sayi 2024-12\nYayim Tarihi 22.12.2024\n"
+    no, date = extract_bulletin_metadata_from_text(page)
+    assert no == "2024-12"
+    assert date == "2024-12-22"
+
+
+def test_extract_bulletin_metadata_handles_pre_2023_uppercase_colon_format():
+    """REGRESSION: 2019–2022 PDFs use uppercase + colon separator with
+    the label and value on different lines.
+
+    Captured shape from real 2022_09.pdf page 1::
+
+        SAYI
+                : 2022-09 (EYLÜL)
+        YAYIN TARİHİ        : 21.09.2022
+    """
+    page1_old = (
+        "ISSN  1301- 0395\n"
+        "RESMİ PATENT BÜLTENİ\n"
+        "OFFICIAL PATENT BULLETIN\n"
+        "2022\n"
+        "SAYI \n"
+        "        : 2022-09 (EYLÜL) \n"
+        "YAYIN TARİHİ        : 21.09.2022\n"
+    )
+    no, date = extract_bulletin_metadata_from_text(page1_old)
+    assert no == "2022-09"
+    assert date == "2022-09-21"
+
+
+def test_extract_bulletin_metadata_handles_pre_2023_with_dotted_capital_I():
+    """The 2019–2022 format spells ``TARİHİ`` with the dotted capital
+    İ (Turkish), not ASCII I."""
+    page = (
+        "SAYI : 2020-07\n"
+        "YAYIN TARİHİ : 21.07.2020\n"
+    )
+    no, date = extract_bulletin_metadata_from_text(page)
+    assert no == "2020-07"
+    assert date == "2020-07-21"
+
+
+def test_extract_bulletin_metadata_returns_partial_when_only_one_present():
+    no, date = extract_bulletin_metadata_from_text("Sayı 2025-08\n")
+    assert no == "2025-08"
+    assert date is None
+
+    no, date = extract_bulletin_metadata_from_text("Yayım Tarihi 21.08.2025\n")
+    assert no is None
+    assert date == "2025-08-21"
+
+
+def test_extract_bulletin_metadata_returns_both_none_for_unrelated_page():
+    """A random body page (no Sayı / Yayım Tarihi) -> (None, None)."""
+    body = "(11) TR 2022 014462 B\n(12) Patent Belgesi\n"
+    assert extract_bulletin_metadata_from_text(body) == (None, None)
+
+
+def test_extract_bulletin_metadata_handles_none_and_empty():
+    assert extract_bulletin_metadata_from_text(None) == (None, None)
+    assert extract_bulletin_metadata_from_text("") == (None, None)
+
+
+# ---------------------------------------------------------------------------
+# Step 3.2 — extract_bulletin_metadata (doc-level)
+# ---------------------------------------------------------------------------
+
+class _FakePage:
+    def __init__(self, text: str):
+        self._text = text
+    def get_text(self, kind: str = "text") -> str:
+        return self._text
+
+
+class _FakeDoc:
+    def __init__(self, pages):
+        self._pages = [_FakePage(t) for t in pages]
+    @property
+    def page_count(self) -> int:
+        return len(self._pages)
+    def __getitem__(self, idx):
+        return self._pages[idx]
+
+
+def test_extract_bulletin_metadata_doc_finds_header_on_page_1():
+    doc = _FakeDoc([
+        "Sayı 2025-08 \nYayım Tarihi  \n21.08.2025\n",
+        "(11) TR 2025 ... B\n",
+        "more body\n",
+    ])
+    no, date = extract_bulletin_metadata(doc)
+    assert no == "2025-08"
+    assert date == "2025-08-21"
+
+
+def test_extract_bulletin_metadata_doc_aggregates_across_pages():
+    """When the bulletin number lives on page 1 but the date is on page 2
+    (defensive — never observed in real bundles), both should still be
+    found."""
+    doc = _FakeDoc([
+        "Sayı 2026-01\n",
+        "Yayım Tarihi 22.01.2026\n",
+        "more body\n",
+    ])
+    no, date = extract_bulletin_metadata(doc)
+    assert no == "2026-01"
+    assert date == "2026-01-22"
+
+
+def test_extract_bulletin_metadata_doc_respects_max_pages():
+    """If the header is past max_pages, it's not found — performance
+    guardrail, not a hard correctness case."""
+    doc = _FakeDoc([
+        "blank cover\n", "blank inside\n", "blank toc\n",
+        "Sayı 2025-08\nYayım Tarihi 21.08.2025\n",  # page 4 (index 3)
+    ])
+    no, date = extract_bulletin_metadata(doc, max_pages=3)
+    assert no is None and date is None
+
+
+def test_extract_bulletin_metadata_doc_handles_empty_document():
+    doc = _FakeDoc([])
+    assert extract_bulletin_metadata(doc) == (None, None)

@@ -31,7 +31,7 @@ CLI (lands in step 3.8)::
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 
 def _get_fitz():
@@ -101,6 +101,104 @@ def normalize_iso_date(raw: Optional[str]) -> Optional[str]:
         return None
     yyyy, mm, dd = m.groups()
     return f"{yyyy}-{mm}-{dd}"
+
+
+def normalize_tr_date(raw: Optional[str]) -> Optional[str]:
+    """``21.08.2025`` -> ``2025-08-21``. ``None`` if no match.
+
+    Used for the cover-page ``Yayım Tarihi`` field, which renders the
+    date in Turkish DD.MM.YYYY convention. The body of the PDF uses
+    YYYY/MM/DD instead — see ``normalize_iso_date``.
+    """
+    if not raw:
+        return None
+    m = re.search(r"\b(\d{2})\.(\d{2})\.(\d{4})\b", raw)
+    if not m:
+        return None
+    dd, mm, yyyy = m.groups()
+    return f"{yyyy}-{mm}-{dd}"
+
+
+# Cover-page header patterns. Two layouts seen in the wild:
+#
+#   2023+:    Sayı 2025-08
+#             Yayım Tarihi
+#             21.08.2025
+#
+#   2019–2022 (uppercase + colon-separated):
+#             SAYI
+#                     : 2022-09 (EYLÜL)
+#             YAYIN TARİHİ        : 21.09.2022
+#
+# The regexes are case-insensitive on ASCII letters, with explicit
+# character classes for the Turkish I family (``ı``/``İ``/``I``/``i``)
+# since Python's ``re.IGNORECASE`` doesn't fold those across cases.
+# An optional colon separator and arbitrary whitespace (newlines included
+# via ``\s*``) cover both layouts.
+_BULLETIN_NO_RE = re.compile(
+    r"SAY[Iıİ]\s*:?\s*(\d{4}-\d{1,2})",
+    re.IGNORECASE,
+)
+_BULLETIN_DATE_RE = re.compile(
+    r"YAY[Iıİ][NM]\s+TAR[İI]H[Iıİ]\s*:?\s*(\d{2})\.(\d{2})\.(\d{4})",
+    re.IGNORECASE,
+)
+
+
+def extract_bulletin_metadata_from_text(
+    text: Optional[str],
+) -> Tuple[Optional[str], Optional[str]]:
+    """Pure helper: extract ``(bulletin_no, bulletin_date_iso)`` from one
+    page's text.
+
+    Returns ``(None, None)`` when neither pattern matches, or one side
+    populated and the other ``None``. Splitting this from the doc-level
+    wrapper keeps the logic unit-testable without a live PDF.
+    """
+    if not text:
+        return None, None
+
+    bulletin_no: Optional[str] = None
+    m = _BULLETIN_NO_RE.search(text)
+    if m:
+        bulletin_no = m.group(1)
+
+    bulletin_date: Optional[str] = None
+    m = _BULLETIN_DATE_RE.search(text)
+    if m:
+        dd, mm, yyyy = m.group(1), m.group(2), m.group(3)
+        bulletin_date = f"{yyyy}-{mm}-{dd}"
+
+    return bulletin_no, bulletin_date
+
+
+def extract_bulletin_metadata(
+    doc,
+    *,
+    max_pages: int = 3,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Scan the first ``max_pages`` of a PyMuPDF doc for the bulletin
+    header: ``Sayı YYYY-M`` and ``Yayım Tarihi DD.MM.YYYY``.
+
+    Either return value may be ``None`` if the corresponding pattern is
+    absent — the caller decides whether that's a hard failure. Stops
+    scanning as soon as both have been found.
+    """
+    bulletin_no: Optional[str] = None
+    bulletin_date: Optional[str] = None
+
+    pages_to_scan = min(max_pages, getattr(doc, "page_count", 0))
+    for i in range(pages_to_scan):
+        text = doc[i].get_text("text")
+        no, date = extract_bulletin_metadata_from_text(text)
+        if bulletin_no is None and no is not None:
+            bulletin_no = no
+        if bulletin_date is None and date is not None:
+            bulletin_date = date
+        if bulletin_no and bulletin_date:
+            break
+
+    return bulletin_no, bulletin_date
 
 
 def parse_inid_block(text: str) -> Dict[str, List[str]]:
