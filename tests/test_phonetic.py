@@ -11,10 +11,7 @@ Covers:
 - _levenshtein() — edit distance
 - Edge cases: empty strings, single chars, multi-word names
 """
-import sys
-import os
 
-import pytest
 
 
 from utils.phonetic import (

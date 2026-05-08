@@ -5,10 +5,7 @@ Tests for Turkish text comparison functions in risk_engine.py:
 - calculate_token_overlap()
 - calculate_name_similarity()
 """
-import sys
-import os
 
-import pytest
 
 
 from risk_engine import (

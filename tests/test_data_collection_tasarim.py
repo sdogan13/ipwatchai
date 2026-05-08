@@ -14,7 +14,6 @@ from pathlib import Path
 import pytest
 
 from data_collection_tasarim import (
-    CLIArgs,
     CollectionCounters,
     DEFAULT_INCREMENTAL_THRESHOLD,
     DEFAULT_LOOKBACK_DAYS,

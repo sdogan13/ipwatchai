@@ -8,10 +8,6 @@ Covers:
 - IDF classification boundaries
 - Class 99 edge cases
 """
-import sys
-import os
-import uuid
-from datetime import datetime
 
 import pytest
 

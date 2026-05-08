@@ -10,18 +10,12 @@ Covers:
 - check_report_eligibility()
 - deduct_name_credit(), deduct_logo_credit(), refund_logo_credit()
 """
-import sys
-import os
 import uuid
 from unittest.mock import patch, MagicMock
-from datetime import date
 
-import pytest
 
 
 from utils.subscription import (
-    PLAN_FEATURES,
-    get_plan_limit,
     get_user_plan,
     check_live_search_eligibility,
     check_quick_search_eligibility,

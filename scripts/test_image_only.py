@@ -16,7 +16,6 @@ cur = conn.cursor()
 text_model = SentenceTransformer('sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2')
 
 from risk_engine import normalize_turkish
-import logging
 
 DATE_FILTER = "AND (application_date >= NOW() - INTERVAL '11 years' OR application_date IS NULL)"
 NORM_OCR = """LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(

@@ -1,6 +1,4 @@
 """Tests for plan feature configuration. Runs without server."""
-import sys
-import os
 
 # Add project root to path
 

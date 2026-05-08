@@ -6,13 +6,11 @@ os.environ["XFORMERS_DISABLED"] = "1"
 _PRE_DOTENV_PIPELINE_BULLETINS_ROOT = os.environ.get("PIPELINE_BULLETINS_ROOT")
 _PRE_DOTENV_DATA_ROOT = os.environ.get("DATA_ROOT")
 
-import psycopg2
 import torch
 import numpy as np
 import cv2
 from pathlib import Path
 from PIL import Image
-from torchvision import transforms
 # CrossEncoder removed - was unused, wasted ~120MB VRAM
 from dotenv import load_dotenv
 
@@ -22,52 +20,36 @@ from pipeline import ingest
 from pipeline import ai  # Optimization: Reuse models loaded here
 from pipeline.ingest_rules import _repair_mojibake
 from services.scoring_service import (
-    RISK_THRESHOLDS,
+    RISK_THRESHOLDS,  # noqa: F401  re-exported
     _calculate_visual_breakdown,
-    _dynamic_combine,
+    _dynamic_combine,  # noqa: F401  re-exported
     build_logo_image_profile,
-    calculate_adjusted_score,
-    calculate_multilevel_similarity,
-    calculate_name_similarity,
-    calculate_risk_score,
-    calculate_text_similarity as idf_text_similarity,
-    calculate_token_overlap,
-    calculate_turkish_similarity,
-    calculate_visual_similarity,
-    check_substring_containment,
+    calculate_name_similarity,  # noqa: F401  re-exported
+    calculate_token_overlap,  # noqa: F401  re-exported
+    calculate_visual_similarity,  # noqa: F401  re-exported
+    check_substring_containment,  # noqa: F401  re-exported
     extract_ocr_text,
-    get_risk_level,
+    get_risk_level,  # noqa: F401  re-exported
     resolve_logo_image_path,
     score_pair,
 )
 from utils.idf_scoring import (
     normalize_turkish,
-    turkish_lower,
-    analyze_query,
-    get_word_weight,
-    get_word_class,
-    is_generic_word
+    turkish_lower,  # noqa: F401  re-exported
+    
 )
 # Translation similarity for cross-language conflict detection
 # Translation similarity no longer used directly - handled by dual-path scoring in score_pair()
 # Graduated phonetic scoring (replaces binary dMetaphone match)
 from utils.phonetic import calculate_phonetic_similarity
-from utils.class_utils import (
-    GLOBAL_CLASS,
-    classes_overlap,
-    get_overlapping_classes,
-    expand_classes
-)
 # ===================== DATABASE CONNECTION POOL =====================
 from db.pool import (
     get_connection,
-    release_connection,
-    connection_context,
-    close_pool
+    release_connection
 )
 
 # ===================== STRUCTURED LOGGING =====================
-from logging_config import get_logger, log_timing, setup_logging
+from logging_config import get_logger, setup_logging
 
 _LOCAL_PROJECT_ROOT = Path(__file__).resolve().parent
 _LOCAL_DEFAULT_BULLETINS_ROOT = _LOCAL_PROJECT_ROOT / "bulletins" / "Marka"

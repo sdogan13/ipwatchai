@@ -714,7 +714,6 @@ class AgenticTrademarkSearch:
 import tempfile
 from fastapi import APIRouter, Query, HTTPException, Depends, UploadFile, File, Form, Request
 from pydantic import BaseModel
-from typing import Optional
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 

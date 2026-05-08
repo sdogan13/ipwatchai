@@ -12,8 +12,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from services.registry_search_service import (
-    DEFAULT_PER_REGISTRY_CANDIDATES,
-    TRADEMARK_INACTIVE_STATUSES,
     _normalize_design_result,
     _trademark_image_url,
     normalize_nice_filter,

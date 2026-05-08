@@ -8,8 +8,6 @@ and that the translation score floor works correctly.
 Runs without NLLB model or DB — we seed IDFLookup with known test
 words so the 3-tier classification works correctly in CI.
 """
-import sys
-import os
 import time
 import pytest
 from unittest.mock import patch
@@ -19,7 +17,6 @@ from unittest.mock import patch
 from utils.translation import (
     score_translated_pair,
     calculate_translation_similarity,
-    translate_to_turkish,
 )
 
 

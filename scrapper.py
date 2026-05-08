@@ -4,12 +4,11 @@ import json
 import os
 import re
 import random
-import requests
 import html
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Tuple, List, Dict
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+from typing import List, Dict
+from playwright.sync_api import sync_playwright
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_exponential

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import io
 import logging
-import tempfile
 from pathlib import Path
 from typing import List, Optional
 from uuid import UUID, uuid4
@@ -26,7 +25,6 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     File,
-    Form,
     HTTPException,
     Query,
     Request,
@@ -135,7 +133,6 @@ def _save_upload(content: bytes, item_id: UUID, content_type: str) -> Path:
 def register_design_watchlist_routes(app, limiter):
     from auth.authentication import get_current_user
     from services import design_watchlist_service as svc
-    from watchlist.design_scanner import scan_single_design_watchlist
 
     @app.post("/api/v1/design-watchlist", tags=["Design Watchlist"])
     @limiter.limit("30/minute")

@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from fastapi import Depends, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from PIL import Image
 
 

@@ -3,51 +3,27 @@ Trademark Risk Assessment System - Main Application
 Multi-tenant API with authentication and watchlist monitoring
 """
 import logging
-from datetime import datetime
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, HTTPException, File, UploadFile, Form, Depends, Query
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Request, HTTPException, UploadFile
 from slowapi.util import get_remote_address
 from pathlib import Path
-from typing import Optional
 from PIL import Image
 import io
 import tempfile
-import os
-import time
 import torch
-import psycopg2
-import psycopg2.extras
 
-from auth.authentication import CurrentUser, get_current_user, require_role
 from config.settings import settings
-from services.scoring_service import adjust_image_similarity, extract_ocr_text
+from services.scoring_service import extract_ocr_text
 # CENTRALIZED IDF SCORING - consistent across the entire system
 from utils.idf_scoring import (
     normalize_turkish,
-    calculate_text_similarity,
-    calculate_combined_score,
     calculate_comprehensive_score,  # Multi-factor scoring (NEW)
-    calculate_alert_risk_score,     # Alert risk scoring (NEW)
-    get_risk_level,
-    is_generic_word,    # Data-driven from word_idf table
-    get_word_weight,    # 3-tier: 0.1 (generic), 0.5 (semi), 1.0 (distinctive)
-    get_word_class,     # Get word classification
-    analyze_query,      # Query analysis for debugging
     MAX_RESULTS         # Global constant for top N results (10)
 )
 # Class 99 (Global Brand) utilities - covers all 45 Nice classes
 from utils.class_utils import (
-    GLOBAL_CLASS,
-    is_global_class,
-    expand_classes,
-    classes_overlap,
-    get_overlapping_classes,
-    format_class_display,
-    should_include_in_class_filter,
-    get_class_sql_condition,
-    calculate_class_overlap_score
+    GLOBAL_CLASS
 )
 
 # Unified scoring engine - single source of truth for all search paths
@@ -55,7 +31,6 @@ from risk_engine import (
     score_pair,
     calculate_visual_similarity,
     get_risk_level as risk_get_risk_level,
-    normalize_turkish as risk_normalize_turkish,
 )
 
 # Configure logging
@@ -65,23 +40,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 from app_admin_scoring_routes import (
-    TestScoringRequest,
-    TestScoringResponse,
     register_admin_scoring_routes,
-    test_scoring,
 )
 from app_lifecycle import run_shutdown_tasks, run_startup_tasks
 from app_assets import configure_static_assets, mount_static_assets, register_asset_routes
 from app_factory import create_fastapi_app
 from app_enhanced_search_routes import (
-    AutoSuggestedClass,
-    EnhancedSearchResponse,
-    SearchContext,
     SearchRequest,
-    TrademarkResult,
-    format_date,
-    get_class_suggestions_internal,
-    get_image_url,
     get_status_code,
     register_enhanced_search_routes,
 )
@@ -89,21 +54,12 @@ from app_design_search_routes import register_design_search_routes
 from app_registry_search_routes import register_registry_search_routes
 from app_design_watchlist_routes import register_design_watchlist_routes
 from app_design_alert_routes import register_design_alert_routes
-from app_image_routes import find_trademark_image, register_trademark_image_routes
+from app_image_routes import register_trademark_image_routes
 from app_image_search_routes import register_image_search_routes
 from app_middleware import configure_middleware
 from app_nice_class_routes import (
-    ClassSuggestionRequest,
-    ClassSuggestionResponse,
     NICE_CLASS_NAMES,
-    NICE_CLASS_NAMES_TR,
-    SuggestedClass,
-    get_class_name,
-    get_nice_classes,
-    parse_classes_text,
     register_nice_class_routes,
-    suggest_nice_classes,
-    validate_classes,
 )
 from app_errors import configure_exception_handlers
 from app_public_portfolio_routes import register_public_portfolio_routes
@@ -112,7 +68,6 @@ from app_rate_limit import configure_rate_limiting
 from app_router_registry import register_application_routers
 from app_legacy_search_routes import register_legacy_search_utility_routes
 from app_legacy_rollback_routes import register_legacy_rollback_routes
-from app_search_meta_routes import get_search_credits
 from app_system_routes import register_system_routes
 
 

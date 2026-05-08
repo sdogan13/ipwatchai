@@ -4,7 +4,7 @@ sys.path.insert(0, '/app')
 
 from utils.translation import (
     get_translations, translate_to_turkish,
-    detect_language_fasttext, batch_translate_to_turkish
+    detect_language_fasttext
 )
 
 names = ["golden eagle", "silver fox", "cicek masali", "samsung", "apple", "DOĞAN"]

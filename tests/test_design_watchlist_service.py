@@ -9,7 +9,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 

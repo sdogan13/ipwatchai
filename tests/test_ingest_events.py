@@ -1,7 +1,6 @@
 import sys
 import uuid
 
-import pytest
 
 
 sys.modules.pop("ingest_events", None)

@@ -7,8 +7,6 @@ target the per-event-type parsers and their sub-helpers.
 import pytest
 
 from pdf_extract_tasarim_events import (
-    CourtRef,
-    HolderRef,
     TasarimEvent,
     clean_text,
     detect_section_for_page,

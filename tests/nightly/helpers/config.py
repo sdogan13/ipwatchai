@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 
 from tests.live.helpers.config import load_live_config, should_run_env_flag

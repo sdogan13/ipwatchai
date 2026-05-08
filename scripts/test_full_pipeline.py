@@ -20,7 +20,7 @@ text_model = SentenceTransformer('sentence-transformers/paraphrase-multilingual-
 print("Ready.\n")
 
 # Helper: minimal RiskEngine with just DB + text model
-from risk_engine import RiskEngine, normalize_turkish, turkish_lower
+from risk_engine import RiskEngine, normalize_turkish
 import logging
 
 engine = RiskEngine.__new__(RiskEngine)

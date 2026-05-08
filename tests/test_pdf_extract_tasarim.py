@@ -5,12 +5,9 @@ The streaming PDF parsing is exercised by a smoke test against the real
 target the pure helpers that don't need PyMuPDF.
 """
 
-import pytest
 
 from pdf_extract_tasarim import (
-    Applicant,
     Attorney,
-    Designer,
     Priority,
     clean_text,
     detect_deferred_period,

@@ -10,7 +10,6 @@ Usage:
     python scripts/download_pdfs.py --distribute-only  # just move existing root PDFs into folders
     python scripts/download_pdfs.py --visible       # show browser
 """
-import os
 import re
 import sys
 import json
@@ -103,8 +102,7 @@ async def collect_download_urls(headless: bool = True) -> List[Dict]:
     from data_collection import (
         extract_card_metadata, collect_download_clickables,
         maybe_dismiss_overlays, select_category,
-        DOWNLOAD_LABEL_SELECTOR, CD_TEXT_RE,
-        open_download_menu, list_menu_items, force_close_menus,
+        DOWNLOAD_LABEL_SELECTOR, open_download_menu, list_menu_items, force_close_menus,
         MENU_WAIT_MS,
     )
 

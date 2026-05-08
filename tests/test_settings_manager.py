@@ -3,12 +3,9 @@ Tests for the SettingsManager singleton (in-memory cache with TTL).
 
 All DB calls are mocked — tests verify cache logic, TTL, and invalidation.
 """
-import sys
-import os
 import time
 from unittest.mock import patch, MagicMock
 
-import pytest
 
 
 from utils.settings_manager import SettingsManager, get_rate_limit_value

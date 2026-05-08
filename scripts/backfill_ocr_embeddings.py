@@ -6,7 +6,6 @@ sys.path.insert(0, '/app')
 
 import psycopg2
 from sentence_transformers import SentenceTransformer
-import numpy as np
 
 BATCH_SIZE = 256
 COMMIT_EVERY = 5000  # commit every N records

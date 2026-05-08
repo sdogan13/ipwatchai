@@ -8,7 +8,7 @@ Tests:
 3. Robustness edge cases (single-word, multi-word, Turkish chars, abbreviations)
 4. Cross-feature consistency (public vs authenticated search)
 """
-import os, sys, json, time
+import os, sys
 os.environ.setdefault('DB_PORT', '5433')
 os.environ.setdefault('DB_PASSWORD', 'Dogan.1996')
 
@@ -19,7 +19,7 @@ TOKEN = open(os.path.join(os.path.dirname(__file__), "tmp_token.txt")).read().st
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
 
 # Also test IDF scoring directly for precise pair-level checks
-from services.scoring_service import compute_idf_weighted_score, tokenize
+from services.scoring_service import compute_idf_weighted_score
 from risk_engine import score_pair
 
 PASS = 0

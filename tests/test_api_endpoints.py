@@ -6298,7 +6298,6 @@ async def test_watchlist_service_import_watchlist_upload_file_respects_watchlist
 @pytest.mark.asyncio
 async def test_extracted_upload_watchlist_logo_delegates_to_service_and_schedules_processing():
     from api.watchlist_routes import (
-        _process_watchlist_logo,
         _start_watchlist_logo_thread,
         upload_watchlist_logo,
     )

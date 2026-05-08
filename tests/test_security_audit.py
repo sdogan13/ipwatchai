@@ -13,11 +13,7 @@ Tests cover:
 - LIKE injection prevention
 """
 import os
-import sys
-import uuid
 import pytest
-from unittest.mock import MagicMock, patch
-from datetime import datetime
 
 # Path setup handled by conftest.py
 

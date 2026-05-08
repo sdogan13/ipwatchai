@@ -5,12 +5,8 @@ Covers:
 - calculate_appeal_deadline(): date input types, 2-month rule, edge cases
 - classify_deadline_status(): status-based routing, urgency levels, days_remaining
 """
-import sys
-import os
 from datetime import date, datetime, timedelta
-from unittest.mock import patch
 
-import pytest
 
 
 from utils.deadline import calculate_appeal_deadline, classify_deadline_status

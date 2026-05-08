@@ -32,7 +32,7 @@ import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence
 
 
 _LOCAL_PROJECT_ROOT = Path(__file__).resolve().parent
@@ -114,7 +114,6 @@ def hsv_histogram(image_path: Path, bins: int = HSV_BINS) -> List[float]:
     zeros if the image can't be loaded).
     """
     import cv2
-    import numpy as np
     img = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
     if img is None:
         return [0.0] * (bins ** 3)

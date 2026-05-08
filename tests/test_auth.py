@@ -4,11 +4,9 @@ role-based access control, and superadmin checks.
 
 All DB calls mocked — tests run without database.
 """
-import sys
-import os
 import uuid
 from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 

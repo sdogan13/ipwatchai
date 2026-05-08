@@ -9,9 +9,6 @@ Covers:
 - risk_engine.get_risk_level() — threshold classification
 - risk_engine.calculate_visual_similarity() — CLIP+DINOv2+OCR composite
 """
-import sys
-import os
-import math
 import inspect
 from unittest.mock import MagicMock, patch
 
@@ -32,10 +29,6 @@ from risk_engine import (
     _dynamic_combine,
     score_pair,
     RISK_THRESHOLDS,
-    calculate_name_similarity,
-    check_substring_containment,
-    calculate_token_overlap,
-    normalize_turkish as re_normalize_turkish,
     get_status_category,
 )
 
@@ -1991,7 +1984,6 @@ class TestFeatureFlag:
     def test_settings_has_use_unified_scoring(self):
         """Settings class should have use_unified_scoring field."""
         from config.settings import Settings
-        import inspect
         # Check the class has the field
         assert hasattr(Settings, 'model_fields') or hasattr(Settings, '__fields__')
         fields = Settings.model_fields if hasattr(Settings, 'model_fields') else Settings.__fields__

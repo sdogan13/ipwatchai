@@ -23,7 +23,6 @@ WIPO standard codes used in the bulletin:
 
 import json
 import logging
-import os
 import re
 import shutil
 import time

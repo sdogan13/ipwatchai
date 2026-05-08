@@ -3,7 +3,6 @@ Quick live API test for the FOREIGN_GENERICS_OVERRIDE fix.
 Run inside the container: python3 scripts/test_jewelry_fix.py
 """
 import requests
-import json
 
 BASE = "http://localhost:8000"
 

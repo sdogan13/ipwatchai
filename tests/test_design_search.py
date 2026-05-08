@@ -154,7 +154,7 @@ def test_inactive_statuses_includes_iptal_and_hukumsuz():
 # ---------------------------------------------------------------------------
 
 def test_resolve_design_image_rejects_traversal(tmp_path, monkeypatch):
-    from app_design_search_routes import _resolve_design_image, DESIGN_BULLETINS_ROOT
+    from app_design_search_routes import _resolve_design_image
     # Craft a path that tries to escape the root
     assert _resolve_design_image("../../../etc/passwd") is None
     assert _resolve_design_image("..\\windows\\win.ini") is None

@@ -12,10 +12,7 @@ Covers:
 - calculate_class_overlap_score()
 - is_class_conflict_high_risk()
 """
-import sys
-import os
 
-import pytest
 
 
 from utils.class_utils import (

@@ -5,10 +5,6 @@ These tests cover the pure helpers: aggregation, idempotency checks,
 section filtering, and the HSV histogram on a synthetic image.
 """
 
-from pathlib import Path
-import shutil
-import tempfile
-import uuid
 
 import pytest
 
@@ -18,7 +14,6 @@ from embeddings_tasarim import (
     COLOR_DIM,
     aggregate_design_embeddings,
     design_already_aggregated,
-    hsv_histogram,
     mean_pool,
     select_embeddable_records,
     view_already_embedded,

@@ -8,11 +8,7 @@ Covers:
 - Concurrent-safe singleton patterns
 - Score clamping (never > 1.0 or < 0.0)
 """
-import sys
-import os
-from unittest.mock import patch, MagicMock
 
-import pytest
 
 
 

@@ -20,7 +20,7 @@ Tests are organized by feature:
 
 import pytest
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from unittest.mock import patch, MagicMock
 
 from utils.subscription import (
@@ -32,8 +32,6 @@ from utils.subscription import (
     check_application_eligibility,
     check_report_eligibility,
     check_ai_credit_eligibility,
-    check_name_generation_eligibility,
-    check_logo_generation_eligibility,
     get_lead_access,
     get_monthly_applications,
 )

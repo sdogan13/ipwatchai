@@ -9,7 +9,6 @@ It identifies the "events volume" (containing renewals, transfers, etc.) by chec
 the TOC page for section headers, and renames it to bulletin.pdf for the extractor.
 """
 import json
-import re
 import sys
 import time
 import logging

@@ -6,7 +6,6 @@ Tests for dashboard layout reorganization:
 - Each tab content isolated
 - Mobile navigation structure
 """
-import pytest
 from pathlib import Path
 
 # ─── File paths ───────────────────────────────────────────────

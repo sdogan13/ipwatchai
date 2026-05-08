@@ -15,7 +15,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from pdf_extract_events import extract_events_from_pdf, extract_events_from_folder, _detect_source_type, _parse_folder_info
+from pdf_extract_events import extract_events_from_folder, _detect_source_type, _parse_folder_info
 
 # Force UTF-8 output on Windows
 if sys.platform == "win32":

@@ -4,12 +4,9 @@ score_translated_pair, calculate_translation_similarity.
 
 All NLLB model calls are mocked — tests run without GPU or model downloads.
 """
-import sys
-import os
 from unittest.mock import patch, MagicMock
 from pathlib import Path
 
-import pytest
 
 import utils.translation as translation
 

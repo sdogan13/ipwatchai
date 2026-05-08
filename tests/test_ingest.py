@@ -6,15 +6,13 @@ Tests pure functions and tuple/SQL structure.
 Does NOT require a live database.
 """
 import sys
-import os
 import json
 import uuid
 import pytest
 from datetime import datetime, date, timezone
 from contextlib import contextmanager
 from types import ModuleType
-from unittest.mock import MagicMock, patch
-from psycopg2.extras import Json
+from unittest.mock import patch
 
 # Force a fresh import of the canonical packaged ingest module.
 sys.modules.pop("pipeline.ingest", None)
@@ -2454,7 +2452,7 @@ class TestPipelineSortKey:
     """Test the folder_sort_key from pipeline.parallel."""
 
     def test_import_and_order(self):
-        from pipeline.parallel import folder_sort_key, _extract_folder_number
+        from pipeline.parallel import folder_sort_key
         folders = ["APP_1", "GZ_488", "BLT_200", "GZ_300", "BLT_499", "GZ_499"]
         result = sorted(folders, key=folder_sort_key)
         assert result == ["BLT_499", "BLT_200", "GZ_499", "GZ_488", "GZ_300", "APP_1"]

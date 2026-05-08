@@ -1,5 +1,5 @@
 """Lightweight full pipeline test — SQL only, no heavy model loading."""
-import sys, os, time, ast
+import sys, os, time
 sys.path.insert(0, '/app')
 import psycopg2
 
