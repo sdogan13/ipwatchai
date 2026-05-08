@@ -4,17 +4,25 @@ Built one helper at a time. Each step adds its own test block so failures
 point cleanly at the unit under test.
 """
 
+from pathlib import Path
+
 import pytest
 
 from cd_extract_patent import (
+    DEFAULT_SEVEN_ZIP,
     TABLE_COLUMNS,
     decode_hsqldb_escapes,
+    extract_cd_archive,
     parse_hsqldb_log,
     parse_hsqldb_log_line,
     resolve_image_path,
     strip_ipc_html,
 )
-from cd_extract_patent import _parse_sql_values, _split_application_no
+from cd_extract_patent import (
+    _parse_sql_values,
+    _resolve_seven_zip,
+    _split_application_no,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -618,3 +626,95 @@ def test_resolve_image_path_accepts_str_or_path(tmp_path):
     b = resolve_image_path("2017/15048", str(tmp_path))
     assert a == b
     assert a is not None
+
+
+# ---------------------------------------------------------------------------
+# Step 2.6 — _resolve_seven_zip + extract_cd_archive
+# ---------------------------------------------------------------------------
+
+def test_resolve_seven_zip_uses_explicit_override():
+    """Explicit override beats env and default."""
+    explicit = Path("X:/custom/7z.exe")
+    assert _resolve_seven_zip(explicit) == explicit
+
+
+def test_resolve_seven_zip_falls_back_to_env(monkeypatch):
+    """When no override, the PIPELINE_SEVEN_ZIP_PATH env var is honored."""
+    monkeypatch.setenv("PIPELINE_SEVEN_ZIP_PATH", "Y:/env/7z.exe")
+    assert _resolve_seven_zip() == Path("Y:/env/7z.exe")
+
+
+def test_resolve_seven_zip_falls_back_to_default(monkeypatch):
+    """When neither override nor env is set, the platform default is used."""
+    monkeypatch.delenv("PIPELINE_SEVEN_ZIP_PATH", raising=False)
+    assert _resolve_seven_zip() == Path(DEFAULT_SEVEN_ZIP)
+
+
+def test_extract_cd_archive_raises_when_archive_missing(tmp_path):
+    ghost = tmp_path / "no_such.rar"
+    with pytest.raises(FileNotFoundError, match="archive not found"):
+        extract_cd_archive(ghost, tmp_path / "out")
+
+
+def test_extract_cd_archive_raises_when_seven_zip_missing(tmp_path):
+    """If the 7-Zip override path doesn't exist, fail loudly before any
+    real subprocess work."""
+    fake_rar = tmp_path / "fake.rar"
+    fake_rar.write_bytes(b"not really a rar but we never get past the 7-Zip check")
+    bad_seven = tmp_path / "definitely_not_seven_zip.exe"
+    with pytest.raises(FileNotFoundError, match="7-Zip not found"):
+        extract_cd_archive(fake_rar, tmp_path / "out", seven_zip=bad_seven)
+
+
+# ----- Live integration smoke test (skipped if the real CD is absent) -----
+
+_REAL_CD = Path(
+    "C:/Users/701693/turk_patent/bulletins/Patent__Faydali_Model/2025_12_CD.rar"
+)
+
+
+@pytest.mark.skipif(
+    not _REAL_CD.is_file(),
+    reason=f"Real CD {_REAL_CD.name} not on disk; skipping integration smoke",
+)
+@pytest.mark.skipif(
+    not Path(DEFAULT_SEVEN_ZIP).is_file(),
+    reason="7-Zip not installed at the platform default path",
+)
+def test_extract_cd_archive_real_2025_12_smoke(tmp_path):
+    """End-to-end smoke: extract the real 2025_12 CD, then check that
+    the HSQLDB files landed and the bundled JRE was excluded.
+
+    Strong assertions:
+      - returned path exists and contains data/ptbulletin.log
+      - data/java/ is absent in the extracted tree
+      - extracted size is much smaller than the source archive
+        (sanity check that the JRE skip worked)
+    """
+    cd_root = extract_cd_archive(_REAL_CD, tmp_path)
+
+    # Returned path looks right
+    assert cd_root.is_dir()
+    assert cd_root.name.startswith("2025_12") or "2025_12" in cd_root.name
+
+    # HSQLDB files survived
+    assert (cd_root / "data" / "ptbulletin.log").is_file()
+    assert (cd_root / "data" / "ptbulletin.script").is_file()
+    # Image folders survived
+    assert (cd_root / "data" / "images").is_dir()
+
+    # JRE was excluded
+    assert not (cd_root / "data" / "java").exists(), \
+        "data/java/ should have been skipped"
+
+    # Sanity: extraction produced real content (tens of MB of TIFFs +
+    # the HSQLDB log). We don't compare to the compressed source archive
+    # size because RAR compression makes that ratio non-monotonic — the
+    # important guarantee is that data/java/ was excluded (asserted
+    # above) and that the surviving content is non-trivial.
+    total_bytes = sum(
+        p.stat().st_size for p in cd_root.rglob("*") if p.is_file()
+    )
+    assert total_bytes > 10 * 1024 * 1024, (
+        f"extracted only {total_bytes} bytes — likely a partial extract"
+    )

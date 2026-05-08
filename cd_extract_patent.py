@@ -22,7 +22,9 @@ Built incrementally. Each helper has its own unit-test file.
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -356,3 +358,111 @@ def resolve_image_path(
                 return candidate
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# Step 2.6 — 7-Zip archive extractor
+# ---------------------------------------------------------------------------
+
+# Default 7-Zip executable on Windows. Override via env var
+# ``PIPELINE_SEVEN_ZIP_PATH`` (matches the README's variable name).
+DEFAULT_SEVEN_ZIP = "C:/Program Files/7-Zip/7z.exe"
+
+
+def _resolve_seven_zip(override: Optional[str | Path] = None) -> Path:
+    """Locate the 7-Zip executable, in priority:
+
+      1. explicit ``override`` argument
+      2. ``PIPELINE_SEVEN_ZIP_PATH`` environment variable
+      3. the platform default (``C:/Program Files/7-Zip/7z.exe`` on Windows)
+    """
+    if override is not None:
+        return Path(override)
+    env = os.environ.get("PIPELINE_SEVEN_ZIP_PATH")
+    if env:
+        return Path(env)
+    return Path(DEFAULT_SEVEN_ZIP)
+
+
+def extract_cd_archive(
+    rar_path: str | Path,
+    scratch_dir: str | Path,
+    *,
+    seven_zip: Optional[str | Path] = None,
+    timeout: Optional[int] = 600,
+) -> Path:
+    """Extract a Patent CD ``.rar`` archive into ``scratch_dir``.
+
+    Skips ``data/java/`` (~80% of the archive — the bundled JRE is not
+    needed for ingestion). Returns the path to the extracted CD root,
+    which is the single top-level folder inside the archive (e.g.
+    ``scratch_dir/2025_12``).
+
+    Raises:
+      - ``FileNotFoundError`` if ``rar_path`` is missing.
+      - ``FileNotFoundError`` if 7-Zip itself is not installed at the
+        resolved path.
+      - ``RuntimeError`` if 7-Zip exits with a fatal status (non-zero
+        and non-warning) or if no top-level folder is found after
+        extraction.
+
+    7-Zip exit codes (per the official spec):
+      - 0 = ok
+      - 1 = warnings (non-fatal — usually file-locked or skipped items)
+      - 2 = fatal error
+      - 7 = command line error
+      - 8 = not enough memory
+      - 255 = user stopped
+    Only 0 and 1 are accepted.
+    """
+    rar = Path(rar_path)
+    if not rar.is_file():
+        raise FileNotFoundError(f"archive not found: {rar}")
+
+    seven = _resolve_seven_zip(seven_zip)
+    if not seven.is_file():
+        raise FileNotFoundError(f"7-Zip not found at {seven}")
+
+    scratch = Path(scratch_dir)
+    scratch.mkdir(parents=True, exist_ok=True)
+
+    # The archive's top-level folder name varies (2025_12, 2024_07, …),
+    # so we exclude with a leading wildcard. Both `*/data/java` (the
+    # directory itself) and `*/data/java/*` (its contents) are needed.
+    cmd = [
+        str(seven), "x",
+        str(rar),
+        f"-o{scratch}",
+        "-x!*/data/java",
+        "-x!*/data/java/*",
+        "-y",   # assume Yes for any 7-Zip prompts
+        "-bso0",  # silence stdout
+        "-bsp0",  # silence progress
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    if result.returncode not in (0, 1):
+        raise RuntimeError(
+            f"7-Zip exited {result.returncode} extracting {rar.name}: "
+            f"{(result.stderr or result.stdout).strip()[:500]}"
+        )
+
+    # Identify the extracted CD root. A patent CD has exactly one
+    # top-level folder containing data/, autorun.inf, etc.
+    candidates = [p for p in scratch.iterdir() if p.is_dir()]
+    if not candidates:
+        raise RuntimeError(f"no folders found in {scratch} after extracting {rar.name}")
+
+    if len(candidates) == 1:
+        return candidates[0]
+
+    # Multiple top-level folders — pick the one that looks like a CD root
+    # (contains data/ptbulletin.log).
+    for c in candidates:
+        if (c / "data" / "ptbulletin.log").is_file():
+            return c
+
+    raise RuntimeError(
+        f"could not identify CD root in {scratch}: "
+        f"{[c.name for c in candidates]}"
+    )
