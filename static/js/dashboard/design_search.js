@@ -483,8 +483,23 @@
   }
 
   // ---------------------------------------------------------------
-  // runSearch / resetForm
+  // runSearch
   // ---------------------------------------------------------------
+
+  function setSubmitLoading(loading) {
+    var btn = $("design-search-submit");
+    if (btn) {
+      btn.disabled = !!loading;
+      var searchIcon = btn.querySelector('[data-design-submit-icon="search"]');
+      var spinIcon = btn.querySelector('[data-design-submit-icon="spinner"]');
+      if (searchIcon) searchIcon.classList.toggle("hidden", !!loading);
+      if (spinIcon) spinIcon.classList.toggle("hidden", !loading);
+    }
+    var idleHint = $("design-search-hint");
+    var loadHint = $("design-search-hint-loading");
+    if (idleHint) idleHint.classList.toggle("hidden", !!loading);
+    if (loadHint) loadHint.classList.toggle("hidden", !loading);
+  }
 
   async function runSearch() {
     var query = ($("design-search-input") || {}).value || "";
@@ -500,6 +515,7 @@
     hideHistory();
     clearError();
     setStatus("");
+    setSubmitLoading(true);
     show($("design-search-results-card"));
     show($("design-search-loading"));
     hide($("design-search-grid"));
@@ -542,39 +558,8 @@
       showError(t("design_search.error_network", "Network error"));
     } finally {
       hide($("design-search-loading"));
+      setSubmitLoading(false);
     }
-  }
-
-  function resetForm() {
-    var q = $("design-search-input");
-    var img = $("design-search-image");
-    if (q) q.value = "";
-    if (img) img.value = "";
-    // Clear Locarno picker via its Alpine x-data (selection + open + AI input)
-    var locarnoHidden = $("design-search-locarno");
-    var pickerRoot = locarnoHidden && locarnoHidden.closest && locarnoHidden.closest("[x-data]");
-    if (pickerRoot && pickerRoot._x_dataStack && pickerRoot._x_dataStack[0]) {
-      try {
-        var s = pickerRoot._x_dataStack[0];
-        s.designSelectedClasses = [];
-        s.designClassInput = "";
-        s.designSuggestedClasses = [];
-        s.designClassError = "";
-        s.designClassOpen = false;
-        if (locarnoHidden) locarnoHidden.value = "";
-      } catch (e) {}
-    }
-    if (locarnoHidden) locarnoHidden.value = "";
-    // Notify Alpine drag-drop wrapper to clear its preview
-    var dragRoot = q && q.closest && q.closest("[x-data]");
-    if (dragRoot && dragRoot._x_dataStack && dragRoot._x_dataStack[0]) {
-      try { dragRoot._x_dataStack[0].designClearImage(); } catch (e) {}
-    }
-    hideHistory();
-    hide($("design-search-results-card"));
-    clearError();
-    setStatus("");
-    updateClearInputBtnVisibility();
   }
 
   // ---------------------------------------------------------------
@@ -636,13 +621,6 @@
       if (t.closest("#design-search-submit")) {
         e.preventDefault();
         runSearch();
-        return;
-      }
-
-      // Reset (Sıfırla)
-      if (t.closest("#design-search-reset")) {
-        e.preventDefault();
-        resetForm();
         return;
       }
 

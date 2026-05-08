@@ -952,7 +952,7 @@
                    designClearImage(){
                      this.designImageName = ''; this.designImagePreview = '';
                      const inp = document.getElementById('design-search-image');
-                     if(inp) inp.value = '';
+                     if(inp){ inp.value = ''; inp.dispatchEvent(new Event('change', {bubbles:true})); }
                    },
                    designHandleDrop(e){
                      this.designDragOver = false;
@@ -1381,25 +1381,31 @@
           </div>
         </div>
 
-        <!-- Action row -->
+        <!-- Action row (single button — clearing handled by ×-on-input and ×-on-image) -->
         <div class="flex flex-col sm:flex-row gap-3">
           <button type="button" id="design-search-submit"
                   class="flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-semibold text-sm bg-indigo-600 text-white hover:bg-indigo-700 transition-all shadow-sm disabled:opacity-50">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg data-design-submit-icon="search" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                     d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
             </svg>
+            <svg data-design-submit-icon="spinner" class="w-5 h-5 animate-spin hidden" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+            </svg>
             <span x-text="t('design_search.submit')">Ara</span>
           </button>
-          <button type="button" id="design-search-reset"
-                  class="px-4 py-3 rounded-xl font-medium text-sm hover:opacity-80 transition-colors"
-                  style="background:var(--color-bg-muted);color:var(--color-text-secondary)"
-                  x-text="t('design_search.reset')">Sıfırla</button>
         </div>
 
-        <!-- Analysis-types hint line (matches Marka's landing.search_hint format) -->
-        <p class="mt-2 text-center text-sm px-1" style="color:var(--color-text-muted)"
+        <!-- Analysis-types hint (idle) / AI analysis started (loading) — mirror of Marka -->
+        <p id="design-search-hint" class="mt-2 text-center text-sm px-1"
+           style="color:var(--color-text-muted)"
            x-text="t('design_search.analysis_hint')">Visual • Color • Text • Locarno</p>
+        <div id="design-search-hint-loading" class="hidden mt-2 flex items-center justify-center gap-2 text-sm font-medium"
+             style="color:var(--color-primary)">
+          <span class="animate-pulse">&#9203;</span>
+          <span x-text="t('landing.ai_analysis_started')">AI analizi başlatıldı...</span>
+        </div>
 
         <!-- Live design DB count (mirrors the Marka stats line; uses a separate
              designCount populated from /api/v1/status statistics.total_designs) -->
