@@ -186,6 +186,91 @@ def build_cd_filename(card_id: str) -> str:
     return f"{cid}_CD.rar"
 
 
+_UUID_RE = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+    re.IGNORECASE,
+)
+
+
+def is_multi_uuid_href(url: Optional[str]) -> bool:
+    """True when the URL path contains a comma-separated UUID list.
+
+    Two legacy cards on the live UI as of 2026-05-08 (``2015_4`` and
+    ``1996_6``) carry an href whose path is ten UUIDs joined by commas.
+    The server rejects the multi-UUID request with a connection reset;
+    each UUID is independently downloadable as a single-UUID URL.
+    """
+    if not url or "," not in url:
+        return False
+    path_part = url.split("?", 1)[0]
+    return "," in path_part and _UUID_RE.search(path_part) is not None
+
+
+def split_multi_uuid_href(url: str) -> List[str]:
+    """Expand a comma-separated multi-UUID href into single-UUID URLs.
+
+    Given e.g. ``https://h/file/{U1},{U2},{U3}?name=X&download`` this
+    returns three URLs of the form
+    ``https://h/file/{Ui}?name=X&download``. Order is preserved.
+    Raises ``ValueError`` if the URL has no path UUIDs to expand.
+    """
+    if not url:
+        raise ValueError("url required")
+    head, _, query = url.partition("?")
+    suffix = f"?{query}" if query else ""
+    base, _, last_segment = head.rpartition("/")
+    uuids = [u for u in last_segment.split(",") if u.strip()]
+    if not uuids:
+        raise ValueError(f"no UUIDs found in {url!r}")
+    return [f"{base}/{u}{suffix}" for u in uuids]
+
+
+def legacy_part_filename(card_id: str, idx: int, total: int) -> str:
+    """Filename for one piece of a legacy multi-UUID bundle.
+
+    e.g. ``legacy_part_filename("1996_6", 3, 10) -> "1996_6_legacy_part03.pdf"``.
+    Pad width tracks the part count so files sort correctly in any
+    listing.
+    """
+    cid = (card_id or "").strip()
+    if not cid:
+        raise ValueError("card_id required")
+    if total < 1 or idx < 1 or idx > total:
+        raise ValueError(f"bad part index/total: {idx}/{total}")
+    width = max(2, len(str(total)))
+    return f"{cid}_legacy_part{idx:0{width}d}.pdf"
+
+
+def existing_legacy_parts(category_folder: str | Path, card_id: str) -> List[Path]:
+    """Return non-empty legacy-part files already on disk for ``card_id``.
+
+    Used to avoid re-downloading legacy parts that are already present.
+    Matches ``{cid}_legacy_part{NN}.pdf`` regardless of pad width.
+    """
+    root = Path(category_folder)
+    if not root.is_dir():
+        return []
+    cid = (card_id or "").strip()
+    if not cid:
+        return []
+    cid_lower = cid.lower()
+    pat = re.compile(rf"^{re.escape(cid_lower)}_legacy_part\d+\.pdf$")
+    found: List[Path] = []
+    try:
+        for entry in root.iterdir():
+            if not entry.is_file():
+                continue
+            if pat.match(entry.name.lower()):
+                try:
+                    if entry.stat().st_size > 0:
+                        found.append(entry)
+                except OSError:
+                    continue
+    except OSError:
+        return []
+    return sorted(found)
+
+
 def build_pdf_filename(card_id: str) -> str:
     """e.g. ``2025_12`` -> ``2025_12.pdf``."""
     cid = (card_id or "").strip()
@@ -765,6 +850,82 @@ async def download_one_track(
     return await playwright_download_click(page, item_locator, out_path)
 
 
+def _part_present(out_path: Path) -> bool:
+    try:
+        return out_path.is_file() and out_path.stat().st_size > 0
+    except OSError:
+        return False
+
+
+async def _download_legacy_multipart(
+    page,
+    context,
+    multi_uuid_href: str,
+    bulletins_root: Path,
+    card_id: str,
+) -> CollectionCounters:
+    """Download a legacy multi-UUID bundle as separate part files.
+
+    Splits the comma-separated UUIDs in the href, streams each one to
+    ``{card_id}_legacy_part##.pdf``. Parts already present on disk are
+    skipped. If every expected part is present the card is reported as a
+    single ``skipped=1`` outcome so re-runs are quiet.
+    """
+    abs_url = urljoin(page.url, multi_uuid_href)
+    try:
+        single_urls = split_multi_uuid_href(abs_url)
+    except ValueError as e:
+        logger.warning("[!] %s: cannot split multi-UUID href: %r", card_id, e)
+        return CollectionCounters(failed=1)
+
+    total = len(single_urls)
+    bulletins_root.mkdir(parents=True, exist_ok=True)
+
+    plan: List[tuple[int, str, Path, str]] = []
+    already_present = 0
+    for idx, single_url in enumerate(single_urls, start=1):
+        out_name = legacy_part_filename(card_id, idx, total)
+        out_path = bulletins_root / out_name
+        if _part_present(out_path):
+            already_present += 1
+        else:
+            plan.append((idx, single_url, out_path, out_name))
+
+    if not plan:
+        logger.info("[=] %s: all %d legacy parts already on disk, skipping",
+                    card_id, total)
+        return CollectionCounters(skipped=1)
+
+    logger.info("[*] %s: legacy multi-part bundle, %d/%d parts to fetch",
+                card_id, len(plan), total)
+    counters = CollectionCounters(skipped=already_present)
+
+    for idx, single_url, out_path, out_name in plan:
+        logger.info("[*] %s part %d/%d -> %s", card_id, idx, total, out_name)
+        ok = False
+        for attempt in range(1, MAX_RETRIES + 2):
+            try:
+                if await stream_download_with_browser_session(
+                    context, page, single_url, str(out_path),
+                ):
+                    ok = True
+                    break
+            except Exception as e:
+                logger.warning("    requests attempt %d failed for part %d: %r",
+                               attempt, idx, e)
+                await page.wait_for_timeout(1000)
+
+        if ok:
+            counters.downloaded += 1
+            logger.info("[+] %s part %d/%d saved", card_id, idx, total)
+        else:
+            counters.failed += 1
+            logger.warning("[!] %s part %d/%d failed after %d attempts",
+                           card_id, idx, total, MAX_RETRIES + 1)
+
+    return counters
+
+
 async def process_card(
     page,
     context,
@@ -788,6 +949,19 @@ async def process_card(
     # download href, treat the card as a single-PDF anchor and skip the
     # menu logic entirely.
     direct_href = await get_clickable_download_href(clickable)
+    if direct_href and is_multi_uuid_href(direct_href):
+        # Legacy multi-month bundle card (e.g. 2015_4, 1996_6 as of
+        # 2026-05-08). The href packs N UUIDs into the path; the server
+        # rejects the multi-UUID request with a connection reset, but each
+        # UUID is independently downloadable. Fan out and save each part
+        # as {card_id}_legacy_part##.pdf.
+        if Track.PDF not in wanted:
+            logger.info("[i] %s: legacy multi-part bundle but PDF track not wanted, skipping",
+                        card_id)
+            return CollectionCounters(skipped=1)
+        return await _download_legacy_multipart(
+            page, context, direct_href, bulletins_root, card_id,
+        )
     if direct_href:
         is_direct_href_card = True
         by_track[Track.PDF] = {

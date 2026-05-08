@@ -27,13 +27,17 @@ from data_collection_patent import (
     build_pdf_filename,
     card_is_complete,
     classify_menu_item_text,
+    existing_legacy_parts,
     existing_track_file,
+    is_multi_uuid_href,
     is_recent_issue,
+    legacy_part_filename,
     normalize_card_id,
     parse_argv,
     parse_issue_date,
     safe_filename_keep_text,
     slugify,
+    split_multi_uuid_href,
     track_filename,
     tracks_missing,
 )
@@ -391,3 +395,127 @@ def test_cliargs_dataclass_fields_are_exposed():
     assert args.headless is False
     assert args.bulletins_root == Path("/tmp/x")
     assert args.tracks == {Track.PDF}
+
+
+# ---------------------------------------------------------------------------
+# Legacy multi-UUID href detection + splitting
+# ---------------------------------------------------------------------------
+
+# A real href captured from the live UI on 2026-05-08 for card 1996_6.
+LEGACY_1996_6_HREF = (
+    "https://webim.turkpatent.gov.tr/file/"
+    "5a72e006-8735-4a80-8f8e-a55bca25c34d,00a60abf-0368-4db6-a652-6e573343b780,"
+    "4d886d0b-d59f-4a52-8e33-aa1d99ed6f0f,cfa16ba7-4cdb-4b97-b2aa-ad0a964203f6,"
+    "c363935e-b0f9-438f-97b1-066d48ce8293,751e4385-65f4-4f1c-9955-dbbd15d593ba,"
+    "d273182d-0a6a-45ba-8b47-89b208b9d1a5,a60df88b-f4dc-4e11-9785-7f176707d823,"
+    "efc337f2-6a95-4b34-9641-c7ff4baa21a1,4ed267b6-2227-4931-89b5-41e779b5ac38"
+    "?name=1996_6&download"
+)
+SINGLE_UUID_HREF = (
+    "https://webim.turkpatent.gov.tr/file/"
+    "a383bb6a-a74f-4fd0-8218-6401e7641de1?name=2026_04&download"
+)
+
+
+def test_is_multi_uuid_href_detects_legacy_pattern():
+    assert is_multi_uuid_href(LEGACY_1996_6_HREF) is True
+
+
+def test_is_multi_uuid_href_rejects_single_uuid_url():
+    """The normal monthly PDF anchors must NOT be classified as multi-part."""
+    assert is_multi_uuid_href(SINGLE_UUID_HREF) is False
+
+
+def test_is_multi_uuid_href_handles_none_and_empty():
+    assert is_multi_uuid_href(None) is False
+    assert is_multi_uuid_href("") is False
+    assert is_multi_uuid_href("https://example.com/x") is False
+
+
+def test_is_multi_uuid_href_ignores_commas_in_query_only():
+    """A comma in the query string alone is not a multi-UUID path."""
+    url = "https://webim.turkpatent.gov.tr/file/a383bb6a-a74f-4fd0-8218-6401e7641de1?name=a,b&download"
+    assert is_multi_uuid_href(url) is False
+
+
+def test_split_multi_uuid_href_expands_to_single_uuid_urls():
+    parts = split_multi_uuid_href(LEGACY_1996_6_HREF)
+    assert len(parts) == 10
+    for url in parts:
+        assert "?name=1996_6&download" in url
+        assert url.count(",") == 0
+        path = url.split("?", 1)[0]
+        last = path.rsplit("/", 1)[-1]
+        assert len(last) == 36
+        assert last.count("-") == 4
+
+
+def test_split_multi_uuid_href_preserves_order():
+    parts = split_multi_uuid_href(LEGACY_1996_6_HREF)
+    assert parts[0].rsplit("/", 1)[-1].split("?", 1)[0] == "5a72e006-8735-4a80-8f8e-a55bca25c34d"
+    assert parts[-1].rsplit("/", 1)[-1].split("?", 1)[0] == "4ed267b6-2227-4931-89b5-41e779b5ac38"
+
+
+def test_split_multi_uuid_href_handles_single_uuid_passthrough():
+    """A single-UUID URL split yields exactly one URL identical to input."""
+    parts = split_multi_uuid_href(SINGLE_UUID_HREF)
+    assert parts == [SINGLE_UUID_HREF]
+
+
+def test_split_multi_uuid_href_rejects_empty():
+    with pytest.raises(ValueError):
+        split_multi_uuid_href("")
+
+
+# ---------------------------------------------------------------------------
+# legacy_part_filename / existing_legacy_parts
+# ---------------------------------------------------------------------------
+
+def test_legacy_part_filename_pads_for_sort_order():
+    # 10 parts -> 2-digit pad
+    assert legacy_part_filename("1996_6", 1, 10) == "1996_6_legacy_part01.pdf"
+    assert legacy_part_filename("1996_6", 10, 10) == "1996_6_legacy_part10.pdf"
+    # 100 parts -> 3-digit pad
+    assert legacy_part_filename("X", 7, 100) == "X_legacy_part007.pdf"
+    # Tiny totals still get min 2-digit pad
+    assert legacy_part_filename("Y", 1, 3) == "Y_legacy_part01.pdf"
+
+
+def test_legacy_part_filename_validates_inputs():
+    with pytest.raises(ValueError):
+        legacy_part_filename("", 1, 10)
+    with pytest.raises(ValueError):
+        legacy_part_filename("X", 0, 10)
+    with pytest.raises(ValueError):
+        legacy_part_filename("X", 5, 4)
+    with pytest.raises(ValueError):
+        legacy_part_filename("X", 1, 0)
+
+
+def test_existing_legacy_parts_finds_present_pieces():
+    with temp_dir() as tmp:
+        (tmp / "1996_6_legacy_part01.pdf").write_bytes(b"%PDF-1.4 part 1")
+        (tmp / "1996_6_legacy_part02.pdf").write_bytes(b"%PDF-1.4 part 2")
+        (tmp / "1996_6_legacy_part05.pdf").write_bytes(b"%PDF-1.4 part 5")
+        (tmp / "1996_6.pdf").write_bytes(b"unrelated")  # NOT a legacy part
+        (tmp / "2025_12_legacy_part01.pdf").write_bytes(b"different card")
+
+        found = existing_legacy_parts(tmp, "1996_6")
+        names = sorted(p.name for p in found)
+        assert names == [
+            "1996_6_legacy_part01.pdf",
+            "1996_6_legacy_part02.pdf",
+            "1996_6_legacy_part05.pdf",
+        ]
+
+
+def test_existing_legacy_parts_skips_zero_byte_files():
+    with temp_dir() as tmp:
+        (tmp / "1996_6_legacy_part01.pdf").write_bytes(b"")
+        assert existing_legacy_parts(tmp, "1996_6") == []
+
+
+def test_existing_legacy_parts_returns_empty_when_root_missing():
+    with temp_dir() as tmp:
+        ghost = tmp / "no_such_folder"
+        assert existing_legacy_parts(ghost, "1996_6") == []
