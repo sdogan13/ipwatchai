@@ -199,6 +199,138 @@ def test_search_designs_empty_query_returns_error():
 # Route registration — verifies the three paths attach to a FastAPI app
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Quota counting on /quick — eligibility + increment wiring
+# ---------------------------------------------------------------------------
+
+import asyncio
+
+
+class _NullDB:
+    """Stand-in for ``database.crud.Database`` in tests — supports the
+    context-manager protocol without opening a real connection."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+def _stub_async_search(*, expected_query=None):
+    async def _stub(**_kwargs):
+        if expected_query is not None:
+            assert _kwargs.get("query") == expected_query
+        return {"results": [], "total": 0, "duration_ms": 0}
+    return _stub
+
+
+def test_quick_search_returns_429_when_quota_exceeded(monkeypatch):
+    """Over-limit users see the eligibility payload as a 429."""
+    from app_design_search_routes import design_search_quick
+
+    over_limit_details = {
+        "error": "daily_limit_exceeded",
+        "current_plan": "free",
+        "daily_limit": 5,
+        "used_today": 5,
+        "remaining": 0,
+        "message": "Limit ulasildi",
+        "message_en": "Limit reached",
+    }
+
+    eligibility_calls = []
+    increment_calls = []
+
+    def fake_check(db, user_id):
+        eligibility_calls.append(user_id)
+        return False, "daily_limit_exceeded", over_limit_details
+
+    def fake_increment(db, user_id, org_id=None):
+        increment_calls.append((user_id, org_id))
+        return 6
+
+    monkeypatch.setattr("utils.subscription.check_quick_search_eligibility", fake_check)
+    monkeypatch.setattr("utils.subscription.increment_quick_search_usage", fake_increment)
+    monkeypatch.setattr("database.crud.Database", lambda *a, **kw: _NullDB())
+    monkeypatch.setattr("app_design_search_routes._do_design_search", _stub_async_search())
+
+    with pytest.raises(Exception) as excinfo:
+        asyncio.run(design_search_quick(
+            query="Lamba", image=None, locarno=None, limit=10,
+            user_id="user-123", organization_id="org-1",
+        ))
+
+    assert getattr(excinfo.value, "status_code", None) == 429
+    assert getattr(excinfo.value, "detail", None) == over_limit_details
+    assert eligibility_calls == ["user-123"]
+    assert increment_calls == []  # increment NOT called when over limit
+
+
+def test_quick_search_increments_after_successful_search(monkeypatch):
+    """Under-limit users get a 200 and the daily counter goes up by one."""
+    from app_design_search_routes import design_search_quick
+
+    eligibility_calls = []
+    increment_calls = []
+
+    def fake_check(db, user_id):
+        eligibility_calls.append(user_id)
+        return True, "ok", {"current_plan": "starter", "daily_limit": 50,
+                             "used_today": 3, "remaining": 47}
+
+    def fake_increment(db, user_id, org_id=None):
+        increment_calls.append((user_id, org_id))
+        return 4
+
+    monkeypatch.setattr("utils.subscription.check_quick_search_eligibility", fake_check)
+    monkeypatch.setattr("utils.subscription.increment_quick_search_usage", fake_increment)
+    monkeypatch.setattr("database.crud.Database", lambda *a, **kw: _NullDB())
+    monkeypatch.setattr("app_design_search_routes._do_design_search",
+                        _stub_async_search(expected_query="Lamba"))
+
+    result = asyncio.run(design_search_quick(
+        query="Lamba", image=None, locarno=None, limit=10,
+        user_id="user-456", organization_id="org-2",
+    ))
+
+    assert result == {"results": [], "total": 0, "duration_ms": 0}
+    assert eligibility_calls == ["user-456"]
+    assert increment_calls == [("user-456", "org-2")]
+
+
+def test_quick_search_skips_quota_when_no_user_id(monkeypatch):
+    """If user_id wasn't resolved (defensive path), neither check nor
+    increment runs."""
+    from app_design_search_routes import design_search_quick
+
+    eligibility_calls = []
+    increment_calls = []
+
+    def fake_check(db, user_id):
+        eligibility_calls.append(user_id)
+        return False, "x", {}
+
+    def fake_increment(db, user_id, org_id=None):
+        increment_calls.append((user_id, org_id))
+
+    monkeypatch.setattr("utils.subscription.check_quick_search_eligibility", fake_check)
+    monkeypatch.setattr("utils.subscription.increment_quick_search_usage", fake_increment)
+    monkeypatch.setattr("app_design_search_routes._do_design_search", _stub_async_search())
+
+    asyncio.run(design_search_quick(
+        query="Lamba", image=None, locarno=None, limit=10,
+        user_id=None, organization_id=None,
+    ))
+
+    assert eligibility_calls == []
+    assert increment_calls == []
+
+
+# ---------------------------------------------------------------------------
+# Route registration — verifies the three paths attach to a FastAPI app
+# ---------------------------------------------------------------------------
+
 def test_register_design_search_routes_attaches_three_paths():
     from fastapi import FastAPI
     from slowapi import Limiter

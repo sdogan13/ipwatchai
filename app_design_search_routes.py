@@ -120,17 +120,15 @@ async def _do_design_search(
     if image_temp_path:
         image_embeddings = _embed_query_image(image_temp_path)
 
-    db = Database()
-    with db.get_connection() as conn:
-        result = search_designs(
-            conn,
+    with Database() as db:
+        return search_designs(
+            db.conn,
             query=query,
             image_embeddings=image_embeddings,
             locarno_classes=locarno_classes,
             limit=limit,
             public=public,
         )
-    return result
 
 
 async def design_search_quick(
@@ -140,12 +138,28 @@ async def design_search_quick(
     locarno: Optional[str],
     limit: int,
     user_id: Optional[str] = None,
+    organization_id: Optional[str] = None,
 ) -> dict:
-    """Authenticated full-detail search. Caller is responsible for auth + quota."""
+    """Authenticated full-detail search.
+
+    Counts against the same daily ``max_daily_quick_searches`` quota the
+    trademark quick search uses. Over-limit returns 429 with the upgrade-hint
+    payload. Increment happens AFTER a successful search so failed retrievals
+    don't burn the user's quota.
+    """
     has_image = image is not None and image.filename
     has_query = bool(query and query.strip())
     if not (has_image or has_query):
         raise HTTPException(status_code=422, detail="Provide a product name (min 2 chars) or upload a design image")
+
+    # Daily quota check (mirrors agentic_search.py:954-961)
+    if user_id:
+        from database.crud import Database
+        from utils.subscription import check_quick_search_eligibility
+        with Database() as db:
+            can_search, reason, details = check_quick_search_eligibility(db, user_id)
+            if not can_search:
+                raise HTTPException(status_code=429, detail=details)
 
     temp_path: Optional[str] = None
     if has_image:
@@ -154,7 +168,7 @@ async def design_search_quick(
         content = await image.read()
         temp_path = _save_upload_to_temp(content)
     try:
-        return await _do_design_search(
+        result = await _do_design_search(
             query=query.strip() if query else None,
             image_temp_path=temp_path,
             locarno_classes=_parse_locarno_param(locarno),
@@ -167,6 +181,15 @@ async def design_search_quick(
                 os.unlink(temp_path)
             except OSError:
                 pass
+
+    # Increment AFTER successful retrieval — failed searches don't burn quota
+    if user_id:
+        from database.crud import Database
+        from utils.subscription import increment_quick_search_usage
+        with Database() as db:
+            increment_quick_search_usage(db, user_id, organization_id)
+
+    return result
 
 
 async def design_search_public(
@@ -232,9 +255,13 @@ def register_design_search_routes(app, limiter):
         current_user=Depends(get_current_user),
     ):
         user_id = None
+        org_id = None
         if current_user is not None:
-            user_id = getattr(current_user, "user_id", None) or getattr(current_user, "id", None)
+            uid = getattr(current_user, "id", None) or getattr(current_user, "user_id", None)
+            user_id = str(uid) if uid is not None else None
+            oid = getattr(current_user, "organization_id", None)
+            org_id = str(oid) if oid is not None else None
         return await design_search_quick(
             query=query, image=image, locarno=locarno, limit=limit,
-            user_id=user_id,
+            user_id=user_id, organization_id=org_id,
         )
