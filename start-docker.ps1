@@ -24,8 +24,8 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host "[WARN] GPU not available in Docker, will use CPU mode" -ForegroundColor Yellow
 }
 
-# Navigate to project directory
-Set-Location "C:\Users\701693\turk_patent"
+# Navigate to project directory (the directory this script lives in)
+Set-Location $PSScriptRoot
 
 # Build and start services
 Write-Host "`n[+] Building backend image..." -ForegroundColor Yellow

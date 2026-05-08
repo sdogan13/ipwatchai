@@ -4,7 +4,6 @@ import sys
 import time
 import shutil
 import psycopg2
-import getpass
 import argparse
 from psycopg2.extras import Json, execute_values
 from pathlib import Path

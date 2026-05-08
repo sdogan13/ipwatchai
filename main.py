@@ -506,13 +506,6 @@ async def _do_public_search(
         all_results = result.get("results") or []
         seen_names = {}
         deduped_results = []
-        # DEBUG: log first 15 raw results + any naki/nike entries
-        for idx, r in enumerate(all_results):
-            rn = (r.get("name") or "?")
-            rs = (r.get("scores") or {}).get("total", 0)
-            rpath = (r.get("scores") or {}).get("scoring_path", "")
-            if idx < 15 or rn.lower() in ('naki', 'nike'):
-                logger.info(f"  RAW[{idx}] name={rn!r} score={rs:.4f} path={rpath}")
         for r in all_results:
             raw_name = (r.get("trademark_name") or r.get("name") or "").strip().lower()
             score = (r.get("scores") or {}).get("total", 0)
@@ -522,11 +515,6 @@ async def _do_public_search(
                     deduped_results = [d for d in deduped_results if (d.get("trademark_name") or d.get("name") or "").strip().lower() != raw_name]
                 seen_names[raw_name] = score
                 deduped_results.append(r)
-        # DEBUG: log first 15 deduped results
-        for idx, r in enumerate(deduped_results[:15]):
-            rn = (r.get("name") or "?")
-            rs = (r.get("scores") or {}).get("total", 0)
-            logger.info(f"  DEDUP[{idx}] name={rn!r} score={rs:.4f}")
 
         # Strip sensitive fields, return max 10 results
         safe_results = []

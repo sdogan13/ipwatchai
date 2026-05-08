@@ -403,8 +403,8 @@ def main():
         print(f"\n   Word breakdown:")
 
         for w in analysis['words']:
-            type_str = "GENERIC" if w['is_generic'] else "DISTINCTIVE"
-            print(f"      {w['word']:<15} weight={w['weight']:.1%}  IDF={w['idf']:.2f}  freq={w['doc_frequency']:,}  [{type_str}]")
+            type_str = w['word_class'].upper()
+            print(f"      {w['word']:<15} weight={w['final_weight']:.1%}  IDF={w['idf']:.2f}  freq={w['doc_frequency']:,}  [{type_str}]")
 
     print("\n" + "="*60)
 
