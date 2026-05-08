@@ -419,6 +419,16 @@ def test_resolve_design_images_malformed_appno_returns_empty(tmp_path):
     assert resolve_design_images("garbage", tmp_path) == []
 
 
+def test_resolve_design_images_hague_application_no_returns_empty(tmp_path):
+    """Hague international design numbers (``DM/NNNNNN``) appear in the
+    Tasarim CD's IDDOSSIER table — confirmed empirically: 101 of 913
+    dossiers in the verbose 231 archive use this shape. Hague designs
+    don't have image folders on the CD (their art lives at WIPO), so
+    the resolver correctly returns ``[]`` for them. The current strict
+    digits-only year guard is what enforces this."""
+    assert resolve_design_images("DM/086402", tmp_path) == []
+
+
 def test_resolve_design_images_one_design_multi_view(tmp_path):
     """Single design with two views — mirrors what 240/.../2015_04124 ships."""
     folder = tmp_path / "2015_04124"
@@ -513,19 +523,27 @@ def test_locate_cd_layout_modern_layout(tmp_path):
 
 
 def test_locate_cd_layout_verbose_layout(tmp_path):
-    """Verbose ``231 say_l_*.rar`` layout: log under setup/, images at root."""
-    setup = tmp_path / "setup"
-    setup.mkdir()
-    (setup / "idbulletin.log").write_text("", encoding="utf-8")
-    (setup / "idbulletin.script").write_text("", encoding="utf-8")
-    # images at archive root, not inside setup/
+    """Verbose ``231 say_l_*.rar`` real shape (post-extraction):
+
+    - canonical ``idbulletin.log`` at archive root (no wrapping folder)
+    - duplicate copy at ``setup/idbulletin.log``
+    - images at archive root
+
+    Confirmed by extracting the actual archive in step 2.6 verification.
+    """
+    (tmp_path / "idbulletin.log").write_text("real", encoding="utf-8")
+    (tmp_path / "idbulletin.script").write_text("", encoding="utf-8")
     (tmp_path / "images").mkdir()
     (tmp_path / "main.html").write_text("", encoding="utf-8")
+    setup = tmp_path / "setup"
+    setup.mkdir()
+    (setup / "idbulletin.log").write_text("duplicate", encoding="utf-8")
 
     layout = _locate_cd_layout(tmp_path)
-    assert layout.cd_root == setup
-    assert layout.log_path == setup / "idbulletin.log"
-    assert layout.images_root == tmp_path / "images"  # sibling of cd_root
+    assert layout.cd_root == tmp_path
+    assert layout.log_path == tmp_path / "idbulletin.log"
+    assert layout.log_path.read_text(encoding="utf-8") == "real"
+    assert layout.images_root == tmp_path / "images"
 
 
 def test_locate_cd_layout_missing_log_raises(tmp_path):

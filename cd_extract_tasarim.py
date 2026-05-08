@@ -430,12 +430,14 @@ def _locate_cd_layout(scratch_dir: str | Path) -> CDLayout:
     Locates the canonical ``idbulletin.log`` anywhere in the tree:
 
       - modern ``{N}_CD.rar``:   ``scratch/{N}/idbulletin.log``
-      - verbose ``231 say_l_*``: ``scratch/setup/idbulletin.log``
+      - verbose ``231 say_l_*``: ``scratch/idbulletin.log`` (archive
+        root; the bulletin files unpack with no wrapping folder)
 
-    Modern archives ship **two** logs — the canonical one and an
-    apparent duplicate at ``{N}/setup/idbulletin.log``. We pick the
-    shallower path (fewest directory components from ``scratch``) as
-    the CD root and ignore deeper duplicates. If two logs sit at the
+    Both layouts ship a **duplicate** ``idbulletin.log`` one level
+    deeper under ``setup/`` (modern: ``{N}/setup/idbulletin.log``;
+    verbose: ``setup/idbulletin.log``). We pick the shallower path
+    (fewest directory components from ``scratch``) as the canonical
+    CD root and ignore deeper duplicates. If two logs sit at the
     same shallowest depth, that's a real ambiguity we refuse to guess.
 
     For ``images_root``, prefer ``cd_root/images`` if it exists; fall
