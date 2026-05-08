@@ -709,6 +709,11 @@ class CLIArgs:
 # These are the canonical filenames inside that folder.
 CD_METADATA_FILENAME = "cd_metadata.json"
 RAW_HSQLDB_FILES = ("ptbulletin.log", "ptbulletin.script", "ptbulletin.properties")
+# CD-side TIFFs land here (matches Marka's `images/` convention). Stored
+# as ``images/{year}/{appno}.tif`` to preserve the year-foldered shape
+# from the source archive. PDF-extracted figures live in a sibling
+# ``figures/`` dir (different file extensions; never collide).
+CD_IMAGES_DIRNAME = "images"
 
 
 def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
@@ -818,6 +823,12 @@ def _process_one(
         parent = bulletin_folder_path(out_dir, doc["bulletin_no"], doc["bulletin_date"])
         parent.mkdir(parents=True, exist_ok=True)
 
+        # Carry CD TIFFs into parent/images/ and rewrite each patent's
+        # image_path to be relative to the parent folder. Without this,
+        # cd_metadata.json's image_path values point inside the scratch
+        # dir which is about to be deleted.
+        figures_carried = _carry_cd_images(doc, cd_root, parent)
+
         (parent / CD_METADATA_FILENAME).write_text(
             json.dumps(doc, ensure_ascii=False, indent=2),
             encoding="utf-8",
@@ -839,7 +850,56 @@ def _process_one(
         "rar": rar.name,
         "out": parent.name,
         "stats": doc["stats"],
+        "figures_carried": figures_carried,
     }
+
+
+def _carry_cd_images(
+    doc: Dict[str, Any],
+    cd_root: Path,
+    parent: Path,
+) -> int:
+    """Move CD TIFFs from the scratch dir into ``parent/images/`` and
+    rewrite each patent's ``image_path`` to point at the new location.
+
+    cd_to_metadata sets ``image_path`` to the path relative to cd_root
+    (e.g. ``"data/images/2017/15048.tif"``). After this function runs,
+    each present TIFF lives at ``parent/images/{year}/{appno}.tif`` and
+    ``image_path`` is rewritten to ``"images/{year}/{appno}.tif"``
+    (relative to the parent folder).
+
+    Patents with a missing-on-disk source TIFF keep their image_path
+    nulled — better to surface the gap than to leave a dead path.
+
+    Returns the count of TIFFs successfully carried.
+    """
+    images_root = parent / CD_IMAGES_DIRNAME
+    moved = 0
+    for patent in doc.get("patents", []):
+        rel = patent.get("image_path")
+        if not rel:
+            continue
+        # cd_to_metadata produces "data/images/{year}/{appno}.tif"; only
+        # rewrite paths that match that shape — anything else is unknown
+        # and gets cleared so downstream code doesn't follow a dead path.
+        rel_path = Path(rel)
+        try:
+            inside = rel_path.relative_to("data/images")
+        except ValueError:
+            patent["image_path"] = None
+            continue
+
+        src = cd_root / rel_path
+        if not src.is_file():
+            patent["image_path"] = None
+            continue
+
+        dest = images_root / inside
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dest))
+        patent["image_path"] = (Path(CD_IMAGES_DIRNAME) / inside).as_posix()
+        moved += 1
+    return moved
 
 
 def main(argv: Optional[List[str]] = None) -> int:

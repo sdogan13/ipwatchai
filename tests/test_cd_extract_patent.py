@@ -15,8 +15,10 @@ from cd_extract_patent import (
     decode_hsqldb_escapes,
     extract_cd_archive,
     main,
+    CD_IMAGES_DIRNAME,
     CD_METADATA_FILENAME,
     RAW_HSQLDB_FILES,
+    _carry_cd_images,
     parse_argv,
     parse_bulletin_inf,
     parse_hsqldb_log,
@@ -899,6 +901,98 @@ def test_raw_hsqldb_filenames_constant():
     assert RAW_HSQLDB_FILES == ("ptbulletin.log", "ptbulletin.script", "ptbulletin.properties")
 
 
+def test_cd_images_dirname_constant():
+    """CD TIFFs land in ``images/`` inside the bulletin parent folder
+    (matches Marka's ``images/`` convention)."""
+    assert CD_IMAGES_DIRNAME == "images"
+
+
+def _make_fake_cd_root_with_tiffs(tmp_path, year_to_appnos):
+    """Create a fake cd_root with data/images/{year}/{appno}.tif files."""
+    cd_root = tmp_path / "scratch" / "2025_8"
+    images_root = cd_root / "data" / "images"
+    for year, appnos in year_to_appnos.items():
+        (images_root / year).mkdir(parents=True, exist_ok=True)
+        for appno in appnos:
+            (images_root / year / f"{appno}.tif").write_bytes(b"TIFF FAKE\x00")
+    return cd_root
+
+
+def test_carry_cd_images_moves_tiffs_and_rewrites_paths(tmp_path):
+    """Happy path: TIFFs move from cd_root/data/images/{year}/{appno}.tif
+    into parent/images/{year}/{appno}.tif; image_path values rewritten
+    to relative ``images/{year}/{appno}.tif``."""
+    cd_root = _make_fake_cd_root_with_tiffs(
+        tmp_path, {"2017": ["15048"], "2018": ["13083"]},
+    )
+    parent = tmp_path / "PT_2025_8_2025-08-21"
+    parent.mkdir()
+    doc = {
+        "bulletin_no": "2025/8",
+        "bulletin_date": "2025-08-21",
+        "patents": [
+            {"application_no": "2017/15048", "image_path": "data/images/2017/15048.tif"},
+            {"application_no": "2018/13083", "image_path": "data/images/2018/13083.tif"},
+        ],
+    }
+
+    moved = _carry_cd_images(doc, cd_root, parent)
+
+    assert moved == 2
+    # Files moved into parent/images/{year}/...
+    assert (parent / "images" / "2017" / "15048.tif").is_file()
+    assert (parent / "images" / "2018" / "13083.tif").is_file()
+    # Source TIFFs gone from cd_root (move, not copy)
+    assert not (cd_root / "data" / "images" / "2017" / "15048.tif").exists()
+    # image_path values rewritten to relative paths under the parent
+    assert doc["patents"][0]["image_path"] == "images/2017/15048.tif"
+    assert doc["patents"][1]["image_path"] == "images/2018/13083.tif"
+
+
+def test_carry_cd_images_handles_missing_tiff_by_nulling_path(tmp_path):
+    """Defensive: if image_path points to a TIFF that doesn't exist on
+    disk (HSQLDB row references a missing figure), null the path so
+    downstream code doesn't follow a dead reference."""
+    cd_root = _make_fake_cd_root_with_tiffs(tmp_path, {"2017": ["15048"]})
+    parent = tmp_path / "PT_x"
+    parent.mkdir()
+    doc = {
+        "patents": [
+            {"application_no": "2017/15048", "image_path": "data/images/2017/15048.tif"},
+            {"application_no": "2018/99999", "image_path": "data/images/2018/99999.tif"},
+            {"application_no": "2019/00001", "image_path": None},
+        ],
+    }
+
+    moved = _carry_cd_images(doc, cd_root, parent)
+
+    assert moved == 1                                          # only the present one
+    assert doc["patents"][0]["image_path"] == "images/2017/15048.tif"
+    assert doc["patents"][1]["image_path"] is None             # missing -> nulled
+    assert doc["patents"][2]["image_path"] is None             # was None, stays None
+
+
+def test_carry_cd_images_clears_unexpected_path_shape(tmp_path):
+    """Any image_path that isn't under ``data/images/`` is cleared
+    rather than silently kept as-is."""
+    cd_root = tmp_path / "cd_root"
+    (cd_root / "weird").mkdir(parents=True)
+    parent = tmp_path / "PT_x"
+    parent.mkdir()
+    doc = {
+        "patents": [
+            {"application_no": "X", "image_path": "weird/somewhere/15048.tif"},
+            {"application_no": "Y", "image_path": "/abs/path/15048.tif"},
+        ],
+    }
+
+    moved = _carry_cd_images(doc, cd_root, parent)
+
+    assert moved == 0
+    assert doc["patents"][0]["image_path"] is None
+    assert doc["patents"][1]["image_path"] is None
+
+
 def test_parse_argv_with_explicit_rar(tmp_path):
     rar = tmp_path / "2025_12_CD.rar"
     rar.write_bytes(b"")  # placeholder; parse_argv doesn't dereference
@@ -1016,6 +1110,25 @@ def test_main_real_2025_12_smoke(tmp_path):
     assert (parent / "ptbulletin.log").is_file()
     assert (parent / "ptbulletin.script").is_file()
     assert (parent / "ptbulletin.properties").is_file()
+
+    # CD TIFFs carried into images/, not left in scratch. Bulletin
+    # 2025/12 has hundreds of resolved figures per the earlier --all run.
+    images_dir = parent / "images"
+    assert images_dir.is_dir()
+    tif_count = sum(1 for _ in images_dir.rglob("*.tif"))
+    assert tif_count > 100, f"expected >100 TIFFs carried, got {tif_count}"
+
+    # image_path values inside cd_metadata.json now point under images/
+    # (relative to parent), not the dead data/images/ scratch path.
+    import json as _json
+    payload = _json.loads(cd_meta.read_text(encoding="utf-8"))
+    paths_with_image = [
+        p["image_path"] for p in payload["patents"] if p.get("image_path")
+    ]
+    assert len(paths_with_image) > 100
+    assert all(p.startswith("images/") for p in paths_with_image), (
+        "image_path must be relative to the parent folder under images/"
+    )
 
     # Scratch should be cleaned by default
     assert not (scratch / "2025_12_CD").exists()
