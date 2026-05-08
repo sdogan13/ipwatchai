@@ -1041,12 +1041,14 @@
                             </div>
                             <!-- Info -->
                             <div class="min-w-0 flex-1">
-                                <div class="flex items-center gap-2">
+                                <div class="flex items-center gap-2 flex-wrap">
                                     <span class="text-sm font-semibold truncate" style="color:var(--color-text-primary)" x-text="getTrademarkDisplayName(tm)"></span>
                                     <span x-show="tm.status" class="text-[10px] px-1.5 py-0.5 rounded-full shrink-0"
                                           :style="'background:' + (tm.status === 'Tescil' ? 'var(--color-risk-low-bg);color:var(--color-risk-low-text)' : 'var(--color-bg-card);color:var(--color-text-muted)')"
                                           x-text="tm.status"></span>
                                 </div>
+                                <div x-html="renderEventDerivedBadges(tm)"></div>
+                                <div x-html="renderLastEventLine(tm)"></div>
                                 <div class="flex items-center gap-3 text-xs mt-0.5" style="color:var(--color-text-muted)">
                                     <span x-show="tm.application_no" x-text="tm.application_no"></span>
                                     <span x-show="tm.nice_classes && tm.nice_classes.length" x-text="'Sinif: ' + tm.nice_classes.join(', ')"></span>

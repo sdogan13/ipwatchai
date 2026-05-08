@@ -469,6 +469,89 @@ window.AppComponents.renderEventsButton = function(applicationNo) {
 };
 
 // ============================================
+// G4) Event-derived signal badges
+//     holder-changed pill, restriction warning, last-activity line.
+//     Each helper returns '' when its source field is absent so it
+//     gracefully degrades on responses that don't yet surface events.
+// ============================================
+window.AppComponents.HOLDER_CHANGE_RECENT_MONTHS = 12;
+
+window.AppComponents.isRecentDate = function(dateStr, months) {
+    if (!dateStr) return false;
+    var d = new Date(dateStr);
+    if (isNaN(d.getTime())) return false;
+    var windowMs = (months || 12) * 30.4375 * 24 * 60 * 60 * 1000;
+    return (Date.now() - d.getTime()) <= windowMs;
+};
+
+window.AppComponents.renderHolderChangedBadge = function(item) {
+    if (!item || !item.holder_changed_at) return '';
+    if (!window.AppComponents.isRecentDate(item.holder_changed_at, window.AppComponents.HOLDER_CHANGE_RECENT_MONTHS)) return '';
+    var dateLabel = (typeof formatDateTRShort === 'function') ? formatDateTRShort(item.holder_changed_at) : item.holder_changed_at;
+    var tooltip = (t('events.holder_changed_at') + ': ' + dateLabel).replace(/"/g, '&quot;');
+    return '<span class="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-medium" '
+        + 'style="background:var(--color-warning-bg, #fef3c7);color:var(--color-warning-text, #92400e)" '
+        + 'data-event-badge="holder-changed" '
+        + 'title="' + tooltip + '">'
+        + '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">'
+        + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>'
+        + '</svg>'
+        + t('events.holder_changed')
+        + '</span>';
+};
+
+window.AppComponents.renderRestrictionBadge = function(item) {
+    if (!item || !item.has_restrictions) return '';
+    var count = item.active_restriction_count || 0;
+    if (count < 1) return '';
+    var critical = count >= 3;
+    var bg = critical ? 'var(--color-risk-critical-bg, #fee2e2)' : 'var(--color-warning-bg, #fef3c7)';
+    var fg = critical ? 'var(--color-risk-critical-text, #991b1b)' : 'var(--color-warning-text, #92400e)';
+    return '<span class="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-medium" '
+        + 'style="background:' + bg + ';color:' + fg + '" '
+        + 'data-event-badge="restriction" '
+        + 'data-restriction-count="' + count + '">'
+        + '<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">'
+        + '<path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>'
+        + '</svg>'
+        + t('events.active_restrictions_count', { count: count })
+        + '</span>';
+};
+
+window.AppComponents.renderLastEventLine = function(item) {
+    if (!item || !item.last_event_type || !item.last_event_date) return '';
+    if (item.last_event_type === 'correction') return '';
+    var sev = item.last_event_severity || 'low';
+    var color;
+    if (sev === 'critical') color = 'var(--color-risk-critical-text, #991b1b)';
+    else if (sev === 'high') color = 'var(--color-risk-high-text, #b45309)';
+    else if (sev === 'medium') color = 'var(--color-text-secondary)';
+    else color = 'var(--color-text-faint)';
+    var typeKey = 'events.type_' + item.last_event_type;
+    var typeLabel = t(typeKey);
+    if (typeLabel === typeKey) typeLabel = item.last_event_type;
+    var dateLabel = (typeof formatDateTRShort === 'function') ? formatDateTRShort(item.last_event_date) : item.last_event_date;
+    return '<div class="text-xs mt-0.5" data-event-line="last" data-event-severity="' + sev + '" style="color:' + color + '">'
+        + t('events.last_event') + ': '
+        + '<span class="font-medium">' + escapeHtml(typeLabel) + '</span>'
+        + ' · ' + escapeHtml(dateLabel)
+        + '</div>';
+};
+
+window.AppComponents.renderEventDerivedBadges = function(item) {
+    var hc = window.AppComponents.renderHolderChangedBadge(item);
+    var rb = window.AppComponents.renderRestrictionBadge(item);
+    if (!hc && !rb) return '';
+    return '<div class="flex flex-wrap items-center gap-1 mt-1">' + hc + rb + '</div>';
+};
+
+var isRecentDate = window.AppComponents.isRecentDate;
+var renderHolderChangedBadge = window.AppComponents.renderHolderChangedBadge;
+var renderRestrictionBadge = window.AppComponents.renderRestrictionBadge;
+var renderLastEventLine = window.AppComponents.renderLastEventLine;
+var renderEventDerivedBadges = window.AppComponents.renderEventDerivedBadges;
+
+// ============================================
 // H) VS Comparison Layout
 //    Side-by-side layout: [New App] -- VS Ring -- [Existing]
 // ============================================

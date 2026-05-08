@@ -1457,7 +1457,9 @@
     "type_madrid_renewal": "Madrid Renewal",
     "type_address_change": "Address Change",
     "type_name_change": "Name Change",
-    "type_class_change": "Class Change"
+    "type_class_change": "Class Change",
+    "holder_changed": "Holder changed",
+    "active_restrictions_count": "{count} active restriction(s)"
   },
   "nice_classes": {
     "1": "Chemical Products",

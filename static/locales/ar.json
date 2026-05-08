@@ -1459,7 +1459,9 @@
     "type_madrid_renewal": "تجديد مدريد",
     "type_address_change": "تغيير العنوان",
     "type_name_change": "تغيير الاسم",
-    "type_class_change": "تغيير الفئة"
+    "type_class_change": "تغيير الفئة",
+    "holder_changed": "تغير المالك",
+    "active_restrictions_count": "{count} قيد نشط"
   },
   "nice_classes": {
     "1": "منتجات كيميائية",

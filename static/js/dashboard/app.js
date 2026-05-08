@@ -2812,6 +2812,8 @@ function renderEntityTrademarks(trademarks) {
             + '<div class="font-semibold text-gray-900 truncate">' + (escapeHtml(tm.name) || t('holder.unnamed')) + '</div>'
             + (tm.application_date ? '<div class="text-xs text-gray-400">' + formatHolderDate(tm.application_date) + '</div>' : '')
             + (tm.registration_date ? '<div class="text-xs" style="color:var(--color-text-faint)">' + t('holder.registration_date') + ': ' + formatHolderDate(tm.registration_date) + '</div>' : '')
+            + window.AppComponents.renderEventDerivedBadges(tm)
+            + window.AppComponents.renderLastEventLine(tm)
             + window.AppComponents.renderTurkpatentButton(tm.application_no)
             + egIndicator + '</div>'
             + '<div class="flex-shrink-0"><span class="' + getStatusBadgeClass(tm.status) + ' px-2 py-1 rounded text-xs font-medium">'

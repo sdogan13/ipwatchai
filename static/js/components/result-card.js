@@ -209,6 +209,8 @@ window.AppComponents.renderResultCard = function(r) {
         + '<div class="font-semibold truncate" style="color:var(--color-text-primary)">' + highlightMatches(displayName, r.scores && r.scores.matched_words) + '</div>'
         + (r.name_tr && r.name_tr.toLowerCase() !== (r.name || '').toLowerCase() ? '<div class="text-xs mt-0.5" style="color:var(--color-text-faint)">TR: ' + escapeHtml(r.name_tr) + '</div>' : '')
         + '<div class="mt-0.5"><span class="text-xs px-2 py-0.5 rounded-full font-medium" style="color:' + getStatusColor(r.status) + ';background:' + getStatusBg(r.status) + '">' + getStatusText(r.status) + '</span></div>'
+        + window.AppComponents.renderEventDerivedBadges(r)
+        + window.AppComponents.renderLastEventLine(r)
         + (r.application_date ? '<div class="text-xs" style="color:var(--color-text-faint)">' + t('common.application_date') + ' ' + formatDateTRShort(r.application_date) + '</div>' : '')
         + window.AppComponents.renderNiceClassBadges(r.classes)
         + window.AppComponents.renderTurkpatentButton(r.application_no)

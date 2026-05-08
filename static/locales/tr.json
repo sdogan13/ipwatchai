@@ -1462,7 +1462,9 @@
     "type_madrid_renewal": "Madrid Yenileme",
     "type_address_change": "Adres Değişikliği",
     "type_name_change": "Unvan Değişikliği",
-    "type_class_change": "Sınıf Değişikliği"
+    "type_class_change": "Sınıf Değişikliği",
+    "holder_changed": "Sahip değişti",
+    "active_restrictions_count": "{count} aktif kısıtlama"
   },
   "nice_classes": {
     "1": "Kimyasal Ürünler",

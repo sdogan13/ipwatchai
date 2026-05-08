@@ -163,6 +163,7 @@ def _read_entity_modal_contract(page) -> dict:
                 const el = document.querySelector(selector);
                 return el ? el.textContent.trim() : '';
             };
+            const list = document.getElementById('entityTrademarksList');
             return {
                 title: text('#entityModalTitle'),
                 subtitle: text('#entityModalSubtitle'),
@@ -174,6 +175,15 @@ def _read_entity_modal_contract(page) -> dict:
                 watchAllVisible: !!document.getElementById('entityWatchAllBtn'),
                 csvVisible: !!document.getElementById('entityCsvBtn'),
                 searchPlaceholder: document.getElementById('entitySearchInput')?.getAttribute('placeholder') || '',
+                eventBadgeHelpersLoaded: (
+                    typeof window.renderEventDerivedBadges === 'function'
+                    && typeof window.renderLastEventLine === 'function'
+                    && typeof window.renderHolderChangedBadge === 'function'
+                    && typeof window.renderRestrictionBadge === 'function'
+                ),
+                holderChangedBadgeCount: list ? list.querySelectorAll('[data-event-badge="holder-changed"]').length : 0,
+                restrictionBadgeCount: list ? list.querySelectorAll('[data-event-badge="restriction"]').length : 0,
+                lastEventLineCount: list ? list.querySelectorAll('[data-event-line="last"]').length : 0,
             };
         }"""
     )
@@ -194,6 +204,8 @@ def _assert_entity_modal_contract(contract: dict, expected_id: str) -> None:
         raise AssertionError("expected entity modal action buttons to be visible")
     if contract["itemCount"] <= 0:
         raise AssertionError("expected entity portfolio list to contain results")
+    if not contract["eventBadgeHelpersLoaded"]:
+        raise AssertionError("expected event-derived badge helpers to be loaded on the page")
 
     for label in ("totalCount", "registeredCount", "pendingCount"):
         if not str(contract[label]).isdigit():
