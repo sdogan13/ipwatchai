@@ -112,11 +112,31 @@ limiter = configure_rate_limiting(app, settings, logger, _get_rate_limit_key)
 configure_exception_handlers(app, settings, logger)
 
 
+# Each step below is logged as both a banner print (always visible in stderr,
+# survives any logging-config issue) and a structured logger line. If startup
+# 404s come back in prod, the last banner that printed shows which step
+# crashed.
+def _step(name):
+    print(f"[STARTUP] {name}", flush=True)
+    logger.info("startup step", extra={"step": name})
+
+
+_step("register_application_routers")
 register_application_routers(app, logger)
+
+_step("register_system_routes")
 register_system_routes(app, settings)
+
+_step("register_admin_scoring_routes")
 register_admin_scoring_routes(app)
+
+_step("register_nice_class_routes")
 register_nice_class_routes(app)
+
+_step("register_public_portfolio_routes")
 public_portfolio, public_portfolio_csv = register_public_portfolio_routes(app, limiter, logger)
+
+_step("router-registration-complete")
 
 
 # Static files and templates
