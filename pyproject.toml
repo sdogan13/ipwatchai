@@ -1,0 +1,119 @@
+[tool.ruff]
+# Match the runtime: Dockerfile.backend builds on python3.10
+target-version = "py310"
+line-length = 120
+
+# Skip vendored / generated / data directories. The repo also contains a
+# literal directory named ".py" (an embedded Python install) that confuses
+# pattern matching, hence the explicit name.
+extend-exclude = [
+    ".py",
+    ".tmp_launcher_exact",
+    ".tmp_launcher_tests",
+    ".tmp_translation_refresh_smoke",
+    ".tmp_translation_refresh_tests",
+    "artifacts",
+    "bulletins",
+    "clients",
+    "pgdata",
+    "pgsql",
+    "python",
+    "reports",
+    "tmp",
+    "turk_patent",
+    "uploads",
+    "*/migrations/versions",  # alembic-generated, hand-edited rarely
+]
+
+[tool.ruff.lint]
+# Conservative rule set — only the categories we've already cleaned and
+# can keep clean without surprise. Add more (e.g. E, W, B) only after
+# discussing.
+select = [
+    "F401",  # unused imports
+    "F811",  # redefinition of unused
+    "F841",  # unused local variable
+]
+
+# Keep the cleanup methodology explicit:
+# - Re-exports across module boundaries are tagged `# noqa: F401  re-exported`.
+# - Compatibility-shim redefinitions (utils/subscription.py L823 vs L955,
+#   pipeline/ingest_helpers.py L65-636 vs L709-731 module-level
+#   assignments) are deliberate and currently un-resolved.
+[tool.ruff.lint.per-file-ignores]
+# tests/conftest.py — pytest auto-discovers fixtures by name without
+# explicit imports, so unused-looking imports here may be required.
+"tests/conftest.py" = ["F401"]
+
+# pipeline/ingest_helpers.py — F811 redefinitions are real refactor
+# scaffolding (`parse_date = _rules.parse_date` etc. at module level
+# overrides earlier defs). Triage requires a design decision; until
+# then, don't fail CI on these.
+"pipeline/ingest_helpers.py" = ["F811"]
+
+# utils/subscription.py — same pattern: "Compatibility redefinitions:
+# keep legacy behaviors working" comment at L953. Resolve when the
+# unified-AI-credits migration is complete.
+"utils/subscription.py" = ["F811"]
+
+# ----------------------------------------------------------------------
+# Vulture (dead-code finder). Pip install with: pip install vulture
+# Run: python -m vulture .
+# ----------------------------------------------------------------------
+[tool.vulture]
+min_confidence = 80
+exclude = [
+    ".py/",
+    ".tmp_launcher_exact/",
+    ".tmp_launcher_tests/",
+    ".tmp_translation_refresh_smoke/",
+    ".tmp_translation_refresh_tests/",
+    "artifacts/",
+    "bulletins/",
+    "clients/",
+    "pgdata/",
+    "pgsql/",
+    "python/",
+    "reports/",
+    "tmp/",
+    "turk_patent/",
+    "uploads/",
+    "tests/",  # too many pytest-fixture false positives
+]
+
+# Names that LOOK unused to static analysis but are actually required
+# by various callable contracts. Add to this list rather than tagging
+# each call site, to keep noise down.
+ignore_names = [
+    # Python protocol parameters
+    "exc_tb",  # __exit__
+    "exc_val",  # __exit__
+    "exc_type",  # __exit__
+    "frame",  # signal handler
+    "signum",  # signal handler
+
+    # FastAPI dependency-injection slots that exist for forward-compat
+    # or to satisfy a specific caller signature
+    "background_tasks",  # FastAPI BackgroundTasks (passed by callers but unused inside)
+    "json_client_getter",  # creative_service: passed by tests
+    "current_lang",  # nice_class_service / app_enhanced_search_routes: lambda contract
+
+    # Backward-compat parameters kept for old clients (typically
+    # tagged `include_in_schema=False`)
+    "alert_threshold",
+]
+
+ignore_decorators = [
+    # FastAPI route handlers are called via URL routing, not direct
+    # function reference — vulture can't see this.
+    "@app.get", "@app.post", "@app.put", "@app.delete", "@app.patch",
+    "@router.get", "@router.post", "@router.put", "@router.delete", "@router.patch",
+    "@*.get", "@*.post", "@*.put", "@*.delete", "@*.patch",
+
+    # Pytest fixtures are discovered by name from test parameters
+    "@pytest.fixture",
+    "@fixture",
+
+    # SlowAPI rate-limit decorators
+    "@limiter.limit",
+]
