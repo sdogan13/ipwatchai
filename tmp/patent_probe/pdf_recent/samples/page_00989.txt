@@ -1,0 +1,48 @@
+(11) TR 2025 010844 T4
+(12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ
+(21) Başvuru Numarası
+2025/010844
+(96) Başvuru Tarihi
+2011/07/08
+(97) EP Yayın No
+EP3626736B1
+(97) EP Yayın Tarihi
+2025/06/11
+(51) Buluşun tasnif sınıfları
+A61P7/00
+A61P33/06
+C12N9/64
+A61P7/04
+C07K14/755
+A61K38/36
+A61P29/00
+A61K38/00
+A61K38/37
+(96) EP Başvuru No
+EP19191438.1
+(30) Rüçhan Bilgileri (32) (33) (31)
+2010/07/08  US  US 201036263510P
+(74) Vekil
+UĞUR GÜRŞAD YALÇINER (YALÇINER  PATENT
+VE DAN. LTD. ŞTİ.)
+(73) Patent Sahibi
+TAKEDA PHARMACEUTICAL COMPANY LIMITED
+1-1, DOSHOMACHI 4-CHOME CHUO-KU OSAKA-
+SHI, OSAKA     JAPONYA
+(72) Buluşu Yapanlar
+Leopold Grillberger
+Wolfgang Mundt
+Manfred Reiter
+(54) Buluş Başlığı
+Hücre kültüründe rekombinant yüksek moleküler ağırlıklı vwf üretim yöntemi
+(57) Özet
+Diğer yönlerin yanı sıra, mevcut buluş, yüksek moleküler ağırlıklı vWF, özellikle yüksek spesifik aktiviteye sahip oldukça
+multimerikWf ve yüksek spesifik aktiviteye sahip ADAMTS13 üretmeye yönelik hücre kültürü koşulları ile ilgilidir. Mevcut
+buluşun hücre kültürü koşulları, örneğin, düşük bir amonyum (NH4+) konsantrasyonuna sahip artan bir bakır konsantrasyonuna
+ve/veya hücre kültürü süpernatantına sahip bir hücre kültürü ortamını içerebilir. Mevcut buluş ayrıca, yüksek spesifik
+aktivitelere sahip yüksek moleküler ağırlıklı vWF ve rA13'ü eksprese etmek için hücre kültürü koşullarında hücrelerin
+yetiştirilmesine yönelik yöntemler sağlar.
+______________________________________________________________________________________________________________________
+2025/8  Resmi Patent Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 21.08.2025    989

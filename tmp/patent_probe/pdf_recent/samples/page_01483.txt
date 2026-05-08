@@ -1,0 +1,36 @@
+(19)
+(11) TR 2025 008260 A2
+(12) Patent Başvurusu
+(21) Başvuru Numarası
+2025/008260
+(22) Başvuru Tarihi
+2025/06/20
+(43) Başvuru Yayın Tarihi
+2025/08/21
+(51) Buluşun tasnif sınıfları
+H04W
+H04W 12/00
+H04W 52/00
+(30) Rüçhan Bilgileri (32) (33) (31)
+(74) Vekil
+UĞUR GÜRŞAD YALÇINER (YALÇINER  PATENT VE DAN. LTD. ŞTİ.)
+(71) Başvuru Sahibi
+İSTANBUL MEDİPOL ÜNİVERSİTESİ
+CİBALİ MAH. ATATÜRK BLV. ÖZEL MEDIPOL
+ÜNIVERSITESI 25  Fatih  İstanbul TÜRKİYE
+(72) Buluşu Yapanlar
+SENANUR DEMİRCİ
+BADR EDDINE OUAKOUAK
+HÜSEYİN ARSLAN
+(54) Buluş Başlığı
+WAKE UP RADYOLARI İÇİN GÖRÜNÜRLÜK ALANINA DAYALI FİZİKSEL KATMAN KİMLİK DOĞRULAMA
+(57) Özet
+Bu fikir, özellikle 5G ve 6G mimarilerinde yeni nesil
+kablosuz ağlarda ultra düşük güçle çalışmayı sağlamak
+için gerekli olan WuR sistemlerindeki güvenlik açıklarını
+ele almaktadır.
+TR 2025 008260 A2
+______________________________________________________________________________________________________________________
+2025/8  Resmi Patent Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 21.08.2025    1483

@@ -1,0 +1,1113 @@
+
+==============================================================================
+A. SEQUENTIAL LIST PAGES 9-13
+==============================================================================
+
+-- page 9 (first 1200 chars) --
+Başvuru
+1
+2024/007254
+2024 007254
+TİM MİMARLIK DEKORASYON İNŞAAT TURİZM LİMİTED ŞİRKETİ
+2
+2024/008726
+2024 008726
+SULTAN ERBAŞ
+3
+2024/010338
+2024 010338
+BOHEM TURİZM TİCARET VE SANAYİ LİMİTED ŞİRKETİ
+4
+2024/010705
+2024 010705
+SÜMEYYE KOR
+5
+2024/011426
+2024 011426
+KÖKSAL MOBİLYA SANAYİ VE TİCARET ANONİM ŞİRKETİ
+6
+2025/000340
+2025 000340
+YUSUF SERBEST MOBİLYA, KOLTUK, NAKLİYE, TASARIM, ORMAN ÜRÜNLERİ, TEKSTİL, PAZ.SAN.VE
+TİC.LTD.ŞTİ.
+7
+2025/002220
+2025 002220
+SAVA ÖRME MAKİNE TEKSTİL SANAYİ VE TİCARET ANONİM ŞİRKETİ
+8
+2025/002867
+2025 002867
+SAMET ÖZDEMİR
+9
+2025/003395
+2025 003395
+BARIŞ ARK
+10
+2025/003706
+2025 003706
+VASFİ ENERJİ ELEKTRİK ÜRETİM PAZARLAMA SANAYİ VE TİCARET LİMİTED ŞİRKETİ
+11
+2025/004416
+2025 004416
+SÜREYYA ÜLKÜ GÜLER
+12
+2025/004590
+2025 004590
+CEMAL ERDOĞAN
+13
+2025/005062
+2025 005062
+KÜBRA AKTÜRK
+14
+2025/005147
+2025 005147
+İZMİR EKONOMİ ÜNİVERSİTESİ
+15
+2025/005285
+2025 005285
+MERCANLAR MUTFAK EŞYALARI SANAYİ VE TİCARET ANONİM ŞİRKETİ
+16
+2025/005401
+2025 005401
+TAUMA MOBİLYA SANAYİ VE TİCARET LİMİTED ŞİRKETİ
+17
+2025/005427
+2025 005427
+TURAN PLASTİK SANAYİ NAKLİYAT VE TİCARET LİMİTED ŞİRKETİ
+18
+2025/005612
+2025 005612
+JUMBO EV GEREÇLERİ SANAYİ TİCARET ANONİM ŞİRKETİ
+19
+
+-- page 10 (first 1200 chars) --
+60
+2025/008010
+2025 008010
+MESUT TAVUZ
+61
+2025/008019
+2025 008019
+KEPİ DEKORASYON VE MOBİLYA SANAYİ TİCARET ANONİM ŞİRKETİ
+62
+2025/008020
+2025 008020
+KEPİ DEKORASYON VE MOBİLYA SANAYİ TİCARET ANONİM ŞİRKETİ
+63
+2025/008251
+2025 008251
+ZAHİT ALÜMİNYUM SANAYİ VE TİCARET ANONİM ŞİRKETİ
+64
+2025/008257
+2025 008257
+SANDRO P.MORENO
+65
+2025/008308
+2025 008308
+İZETTİN ALKAN
+66
+2025/008369
+2025 008369
+SELÇUK DEMİRCİ
+67
+2025/008553
+2025 008553
+VİNDOFORM KAPI PENCERE AKSESUARLARI SANAYİ VE TİCARET LİMİTED ŞİRKETİ
+68
+2025/008567
+2025 008567
+ALİ CAN BEKKAYA
+69
+2025/008580
+2025 008580
+AKCURA ENDÜSTRİYEL KAUÇUK ÜRÜNLERİ SANAYİ VE TİCARET LİMİTED ŞİRKETİ
+70
+2025/008638
+2025 008638
+HAYTAR ÇİFTLİK EKİPMANLARI İMALAT PAZARLAMA SANAYİ VE TİCARET LİMİTED ŞİRKETİ
+71
+2025/008649
+2025 008649
+ERKAN YİĞİT
+72
+2025/008685
+2025 008685
+DFN TÜKETİM MALLARI SANAYİ TİCARET VE PAZARLAMA ANONİM ŞİRKETİ
+73
+2025/008700
+2025 008700
+TRABZON ORTAHİSAR ORTAOKUL YOL-İŞ SENDİKASI
+74
+2025/008714
+2025 008714
+İNCİ DESİGN KOLTUK MOBİLYA İTHALAT İHRACAT SANAYİ VE TİCARET LİMİTED ŞİRKETİ
+75
+2025/008719
+2025 008719
+OLUŞUM SAC AKSESUAR İTHALAT İHRACAT SANAYİ VE TİCARET LİMİTED ŞİRKETİ
+76
+2025/008818
+2025 008818
+RÜMEYSA BAYRAM
+77
+2025
+
+-- page 11 (first 1200 chars) --
+119
+2026/000639
+2026 000639
+MUSTAFA ÇOLAK
+İSTANBUL EYÜPSULTAN İLKOKUL HALİT DERVİŞ İBRAHİM
+120
+2026/000646
+2026 000646
+UĞUR YANIK
+121
+2026/000647
+2026 000647
+NURULLAH ÜLGİ
+122
+2026/000656
+2026 000656
+EMRAH KAYA
+123
+2026/000672
+2026 000672
+KORKMAZ MOBİLYA VE ORMAN ÜRÜNLERİ SANAYİ VE TİCARET ANONİM ŞİRKETİ
+124
+2026/000675
+2026 000675
+VİOLA OFİS MOBİLYALARI OTOMOTİV İNŞAAT GIDA NAKLİYE SANAYİ VE TİCARET LİMİTED ŞİRKETİ
+125
+2026/000679
+2026 000679
+SİNAN ÇELİK
+126
+2026/000681
+2026 000681
+İSTF ELEKTRONİK HİZMETLERİ SANAYİ VE TİCARET LİMİTED ŞİRKETİ
+127
+2026/000684
+2026 000684
+AVRASYA TAAHHÜT LOJİSTİK ANONİM ŞİRKETİ
+128
+2026/000685
+2026 000685
+AVRASYA TAAHHÜT LOJİSTİK ANONİM ŞİRKETİ
+129
+2026/000693
+2026 000693
+AHMET SONGÜR
+130
+2026/000699
+2026 000699
+GÜLÜZAR ÇİN YEŞİL
+131
+2026/000700
+2026 000700
+TURHAN ÖZDEMİR
+132
+2026/000711
+2026 000711
+AKİF SEVER
+ELAZIĞ KARAKOÇAN HALK EĞİTİMİ MERKEZİ MÜDÜRLÜĞÜ
+FARUK EKMEKYAPAR
+MEHMET APAYDIN
+133
+2026/000743
+2026 000743
+ÖZKARDEŞLER METAL MOBİLYA AKSESUARLARI PRES DÖKÜM SANAYİ VE TİCARET LİMİTED
+ŞİRKETİ
+134
+2026/000745
+2026 000745
+BAMBİ MOBİLYA VE YATAK SANAYİ ANONİM ŞİRKETİ
+135
+2026/000779
+2026 000779
+TRABZON VAKFIKEBİR HALK EĞİTİM MERKEZİ VAKFIKEBİR
+136
+
+-- page 12 (first 1200 chars) --
+170
+2026/000992
+2026 000992
+AHMET ASLIHAN
+OĞUZHAN GALİP
+171
+2026/001001
+2026 001001
+ALİ GEYLAN
+172
+2026/001007
+2026 001007
+İLHAN USTA
+173
+2026/001015
+2026 001015
+MUSTAFA BALIK
+174
+2026/001022
+2026 001022
+ÇİĞDEM ARSLANER
+175
+2026/001031
+2026 001031
+SALİH BERK İLHAN
+176
+2026/001054
+2026 001054
+GÜLEVŞEN ANAOKULU MÜDÜRLÜĞÜ
+177
+2026/001057
+2026 001057
+KAHRAMANMARAŞ PAZARCIK ÇOK PROGRAMLI ANADOLU LİSESİ KİPAŞ
+MUHAMMED EMİN ÖZSAĞIR
+178
+2026/001063
+2026 001063
+KÜÇÜKÇALIK TEKSTİL SANAYİİ VE TİCARET ANONİM ŞİRKETİ
+179
+2026/001069
+2026 001069
+DOKUTEKS HALI TEKSTİL SANAYİ VE TİCARET ANONİM ŞİRKETİ
+180
+2026/001072
+2026 001072
+TOROSLAR BİLİM VE SANAT MERKEZİ
+181
+2026/001079
+2026 001079
+MONDİ MOBİLYA SANAYİ VE TİCARET ANONİM ŞİRKETİ
+182
+2026/001080
+2026 001080
+MONDİ MOBİLYA SANAYİ VE TİCARET ANONİM ŞİRKETİ
+183
+2026/001081
+2026 001081
+MONDİ MOBİLYA SANAYİ VE TİCARET ANONİM ŞİRKETİ
+184
+2026/001083
+2026 001083
+MONDİ MOBİLYA SANAYİ VE TİCARET ANONİM ŞİRKETİ
+185
+2026/001086
+2026 001086
+CANER DEMİR
+186
+2026/001099
+2026 001099
+ARDA CAN ÖZKAN
+187
+2026/001131
+2026 001131
+MERT COŞKUN
+188
+2026/001133
+2026 001133
+İSTİKBAL MOBİLYA SANAYİ VE TİCARET ANONİM ŞİRKETİ
+189
+2026/001134
+2026 001134
+İSTİKBAL MOBİLYA S
+
+-- page 13 (first 1200 chars) --
+225
+2026/001585
+2026 001585
+ADIYAMAN MERKEZ İLKOKUL YAVUZ SELİM
+226
+2026/001589
+2026 001589
+AYŞE KAYA
+MUSA KAYA
+227
+2026/001689
+2026 001689
+KORÇAY METAL ALÜMİNYUM İNŞAAT NAKLİYE DAYANIKLI TÜKETİM GIDA TEKSTİL SANAYİ VE
+TİCARET LİMİTED ŞİRKETİ
+228
+2026/001693
+2026 001693
+DULDA MERDİVEN SİSTEMLERİ İNŞAAT SANAYİ TİCARET LİMİTED ŞİRKETİ
+229
+2026/001703
+2026 001703
+SİİRT MERKEZ MESLEKİ EĞİTİM MERKEZİ MÜDÜRLÜĞÜ SİİRT ATLAS JET
+İDRİS AKDEMİR
+230
+2026/001705
+2026 001705
+UNMAŞ UNLU MAMULLER SANAYİ VE TİCARET ANONİM ŞİRKETİ
+231
+2026/001720
+2026 001720
+OYAK RENAULT OTOMOBİL FABRİKALARI ANONİM ŞİRKETİ
+232
+2026/001721
+2026 001721
+OYAK RENAULT OTOMOBİL FABRİKALARI ANONİM ŞİRKETİ
+233
+2026/001736
+2026 001736
+FARRİ OUTDOOR KAMP MALZEMELERİ LİMİTED ŞİRKETİ
+234
+2026/001757
+2026 001757
+CANER DEMİR
+235
+2026/001769
+2026 001769
+CÜNEYT KILIÇ
+236
+2026/001785
+2026 001785
+OYAK RENAULT OTOMOBİL FABRİKALARI ANONİM ŞİRKETİ
+237
+2026/001787
+2026 001787
+EKİMLER İNŞAAT TURİZM SANAYİ TİCARET LİMİTED ŞİRKETİ
+238
+2026/001794
+2026 001794
+MAKİNE VE KİMYA ENDÜSTRİSİ ANONİM ŞİRKETİ
+239
+2026/001808
+2026 001808
+EREN KARAKAŞ
+240
+2026/001862
+2026 001862
+OYAK RENAULT OTOMOBİL FABRİKALARI ANONİM ŞİRKETİ
+241
+2026/001916
+2026 001
+
+-- page 14 (first 1200 chars) --
+Yayın erteleme talepli tesciller
+Yayın ertelemesi kalkan tesciller
+Düzeltme Sonucu Yenilenen Tesciller
+280
+DM/244860
+DM 244860
+WÜRTH INTERNATIONAL AG
+281
+DM/244882
+DM 244882
+RAYE ROCKS LLC
+282
+DM/245107
+DM 245107
+BTL INDUSTRIES
+283
+DM/245404
+DM 245404
+ALFRED KÄRCHER SE & CO. KG
+284
+DM/245711
+DM 245711
+GRZEGORZ OBAJTEK
+285
+DM/246495
+DM 246495
+ALFRED KÄRCHER SE & CO. KG
+286
+DM/246772
+DM 246772
+HEMRO INTERNATIONAL AG
+287
+DM/246997
+DM 246997
+RELYON PLASMA GMBH
+288
+DM/247536
+DM 247536
+DR. ING. H.C. F. PORSCHE AKTIENGESELLSCHAFT
+289
+DM/248221
+DM 248221
+ALFRED KÄRCHER SE & CO. KG
+290
+DM/249761
+DM 249761
+HARRY WINSTON SA
+291
+DM/250205
+DM 250205
+ATENA S.P.A.
+292
+DM/250497
+DM 250497
+HARRY WINSTON SA
+293
+DM/250736
+DM 250736
+OMEGA SA (OMEGA AG) (OMEGA LTD.)
+294
+DM/250823
+DM 250823
+LEGO A/S
+295
+DM/251867
+DM 251867
+RICHEMONT INTERNATIONAL SA
+296
+DM/252244
+DM 252244
+BORMIOLI LUIGI S.P.A.
+297
+DM/252246
+DM 252246
+HARIO CO., LTD.
+298
+DM/252425
+DM 252425
+ELİFPLAS PLASTİK SANAYİ VE TİCARET LİMİTED ŞİRKETİ
+299
+DM/252544
+DM 252544
+ECOLAB USA INC.
+300
+DM/252955
+DM 252955
+AUTEC SRL
+301
+DM/252957
+DM 252957
+AUTEC SRL
+302
+DM/253349
+DM 253349
+DREAME INTELLIGENT CLEANING FUTURE (SUZHOU) TECHNOLOGY CO., LTD.
+30
+
+==============================================================================
+B. (28) DESIGN-COUNT DISTRIBUTION (full doc)
+==============================================================================
+(11) hits: 382
+(21) hits: 286
+(28) hits: 330
+design-count distribution from (28): {4: 17, 1: 175, 25: 2, 2: 42, 34: 1, 7: 8, 3: 31, 37: 1, 5: 11, 27: 1, 11: 3, 9: 3, 15: 3, 6: 10, 18: 1, 35: 2, 10: 6, 22: 2, 26: 1, 8: 3, 21: 1, 12: 1, 13: 2, 58: 1, 16: 1, 17: 1}
+
+Top 10 records by design count:
+  page= 382 app=2026/002401 designs=58
+  page=  56 app=2025/005741 designs=37
+  page= 179 app=2026/000477 designs=35
+  page= 246 app=2026/000914 designs=35
+  page=  24 app=2024/011426 designs=34
+  page=  81 app=2025/006736 designs=27
+  page= 209 app=2026/000675 designs=26
+  page=  18 app=2024/010338 designs=25
+  page= 259 app=2026/000930 designs=25
+  page= 205 app=2026/000672 designs=22
+
+==============================================================================
+C. ONE TRUE MULTI-DESIGN RECORD
+==============================================================================
+
+-- page 382 (first 1500 chars) --
+   
+1.8 Elektrrik sayacı
+(11)  2026 002401 (21)  2026/002401 (15)  02.04.2026
+(22)  02.04.2026
+(28)  58
+(51)  32-00
+(73)  EBRU TEKSTİL KONFEKSİYON ÜRÜNLERİ SANAYİ VE TİCARET LİMİTED ŞİRKETİ(7485909) MURATPAŞA
+MAH. ULUYOL CAD. İŞKENT SANAYİ SİTESİ D BLOK 29 D 1B20  Bayrampaşa İstanbul  TÜRKİYE
+(72)  ERDİNÇ ALTAY
+(74)  KAHRAMAN HAKYEMEZ (DESTEK PATENT A.Ş.)
+1.1 Desen
+2.1 Desen
+______________________________________________________________________________________________________________________
+382    2026/483  Tasarımlar Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 24.04.2026
+
+
+-- page 383 (first 1500 chars) --
+3.1 Desen
+4.1 Desen
+5.1 Desen
+6.1 Desen
+7.1 Desen
+8.1 Desen
+______________________________________________________________________________________________________________________
+2026/483  Tasarımlar Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 24.04.2026   383
+
+
+-- page 384 (first 1500 chars) --
+9.1 Desen
+10.1 Desen
+11.1 Desen
+12.1 Desen
+13.1 Desen
+14.1 Desen
+______________________________________________________________________________________________________________________
+384    2026/483  Tasarımlar Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 24.04.2026
+
+
+-- page 385 (first 1500 chars) --
+15.1 Desen
+16.1 Desen
+17.1 Desen
+18.1 Desen
+19.1 Desen
+20.1 Desen
+______________________________________________________________________________________________________________________
+2026/483  Tasarımlar Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 24.04.2026   385
+
+
+-- page 386 (first 1500 chars) --
+21.1 Desen
+22.1 Desen
+23.1 Desen
+24.1 Desen
+25.1 Desen
+26.1 Desen
+______________________________________________________________________________________________________________________
+386    2026/483  Tasarımlar Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 24.04.2026
+
+
+==============================================================================
+D. HAGUE SECTION (pages 477-484)
+==============================================================================
+
+-- page 477 (first 1500 chars) --
+   
+   
+   
+   
+   
+WIPO Bülten No: 13/2025
+(11) DM 244882  (15) 15.02.2024
+(22) 15.02.2024  (73) RAYE ROCKS LLC(8022625) 2600 S. Douglas Rd., Suite 1008, 33134 Coral Gables, Florida (US)
+A.B.D.  (74) Sullivan & Worcester LLP / Kazanjian Gerald One Post Office Square 02109  Boston  MA (Boston)  (US)   (72)
+1) Erika Rayman    (28) 1  (51) 11-01  (54) Jewelry for swim wear  (81) III. CH, CN, DE, EM, FR, GB, SG, TR
+WIPO Bülten No: 08/2025
+(11) DM 244137  (15) 28.10.2024
+(22) 28.10.2024  (73) GEORG AZIZ MAROGE(7838366)        (74) Gleim Petri Patent- und Rechtsanwaltspartnerschaft mbB
+John-F.-Kennedy-Straße 4, 74074 Heilbronn (Heilbronn)  (DE)   (72) 1) Georg Aziz Maroge    (28) 1  (51) 11-03  (54) Coin
+(81) III. CH, IL, TR, US
+WIPO Bülten No: 12/2025
+(11) DM 244860  (15) 30.01.2025
+(22) 30.01.2025  (73) WÜRTH INTERNATIONAL AG(5553731) ASPERMONTSTRASSE 1, CH-7000 CHUR  İSVİÇRE
+(74) Adolf Würth GmbH & Co. KG / Katharina Walter Reinhold-Würth-Str. 17 - 19 74653 Künzelsau (Künzelsau)  (DE)   (72)
+1) Yong Bao    (28) 2  (51) 13-02  (54) Electric batter, Accumulator charging apparatus  (81) III. CH, GB, NO, TR
+WIPO Bülten No: 11/2026
+(11) DM 245711  (15) 10.03.2025
+(22) 10.03.2025  (73) GRZEGORZ OBAJTEK(8011913) Polanka 293, 32-400 My?lenice, Silesia (PL)  POLONYA  (74)
+Jerzy Radecki Struga 18 42-200 Czestochowa (Czestochowa)  (PL)   (72) 1) Grzegorz Obajtek    (28) 4  (51) 13-02  (54)
+Charging station for mobile devices  (81) III. CH, DK, EM, FI, GB, NO, TR, UA
+WIPO Bülten No: 12/202
+
+-- page 478 (first 1500 chars) --
+   
+   
+   
+   
+   
+WIPO Bülten No: 12/2026
+(11) DM 248221  (15) 20.03.2025
+(22) 20.03.2025  (73) ALFRED KÄRCHER SE & CO. KG(7712089) Alfred-Kärcher-Strasse 28-40, 71364 Winnenden (DE)
+ALMANYA  (74) Hoeger Stellrecht & Partner Patentanwälte mbB Uhlandstrasse 14c 70182 Stuttgart (Stuttgart)  (DE)   (28) 4
+(51) 13-02  (54) Accumulator, electric  (81) III. CH, EM, GB, TR
+WIPO Bülten No: 14/2026
+(11) DM 246772  (15) 31.03.2025
+(22) 31.03.2025  (73) HEMRO INTERNATIONAL AG(7682241) Thurgauerstrasse 80, 8050 Zürich (CH)  İSVİÇRE  (72) 1)
+Milan Rohrer    (28) 1  (51) 10-04  (54) Electronic coffee scale  (81) III. BR, BX, CH, CN, DE, DK, EM, ES, FR, GR, IL, IT,
+JP, KR, MX, NO, PL, RO, RU, TR, US, VN
+WIPO Bülten No: 15/2026
+(11) DM 246495  (15) 08.04.2025
+(22) 08.04.2025  (73) ALFRED KÄRCHER SE & CO. KG(7712089) Alfred-Kärcher-Strasse 28-40, 71364 Winnenden (DE)
+ALMANYA  (74) Hoeger Stellrecht & Partner Patentanwälte mbB Uhlandstrasse 14c 70182 Stuttgart (Stuttgart)  (DE)   (72) 1)
+Denis Dammk hler  ; 2) Yunjin Zhao  ; 3) Larissa Blessing    (28) 8  (51) 15-05  (54) Control panel for washing installations
+for motor cars  (81) III. CH, EM, GB, TR
+WIPO Bülten No: 4/2026
+(11) DM 246997  (15) 11.04.2025
+(22) 11.04.2025  (73) RELYON PLASMA GMBH(7985587) Osterhofener Straße 6, 93055 Regensburg (DE)  ALMANYA
+(74) Epping Hermann Fischer Patentanwaltsgesellschaft mbH Schlossschmidstr. 5 80639 Munich (Munich)  (DE)   (72) 1) Veit
+Michael Sturm  ; 2) Florian Freund    (28) 4  (51) 24-02  (54) Han
+
+-- page 479 (first 1500 chars) --
+   
+   
+   
+   
+WIPO Bülten No: 10/2026
+(11) DM 249761  (15) 04.09.2025
+(22) 04.09.2025  (73) HARRY WINSTON SA(7922700) Chemin du Tourbillon 8, 1228 Plan-les-Ouates (CH)  ÇİN  (74) The
+Swatch Group AG (The Swatch Group SA) (The Swatch Group Ltd.) Faubourg du Lac 6 2501 Biel/Bienne (Biel/Bienne)  (CH)
+(72) 1) Delphine ABDOURAHIM  ; 2) Tobias WUEST    (28) 2  (51) 11-01  (54) Necklace with pendant, Finger ring  (81)
+III. AL, AM, AZ, BA, BZ, CA, CH, EM, GB, GE, IL, KG, KH, KR, LI, MA, MC, MD, ME, MK, MN, NO, OM, SG, TN, TR,
+UA
+WIPO Bülten No: 40/2025
+(11) DM 250205  (15) 10.09.2025
+(22) 10.09.2025  (73) ATENA S.P.A.(6421666) Via A. De Gasperi, 52, 30020 Gruaro, Ve  İTALYA  (74) PRAXI
+INTELLECTUAL S.P.A. Via Francesco Baracca 5/a 30173 VENEZIA MESTRE (VENEZIA MESTRE)  (IT)   (72) 1) Mauro
+Barbuio, Via De Gasperi, 52, 30020, GRUARO, IT    (28) 2  (51) 06-03  (54) Table, Seat  (81) III. CH, GB, IL, MD, ME,
+MK, NO, RS, SM, TR, UA
+WIPO Bülten No: 13/2026
+(11) DM 250497  (15) 24.09.2025
+(22) 24.09.2025  (73) HARRY WINSTON SA(7857135) Chemin du Tourbillon 8, 1228 Plan-les-Ouates (CH)  İSVİÇRE  (74)
+The Swatch Group AG (The Swatch Group SA) (The Swatch Group Ltd.) Faubourg du Lac 6 2501 Biel/Bienne (Biel/Bienne)
+(CH)   (72) 1) Rie YATSUGI-KANG  ; 2) Tobias WUEST    (28) 6  (51) 11-01  (54) Finger ring, Necklace with pendant,
+Pair of earrings  (81) III. AL, AM, AZ, BA, BZ, CA, CH, EM, GB, GE, IL, KG, KH, KR, LI, MA, MC, MD, ME, MK, MN,
+NO, OM, SG, TN, TR, UA
+WIPO Bülten No: 14/2026
+(11) 
+
+-- page 480 (first 1500 chars) --
+   
+   
+   
+   
+   
+WIPO Bülten No: 13/2026
+(11) DM 251867  (15) 31.10.2025
+(22) 31.10.2025  (73) RICHEMONT INTERNATIONAL SA(7826731) ROUTE DES BICHES 10, 1752 VILLARS-SUR-
+GLÂNE,  İSVİÇRE  (74) Cabinet Lavoix 62 rue de Bonnel 69448 Lyon Cédex 03 (Lyon Cédex 03)  (FR)   (72) 1) Isabelle
+PARVEX    (28) 6  (51) 11-01  (54) Necklace [jewellery], Bracelet, Brooch [jewellery], Ring, Jewellery component  (81) III.
+CH, CN, EM, GB, JP, KR, MX, SG, TR, VN
+WIPO Bülten No: 52/2025
+(11) DM 252544  (15) 06.11.2025
+(22) 06.11.2025  (73) ECOLAB USA INC.(7977689) 1 Ecolab Place, 55102 St Paul, Minnesota (US)  A.B.D.  (74) Boult
+Wade Tennant LLP Salisbury Square House 8 Salisbury Square EC4Y 8AP London (London)  (US)   (72) 1) Jon Fairley  ; 2)
+Abdelrahman Yacout    (28) 3  (51) 24-99  (54) Decontamination system, Part of a decontamination system  (81) III. CH, GB,
+NO, TR
+WIPO Bülten No: 50/2025
+(11) DM 252246  (15) 11.11.2025
+(22) 11.11.2025  (73) HARIO CO., LTD.(6606702) 9-3, Nihonbashi Tomizawa-Cho, Chuo-Ku, Tokyo 103-0006  JAPONYA
+(74) Apeiron Intellectual Property Postbus 67140 1060 JC Amsterdam (Amsterdam)  (NL)   (72) 1) Daigo HIDAKA    (28) 1
+(51) 07-02  (54) Coffee dripper  (81) III. NO, TR
+WIPO Bülten No: 5/2026
+(11) DM 253469  (15) 19.11.2025
+(22) 19.11.2025  (73) DREAME INTELLIGENT CLEANING FUTURE (SUZHOU) TECHNOLOGY CO., LTD.(7985620)
+2nd Floor, Building 6, No. 2288 Wuzhong Avenue, Wuzhong Economic Development Zone, 215100 Suzhou, Jiangsu Province
+(CN)  ÇİN  (74) LEADER PATENT & 
+
+-- page 481 (first 1500 chars) --
+   
+   
+   
+   
+   
+WIPO Bülten No: 2/2026
+(11) DM 252955  (15) 23.12.2025
+(22) 23.12.2025  (73) AUTEC SRL(7088175) Via Pomaroli, 65, I-36030 Caldogno (VI)  İTALYA  (74) ACCAPI SRL Via
+De Griffoni 10/A 40123 Bologna BO (Bologna)  (IT)   (72) 1) Giuseppe ARSIE  ; 2) Giuseppe BATTISTELLA    (28) 3  (51)
+14-03  (54) Wireless remote control  (81) III. CN, JP, KR, TR, US
+WIPO Bülten No: 2/2026
+(11) DM 252957  (15) 23.12.2025
+(22) 23.12.2025  (73) AUTEC SRL(7088175) Via Pomaroli, 65, I-36030 Caldogno (VI)  İTALYA  (74) ACCAPI SRL Via de
+Griffoni 10/A 40123 Bologna BO (Bologna)  (IT)   (72) 1) Patrik INNOCENTE  ; 2) Mauro TERRERAN    (28) 1  (51) 14-03
+(54) Wireless remote control  (81) III. CN, JP, KR, TR, US
+WIPO Bülten No: 8/2026
+(11) DM 254228  (15) 24.12.2025
+(22) 24.12.2025  (73) DREAME INTELLIGENT CLEANING FUTURE (SUZHOU) TECHNOLOGY CO., LTD.(7985620)
+2nd Floor, Building 6, No. 2288 Wuzhong Avenue, Wuzhong Economic Development Zone, 215100 Suzhou, Jiangsu Province
+(CN)  ÇİN  (74) LEADER PATENT & TRADEMARK FIRM 8F-6 Bldg. A Winland International Center  No. 32 Xizhimen
+North Street Haidian District 100082 Beijing (Beijing)  (CN)   (72) 1) Wei CAO    (28) 1  (51) 14-04  (54) Transitional
+graphical user interface for displaying functional modes  (81) III. AM, AZ, BG, BR, BX, BY, CA, CH, DE, DK, EE, ES, FI, FR,
+GB, GE, GR, HR, HU, IL, IT, JP, KG, KR, LI, LT, LV, MC, MD, MN, MX, NO, OM, PL, RS, RU, SA, SG, SI, SM, TJ, TR,
+UA, US, UZ, VN
+WIPO Bülten No: 12/2026
+(11) DM 254952  (15)
+
+-- page 482 (first 1500 chars) --
+   
+   
+   
+   
+WIPO Bülten No: 12/2026
+(11) DM 254953  (15) 16.01.2026
+(22) 16.01.2026  (73) HUAWEI TECHNOLOGIES CO., LTD.(7777581) HUAWEI ADMINISTRATION BUILDING
+BANTIAN LONGGANG DISTRICT SHENZHEN, GUANGDONG 518129   ÇİN  (74) SCIHEAD IP LAW FIRM Room
+1702/1703 Unit 4th Building A Kexing Science Park No.15 Keyuan Road Science and Technology Park Nanshan District
+518000 Shenzhen Guangdong (Shenzhen)  (CN)   (72) 1) Keren NI    (28) 1  (51) 10-07  (54) Part of casing for smartwatch
+(81) III. BR, EM, GB, JP, MX, RU, SA, TR
+WIPO Bülten No: 12/2026
+(11) DM 254954  (15) 16.01.2026
+(22) 16.01.2026  (73) HUAWEI TECHNOLOGIES CO., LTD.(7799925) HUAWEI ADMINISTRATION BUILDING
+BANTIAN LONGGANG DISTRICT SHENZHEN, GUANGDONG 518129   ÇİN  (74) SCIHEAD IP LAW FIRM Room
+1702/1703 Unit 4th Building A Kexing Science Park No.15 Keyuan Road Science and Technology Park Nanshan District
+518000 Shenzhen Guangdong (Shenzhen)  (CN)   (72) 1) Zhiwei CHEN  ; 2) Xiang YUAN  ; 3) Fujita Chikara    (28) 3  (51)
+10-07  (54) Casing for smartwatch  (81) III. BR, EM, MX, TR
+WIPO Bülten No: 12/2026
+(11) DM 254959  (15) 16.01.2026
+(22) 16.01.2026  (73) HUAWEI TECHNOLOGIES CO., LTD.(7777581) HUAWEI ADMINISTRATION BUILDING
+BANTIAN LONGGANG DISTRICT SHENZHEN, GUANGDONG 518129   ÇİN  (74) SCIHEAD IP LAW FIRM Room
+1702/1703 Unit 4th Building A Kexing Science Park No.15 Keyuan Road Science and Technology Park Nanshan District
+518000 Shenzhen Guangdong (Shenzhen)  (CN)   (72) 1) Xiang YUAN  ; 2) Wanyou ZHANG  ; 3) Zh
+
+-- page 483 (first 1500 chars) --
+   
+   
+   
+   
+   
+WIPO Bülten No: 13/2026
+(11) DM 255102  (15) 20.02.2026
+(22) 20.02.2026  (73) PROXXON S.A(8018491) Haerebierg 6, 6868 WECKER (LU)  LÜKSEMBURG  (74) OFFICE
+FREYLINGER S.A. 234 route dArlon 8010 Strassen (Strassen)  (LU)   (72) 1) Yannick Horn  ; 2) Jannik Stommes    (28) 1
+(51) 03-01  (54) Toolbox  (81) III. CH, EM, GB, TR
+WIPO Bülten No: 13/2026
+(11) DM 255105  (15) 20.02.2026
+(22) 20.02.2026  (73) PROXXON S.A.(7733606) 6, Härebierg, 6868 Wecker (LU)  LÜKSEMBURG  (74) Office Freylinger
+S.A. 234 Route dArlon 8010 Strassen (Strassen)  (LU)   (72) 1) Yannick Horn  ; 2) Jannik Stommes    (28) 1  (51) 13-02  (54)
+Battery charger  (81) III. CH, EM, GB, TR
+WIPO Bülten No: 13/2026
+(11) DM 255123  (15) 25.02.2026
+(22) 25.02.2026  (73) SAMSONITE IP HOLDINGS S.À R.L.(7985692) 13-15 AVENUE DE LA LIBERTÉ 1931
+LUXEMBOURG   LÜKSEMBURG  (74) Richard Andrew Lamb Samsonite Europe NV Westerring 17 9700 Oudenaarde
+(Oudenaarde)  (BE)   (72) 1) Thibaud HENDRIKX    (28) 1  (51) 03-01  (54) Suitcase  (81) III. CN, GB, JP, KR, SG, TR,
+US
+WIPO Bülten No: 13/2026
+(11) DM 255160  (15) 25.02.2026
+(22) 25.02.2026  (73) SAMSONITE IP HOLDINGS S.À R.L.(7985692) 13-15 AVENUE DE LA LIBERTÉ 1931
+LUXEMBOURG   LÜKSEMBURG  (74) Richard Andrew Lamb Samsonite Europe NV Westerring 17 9700 Oudenaarde
+(Oudenaarde)  (BE)   (72) 1) Adrien LEFEBVRE    (28) 1  (51) 03-01  (54) Suitcase  (81) III. CN, JP, KR, SG, TR
+WIPO Bülten No: 15/2026
+(11) DM 255563  (15) 03.03.2026
+(22) 03.03.2026  (73) JIEMEI HUAN
+
+-- page 484 (first 1500 chars) --
+   
+   
+   
+WIPO Bülten No: 13/2026
+(11) DM 255215  (15) 06.03.2026
+(22) 06.03.2026  (73) CHANEL SARL(7935560) Quai du Général-Guisan 24, 1204 Genève (CH)  İSVİÇRE  (72) 1) Matthieu
+Blazy    (28) 3  (51) 03-01  (54) Handbag  (81) III. AZ, BG, DK, FI, GR, JP, MA, NO, PL, SA, TN, TR, UA
+WIPO Bülten No: 14/2026
+(11) DM 255497  (15) 16.03.2026
+(22) 16.03.2026  (73) DEON DU PLESSIS(8020928) 1149 Sand Trap Court, 32124 Daytona Beach, Florida (US)  A.B.D.
+(72) 1) Deon Du Plessis    (28) 3  (51) 21-02  (54) Portable golf putting training aid  (81) III. CA, CN, EM, GB, KR, MX,
+SG, TR, VN
+WIPO Bülten No: 15/2026
+(11) DM 255671  (15) 20.03.2026
+(22) 20.03.2026  (73) BULGARI HORLOGERIE S.A.(8024664) 34 rue de Monruz, 2000 Neuchatel (CH)  İSVİÇRE  (74)
+Bulgari S.p.A. - Brand Protection 11 Lungotevere Marzio 00186 Rome (Rome)  (IT)   (72) 1) Fabrizio Buonamassa Stigliani
+(28) 1  (51) 10-07  (54) Watch bracelet  (81) III. AZ, BR, CA, CH, CN, EM, GB, JP, KR, LI, MA, MC, RU, SA, SG, TR,
+US, VN
+WIPO Bülten No: 15/2026
+(11) DM 255585  (15) 23.03.2026
+(22) 23.03.2026  (73) BULGARI SPA(7836309) LUNGOTEVERE MARZIO 11, 00186 ROME (IT)  İTALYA  (74) Bulgari
+S.p.A. - Brand Protection Department Lungotevere Marzio 11 00186 Rome (Rome)  (IT)   (72) 1) Lucia Silvestri    (28) 1  (51)
+11-01  (54) Jewellery component  (81) III. AZ, BR, CA, CH, CN, EM, GB, JP, KR, LI, MA, MC, RU, SA, SG, TR, US, VN
+_____________________________________________________________________________________________________________
+
+==============================================================================
+E. DEFERRED SECTION (pages 431-438)
+==============================================================================
+
+-- page 431 (first 1500 chars) --
+   
+   
+   
+(11)  2026 000017 (21)  2026/000017 (15)  04.01.2026
+(22)  04.01.2026
+(28)  17
+(51)  06-03 , 06-02
+, 06-01
+(ES)  30 Ay
+(73)  YUSUF ÇAKAR(7286217)
+(72)  YUSUF ÇAKAR
+(11)  2026 000694 (21)  2026/000694 (15)  29.01.2026
+(22)  29.01.2026
+(28)  1
+(51)  05-05
+(ES)  30 Ay
+(73)  EMRE DİRİK(7987487)
+(73)  ORİ TEKSTİL SANAYİ TİCARET ANONİM ŞİRKETİ(7987794) ALTINOVA MAH. FUAR CAD. BUTTİM
+İŞMERKEZİ BUTTIM ÇARŞI 61 4017  Osmangazi Bursa  TÜRKİYE
+(11)  2026 001806 (21)  2026/001806 (15)  07.03.2026
+(22)  07.03.2026
+(28)  1
+(51)  12-16
+(ES)  30 Ay
+(73)  ÇAĞLA ER ARSLAN(8008007)
+(11)  2026 001807 (21)  2026/001807 (15)  07.03.2026
+(22)  07.03.2026
+(28)  1
+(51)  12-16
+(ES)  30 Ay
+(73)  ÇAĞLA ER ARSLAN(8008007)
+YAYIN ERTELEME TALEPLİ TASARIM TESCİLLERİ
+______________________________________________________________________________________________________________________
+2026/483  Tasarımlar Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 24.04.2026   431
+
+
+-- page 432 (first 1500 chars) --
+______________________________________________________________________________________________________________________
+432    2026/483  Tasarımlar Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 24.04.2026
+
+
+-- page 433 (first 1500 chars) --
+(11)  2023 004953 (21)  2023/004953 (15)  21.05.2023
+(22)  21.05.2023
+(28)  7
+(51)  07-02
+(73)  ENİSE GÜLKESEN(7392096)
+(74)  GÖKHAN ÇİMEN (KUANTUM PATENT A.Ş.)
+1.1 Tencere kulpu
+2.1 Tencere kulpu
+2.2 Tencere kulpu
+3.1 Tencere kulpu
+3.2 Tencere kulpu
+4.1 Tencere kulpu
+          ______________________________________________
+Yayın Erteleme Talebi Kaldırılan Tasarım Tescilleri
+______________________________________________________________________________________________________________________
+2026/483  Tasarımlar Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 24.04.2026   433
+
+
+-- page 434 (first 1500 chars) --
+4.2 Tencere kulpu
+5.1 Tencere kulpu
+5.2 Tencere kulpu
+6.1 Tencere kulpu
+6.2 Tencere kulpu
+7.1 Tencere kulpu
+______________________________________________________________________________________________________________________
+434    2026/483  Tasarımlar Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 24.04.2026
+
+
+-- page 435 (first 1500 chars) --
+   
+7.2 Tencere kulpu
+7.3 Tencere kulpu
+7.4 Tencere kulpu
+(11)  2023 005973 (21)  2023/005973 (15)  14.06.2023
+(22)  14.06.2023
+(28)  1
+(51)  07-02
+(73)  SERCAN ÖZGÜR(6823475)
+(72)  SERCAN ÖZGÜR
+1.1 Kahve demleme aparatı
+1.2 Kahve demleme aparatı
+______________________________________________________________________________________________________________________
+2026/483  Tasarımlar Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 24.04.2026   435
+
+
+-- page 436 (first 1500 chars) --
+   
+1.3 Kahve demleme aparatı
+1.4 Kahve demleme aparatı
+(11)  2023 011602 (21)  2023/011602 (15)  16.11.2023
+(22)  16.11.2023
+(28)  6
+(51)  21-01
+(73)  AYŞE İNHAN DİNÇMEN(5216281)
+(73)  RPT REKLAM VE PROMOSYON HİZMETLERİ PAZARLAMA SANAYİ TİCARET LİMİTED ŞİRKETİ(6385431)
+İKİTELLİ OSB MAH. ESENLER 20. BLOK SK. ESENLER SANAYİ 20.BLOK 6  Başakşehir İstanbul  TÜRKİYE
+(72)  FATMA İNHAN
+1.1 Oyuncak
+2.1 Oyuncak
+3.1 Oyuncak
+4.1 Oyuncak
+______________________________________________________________________________________________________________________
+436    2026/483  Tasarımlar Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 24.04.2026
+
+
+-- page 437 (first 1500 chars) --
+5.1 Oyuncak
+6.1 Oyuncak
+______________________________________________________________________________________________________________________
+2026/483  Tasarımlar Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 24.04.2026   437
+
+
+-- page 438 (first 1500 chars) --
+______________________________________________________________________________________________________________________
+438    2026/483  Tasarımlar Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 24.04.2026
+
+
+==============================================================================
+F. RAW vs BLOCKS TEXT FOR PAGE 17 (single record)
+==============================================================================
+=== get_text('text') ===
+(11)  2024 007254 (21)  2024/007254 (15)  06.09.2024
+(22)  06.09.2024
+(28)  4
+(51)  26-05
+(73)  TİM MİMARLIK DEKORASYON İNŞAAT TURİZM LİMİTED ŞİRKETİ(7610221) HARBİYE MAH. ABDİ İPEKÇİ
+CAD. ŞEVKET PAŞA APARTMANI 38 6  Şişli İstanbul  TÜRKİYE
+(72)  ŞEBNEM SULTAN BUHARA GÜLEN
+(74)  IŞIK ÖZDOĞAN (MOROĞLU ARSEVEN DANIŞMANLIK A.Ş.)
+1.1 Lamba
+2.1 Lamba
+3.1 Lamba
+4.1 Lamba
+______________________________________________________________________________________________________________________
+2026/483  Tasarımlar Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 24.04.2026   17
+
+
+==============================================================================
+G. STRUCTURED RECORD WALK — first 12 (21)-records, summarize fields
+==============================================================================
+total records: 286
+
+[  0] page=17 app=2024/007254
+   (11) 2024 008726
+   (15) 06.09.2024
+   (21) 2024/007254
+   (22) 06.09.2024
+   (28) 4
+   (51) 26-05
+   (72) ŞEBNEM SULTAN BUHARA GÜLEN
+   (73) TİM MİMARLIK DEKORASYON İNŞAAT TURİZM LİMİTED ŞİRKETİ(7610221) HARBİYE MAH. ABDİ İPEKÇİ CAD. ŞEVKET 
+   (74) IŞIK ÖZDOĞAN (MOROĞLU ARSEVEN DANIŞMANLIK A.Ş.) 1.1 Lamba 2.1 Lamba 3.1 Lamba 4.1 Lamba ____________
+   views_in_block: 4; unique design indexes: 4
+
+[  1] page=18 app=2024/008726
+   (11) 2024 010338
+   (15) 21.10.2024
+   (21) 2024/008726
+   (22) 21.10.2024
+   (28) 1
+   (51) 25-02
+   (73) SULTAN ERBAŞ(7264811)
+   (74) UĞUR DEMİRCAN (GOLD PATENT MÜŞ. TUR. MATB. VE AMB. SAN. VE TİC. LTD. ŞTİ.) 1.1 Pano 1.2 Pano
+   views_in_block: 2; unique design indexes: 1
+
+[  2] page=18 app=2024/010338
+   (11) 2024 010705
+   (15) 06.12.2024
+   (21) 2024/010338
+   (22) 06.12.2024
+   (28) 25
+   (51) 07-02 , 07-06 , 07-07 , 07-09 , 07- 05
+   (72) İBRAHİM ZAFER TÜRKSOY
+   (73) BOHEM TURİZM TİCARET VE SANAYİ LİMİTED ŞİRKETİ(6023602) BİNBAŞI REŞAT BEY MA AKÇAY C.351 SK. 4 3  Ga
+   (74) GÖZDE ÇİMEN ÖZEN 1.1 Tepsi 2.1 Tepsi _______________________________________________________________
+   views_in_block: 27; unique design indexes: 25
+
+[  3] page=23 app=2024/010705
+   (11) 2024 011426
+   (15) 18.12.2024
+   (21) 2024/010705
+   (22) 18.12.2024
+   (28) 2
+   (51) 03-01
+   (73) SÜMEYYE KOR(7787030) 1.1 Anahtarlık 2.1 Anahtarlık _________________________________________________
+   views_in_block: 2; unique design indexes: 2
+
+[  4] page=24 app=2024/011426
+   (11) 2025 000340
+   (15) 30.12.2024
+   (21) 2024/011426
+   (22) 30.12.2024
+   (28) 34
+   (51) 06-03 , 06-06 , 06-01
+   (72) BORA KÖKSAL | MEHMET KÖKSAL
+   (73) KÖKSAL MOBİLYA SANAYİ VE TİCARET ANONİM ŞİRKETİ(6392695) AHİ EVRANOSB MAH/SEMT AVRUPAHUN CAD. 5  Sin
+   (74) ERSUN AYDIN (REHBER MARKA PATENT TEKSTİL İNŞAAT GIDA OTOMOTİV SANAYİ TİCARET LİMİTED ŞİRKETİ) 1.1 Sa
+   views_in_block: 42; unique design indexes: 34
+
+[  5] page=31 app=2025/000340
+   (11) 2025 002220
+   (15) 15.01.2025
+   (21) 2025/000340
+   (22) 15.01.2025
+   (28) 7
+   (51) 06-03 , 06-01 , 06-04
+   (72) İSMAİL SERBEST
+   (73) YUSUF SERBEST MOBİLYA, KOLTUK, NAKLİYE, TASARIM, ORMAN ÜRÜNLERİ, TEKSTİL, PAZ.SAN.VE TİC.LTD.ŞTİ.(54
+   (74) GÜLİZ ÖZTEN (DÜZGÜN GLOBAL MARKA VE PATENT DANIŞMANLIĞI ANONİM ŞİRKETİ) 1.1 Koltuk 1.2 Koltuk 2.1 Ko
+   views_in_block: 14; unique design indexes: 7
+
+[  6] page=33 app=2025/002220
+   (11) 2025 009742
+   (15) 19.03.2025
+   (21) 2025/002220
+   (22) 19.03.2025
+   (28) 1
+   (51) 15-06
+   (72) AHMET YILMAZ
+   (73) SAVA ÖRME MAKİNE TEKSTİL SANAYİ VE TİCARET ANONİM ŞİRKETİ(6935884) Y.BOSNA M. MH. SEDİR SK 1  Bahçel
+   (74) GÜLSÜM YILDIRIM (YAZAR PATENT DANIŞMANLIK HİZMETLERİ LİMİTED ŞİRKETİ) 1.1 Örme makinesi kapağı 1.2 Ö
+   views_in_block: 10; unique design indexes: 1
+
+[  7] page=35 app=2025/009742
+   (11) 2025 002867
+   (15) 27.03.2025
+   (21) 2025/009742
+   (22) 27.03.2025
+   (28) 2
+   (51) 32-00
+   (72) MUZAFFER KARACA
+   (73) KARACA ZÜCCACİYE TİCARET VE SANAYİ ANONİM ŞİRKETİ(6366548) CUMHURİYET MAH. YENİ YOL 1 SK. NOW BOMONT
+   (74) MEHMET AKİF AYDIN (AYDIN AYDIN TELİF HAKLARI MARKA PATENT LTD. ŞTİ.) 1.1 Mağaza iç mekan yerleşimi 1
+   views_in_block: 4; unique design indexes: 2
+
+[  8] page=36 app=2025/002867
+   (11) 2025 003395
+   (15) 15.04.2025
+   (21) 2025/002867
+   (22) 15.04.2025
+   (28) 1
+   (51) 06-01
+   (72) SAMET ÖZDEMİR 1.1 Koltuk
+   (73) SAMET ÖZDEMİR(6544237)
+   views_in_block: 1; unique design indexes: 1
+
+[  9] page=36 app=2025/003395
+   (11) 2025 003706
+   (15) 05.05.2025
+   (21) 2025/003395
+   (22) 05.05.2025
+   (28) 1
+   (51) 25-03
+   (72) BARIŞ ARK
+   (73) BARIŞ ARK(7859803)
+   (74) ÇAĞLA ALİOĞLU (LEGALKA FİKRİ VE SINAİ HAKLAR DANIŞMANLIK HİZMETLERİ LİMİTED ŞİRKETİ) 1.1 Kiosk 1.2 K
+   views_in_block: 4; unique design indexes: 1
+
+[ 10] page=37 app=2025/003706
+   (11) 2025 004416
+   (15) 15.05.2025
+   (21) 2025/003706
+   (22) 15.05.2025
+   (28) 1
+   (51) 07-07
+   (72) ABDULLAH KALBUR
+   (73) VASFİ ENERJİ ELEKTRİK ÜRETİM PAZARLAMA SANAYİ VE TİCARET LİMİTED ŞİRKETİ(6803808) SİVAS YOL AYRIMI D
+   (74) SEMİHA İMGE ÖZBEK BAŞDALAN (DANIŞ PATENT DAN. HİZM. TİC. LTD. ŞTİ.) 1.1 Gıda kovası 1.2 Gıda kovası 
+   views_in_block: 2; unique design indexes: 1
+
+[ 11] page=38 app=2025/004416
+   (11) 2025 004590
+   (15) 13.06.2025
+   (21) 2025/004416
+   (22) 13.06.2025
+   (28) 1
+   (51) 07-06
+   (72) SÜREYYA ÜLKÜ GÜLER 1.1 Kaşık altlığı
+   (73) SÜREYYA ÜLKÜ GÜLER(6642243)
+   views_in_block: 1; unique design indexes: 1

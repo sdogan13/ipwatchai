@@ -1551,6 +1551,18 @@ body.modal-open {
     }
 }
 
+/* Revision loading state — single centered breathing tile (one logo in,
+   one logo out). Reuses the same skeleton-breathe animation; just collapses
+   the grid to a single column with a constrained width so the lone tile
+   doesn't look orphaned in a wide row. */
+.studio-loading-area.is-revising .studio-logo-skeleton-grid {
+    grid-template-columns: minmax(0, 320px);
+    justify-content: center;
+}
+.studio-loading-area.is-revising .studio-logo-skeleton:nth-child(n+2) {
+    display: none;
+}
+
 /* Per-card style badge — Modern / Classic / Bold / Playful */
 .studio-style-badge {
     display: inline-flex;

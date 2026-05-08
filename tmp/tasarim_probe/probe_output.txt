@@ -1,0 +1,280 @@
+
+==============================================================================
+1. PDF SUMMARY
+==============================================================================
+path: C:\Users\701693\turk_patent\bulletins\Tasarim\TS_483_2026-04-24\bulletin.pdf
+size_mb: 97.9
+page_count: 484
+pdf_version: ('null', 'null')
+producer: Acrobat Distiller 7.0 (Windows)
+creator: PScript5.dll Version 5.2
+title: tasarım_178_ilk forma.pdf
+creationDate: D:20190405161755+03'00'
+modDate: D:20260424093231+03'00'
+toc_entries: 8
+  toc [1, 'YAYIN_ERTELEMELI.pdf', -1]
+  toc [2, 'Boş Sayfa', 432]
+  toc [1, 'YAYIN_ERTELEMESI_KALKAN.pdf', -1]
+  toc [2, 'Boş Sayfa', 438]
+  toc [1, 'SERHLER.pdf', -1]
+  toc [2, 'Boş Sayfa', 474]
+  toc [1, 'DUZELTMELER.pdf', -1]
+  toc [2, 'Boş Sayfa', 476]
+
+==============================================================================
+2. COVER + INDEX (pages 1..6)
+==============================================================================
+
+-- page 1 (first 800 chars) --
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+Sayı 483
+Yayım Tarihi  
+24.0ϰ.2026
+
+
+-- page 2 (first 800 chars) --
+
+
+-- page 3 (first 800 chars) --
+İÇİNDEKİLER 
+ 
+Duyuru  ....................................................................................................................................................... 5 
+Tasarım Bülteninde Yer Alan Uluslararası Kodlar ve Açıklamaları  .................................................. 7 
+Tasarım Bülteni Sıralı Listesi  .................................................................................................................. 9 
+Görsel Anlatımlar  ................................................................................................................................... 15
+Türk Patent ve Marka Kurumu Başkanlığından İlan Olunmuştur  ................................................ 441 
+Düzeltmeler......................... ................................................
+
+-- page 4 (first 800 chars) --
+
+
+==============================================================================
+3. INID / FIELD-MARKER FREQUENCY (sample 200 pages, evenly spaced)
+==============================================================================
+INID 2-3 digit code frequencies (top 25):
+  (73) -> 307
+  (11) -> 290
+  (15) -> 290
+  (72) -> 169
+  (58) -> 152
+  (22) -> 130
+  (28) -> 130
+  (51) -> 130
+  (21) -> 115
+  (74) -> 102
+  (54) -> 15
+  (81) -> 15
+  (203) -> 8
+  (204) -> 8
+  (205) -> 8
+  (78) -> 3
+
+Turkish field-label frequencies:
+  Yayım Tarihi: 1
+
+(21)+app_no boundary hits across sample: 115
+'Başvuru Numarası …' boundary hits across sample: 0
+
+==============================================================================
+4. ESTIMATED RECORD COUNT (full scan)
+==============================================================================
+total (21)+app_no across all pages: 286
+total 'Başvuru Numarası …' across all pages: 0
+total bare YYYY/NNNNNN-on-own-line hits: 286
+pages_with_records: 237
+
+==============================================================================
+5. SECTION STRUCTURE (heuristic header scan, first 30 + last 10 pages)
+==============================================================================
+  page 1:   ⏎   ⏎   ⏎   ⏎   ⏎   ⏎   ⏎   ⏎   ⏎   ⏎   ⏎   ⏎   ⏎   ⏎   ⏎   ⏎   ⏎   ⏎   ⏎ Sayı 483 ⏎ Yayım Tarihi   ⏎ 24.0ϰ.2026 ⏎ 
+  page 3: İÇİNDEKİLER  ⏎   ⏎ Duyuru  ....................................................................................................................................................... 5  ⏎ Tasarım Bültenin
+  page 5:   ⏎   ⏎   ⏎   ⏎   ⏎   ⏎   ⏎   ⏎   ⏎   ⏎   ⏎   ⏎   ⏎ TESCİLLİ TASARIMLARA İTİRAZ İÇİN DUYURU  ⏎   ⏎   ⏎ 10.01.2017 tarih ve 29944 sayılı Resmi Gazete’ de yayınlanarak yürürlüğe  ⏎ giren 6769 sayılı Sın
+  page 6: ______________________________________________________________________________________________________________________ ⏎ 6    2026/483  Tasarımlar Bülteni ⏎ Türk Patent ve Marka Kurumu ⏎ Yayın Tarihi 
+  page 8: ______________________________________________________________________________________________________________________ ⏎ 8    2026/483  Tasarımlar Bülteni ⏎ Türk Patent ve Marka Kurumu ⏎ Yayın Tarihi 
+  page 9: Başvuru ⏎ 1 ⏎ 2024/007254 ⏎ 2024 007254 ⏎ TİM MİMARLIK DEKORASYON İNŞAAT TURİZM LİMİTED ŞİRKETİ ⏎ 2 ⏎ 2024/008726 ⏎ 2024 008726 ⏎ SULTAN ERBAŞ ⏎ 3 ⏎ 2024/010338 ⏎ 2024 010338 ⏎ BOHEM TURİZM TİCARET VE
+  page 14: Yayın erteleme talepli tesciller ⏎ Yayın ertelemesi kalkan tesciller ⏎ Düzeltme Sonucu Yenilenen Tesciller ⏎ 280 ⏎ DM/244860 ⏎ DM 244860 ⏎ WÜRTH INTERNATIONAL AG ⏎ 281 ⏎ DM/244882 ⏎ DM 244882 ⏎ RAYE R
+  page 15: GÖRSEL ANLATIMLAR  ⏎   ⏎ ______________________________________________________________________________________________________________________ ⏎ 2026/483  Tasarımlar Bülteni ⏎ Türk Patent ve Marka Ku
+  page 16: ______________________________________________________________________________________________________________________ ⏎ 16    2026/483  Tasarımlar Bülteni ⏎ Türk Patent ve Marka Kurumu ⏎ Yayın Tarihi
+  page 19: 2.2 Tepsi ⏎ 3.1 Tepsi ⏎ 4.1 Tepsi ⏎ 5.2 Tepsi ⏎ 6.1 Tepsi ⏎ 7.1 Peçetelik ⏎ ______________________________________________________________________________________________________________________ ⏎ 202
+  page 20: 8.1 Peçetelik ⏎ 9.1 Peçetelik ⏎ 10.1 Peçetelik ⏎ 11.1 Peçetelik ⏎ 12.1 Peçetelik ⏎ 13.1 Peçetelik ⏎ ____________________________________________________________________________________________________
+  page 21: 14.1 Peçetelik ⏎ 15.1 Peçetelik ⏎ 16.1 Peçetelik ⏎ 17.1 Peçetelik ⏎ 18.1 Peçetelik ⏎ 19.1 Tuzluk ⏎ _____________________________________________________________________________________________________
+  page 22: 20.1 Biberlik ⏎ 21.1 Un kabı ⏎ 22.1 Ocak ⏎ 23.1 Pizza kutusu ⏎ 23.2 Pizza kutusu ⏎ 24.1 Kutu ⏎ _________________________________________________________________________________________________________
+  page 23:     ⏎ 25.1 Stant ⏎ (11)  2024 010705 (21)  2024/010705 (15)  18.12.2024 ⏎ (22)  18.12.2024 ⏎ (28)  2 ⏎ (51)  03-01 ⏎ (73)  SÜMEYYE KOR(7787030) ⏎ 1.1 Anahtarlık ⏎ 2.1 Anahtarlık ⏎ ____________________
+  page 25: 6.1 Koltuk ⏎ 7.1 Koltuk ⏎ 7.2 Koltuk ⏎ 8.1 Koltuk ⏎ 9.1 Koltuk ⏎ 10.1 Koltuk ⏎ ______________________________________________________________________________________________________________________ ⏎ 
+  page 26: 10.2 Koltuk ⏎ 11.1 Koltuk ⏎ 11.2 Koltuk ⏎ 12.1 Koltuk ⏎ 13.1 Koltuk ⏎ 14.1 Koltuk ⏎ ____________________________________________________________________________________________________________________
+  page 27: 15.1 Sehpa ⏎ 16.1 Sehpa ⏎ 17.1 Sehpa ⏎ 18.1 Sehpa ⏎ 19.1 Sehpa ⏎ 19.2 Sehpa ⏎ ______________________________________________________________________________________________________________________ ⏎ 2
+  page 28: 20.1 Sehpa ⏎ 21.1 Sehpa ⏎ 22.1 Sehpa ⏎ 23.1 Sehpa ⏎ 24.1 Masa ⏎ 26.1 Masa ⏎ ______________________________________________________________________________________________________________________ ⏎ 28 
+  page 29: 26.2 Masa ⏎ 27.1 Masa ⏎ 27.2 Masa ⏎ 28.1 Masa ⏎ 29.1 Masa ⏎ 30.1 Masa ⏎ ______________________________________________________________________________________________________________________ ⏎ 2026/48
+  page 30: 31.1 Masa ⏎ 31.2 Masa ⏎ 32.1 Masa ⏎ 33.1 Puf ⏎ 35.1 Sandalye ⏎ 36.1 Şezlong ⏎ ______________________________________________________________________________________________________________________ ⏎ 3
+  page 475: 2025 002476 numaralı tescilin 09.10.2025 tarihli ve 470 sayılı Resmi Tasarımlar Bülteninde gizli tutulmuş olan tasarımcı ⏎ bilgisi 1 numaralı tasarım için HABİBE TURUÇLU olarak gizli olmayacak şekilde
+  page 476: ______________________________________________________________________________________________________________________ ⏎ 476    2026/483  Tasarımlar Bülteni ⏎ Türk Patent ve Marka Kurumu ⏎ Yayın Tarih
+  page 477:     ⏎     ⏎     ⏎     ⏎     ⏎ WIPO Bülten No: 13/2025 ⏎ (11) DM 244882  (15) 15.02.2024 ⏎ (22) 15.02.2024  (73) RAYE ROCKS LLC(8022625) 2600 S. Douglas Rd., Suite 1008, 33134 Coral Gables, Florida (US
+  page 478:     ⏎     ⏎     ⏎     ⏎     ⏎ WIPO Bülten No: 12/2026 ⏎ (11) DM 248221  (15) 20.03.2025 ⏎ (22) 20.03.2025  (73) ALFRED KÄRCHER SE & CO. KG(7712089) Alfred-Kärcher-Strasse 28-40, 71364 Winnenden (DE) ⏎
+  page 479:     ⏎     ⏎     ⏎     ⏎ WIPO Bülten No: 10/2026 ⏎ (11) DM 249761  (15) 04.09.2025 ⏎ (22) 04.09.2025  (73) HARRY WINSTON SA(7922700) Chemin du Tourbillon 8, 1228 Plan-les-Ouates (CH)  ÇİN  (74) The ⏎ S
+  page 480:     ⏎     ⏎     ⏎     ⏎     ⏎ WIPO Bülten No: 13/2026 ⏎ (11) DM 251867  (15) 31.10.2025 ⏎ (22) 31.10.2025  (73) RICHEMONT INTERNATIONAL SA(7826731) ROUTE DES BICHES 10, 1752 VILLARS-SUR- ⏎ GLÂNE,  İSV
+  page 481:     ⏎     ⏎     ⏎     ⏎     ⏎ WIPO Bülten No: 2/2026 ⏎ (11) DM 252955  (15) 23.12.2025 ⏎ (22) 23.12.2025  (73) AUTEC SRL(7088175) Via Pomaroli, 65, I-36030 Caldogno (VI)  İTALYA  (74) ACCAPI SRL Via ⏎
+  page 482:     ⏎     ⏎     ⏎     ⏎ WIPO Bülten No: 12/2026 ⏎ (11) DM 254953  (15) 16.01.2026 ⏎ (22) 16.01.2026  (73) HUAWEI TECHNOLOGIES CO., LTD.(7777581) HUAWEI ADMINISTRATION BUILDING ⏎ BANTIAN LONGGANG DISTR
+  page 483:     ⏎     ⏎     ⏎     ⏎     ⏎ WIPO Bülten No: 13/2026 ⏎ (11) DM 255102  (15) 20.02.2026 ⏎ (22) 20.02.2026  (73) PROXXON S.A(8018491) Haerebierg 6, 6868 WECKER (LU)  LÜKSEMBURG  (74) OFFICE ⏎ FREYLINGE
+  page 484:     ⏎     ⏎     ⏎ WIPO Bülten No: 13/2026 ⏎ (11) DM 255215  (15) 06.03.2026 ⏎ (22) 06.03.2026  (73) CHANEL SARL(7935560) Quai du Général-Guisan 24, 1204 Genève (CH)  İSVİÇRE  (72) 1) Matthieu ⏎ Blazy 
+
+==============================================================================
+6. PER-PAGE IMAGE STATS + UNIQUE XREFS
+==============================================================================
+total image references: 2088
+unique image xrefs: 2081
+images-per-page: min=0, avg=4.31, max=6
+page-image distribution: {'1-4': 152, '0': 50, '5-8': 282}
+
+==============================================================================
+7. PICK 5 REPRESENTATIVE RECORDS (first 200 records)
+==============================================================================
+total record starts found: 286
+picks: {'simple': (0, '2024/007254', 17), 'priority': (91, '2025/010048', 154), 'deferred': (281, '2026/001807', 431)}
+
+--- simple (app_no=2024/007254 page=17) ---
+(21)  2024/007254 (15)  06.09.2024
+(22)  06.09.2024
+(28)  4
+(51)  26-05
+(73)  TİM MİMARLIK DEKORASYON İNŞAAT TURİZM LİMİTED ŞİRKETİ(7610221) HARBİYE MAH. ABDİ İPEKÇİ
+CAD. ŞEVKET PAŞA APARTMANI 38 6  Şişli İstanbul  TÜRKİYE
+(72)  ŞEBNEM SULTAN BUHARA GÜLEN
+(74)  IŞIK ÖZDOĞAN (MOROĞLU ARSEVEN DANIŞMANLIK A.Ş.)
+1.1 Lamba
+2.1 Lamba
+3.1 Lamba
+4.1 Lamba
+______________________________________________________________________________________________________________________
+2026/483  Tasarımlar Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 24.04.2026   17
+
+
+--- priority (app_no=2025/010048 page=154) ---
+(21)  2025/010048 (15)  25.12.2025
+(22)  25.12.2025
+(28)  3
+(51)  07-01
+(30)  27.06.2025  30/010,422  US  27.06.2025  30/010,422  US  27.06.2025  30/010,422  US
+(73)  PACIFIC MARKET INTERNATIONAL, LLC(7478078) 2401 ELLIOTT AVENUE, SUITE 4, SEATTLE,
+WASHINGTON 98121  A.B.D.
+(72)  JESSE SERAFIN
+(72)  GRAHAM CORNWELL
+(72)  VIGNESH CHARI
+(72)  JEFFERY CHARLES MUNIE
+(74)  NÜKHET SERRA CORAL (DERİŞ PATENT VE MARKA ACENTALIĞI A.Ş.)
+1.1 Soğutucu
+1.2 Soğutucu
+______________________________________________________________________________________________________________________
+154    2026/483  Tasarımlar Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 24.04.2026
+
+1.3 Soğutucu
+1.4 Soğutucu
+1.5 Soğutucu
+1.6 Soğutucu
+1.7 Soğutucu
+1.8 Soğutucu
+______________________________________________________________________________________________________________________
+2026/483  Tasarımlar Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 24.04.2026   155
+
+2.1 Soğutucu
+2.2 Soğutucu
+2.3 Soğutucu
+2.4 Soğutucu
+2.5 Soğutucu
+2.6 Soğutucu
+______________________________________________________________________________________________________________________
+156    2026/483  Tasarımlar Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 24.04.2026
+
+2.7 Soğutucu
+2.8 Soğutucu
+3.1 Soğutucu
+3.2 Soğutucu
+3.3 Soğutucu
+3.4 Soğutucu
+______________________________________________________________________________________________________________________
+2026/483  Tasarımlar Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 24.04.2026   157
+
+
+--- deferred (app_no=2026/001807 page=431) ---
+(21)  2026/001807 (15)  07.03.2026
+(22)  07.03.2026
+(28)  1
+(51)  12-16
+(ES)  30 Ay
+(73)  ÇAĞLA ER ARSLAN(8008007)
+YAYIN ERTELEME TALEPLİ TASARIM TESCİLLERİ
+______________________________________________________________________________________________________________________
+2026/483  Tasarımlar Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 24.04.2026   431
+
+______________________________________________________________________________________________________________________
+432    2026/483  Tasarımlar Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 24.04.2026
+
+
+==============================================================================
+8. MULTI-DESIGN RECORD ANALYSIS
+==============================================================================
+design-count distribution over first 286 records:
+  1 designs: 286
+
+==============================================================================
+9. SAMPLE 10 RECORDS — VIEWS / LOCARNO / DESIGNER
+==============================================================================
+  [    0] app=2024/007254 page=  17 locarno=[('06', '09'), ('06', '09'), ('26', '05')] design_count=? designer='?' product='?'
+  [   28] app=2025/006060 page=  66 locarno=[('18', '08'), ('18', '08'), ('07', '02')] design_count=? designer='?' product='?'
+  [   56] app=2025/007613 page= 102 locarno=[('13', '10'), ('13', '10'), ('07', '02')] design_count=? designer='?' product='?'
+  [   84] app=2025/009395 page= 138 locarno=[('09', '12'), ('09', '12'), ('07', '01')] design_count=? designer='?' product='?'
+  [  112] app=2026/000569 page= 185 locarno=[('26', '01'), ('26', '01'), ('06', '04')] design_count=? designer='?' product='?'
+  [  140] app=2026/000822 page= 233 locarno=[('03', '02'), ('03', '02'), ('20', '99')] design_count=? designer='?' product='?'
+  [  168] app=2026/000974 page= 269 locarno=[('06', '02'), ('06', '02'), ('32', '00')] design_count=? designer='?' product='?'
+  [  196] app=2026/001204 page= 299 locarno=[('16', '02'), ('16', '02'), ('02', '04')] design_count=? designer='?' product='?'
+  [  224] app=2026/001571 page= 328 locarno=[('25', '02'), ('25', '02'), ('06', '04')] design_count=? designer='?' product='?'
+  [  252] app=2026/002270 page= 373 locarno=[('29', '03'), ('29', '03'), ('21', '01')] design_count=? designer='?' product='?'
+
+==============================================================================
+10. DEFERRED + HAGUE SCAN
+==============================================================================
+deferred-publication pages: 4; first 10 -> [3, 14, 431, 433]
+hague-reference pages:      4; first 10 -> [3, 13, 14, 477]
+
+==============================================================================
+11. DUMP A FEW IMAGES (first 5 unique xrefs)
+==============================================================================
+saved 5 sample images to C:\Users\701693\turk_patent\tmp\tasarim_probe\figures
+
+==============================================================================
+12. RECORD-BOUNDARY VERIFICATION
+==============================================================================
+(21) NOT followed by app_no in first 50 pages: 0
+
+DONE.

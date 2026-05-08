@@ -1,0 +1,43 @@
+(11) TR 2024 004234 Y
+(12) Faydalı Model Belgesi
+(43) Başvuru Yayın Tarihi
+2024/05/21, 2024/5 Nolu Bülten
+(10) Başvuru Yayın No
+TR 2024 004234 U5
+(21) Başvuru Numarası
+2024/004234
+(22) Başvuru Tarihi
+2024/04/04
+(45) Faydalı Model Belgesinin Veriliş Tarihi
+2025/08/21
+(51) Buluşun tasnif sınıfları
+H04B 5/00
+G09B 5/12
+(30) Rüçhan Bilgileri (32) (33) (31)
+(74) Vekil
+GÖKHAN ÇİMEN (KUANTUM PATENT A.Ş.)
+(73) Faydalı Model Sahibi
+İSTANBUL MEDİPOL ÜNİVERSİTESİ
+CİBALİ MAH. ATATÜRK BLV. ÖZEL MEDIPOL
+ÜNIVERSITESI 25  Fatih  İstanbul TÜRKİYE
+(72) Buluşu Yapanlar
+GİZEM KURNAZ
+BASRİ GÜNDOĞDU
+YUSUF ÇELENK
+SUDE ÖZSOYLU
+(54) Buluş Başlığı
+AKILLI MUTFAK ASİSTANI
+(57) Özet
+Bu buluş, görme engelli bireylerin özellikle mutfakta yemek yaparken veya hazırlarken sıcak yüzeylere temasını
+engelleyerek bireyin yaralanmasının önüne geçmek ve yemek yapımı sırasında bireye yardımcı olmak için
+kullanılabilen akıllı mutfak asistanı ile ilgili olup, özelliği; içerisinde yapay zeka algoritması ile çalışan işlemci,
+bluetooth ve kablosuz şarj modülü bulunan bir yüzük gövdesi (1), yüzük gövdesinin (1) üzerine konumlandırılan ve
+belirli bir alandaki sıcaklığı ve yoğunluğunu algılayan en az 2 adet sıcaklık sensörü (2), yüzük gövdesi (1) üzerinde
+yer alan ve sesli komut algılayabilen ve sesli uyarı ve komut verebilen ses modülü (3), yüzük gövdesi (1) üzerinde
+bulunan bir şarj girişine (4), kullanıcı komutunu algılayarak yemek tariflerindeki aşamaları sırasıyla ses modülüne
+(3) yapay zeka algoritması ile ileten işlemci ve kullanıcıya sonraki adım için 1-2 dk kaldığını hatırlatan alarm
+sistemine sahip olmasıdır.
+______________________________________________________________________________________________________________________
+2025/8  Resmi Patent Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 21.08.2025    495

@@ -1,0 +1,51 @@
+Bültende yayımlanan başvuruların yayın türleri aşağıda verilen kodlarla gösterilmiştir. 
+ 
+A1- Araştırma raporu ile birlikte yayımlanan patent başvuruları 
+ 
+A2- Araştırma raporsuz yayımlanan patent başvuruları 
+ 
+A3- Yayımlanmış patent başvurularının araştırma raporları 
+ 
+U  - Faydalı model belgesi başvuruları (Mülga 551 KHK) 
+ 
+U1- Patent İşbirliği Anlaşması aracılığıyla yapılan ve I.Kısımdan ulusal safhaya 
+giren faydalı model belgesi başvuruları (Mülga 551 KHK) 
+U2- Patent İşbirliği Anlaşması aracılığıyla yapılan ve II.Kısımdan ulusal safhaya giren 
+faydalı model belgesi başvuruları (Mülga 551 KHK) 
+U4-Araştırma raporu ile birlikte yayımlanan faydalı model başvuruları 
+ 
+U5- Araştırma raporsuz yayımlanan faydalı model başvuruları 
+ 
+U3- Yayımlanmış faydalı model başvurularının araştırma raporları 
+ 
+T1- Patent İşbirliği Anlaşması aracılığıyla yapılan, I.Kısımdan sonra ulusal safhaya 
+giren ve araştırma raporu ile birlikte yayımlanan patent başvuruları (Mülga 551 KHK) 
+T2- Patent İşbirliği Anlaşması aracılığıyla yapılan, II.Kısımdan sonra ulusal safhaya 
+giren patent başvuruları (Mülga 551 KHK) 
+T3- İstemleri yayımlanan Avrupa patent başvuruları 
+ 
+T4- Fasikülleri yayımlanan Avrupa Patentleri 
+ 
+T-   Patent işbirliği antlaşması aracılığıyla yapılan ve araştırma raporu ile birlikte 
+yayımlanan patent başvuruları 
+T5 - Patent işbirliği antlaşması aracılığıyla yapılan ve TÜRKPATENT bünyesinde 
+hazırlanan araştırma raporu ile birlikte yayımlanan faydalı model başvuruları 
+T6 - Patent işbirliği antlaşması aracılığıyla yapılan faydalı model başvuruları 
+ 
+T7 - Patent işbirliği antlaşması aracılığıyla yapılan ve yayımlanmış olan faydalı model 
+başvurularının TÜRKPATENT bünyesinde hazırlanan araştırma raporları 
+T8- Patent İşbirliği Anlaşması aracılığıyla yapılan patent başvuruları (araştırma 
+raporu herhangi bir nedenden dolayı düzenlenememiş olan başvurular) 
+TB- Tescil Edilen Entegre Devre Topoğrafyası 
+ 
+Y - Verilen faydalı model belgeleri 
+ 
+B-   Verilen patentler 
+ 
+ 
+  Bültende  yer  alan  bilgilerde  herhangi  bir  düzeltme  olduğunda,  düzeltmeler  daha 
+sonra  yayımlanacak  olan bültenlerin son kısmında yer alacaktır. 
+______________________________________________________________________________________________________________________
+6    Yayın Tarihi : 21.08.2025
+Türk Patent ve Marka Kurumu
+2025/8  Resmi Patent Bülteni

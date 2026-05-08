@@ -1,0 +1,2064 @@
+
+==============================================================================
+1. PDF SUMMARY
+==============================================================================
+Path: C:\Users\701693\turk_patent\bulletins\Patent__Faydali_Model\2025_08.pdf
+File size: 50,133,539 bytes (47.81 MiB)
+Page count: 1976
+  meta.title: ''
+  meta.author: ''
+  meta.subject: ''
+  meta.keywords: ''
+  meta.creator: ''
+  meta.producer: 'iText1.3.1 by lowagie.com (based on itext-paulo-154)'
+  meta.creationDate: "D:20221221095046+03'00'"
+  meta.modDate: "D:20250821150114+03'00'"
+  meta.format: 'PDF 1.6'
+  meta.encryption: None
+TOC entries (outline): 16
+  L1  p  -1  01.pdf
+  L2  p 130  Boş Sayfa
+  L1  p  -1  19.pdf
+  L2  p  -1  (5. SIRA) 6769 Patent Belgeleri.pdf
+  L3  p 132  Boş Sayfa
+  L2  p 388  Boş Sayfa
+  L1  p  -1  16.pdf
+  L2  p  -1   
+  L3  p1328  Boş Sayfa
+  L1  p  -1  17.pdf
+  L2  p  -1   
+  L3  p1846  Boş Sayfa
+  L2  p1940  Boş Sayfa
+  L1  p  -1  18.pdf
+  L2  p  -1  (18. SIRA) 6769 SMK YAYIMLANAN.pdf
+  L3  p1942  Boş Sayfa
+
+==============================================================================
+2. FIRST 8 PAGES (cover + TOC text)
+==============================================================================
+
+--- page 1 ---
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+Sayı 2025-08 
+Yayım Tarihi  
+21.08.2025
+
+
+--- page 2 ---
+
+
+--- page 3 ---
+İÇİNDEKİLER 
+AÇIKLAMALAR .................................................................................................................................................................................................. 5 
+YAYIN İNDEKSLERİ  ......................................................................................................................................................................................... 7 
+MÜLGA 551 SAYILI KHK’NIN 63 ÜNCÜ MADDESİ HÜKMÜ UYARINCA VERİLEN İNCELEMELİ PATENTLER  ............... 115 
+6769 SAYILI SMK'NIN 98 İNCİ MADDE HÜKMÜ UYARINCA VERİLEN PATENT BELGELERİ  ............................................... 131 
+6769 SAYILI SMK'NIN 143 ÜNCÜ MADDE HÜKMÜ UYARINCA VERİLEN FAYDALI MODEL BELGELERİ  ......................... 389 
+MÜLGA 551 SAYILI KHK’NIN 55 İNCİ MADDESİ HÜKMÜ UYARINCA YAYIMLANAN PATENT VE FAYDALI MODEL 
+BELGESİ BAŞVURULARI.............................................................................................................................................................................. 525 
+Başvuru Numaralarına Göre Patent/Faydalı Model Başvuruları İndeksi 
+Başvuru Sahibine Göre Patent/Faydalı Model Başvuruları İndeksi 
+Tasnif Sınıflarına Göre Patent/Faydalı Model Başvuruları İndeksi 
+AVRUPA PATENTLERİNİN VERİLMESİ İLE İLGİLİ FASİKÜLLERİ YAYIMLANAN AVRUPA PATENTLERİ ..................... 577 
+MÜLGA 551 SAYILI KHK’NIN 57 NCİ MADDE HÜKMÜ UYARINCA ARAŞTIRMA RAPORU 
+YAYIMLANAN BAŞVURULAR  ................................................................................................................................................................. 1151 
+6769 SAYILI SMK'NIN 143 NCU MADDE HÜKMÜ UYARINCA ARASTIRMA RAPORU YAYIMLANAN FAYDALI 
+ 
+MODEL BAŞVURULARI  ............................................................................................................................................................................ 1180 
+LİSANS VERME TEKLİFİNDE BULUNULAN PATENTLER  ............................................................................................................. 1190 
+6769 SAYILI SMK'NIN UYGULANMASINA DAİR YÖNETMENLİĞİN 117 NCİ MADDESİ 7NCİ, VE 8 İNCİ FIKRALARI 
+UYARINCA KULLANMA BEYANI VERİLEN BAŞVURU VEYA PATENT/FAYDALI MODELLERİN İLANI  ......................... 1190 
+6769 SAYILI SMK'NIN UYGULANMASINA DAİR YÖNETMENLİĞİN 117 NCİ MADDESİ 7NCİ VE 8 İNCİ FIKRALARI 
+UYARINCA KULLANMAMA BEYANI VERİLEN BAŞVURU VEYA PATENT/FAYDALI MODELLERİN İLANI  .................. 1193 
+6769 
+
+--- page 4 ---
+6769 SAYILI SMK’NIN 96 İNCİ MADDE HÜKMÜ UYARINCA ARAŞTIRMA RAPORU İLE YAYIMLANAN 
+ 
+PATENT BAŞVURULARI  ........................................................................................................................................................................... 1845 
+6769 SAYILI SMK’NIN UYGULANMASINA DAİR YÖNETMELİĞİN 120 İNCİ MADDE HÜKMÜ UYARINCA 
+ 
+ARAŞTIRMA RAPORU İLE YAYIMLANAN FAYDALI MODEL BAŞVURULARI  ........................................................................ 1941 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+
+
+--- page 5 ---
+AÇIKLAMALAR  
+ 
+ Bu bülten TÜRKPATENT tarafından aylık olarak yayımlanmaktadır. 
+ Bültende  yayımlanan   patentler  /faydalı  model  belgeleri  patent/faydalı   model  
+belgesi  numaralarına   göre, başvurular başvuru numarasına göre sınırlandırılmıştır. 
+ Bibliyografik  bilgiler  I.N.I.D.  ( Internationally  agreed  Numbers  for  the Identification  
+of bibliografic  Data  -Bibliyografik  bilgilerin  tanımlanması    için  uluslararası  olarak  
+kabul  edilmiş  numaralar  )  kodları  ile  işaret edilmiştir. 
+ 
+KODLAR  
+AÇIKLAMA 
+(11-10) 
+Yayın Numarası-Patent numarası 
+(12) 
+Başvurunun Türü           
+(21) 
+Başvuru Numarası
+    
+(22) 
+Başvuru Tarihi 
+(24) 
+Korumanın Başlangıç Tarihi 
+(30) 
+Rüçhan Bilgileri       
+(31) 
+Rüçhan Numarası
+       
+(32) 
+Rüçhan Tarihi         
+(33) 
+Rüçhan Ülkesi 
+(43) 
+İncelenmemiş Başvurunun Yayın Tarihi       
+(44) 
+İncelenmiş Başvurunun Yayın Tarihi            
+(45) 
+Belgenin Veriliş Tarihi 
+(51) 
+Uluslararası Tasnif Sınıfı 
+(54) 
+Buluş Başlığı 
+(57) 
+Özet 
+(71) 
+Başvuru Sahipleri 
+(72) 
+Buluşu Yapanlar 
+(73) 
+Patent/Faydalı Model Belgesi Sahipleri 
+(74) 
+Patent Vekili 
+(86) 
+Uluslararası Başvuru Numarası 
+(88) 
+Araştırma Raporunun Yayın Tarihi 
+ 
+ 
+ 
+ Bibliyografik bilgilerde yer alan  Uluslararası Tasnif Sınıflarını gösteren harfler, buluşun 
+ait olduğu teknik sahayı belirtmekte ve aşağıda belirtilen 8 ana sınıftan oluşmaktadır. 
+ 
+ 
+Günlük Hayatın İhtiyaçları: A 
+Değişik Sanayi Teknikleri ve Taşımacılık :B 
+Kimya ve Metalurji: C 
+Tekstil ve Kağıt : D 
+Sabit Yapılar:  E 
+Mekanik-Aydınlatma-Isıtma-Donanım : F 
+Fizik : G 
+Elektrik : H 
+ 
+ 
+ 
+ 
+ 
+ 
+______________________________________________________________________________________________________________________
+2025/8  Resmi Patent Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 21.08.2025    5
+
+
+--- page 6 ---
+Bültende yayımlanan başvuruların yayın türleri aşağıda verilen kodlarla gösterilmiştir. 
+ 
+A1- Araştırma raporu ile birlikte yayımlanan patent başvuruları 
+ 
+A2- Araştırma raporsuz yayımlanan patent başvuruları 
+ 
+A3- Yayımlanmış patent başvurularının araştırma raporları 
+ 
+U  - Faydalı model belgesi başvuruları (Mülga 551 KHK) 
+ 
+U1- Patent İşbirliği Anlaşması aracılığıyla yapılan ve I.Kısımdan ulusal safhaya 
+giren faydalı model belgesi başvuruları (Mülga 551 KHK) 
+U2- Patent İşbirliği Anlaşması aracılığıyla yapılan ve II.Kısımdan ulusal safhaya giren 
+faydalı model belgesi başvuruları (Mülga 551 KHK) 
+U4-Araştırma raporu ile birlikte yayımlanan faydalı model başvuruları 
+ 
+U5- Araştırma raporsuz yayımlanan faydalı model başvuruları 
+ 
+U3- Yayımlanmış faydalı model başvurularının araştırma raporları 
+ 
+T1- Patent İşbirliği Anlaşması aracılığıyla yapılan, I.Kısımdan sonra ulusal safhaya 
+giren ve araştırma raporu ile birlikte yayımlanan patent başvuruları (Mülga 551 KHK) 
+T2- Patent İşbirliği Anlaşması aracılığıyla yapılan, II.Kısımdan sonra ulusal safhaya 
+giren patent başvuruları (Mülga 551 KHK) 
+T3- İstemleri yayımlanan Avrupa patent başvuruları 
+ 
+T4- Fasikülleri yayımlanan Avrupa Patentleri 
+ 
+T-   Patent işbirliği antlaşması aracılığıyla yapılan ve araştırma raporu ile birlikte 
+yayımlanan patent başvuruları 
+T5 - Patent işbirliği antlaşması aracılığıyla yapılan ve TÜRKPATENT bünyesinde 
+hazırlanan araştırma raporu ile birlikte yayımlanan faydalı model başvuruları 
+T6 - Patent işbirliği antlaşması aracılığıyla yapılan faydalı model başvuruları 
+ 
+T7 - Patent işbirliği antlaşması aracılığıyla yapılan ve yayımlanmış olan faydalı model 
+başvurularının TÜRKPATENT bünyesinde hazırlanan araştırma raporları 
+T8- Patent İşbirliği Anlaşması aracılığıyla yapılan patent başvuruları (araştırma 
+raporu herhangi bir nedenden dolayı düzenlenememiş olan başvurular) 
+TB- Tescil Edilen Entegre Devre Topoğrafyası 
+ 
+Y - Verilen faydalı model belgeleri 
+ 
+B-   Verilen patentler 
+ 
+ 
+  Bültende  yer  alan  bilgilerde  herhangi  bir  düzeltme  olduğunda,  düzeltmeler  daha 
+sonra  yayımlanacak  olan bültenlerin son kısmında yer alacaktır. 
+______________________________________________________________________________________________________________________
+6    Yayın Tarihi : 21.08.2025
+Türk Patent ve Marka Kurumu
+2025/8  Resmi Patent Bülteni
+
+
+--- page 7 ---
+BAŞVURU NUMARALARINA GÖRE BÜLTENDE YER ALAN YAYIN İNDEKSİ
+Başvuru No
+Yayın Açıklaması
+2021/001903
+Patent/FM Model Başvurularında/Belgelerinde Yayından Sonraki Değişikliğin İlanı
+2021/001947
+Kesinleşen Patent Verilme Kararının İlanı (6769 SMK)
+2021/002025
+Kullanma/Kullanmama Beyanı Verilmemiş Olan Başvuru veya Patent/Faydalı Modellerin İlanı
+2021/002080
+Kullanma/Kullanmama Beyanı Verilmemiş Olan Başvuru veya Patent/Faydalı Modellerin İlanı
+2021/002173
+Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+2021/002538
+Patent/FM Model Başvurularında/Belgelerinde Yayından Sonraki Değişikliğin İlanı
+2021/002906
+Kullanma/Kullanmama Beyanı Verilmemiş Olan Başvuru veya Patent/Faydalı Modellerin İlanı
+2021/002950
+Kullanma/Kullanmama Beyanı Verilmemiş Olan Başvuru veya Patent/Faydalı Modellerin İlanı
+2021/003152
+Kullanma/Kullanmama Beyanı Verilmemiş Olan Başvuru veya Patent/Faydalı Modellerin İlanı
+2021/003191
+Patent/FM Model Başvurularında/Belgelerinde Yayından Sonraki Değişikliğin İlanı
+2021/004126
+Kullanma/Kullanmama Beyanı Verilmemiş Olan Başvuru veya Patent/Faydalı Modellerin İlanı
+2021/004311
+Kullanma/Kullanmama Beyanı Verilmemiş Olan Başvuru veya Patent/Faydalı Modellerin İlanı
+2021/004431
+Kullanma/Kullanmama Beyanı Verilmemiş Olan Başvuru veya Patent/Faydalı Modellerin İlanı
+2021/004466
+Kullanma/Kullanmama Beyanı Verilmemiş Olan Başvuru veya Patent/Faydalı Modellerin İlanı
+2021/004490
+Devir İşlemi Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)
+2021/004510
+Kullanma/Kullanmama Beyanı Verilmemiş Olan Başvuru veya Patent/Faydalı Modellerin İlanı
+2021/004521
+Kullanma/Kullanmama Beyanı Verilmemiş Olan Başvuru veya Patent/Faydalı Modellerin İlanı
+2021/004628
+Kullanma/Kullanmama Beyanı Verilmemiş Olan Başvuru veya Patent/Faydalı Modellerin İlanı
+2021/004709
+Kullanma/Kullanmama Beyanı Verilmemiş Olan Başvuru veya Patent/Faydalı Modellerin İlanı
+2021/004770
+Kullanma/Kullanmama Beyanı Verilmemiş Olan Başvuru veya Patent/Faydalı Modellerin İlanı
+2021/004850
+Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+2021/004867
+Yıllık Ücretlerinin Ödenmemesi Nedeniyle Geçersiz Olan Patent/FM Belgelerinin Yeniden Geçerlilik İlanı
+2021/004897
+Kullanma/Kullanmama Beyanı Verilmemiş Olan Başvuru veya Patent/Faydalı Modellerin İlanı
+2021/004918
+Devir İşlemi Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)
+2021/005093
+Kullanma/Kullanmama Beyanı Verilmemiş Olan Başvuru
+
+--- page 8 ---
+2021/007178
+Verilen Patent / Faydalı Model İlanı (6769 SMK)
+2021/007284
+Kesinleşen Patent Verilme Kararının İlanı (6769 SMK)
+2021/007293
+Kullanma/Kullanmama Beyanı Verilmemiş Olan Başvuru veya Patent/Faydalı Modellerin İlanı
+2021/007364
+Kullanma/Kullanmama Beyanı Verilmemiş Olan Başvuru veya Patent/Faydalı Modellerin İlanı
+2021/007735
+Devir İşlemi Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)
+2021/007902
+Kullanma/Kullanmama Beyanı Verilmemiş Olan Başvuru veya Patent/Faydalı Modellerin İlanı
+2021/008136
+Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+2021/008187
+Kullanıldığı Beyanı Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)
+2021/008237
+Yeniden Geçerlilik Kazanan Patent/Faydalı Model Başvurularının İlanı (İşlemlerin Devam Ettirilmesi)
+2021/008252
+Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+2021/008357
+Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+2021/008410
+Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+2021/008455
+Kullanma/Kullanmama Beyanı Verilmemiş Olan Başvuru veya Patent/Faydalı Modellerin İlanı
+2021/008548
+Verilen Patent / Faydalı Model İlanı (6769 SMK)
+2021/008556
+Kullanma/Kullanmama Beyanı Verilmemiş Olan Başvuru veya Patent/Faydalı Modellerin İlanı
+2021/008670
+Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+2021/008913
+Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+2021/008931
+Devir İşlemi Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)
+2021/009110
+Verilen Patent / Faydalı Model İlanı (6769 SMK)
+2021/009204
+Kullanma/Kullanmama Beyanı Verilmemiş Olan Başvuru veya Patent/Faydalı Modellerin İlanı
+2021/009274
+Kullanma/Kullanmama Beyanı Verilmemiş Olan Başvuru veya Patent/Faydalı Modellerin İlanı
+2021/009554
+Patent/FM Model Başvurularında/Belgelerinde Yayından Sonraki Değişikliğin İlanı
+2021/009634
+Verilen Patent / Faydalı Model İlanı (6769 SMK)
+2021/009668
+Kullanma/Kullanmama Beyanı Verilmemiş Olan Başvuru veya Patent/Faydalı Modellerin İlanı
+2021/009857
+Kullanıldığı Beyanı Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)
+2021/009974
+Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+2021/010013
+6769 Sayılı SMK'nın 99 uncu Maddesi Hükmü Uyarınca YIDK Tarafından Patent Ha
+
+==============================================================================
+2b. DETECTED SECTION HEADERS (heuristic)
+==============================================================================
+Total candidate header lines: 1313
+  p    3: İÇİNDEKİLER
+  p    4: 6769 SAYILI SMK’NIN 96 İNCİ MADDE HÜKMÜ UYARINCA ARAŞTIRMA RAPORU İLE YAYIMLANAN
+  p    5:  Bültende  yayımlanan   patentler  /faydalı  model  belgeleri  patent/faydalı   model
+  p    6: Bültende yayımlanan başvuruların yayın türleri aşağıda verilen kodlarla gösterilmiştir.
+  p    9: Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p   10: Yıllık Ücretlerinin Ödenmemesi Nedeniyle Geçersiz Olan Patent/FM Başvurularının Yeniden Geçerlilik İlanı
+  p   11: Patent/FM Başvurularının Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p   12: Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p   13: Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p   14: Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p   17: Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p   20: Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p   21: Patent/FM Başvurularının Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p   22: Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p   23: Yıllık Ücretlerinin Ödenmemesi Nedeniyle Geçersiz Olan Patent/FM Başvurularının Yeniden Geçerlilik İlanı
+  p   24: Patent/FM Başvurularının Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p   25: Patent/FM Başvurularının Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p   26: Yıllık Ücretlerinin Ödenmemesi Nedeniyle Geçersiz Olan Patent/FM Başvurularının Yeniden Geçerlilik İlanı
+  p   27: Reddedilen Patent/Faydalı Model Başvurularının İlanı (6769 SMK)
+  p   28: Geri Çekilmiş Sayılan Patent / Faydalı Model Başvurularının İlanı (6769 SMK)
+  p   29: Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+  p   30: Reddedilen Patent/Faydalı Model Başvurularının İlanı (6769 SMK)
+  p   31: Yıllık Ücretlerinin Ödenmemesi Nedeniyle Geçersiz Olan Patent/FM Belgelerinin Yeniden Geçerlilik İlanı
+  p   32: Reddedilen Patent/Faydalı Model Başvurularının İlanı (6769 SMK)
+  p   33: Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+  p   34: Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+  p   35: Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+  p   36: Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+  p   37: Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+  p   38: Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+  p   39: Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+  p   40: Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+  p   41: Araştırma Raporu İle Birlikte Yayımlanan Faydalı Model Başvuruları (6769 SMK)
+  p   42: Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+  p   43: Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+  p   45: Devir İşlemi Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)
+  p   46: Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+  p   47: Araştırma Raporu İle Birlikte Yayımlanan Patent Başvuruları (6769 SMK)
+  p   48: Geri Çekilmiş Sayılan Patent / Faydalı Model Başvurularının İlanı (6769 SMK)
+  p   49: Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+  p   50: Yayımlanmış Faydalı Model Başvurularının Araştırma Raporları (6769 SMK)
+  p   51: Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+  p   52: Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+  p   53: Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+  p   54: Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+  p   55: Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+  p   56: Devir İşlemi Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)
+  p   57: Araştırma Raporu İle Birlikte Yayımlanan Patent Başvuruları (6769 SMK)
+  p   58: Araştırma Raporu İle Birlikte Yayımlanan Patent Başvuruları (6769 SMK)
+  p   60: Avrupa Patent Fasiküllerinin İlanı
+  p   61: Avrupa Patent Fasiküllerinin İlanı
+  p   62: Avrupa Patent Fasiküllerinin İlanı
+  p   63: Avrupa Patent Fasiküllerinin İlanı
+  p   64: Avrupa Patent Fasiküllerinin İlanı
+  p   65: Avrupa Patent Fasiküllerinin İlanı
+  p   66: Avrupa Patent Fasiküllerinin İlanı
+  p   67: Avrupa Patent Fasiküllerinin İlanı
+  p   68: Avrupa Patent Fasiküllerinin İlanı
+  p   69: Avrupa Patent Fasiküllerinin İlanı
+  p   70: Avrupa Patent Fasiküllerinin İlanı
+  p   71: Avrupa Patent Fasiküllerinin İlanı
+  p   72: Avrupa Patent Fasiküllerinin İlanı
+  p   73: Avrupa Patent Fasiküllerinin İlanı
+  p   74: Avrupa Patent Fasiküllerinin İlanı
+  p   75: Avrupa Patent Fasiküllerinin İlanı
+  p   76: Avrupa Patent Fasiküllerinin İlanı
+  p   77: Avrupa Patent Fasiküllerinin İlanı
+  p   78: Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p   79: Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p   80: Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p   81: Devir İşlemi Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)
+  p   82: Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p   83: Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p   84: Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p   85: Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p   87: Devir İşlemi Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)
+  p   88: Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p   89: Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p   90: Yayımlanmış Faydalı Model Başvurularının Araştırma Raporları (6769 SMK)
+  p   91: Yayımlanmış Faydalı Model Başvurularının Araştırma Raporları (6769 SMK)
+  p   93: Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p   94: Devir İşlemi Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)
+  p   95: Devir İşlemi Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)
+  p   96: Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p   97: Patent/FM Başvurularının Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p   98: Patent/FM Başvurularının Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p  107: Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+  p  114: Reddedilen Patent/Faydalı Model Başvurularının İlanı (6769 SMK)
+  p  115: VERİLEN İNCELEMELİ
+  p  389: VERİLEN FAYDALI MODEL
+  p  525: YAYIMLANAN PATENT VE
+  p  527: BAŞVURU NUMARALARINA GÖRE PATENT/FAYDALI MODEL BAŞVURULARI İNDEKSİ
+  p  539: BAŞVURU SAHİBİNE GÖRE PATENT/FAYDALI MODEL BAŞVURULARI İNDEKSİ
+  p  558: TASNİF SINIFLARINA GÖRE PATENT/FAYDALI MODEL BAŞVURULARI İNDEKSİ
+  p  579: (12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ
+  p  580: (12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ
+  p  581: (12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ
+  p  582: (12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ
+  p  583: (12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ
+  p  584: (12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ
+  p  585: (12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ
+  p  586: (12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ
+  p  587: (12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ
+  p  588: (12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ
+  p  589: (12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ
+  p  590: (12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ
+  p  591: (12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ
+  p  592: (12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ
+  p  593: (12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ
+  p  594: (12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ
+  p  595: (12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ
+  p  596: (12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ
+  p  597: (12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ
+  p  598: (12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ
+  p  599: (12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ
+  p  600: (12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ
+  p  601: (12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ
+  p  602: (12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ
+  p  603: (12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ
+  p  604: (12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ
+
+==============================================================================
+3. SAMPLE RAW TEXT (selected pages)
+==============================================================================
+
+--- page 6 (chars=2371) ---
+Bültende yayımlanan başvuruların yayın türleri aşağıda verilen kodlarla gösterilmiştir. 
+ 
+A1- Araştırma raporu ile birlikte yayımlanan patent başvuruları 
+ 
+A2- Araştırma raporsuz yayımlanan patent başvuruları 
+ 
+A3- Yayımlanmış patent başvurularının araştırma raporları 
+ 
+U  - Faydalı model belgesi başvuruları (Mülga 551 KHK) 
+ 
+U1- Patent İşbirliği Anlaşması aracılığıyla yapılan ve I.Kısımdan ulusal safhaya 
+giren faydalı model belgesi başvuruları (Mülga 551 KHK) 
+U2- Patent İşbirliği Anlaşması aracılığıyla yapılan ve II.Kısımdan ulusal safhaya giren 
+faydalı model belgesi başvuruları (Mülga 551 KHK) 
+U4-Araştırma raporu ile birlikte yayımlanan faydalı model başvuruları 
+ 
+U5- Araştırma raporsuz yayımlanan faydalı model başvuruları 
+ 
+U3- Yayımlanmış faydalı model başvurularının araştırma raporları 
+ 
+T1- Patent İşbirliği Anlaşması aracılığıyla yapılan, I.Kısımdan sonra ulusal safhaya 
+giren ve araştırma raporu ile birlikte yayımlanan patent başvuruları (Mülga 551 KHK) 
+T2- Patent İşbirliği Anlaşması aracılığıyla yapılan, II.Kısımdan sonra ulusal safhaya 
+giren patent başvuruları (Mülga 551 KHK) 
+T3- İstemleri yayımlanan Avrupa patent başvuruları 
+ 
+T4- Fasikülleri yayımlanan Avrupa Patentleri 
+ 
+T-   Patent işbirliği antlaşması aracılığıyla yapılan ve araştırma raporu ile birlikte 
+yayımlanan patent başvuruları 
+T5 - Patent işbirliği antlaşması aracılığıyla yapılan ve TÜRKPATENT bünyesinde 
+hazırlanan araştırma raporu ile birlikte yayımlanan faydalı model başvuruları 
+T6 - Patent işbirliği antlaşması aracılığıyla yapılan faydalı model başvuruları 
+ 
+T7 - Patent işbirliği antlaşması aracılığıyla yapılan ve yayımlanmış olan faydalı model 
+başvurularının TÜRKPATENT bünyesinde hazırlanan araştırma raporları 
+T8- Patent İşbirliği Anlaşması aracılığıyla yapılan patent başvuruları (araştırma 
+raporu herhangi bir nedenden dolayı düzenlenememiş olan başvurular) 
+TB- Tescil Edilen Entegre Devre Topoğrafyası 
+ 
+Y - Verilen faydalı model belgeleri 
+ 
+B-   Verilen patentler 
+ 
+ 
+  Bültende  yer  alan  bilgilerde  herhangi  bir  düzeltme  olduğunda,  düzeltmeler  daha 
+sonra  yayımlanacak  olan bültenlerin son kısmında yer alacaktır. 
+______________________________________________________________________________________________________________________
+6    Yayın Tarihi : 21.08.2025
+Türk Patent ve Marka Kurumu
+2025/8  Resmi Patent Bülteni
+
+
+--- page 26 (chars=4200) ---
+2023/000147
+Yıllık Ücretlerinin Ödenmemesi Nedeniyle Geçersiz Olan Patent/FM Başvurularının Yeniden Geçerlilik İlanı
+2023/000426
+Verilen Patent / Faydalı Model İlanı (6769 SMK)
+2023/000587
+Verilen Patent / Faydalı Model İlanı (6769 SMK)
+2023/000595
+Verilen Patent / Faydalı Model İlanı (6769 SMK)
+2023/000599
+Verilen Patent / Faydalı Model İlanı (6769 SMK)
+2023/000599
+Patent/FM Model Başvurularında/Belgelerinde Yayından Sonraki Değişikliğin İlanı
+2023/000628
+Devir İşlemi Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)
+2023/000774
+Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+2023/000801
+Patent/FM Başvurularının Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+2023/000826
+Verilen Patent / Faydalı Model İlanı (6769 SMK)
+2023/000958
+Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+2023/000972
+Verilen Patent / Faydalı Model İlanı (6769 SMK)
+2023/001000
+Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+2023/001073
+Patent/FM Model Başvurularında/Belgelerinde Yayından Sonraki Değişikliğin İlanı
+2023/001098
+Patent/FM Model Başvurularında/Belgelerinde Yayından Sonraki Değişikliğin İlanı
+2023/001136
+Devir İşlemi Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)
+2023/001154
+Verilen Patent / Faydalı Model İlanı (6769 SMK)
+2023/001195
+Verilen Patent / Faydalı Model İlanı (6769 SMK)
+2023/001283
+Kesinleşen Patent Verilme Kararının İlanı (6769 SMK)
+2023/001375
+Patent/FM Model Başvurularında/Belgelerinde Yayından Sonraki Değişikliğin İlanı
+2023/001377
+Verilen Patent / Faydalı Model İlanı (6769 SMK)
+2023/001524
+Kesinleşen Patent Verilme Kararının İlanı (6769 SMK)
+2023/001613
+Devir İşlemi Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)
+2023/001649
+Patent/FM Model Başvurularında/Belgelerinde Yayından Sonraki Değişikliğin İlanı
+2023/001659
+Lisans Verme Teklifinin İlanı
+2023/001758
+Patent/FM Model Başvurularında/Belgelerinde Yayından Sonraki Değişikliğin İlanı
+2023/001763
+Geri Çekilmiş Sayılan Patent / Faydalı Model Başvurularının İlanı (6769 SMK)
+2023/001799
+Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+2023/001837
+Verilen Patent / Faydalı Model İlanı (6769 SMK)
+2023/001897
+Verilen Patent / Faydalı Model İlanı (6769 SMK)
+2023/001950
+Geri Çekilmiş Sayılan Patent / Faydalı Model Başvurularının İlanı (6769 SMK)
+2023/001964
+Reddedilen Patent/Faydalı Model Başvurularının İlanı (6769 SMK)
+2023/001991
+Faydalı Modele Dönüşüm İlanı (6769 SMK)
+2023/002036
+Verilen Patent / Faydalı Model İlanı (6769 SMK)
+2023/002097
+Yayımlanmış Faydalı Model Başvurularının Araştırma Raporları (6769 SMK)
+2023/002101
+Patent/FM Model Başvurularında/Belgelerinde Yayından Sonraki Değişikliğin İlanı
+2023/002170
+Birleşme İşlemi Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)
+2023/002681
+Devir İşlemi Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (67
+
+--- page 51 (chars=4276) ---
+2024/011621
+Verilen Patent / Faydalı Model İlanı (6769 SMK)
+2024/011621
+Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+2024/011663
+Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+2024/011680
+Devir İşlemi Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)
+2024/011682
+Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+2024/011708
+Verilen Patent / Faydalı Model İlanı (6769 SMK)
+2024/011708
+Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+2024/011713
+Yayımlanmış Faydalı Model Başvurularının Araştırma Raporları (6769 SMK)
+2024/011714
+Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+2024/011720
+Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+2024/011723
+Yayımlanmış Faydalı Model Başvurularının Araştırma Raporları (6769 SMK)
+2024/011741
+Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+2024/011743
+Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+2024/011744
+Yayımlanmış Faydalı Model Başvurularının Araştırma Raporları (6769 SMK)
+2024/011790
+Yayımlanmış Faydalı Model Başvurularının Araştırma Raporları (6769 SMK)
+2024/011817
+Araştırma Raporu İle Birlikte Yayımlanan Patent Başvuruları (6769 SMK)
+2024/011817
+Verilen Patent / Faydalı Model İlanı (6769 SMK)
+2024/011826
+Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+2024/011855
+Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+2024/011862
+Faydalı Modele Dönüşüm İlanı (6769 SMK)
+2024/011863
+Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+2024/011900
+Yayımlanmış Faydalı Model Başvurularının Araştırma Raporları (6769 SMK)
+2024/011917
+Patent/FM Model Başvurularında/Belgelerinde Yayından Sonraki Değişikliğin İlanı
+2024/011985
+Yayımlanmış Faydalı Model Başvurularının Araştırma Raporları (6769 SMK)
+2024/011994
+Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+2024/011998
+Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+2024/011999
+Araştırma Raporu İle Birlikte Yayımlanan Patent Başvuruları (6769 SMK)
+2024/011999
+Verilen Patent / Faydalı Model İlanı (6769 SMK)
+2024/012040
+Yayımlanmış Faydalı Model Başvurularının Araştırma Raporları (6769 SMK)
+2024/012044
+Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+2024/012046
+Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+2024/012047
+Yayımlanmış Faydalı Model Başvurularının Araştırma Raporları (6769 SMK)
+2024/012058
+Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+2024/012091
+Yayımlanmış Faydalı Model Başvurularının Araştırma Raporları (6769 SMK)
+2024/012092
+Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+2024/012121
+Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+2024/012142
+Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+2024/012163
+Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)
+2024/012181
+Yayımlanmış Faydalı Model Başvurularının Ar
+
+--- page 101 (chars=4442) ---
+2025/010513
+2025/010526
+2025/010527
+2025/010528
+2025/010531
+2025/010538
+2025/010539
+2025/010540
+2025/010541
+2025/010544
+2025/010545
+2025/010546
+2025/010547
+2025/010548
+2025/010549
+2025/010554
+2025/010558
+2025/010561
+2025/010566
+2025/010569
+2025/010570
+2025/010571
+2025/010572
+2025/010573
+2025/010580
+2025/010581
+2025/010582
+2025/010591
+2025/010592
+2025/010598
+2025/010599
+2025/010601
+2025/010619
+2025/010623
+2025/010625
+2025/010632
+2025/010648
+2025/010659
+2025/010660
+2025/010663
+2025/010664
+2025/010665
+2025/010666
+2025/010667
+2025/010670
+2025/010674
+2025/010675
+2025/010686
+2025/010697
+2025/010700
+2025/010703
+2025/010705
+2025/010706
+2025/010707
+2025/010717
+2025/010720
+2025/010721
+2025/010722
+2025/010725
+2025/010727
+2025/010728
+2025/010730
+2025/010739
+2025/010740
+2025/010741
+2025/010742
+2025/010743
+2025/010745
+2025/010746
+2025/010747
+2025/010748
+2025/010756
+2025/010757
+2025/010758
+2025/010765
+2025/010767
+2025/010770
+2025/010807
+2025/010808
+2025/010810
+2025/010813
+2025/010814
+2025/010815
+2025/010817
+2025/010818
+2025/010819
+2025/010820
+2025/010823
+2025/010824
+2025/010826
+2025/010834
+2025/010835
+2025/010836
+2025/010837
+2025/010843
+2025/010844
+2025/010845
+2025/010853
+2025/010855
+2025/010856
+2025/010857
+2025/010858
+2025/010859
+2025/010863
+2025/010864
+2025/010865
+2025/010866
+2025/010867
+2025/010869
+2025/010890
+2025/010892
+2025/010893
+2025/010894
+2025/010895
+2025/010896
+2025/010897
+2025/010898
+2025/010899
+2025/010902
+2025/010903
+2025/010904
+2025/010906
+2025/010913
+2025/010917
+2025/010919
+2025/010920
+2025/010921
+2025/010922
+2025/010925
+2025/010926
+2025/010931
+2025/010937
+2025/010938
+2025/010949
+2025/010950
+2025/010951
+2025/010964
+2025/010965
+2025/010966
+2025/010969
+2025/010971
+2025/010972
+2025/010973
+2025/010974
+2025/010978
+2025/010979
+2025/010980
+2025/010981
+2025/010984
+2025/010985
+2025/010988
+2025/010990
+2025/010994
+2025/010995
+2025/010996
+2025/010997
+2025/010999
+2025/011000
+2025/011015
+2025/011017
+2025/011019
+2025/011022
+2025/011025
+2025/011026
+2025/011027
+2025/011028
+2025/011029
+2025/011030
+2025/011031
+2025/011032
+2025/011033
+2025/011040
+2025/011048
+2025/011049
+2025/011051
+2025/011056
+2025/011061
+2025/011062
+2025/011064
+2025/011069
+2025/011071
+2025/011072
+2025/011073
+2025/011076
+2025/011087
+2025/011090
+2025/011091
+2025/011092
+2025/011101
+2025/011103
+2025/011104
+2025/011112
+2025/011124
+2025/011125
+2025/011129
+2025/011134
+2025/011138
+2025/011140
+2025/011146
+2025/011147
+2025/011149
+2025/011160
+2025/011164
+2025/011165
+2025/011174
+2025/011178
+2025/011179
+2025/011180
+2025/011185
+2025/011188
+2025/011203
+2025/011207
+2025/011211
+2025/011213
+2025/011235
+2025/011238
+2025/011239
+2025/011241
+2025/011242
+2025/011250
+2025/011252
+2025/011261
+2025/011264
+2025/011267
+2025/011270
+2025/011284
+2025/011288
+2025/011289
+2025/011290
+2025/011291
+2025/011303
+2025/011304
+2025/011311
+2025/011314
+2025/011320
+2025/011322
+2025/011324
+2025/011325
+2025/011337
+2025/011344
+2025/011347
+2025/011353
+2025/011355
+2025/011358
+2025/011372
+2025/011377
+2025/011379
+2025/011384
+2025/011390
+2025/011410
+
+
+--- page 495 (chars=1806) ---
+(11) TR 2024 004234 Y
+(12) Faydalı Model Belgesi
+(43) Başvuru Yayın Tarihi
+2024/05/21, 2024/5 Nolu Bülten
+(10) Başvuru Yayın No
+TR 2024 004234 U5
+(21) Başvuru Numarası
+2024/004234
+(22) Başvuru Tarihi
+2024/04/04
+(45) Faydalı Model Belgesinin Veriliş Tarihi
+2025/08/21
+(51) Buluşun tasnif sınıfları
+H04B 5/00
+G09B 5/12
+(30) Rüçhan Bilgileri (32) (33) (31)
+(74) Vekil
+GÖKHAN ÇİMEN (KUANTUM PATENT A.Ş.)
+(73) Faydalı Model Sahibi
+İSTANBUL MEDİPOL ÜNİVERSİTESİ
+CİBALİ MAH. ATATÜRK BLV. ÖZEL MEDIPOL
+ÜNIVERSITESI 25  Fatih  İstanbul TÜRKİYE
+(72) Buluşu Yapanlar
+GİZEM KURNAZ
+BASRİ GÜNDOĞDU
+YUSUF ÇELENK
+SUDE ÖZSOYLU
+(54) Buluş Başlığı
+AKILLI MUTFAK ASİSTANI
+(57) Özet
+Bu buluş, görme engelli bireylerin özellikle mutfakta yemek yaparken veya hazırlarken sıcak yüzeylere temasını
+engelleyerek bireyin yaralanmasının önüne geçmek ve yemek yapımı sırasında bireye yardımcı olmak için
+kullanılabilen akıllı mutfak asistanı ile ilgili olup, özelliği; içerisinde yapay zeka algoritması ile çalışan işlemci,
+bluetooth ve kablosuz şarj modülü bulunan bir yüzük gövdesi (1), yüzük gövdesinin (1) üzerine konumlandırılan ve
+belirli bir alandaki sıcaklığı ve yoğunluğunu algılayan en az 2 adet sıcaklık sensörü (2), yüzük gövdesi (1) üzerinde
+yer alan ve sesli komut algılayabilen ve sesli uyarı ve komut verebilen ses modülü (3), yüzük gövdesi (1) üzerinde
+bulunan bir şarj girişine (4), kullanıcı komutunu algılayarak yemek tariflerindeki aşamaları sırasıyla ses modülüne
+(3) yapay zeka algoritması ile ileten işlemci ve kullanıcıya sonraki adım için 1-2 dk kaldığını hatırlatan alarm
+sistemine sahip olmasıdır.
+______________________________________________________________________________________________________________________
+2025/8  Resmi Patent Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 21.08.2025    495
+
+
+--- page 989 (chars=1632) ---
+(11) TR 2025 010844 T4
+(12) AVRUPA PATENT FASİKÜLÜ TÜRKÇE ÇEVİRİSİ
+(21) Başvuru Numarası
+2025/010844
+(96) Başvuru Tarihi
+2011/07/08
+(97) EP Yayın No
+EP3626736B1
+(97) EP Yayın Tarihi
+2025/06/11
+(51) Buluşun tasnif sınıfları
+A61P7/00
+A61P33/06
+C12N9/64
+A61P7/04
+C07K14/755
+A61K38/36
+A61P29/00
+A61K38/00
+A61K38/37
+(96) EP Başvuru No
+EP19191438.1
+(30) Rüçhan Bilgileri (32) (33) (31)
+2010/07/08  US  US 201036263510P
+(74) Vekil
+UĞUR GÜRŞAD YALÇINER (YALÇINER  PATENT
+VE DAN. LTD. ŞTİ.)
+(73) Patent Sahibi
+TAKEDA PHARMACEUTICAL COMPANY LIMITED
+1-1, DOSHOMACHI 4-CHOME CHUO-KU OSAKA-
+SHI, OSAKA     JAPONYA
+(72) Buluşu Yapanlar
+Leopold Grillberger
+Wolfgang Mundt
+Manfred Reiter
+(54) Buluş Başlığı
+Hücre kültüründe rekombinant yüksek moleküler ağırlıklı vwf üretim yöntemi
+(57) Özet
+Diğer yönlerin yanı sıra, mevcut buluş, yüksek moleküler ağırlıklı vWF, özellikle yüksek spesifik aktiviteye sahip oldukça
+multimerikWf ve yüksek spesifik aktiviteye sahip ADAMTS13 üretmeye yönelik hücre kültürü koşulları ile ilgilidir. Mevcut
+buluşun hücre kültürü koşulları, örneğin, düşük bir amonyum (NH4+) konsantrasyonuna sahip artan bir bakır konsantrasyonuna
+ve/veya hücre kültürü süpernatantına sahip bir hücre kültürü ortamını içerebilir. Mevcut buluş ayrıca, yüksek spesifik
+aktivitelere sahip yüksek moleküler ağırlıklı vWF ve rA13'ü eksprese etmek için hücre kültürü koşullarında hücrelerin
+yetiştirilmesine yönelik yöntemler sağlar.
+______________________________________________________________________________________________________________________
+2025/8  Resmi Patent Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 21.08.2025    989
+
+
+--- page 1483 (chars=1038) ---
+(19)
+(11) TR 2025 008260 A2
+(12) Patent Başvurusu
+(21) Başvuru Numarası
+2025/008260
+(22) Başvuru Tarihi
+2025/06/20
+(43) Başvuru Yayın Tarihi
+2025/08/21
+(51) Buluşun tasnif sınıfları
+H04W
+H04W 12/00
+H04W 52/00
+(30) Rüçhan Bilgileri (32) (33) (31)
+(74) Vekil
+UĞUR GÜRŞAD YALÇINER (YALÇINER  PATENT VE DAN. LTD. ŞTİ.)
+(71) Başvuru Sahibi
+İSTANBUL MEDİPOL ÜNİVERSİTESİ
+CİBALİ MAH. ATATÜRK BLV. ÖZEL MEDIPOL
+ÜNIVERSITESI 25  Fatih  İstanbul TÜRKİYE
+(72) Buluşu Yapanlar
+SENANUR DEMİRCİ
+BADR EDDINE OUAKOUAK
+HÜSEYİN ARSLAN
+(54) Buluş Başlığı
+WAKE UP RADYOLARI İÇİN GÖRÜNÜRLÜK ALANINA DAYALI FİZİKSEL KATMAN KİMLİK DOĞRULAMA
+(57) Özet
+Bu fikir, özellikle 5G ve 6G mimarilerinde yeni nesil
+kablosuz ağlarda ultra düşük güçle çalışmayı sağlamak
+için gerekli olan WuR sistemlerindeki güvenlik açıklarını
+ele almaktadır.
+TR 2025 008260 A2
+______________________________________________________________________________________________________________________
+2025/8  Resmi Patent Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 21.08.2025    1483
+
+
+--- page 1927 (chars=1336) ---
+(19)
+(11) TR 2025 010103 T
+(12) Patent Başvurusu
+(21) Başvuru Numarası
+2025/010103
+(22) Başvuru Tarihi
+2024/01/22
+(43) Başvuru Yayın Tarihi
+2025/08/21
+(51) Buluşun tasnif sınıfları
+A23B 7/154
+A23B 7/16
+(86) Uluslararası Başvuru No
+PCT/IL2024/050088
+(30) Rüçhan Bilgileri (32) (33) (31)
+2023/01/23  US  63/440,446
+(74) Vekil
+PINAR ARIKAN (GÜN DAN. HİZM. LTD. ŞTİ.)
+(71) Başvuru Sahibi
+DEAD SEA BROMINE COMPANY LTD.
+P.O. BOX 180, 8410101 BEER-SHEVA    İSRAİL
+(72) Buluşu Yapanlar
+MOHAMMED ABUELHAIGA
+REUT ISRAELI
+ANDREY BERMAN
+ALEXANDER FRENKLACH
+(54) Buluş Başlığı
+TAZE MEYVELER İÇIN YENILEBILIR KAPLAMALAR
+(57) Özet
+Buluş, hasat sonrası ürünlerin raf ömrünü uzatmaya
+yönelik bir yönteme ilişkindir; söz
+konusu yöntem, ürünün dış yüzeyinde, bazik bir toprak
+alkali metal bileşiği (örneğin
+magnezyum oksit) ile modifiye edilmiş bir veya daha
+fazla polisakkarit içeren yenilebilir bir
+kaplama oluşturulmasını içermektedir. Ayrıca, suda
+çözünmüş bir polisakkarit ile bir bazik
+toprak alkali metal bileşiği içeren, yaklaşık nötr ila orta
+derecede bazik özellikte bir film
+oluşturucu formülasyon da sağlanmaktadır.
+TR 2025 010103 T
+______________________________________________________________________________________________________________________
+2025/8  Resmi Patent Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 21.08.2025    1927
+
+
+--- page 1967 (chars=1181) ---
+(19)
+(11) TR 2024 006461 U4
+(12) Faydalı Model Başvurusu
+(21) Başvuru Numarası
+2024/006461
+(22) Başvuru Tarihi
+2024/05/24
+(43) Başvuru Yayın Tarihi
+2025/08/21
+(51) Buluşun tasnif sınıfı
+F24B 1/00
+(30) Rüçhan Bilgileri (32) (33) (31)
+(74) Vekil
+MURAT OKUTAN (OKUTAN MARKA PATENT BELGELENDİRME VE
+SINAİ MÜLKİYET HİZM. TİC. LTD. ŞTİ.)
+(71) Başvuru Sahibi
+SÜLEYMAN TOPAL
+(72) Buluşu Yapan
+SÜLEYMAN TOPAL
+(54) Buluş Başlığı
+YENİ BİR PİŞİRME TAŞLI KUZİNE SOBA
+(57) Özet
+Söz konusu buluş, ev, yazlık, iş yerleri, şantiyeler, arıcı
+barınakları gibi sürekli veya kısa süreli yaşam alanlarında
+kullanılmaya uygun katı yakıtlı, ısınma ve pişirme
+ihtiyacına cevap verebilen, pişirme kısmı alt kısımda
+bulunmasına karşın alt kısma yüksek sıcaklık verebilen
+ve pişirme kısmına verilen ısıyı düzenlemeye / kontrol
+etmeye olanak sağlayan, pişirme odası zemininde pileki
+veya granit gibi doğal pişirme taşına (10) sahip Yeni Bir
+Pişirme Taşlı Kuzine Soba ile ilgilidir.
+TR 2024 006461 U4
+______________________________________________________________________________________________________________________
+2025/8  Resmi Patent Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 21.08.2025    1967
+
+
+==============================================================================
+4. INID CODE FREQUENCY (whole PDF)
+==============================================================================
+Distinct codes found: 207
+  (11) ->   1815 hits  first p117
+  (12) ->   1787 hits  first p5
+  (30) ->   1787 hits  first p5
+  (21) ->   1732 hits  first p5
+  (31) ->   1682 hits  first p5
+  (32) ->   1663 hits  first p5
+  (33) ->   1639 hits  first p5
+  (51) ->   1629 hits  first p5
+  (72) ->   1618 hits  first p5
+  (54) ->   1616 hits  first p5
+  (57) ->   1614 hits  first p5
+  (74) ->   1614 hits  first p5
+  (96) ->   1145 hits  first p579
+  (97) ->   1144 hits  first p579
+  (22) ->   1122 hits  first p5
+  (43) ->   1051 hits  first p5
+  (73) ->    975 hits  first p5
+  (10) ->    823 hits  first p117
+  (19) ->    663 hits  first p202
+  (71) ->    657 hits  first p5
+  (45) ->    408 hits  first p5
+  (20) ->    281 hits  first p154
+  (100) ->    150 hits  first p122
+  (14) ->    111 hits  first p135
+  (13) ->     98 hits  first p182
+  (40) ->     88 hits  first p210
+  (16) ->     75 hits  first p254
+  (15) ->     70 hits  first p267
+  (110) ->     64 hits  first p204
+  (120) ->     56 hits  first p180
+  (86) ->     53 hits  first p5
+  (200) ->     50 hits  first p134
+  (17) ->     46 hits  first p394
+  (18) ->     43 hits  first p202
+  (50) ->     42 hits  first p210
+  (300) ->     35 hits  first p134
+  (23) ->     35 hits  first p223
+  (24) ->     32 hits  first p5
+  (70) ->     30 hits  first p317
+  (48) ->     25 hits  first p121
+  (60) ->     25 hits  first p210
+  (41) ->     25 hits  first p229
+  (29) ->     23 hits  first p123
+  (25) ->     23 hits  first p123
+  (26) ->     22 hits  first p123
+  (42) ->     22 hits  first p292
+  (80) ->     21 hits  first p210
+  (27) ->     20 hits  first p123
+  (102) ->     20 hits  first p166
+  (111) ->     20 hits  first p356
+  (101) ->     19 hits  first p166
+  (34) ->     18 hits  first p154
+  (210) ->     18 hits  first p340
+  (400) ->     17 hits  first p134
+  (28) ->     16 hits  first p123
+  (130) ->     15 hits  first p263
+  (140) ->     14 hits  first p263
+  (112) ->     14 hits  first p356
+  (104) ->     13 hits  first p196
+  (201) ->     13 hits  first p202
+  (121) ->     12 hits  first p339
+  (44) ->     11 hits  first p5
+  (106) ->     11 hits  first p196
+  (250) ->     11 hits  first p204
+  (202) ->     11 hits  first p339
+  (212) ->     11 hits  first p625
+  (108) ->     10 hits  first p166
+  (310) ->     10 hits  first p176
+  (103) ->     10 hits  first p180
+  (38) ->     10 hits  first p661
+  (52) ->      9 hits  first p250
+  (220) ->      9 hits  first p340
+  (150) ->      8 hits  first p310
+  (61) ->      8 hits  first p363
+  (90) ->      8 hits  first p363
+  (131) ->      8 hits  first p675
+  (81) ->      8 hits  first p681
+  (160) ->      7 hits  first p176
+  (170) ->      7 hits  first p176
+  (211) ->      7 hits  first p251
+  (36) ->      7 hits  first p435
+  (222) ->      7 hits  first p625
+  (82) ->      7 hits  first p975
+  (35) ->      6 hits  first p154
+  (122) ->      6 hits  first p182
+  (402) ->      6 hits  first p599
+  (156) ->      6 hits  first p673
+  (230) ->      6 hits  first p676
+  (176) ->      6 hits  first p899
+  (105) ->      5 hits  first p196
+  (114) ->      5 hits  first p496
+  (403) ->      5 hits  first p599
+  (223) ->      5 hits  first p625
+  (320) ->      5 hits  first p625
+  (252) ->      5 hits  first p668
+  (39) ->      4 hits  first p154
+  (37) ->      4 hits  first p154
+  (62) ->      4 hits  first p363
+  (530) ->      4 hits  first p384
+  (304) ->      4 hits  first p625
+  (132) ->      4 hits  first p673
+  (83) ->      4 hits  first p801
+  (258) ->      4 hits  first p1049
+  (500) ->      3 hits  first p134
+  (123) ->      3 hits  first p182
+  (107) ->      3 hits  first p196
+  (221) ->      3 hits  first p251
+  (155) ->      3 hits  first p292
+  (711) ->      3 hits  first p342
+  (260) ->      3 hits  first p411
+  (116) ->      3 hits  first p496
+  (115) ->      3 hits  first p496
+  (203) ->      3 hits  first p625
+  (308) ->      3 hits  first p625
+  (232) ->      3 hits  first p625
+  (136) ->      3 hits  first p673
+  (154) ->      3 hits  first p673
+  (152) ->      3 hits  first p673
+  (224) ->      3 hits  first p676
+  (65) ->      3 hits  first p727
+  (84) ->      3 hits  first p975
+  (208) ->      3 hits  first p1049
+  (205) ->      3 hits  first p1707
+  (600) ->      2 hits  first p134
+  (311) ->      2 hits  first p166
+  (125) ->      2 hits  first p182
+  (321) ->      2 hits  first p359
+  (113) ->      2 hits  first p496
+  (144) ->      2 hits  first p501
+  (145) ->      2 hits  first p501
+  (46) ->      2 hits  first p613
+  (134) ->      2 hits  first p673
+  (240) ->      2 hits  first p676
+  (324) ->      2 hits  first p676
+  (242) ->      2 hits  first p676
+  (218) ->      2 hits  first p702
+  (401) ->      2 hits  first p708
+  (420) ->      2 hits  first p708
+  (63) ->      2 hits  first p727
+  (165) ->      2 hits  first p833
+  (166) ->      2 hits  first p833
+  (330) ->      2 hits  first p873
+  (680) ->      2 hits  first p873
+  (148) ->      2 hits  first p899
+  (184) ->      2 hits  first p899
+  (216) ->      2 hits  first p899
+  (85) ->      2 hits  first p1090
+  (404) ->      2 hits  first p1103
+  (408) ->      2 hits  first p1103
+  (302) ->      2 hits  first p1103
+  (712) ->      2 hits  first p1360
+  (66) ->      2 hits  first p1386
+  (87) ->      2 hits  first p1479
+  (441) ->      2 hits  first p1895
+  (88) ->      1 hits  first p5
+  (700) ->      1 hits  first p134
+  (800) ->      1 hits  first p134
+  (900) ->      1 hits  first p134
+  (109) ->      1 hits  first p196
+  (59) ->      1 hits  first p595
+  (204) ->      1 hits  first p625
+  (213) ->      1 hits  first p625
+  (206) ->      1 hits  first p625
+  (380) ->      1 hits  first p625
+  (303) ->      1 hits  first p625
+  (306) ->      1 hits  first p625
+  (350) ->      1 hits  first p668
+  (138) ->      1 hits  first p673
+  (78) ->      1 hits  first p679
+  (91) ->      1 hits  first p681
+  (217) ->      1 hits  first p702
+  (236) ->      1 hits  first p702
+  (235) ->      1 hits  first p702
+  (421) ->      1 hits  first p708
+  (407) ->      1 hits  first p708
+  (02) ->      1 hits  first p714
+  (158) ->      1 hits  first p732
+  (501) ->      1 hits  first p762
+  (301) ->      1 hits  first p804
+  (630) ->      1 hits  first p873
+  (47) ->      1 hits  first p897
+  (172) ->      1 hits  first p899
+  (174) ->      1 hits  first p899
+  (186) ->      1 hits  first p899
+  (141) ->      1 hits  first p946
+  (245) ->      1 hits  first p1008
+  (209) ->      1 hits  first p1089
+  (215) ->      1 hits  first p1089
+  (256) ->      1 hits  first p1089
+  (259) ->      1 hits  first p1089
+  (257) ->      1 hits  first p1089
+  (406) ->      1 hits  first p1103
+  (126) ->      1 hits  first p1127
+  (49) ->      1 hits  first p1145
+  (190) ->      1 hits  first p1338
+  (117) ->      1 hits  first p1359
+  (118) ->      1 hits  first p1359
+  (713) ->      1 hits  first p1360
+  (64) ->      1 hits  first p1386
+  (68) ->      1 hits  first p1386
+  (67) ->      1 hits  first p1386
+  (53) ->      1 hits  first p1396
+  (331) ->      1 hits  first p1569
+  (162) ->      1 hits  first p1930
+  (164) ->      1 hits  first p1930
+  (153) ->      1 hits  first p1975
+  (151) ->      1 hits  first p1975
+
+==============================================================================
+5. IPC SAMPLES (after '(51)' marker)
+==============================================================================
+
+Sample 01 -> 1 line(s):
+   Uluslararası Tasnif Sınıfı
+
+Sample 02 -> 6 line(s):
+   Buluşun tasnif sınıfları
+   C21C 5/28
+   C21C 1/02
+   C21C 1/04
+   C21C 5/30
+   C21C 5/46
+
+Sample 03 -> 2 line(s):
+   Buluşun tasnif sınıfı
+   A61B 17/326
+
+Sample 04 -> 3 line(s):
+   Buluşun tasnif sınıfları
+   G06F 3/00
+   B32B 37/00
+
+Sample 05 -> 4 line(s):
+   Buluşun tasnif sınıfları
+   G06F 3/041
+   H04B 1/38
+   H01Q 7/00
+
+Sample 06 -> 4 line(s):
+   Buluşun tasnif sınıfları
+   G08G 1/123
+   G08G 1/133
+   G08G 1/127
+
+Sample 07 -> 3 line(s):
+   Buluşun tasnif sınıfları
+   G06Q 40/00
+   G06F 10/30
+
+Sample 08 -> 4 line(s):
+   Buluşun tasnif sınıfları
+   E03C 1/00
+   E04H 1/00
+   E06B 1/00
+
+Sample 09 -> 5 line(s):
+   Buluşun tasnif sınıfları
+   F04F 5/00
+   E21F 1/00
+   F04D 29/00
+   F24F 13/32
+
+Sample 10 -> 4 line(s):
+   Buluşun tasnif sınıfları
+   G08G 1/00
+   G01C 21/26
+   G01S 1/08
+
+Sample 11 -> 3 line(s):
+   Buluşun tasnif sınıfları
+   A61H 35/04
+   A61M 3/0262
+
+Sample 12 -> 3 line(s):
+   Buluşun tasnif sınıfları
+   H04N 1/00
+   H04L 12/58
+
+Sample 13 -> 3 line(s):
+   Buluşun tasnif sınıfları
+   G06F 21/62
+   G06F 17/30
+
+Sample 14 -> 3 line(s):
+   Buluşun tasnif sınıfları
+   G06Q 30/02
+   G06Q 50/00
+
+Sample 15 -> 3 line(s):
+   Buluşun tasnif sınıfları
+   G02F 1/225
+   G02F 1/01
+
+Sample 16 -> 5 line(s):
+   Buluşun tasnif sınıfları
+   B22C 9/00
+   B22C 11/00
+   B29C 67/00
+   B33Y 30/00
+
+Sample 17 -> 5 line(s):
+   Buluşun tasnif sınıfları
+   C22B 1/16
+   B01J 2/00
+   B01J 2/12
+   B01J 2/14
+
+Sample 18 -> 4 line(s):
+   Buluşun tasnif sınıfları
+   C03C 8/14
+   C04B 35/01
+   C04B 41/00
+
+Sample 19 -> 2 line(s):
+   Buluşun tasnif sınıfı
+   B60N 2/00
+
+Sample 20 -> 6 line(s):
+   Buluşun tasnif sınıfları
+   A61J 3/00
+   B01L 3/00
+   A61K 38/39
+   A23L 33/17
+   C07K 14/78
+
+Sample 21 -> 5 line(s):
+   Buluşun tasnif sınıfları
+   A61K 36/00
+   A61P 23/00
+   A61P 25/20
+   A61K 36/23
+
+Sample 22 -> 2 line(s):
+   Buluşun tasnif sınıfı
+   A47L 15/48
+
+Sample 23 -> 3 line(s):
+   Buluşun tasnif sınıfları
+   C23D 5/00
+   C03C 8/02
+
+Sample 24 -> 4 line(s):
+   Buluşun tasnif sınıfları
+   B21K 13/02
+   C21D 9/00
+   C22C 38/32
+
+Sample 25 -> 2 line(s):
+   Buluşun tasnif sınıfı
+   A01K 1/015
+
+Sample 26 -> 3 line(s):
+   Buluşun tasnif sınıfları
+   H02K 1/27
+   H02K 16/02
+
+Sample 27 -> 3 line(s):
+   Buluşun tasnif sınıfları
+   C03C 8/02
+   C03C 8/06
+
+Sample 28 -> 3 line(s):
+   Buluşun tasnif sınıfları
+   A61F 2/28
+   A61L 27/38
+
+Sample 29 -> 4 line(s):
+   Buluşun tasnif sınıfları
+   B60J 5/04
+   B60R 1/02
+   B60R 1/06
+
+Sample 30 -> 2 line(s):
+   Buluşun tasnif sınıfı
+   B60K 1/04
+
+IPC tokens-per-record distribution (first 30 samples): {0: 1, 5: 2, 1: 5, 2: 11, 3: 7, 4: 4}
+
+==============================================================================
+6. IMAGE / DRAWING INVENTORY
+==============================================================================
+Total embedded image objects: 1806
+Pages with >=1 image: 1616
+Avg images / image-bearing page: 1.12
+Max images on a single page: 2
+Image format counts: {'jpeg': 832, 'png': 974}
+Image size buckets:  {'>=1000': 79, '400-1000': 1723, '100-400': 4}
+Saved 5 sample figures to ./figures/
+
+First 25 image-bearing pages (page, count):
+  p    1: 1
+  p  117: 1
+  p  118: 1
+  p  119: 1
+  p  120: 1
+  p  121: 1
+  p  122: 1
+  p  123: 1
+  p  124: 1
+  p  125: 1
+  p  126: 1
+  p  127: 1
+  p  128: 1
+  p  129: 1
+  p  131: 1
+  p  133: 1
+  p  134: 1
+  p  135: 1
+  p  136: 1
+  p  137: 1
+  p  138: 1
+  p  139: 1
+  p  140: 1
+  p  141: 1
+  p  142: 1
+  ... (1591 more)
+
+==============================================================================
+7. SAMPLE RECORD BLOCKS (5)
+==============================================================================
+
+--- record-bearing page #1  p5 ---
+AÇIKLAMALAR  
+ 
+ Bu bülten TÜRKPATENT tarafından aylık olarak yayımlanmaktadır. 
+ Bültende  yayımlanan   patentler  /faydalı  model  belgeleri  patent/faydalı   model  
+belgesi  numaralarına   göre, başvurular başvuru numarasına göre sınırlandırılmıştır. 
+ Bibliyografik  bilgiler  I.N.I.D.  ( Internationally  agreed  Numbers  for  the Identification  
+of bibliografic  Data  -Bibliyografik  bilgilerin  tanımlanması    için  uluslararası  olarak  
+kabul  edilmiş  numaralar  )  kodları  ile  işaret edilmiştir. 
+ 
+KODLAR  
+AÇIKLAMA 
+(11-10) 
+Yayın Numarası-Patent numarası 
+(12) 
+Başvurunun Türü           
+(21) 
+Başvuru Numarası
+    
+(22) 
+Başvuru Tarihi 
+(24) 
+Korumanın Başlangıç Tarihi 
+(30) 
+Rüçhan Bilgileri       
+(31) 
+Rüçhan Numarası
+       
+(32) 
+Rüçhan Tarihi         
+(33) 
+Rüçhan Ülkesi 
+(43) 
+İncelenmemiş Başvurunun Yayın Tarihi       
+(44) 
+İncelenmiş Başvurunun Yayın Tarihi            
+(45) 
+Belgenin Veriliş Tarihi 
+(51) 
+Uluslararası Tasnif Sınıfı 
+(54) 
+Buluş Başlığı 
+(57) 
+Özet 
+(71) 
+Başvuru Sahipleri 
+(72) 
+Buluşu Yapanlar 
+(73) 
+Patent/Faydalı Model Belgesi Sahipleri 
+(74) 
+Patent Vekili 
+(86) 
+Uluslararası Başvuru Numarası 
+(88) 
+Araştırma Raporunun Yayın Tarihi 
+ 
+ 
+ 
+ Bibliyografik bilgilerde yer alan  Uluslararası Tasnif Sınıflarını gösteren harfler, buluşun 
+ait olduğu teknik sahayı belirtmekte ve aşağıda belirtilen 8 ana sınıftan oluşmaktadır. 
+ 
+ 
+Günlük Hayatın İhtiyaçları: A 
+Değişik Sanayi Teknikleri ve Taşımacılık :B 
+Kimya ve Metalurji: C 
+Tekstil ve Kağıt : D 
+Sabit Yapılar:  E 
+Mekanik-Aydınlatma-Isıtma-Donanım : F 
+Fizik : G 
+Elektrik : H 
+ 
+ 
+ 
+ 
+ 
+ 
+______________________________________________________________________________________________________________________
+2025/8  Resmi Patent Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 21.08.2025    5
+
+
+--- record-bearing page #2  p117 ---
+(11) TR 2021 011498 B
+(12) İncelemeli Patent
+(43) Başvuru Yayın Tarihi
+2023/01/23, 2023/1 Nolu Bülten
+(10) Başvuru Yayın No
+TR 2021 011498 A2
+(21) Başvuru Numarası
+2021/011498
+(22) Başvuru Tarihi
+2014/01/10
+(45) Patent Belgesinin Veriliş Tarihi
+2025/08/21
+(51) Buluşun tasnif sınıfları
+C21C 5/28
+C21C 1/02
+C21C 1/04
+C21C 5/30
+C21C 5/46
+(86) Uluslararası Başvuru No
+PCT/JP2014/050290
+(30) Rüçhan Bilgileri (32) (33) (31)
+2013/01/18  JP  2013-007188
+2013/01/31  JP  2013-016987
+(74) Vekil
+OYA YALVAÇ (DERİŞ PATENT VE MARKA
+ACENTALIĞI A.Ş.)
+(73) Patent Sahibi
+JFE STEEL CORPORATION
+2-3, UCHISAIWAI-CHO 2-CHOME, CHIYODA-KU,
+TOKYO 1000011    JAPONYA
+(72) Buluşu Yapanlar
+NAOKI KIKUCHI
+KENJI NAKASE
+YUKIO TAKAHASHI
+YUICHI UCHIDA
+YUJI MIKI
+KAZUHITO MOMOSAKI
+TORU IKAGAWA
+KOTARO TANAKA
+RYO KAWABATA
+NAOTAKA SASAKI
+GORO OKUYAMA
+YOZO IWAKI
+(54) Buluş Başlığı
+KONVERTÖR İÇİNDE ÇELİK YAPIM YÖNTEMİ.
+(57) Özet
+[Problem] Sadece düşük fosforlu bir pik demirinin üretim maliyetini düşürmek amacıyla değil aynı zamanda
+karbonsuzlaştırma muamelesinin maliyetini azaltmak amacıyla küçük miktarda bir fluks çözücüsü ile bir eriyik
+demirin (9) silisyum giderme ve fosfor giderme etkililiklerini arttırmaktır.
+[Çözüm]  Bir eriyik demir (9) silisyum giderme işlemini gerçekleştirmek için bir birinci konvertöre (1) yüklenir ve
+bir ara cüruf uzaklaştırması gerçekleştirilir böylece silisyum giderme işleminden sonra bir cürufun bir parçası
+uzaklaştırılır ve konvertör (1) içindeki eriyik demir (9) ile birlikte geriye kalan cüruf tutulur, ve inceltme için
+oksijen ve bir kireç bazlı fluks çözücüsünü içeren toz, ya da ayrıca bir yakıt gazı ve bir yanmayı destekleyen gaz
+eriyik demirin (9) fosfor giderme işlemini gerçekleştirmek için silisyum giderme işleminden sonra konvertörün (1)
+içinde tutulan eriyik demirin (9) bir banyo yüzeyinin üzerine doğru üfleme borusundan (2) üflenir, ve konvertör (1)
+içinde fosfor giderme işleminden sonra bir cürufun en azından bir parçası muhafaza edilirken fosfor giderme
+işleminden sonra eriyik demir (9) akıtılır, ve fosfor giderme işleminden sonra akıtılan eriyik demir (9) başka bir
+konvertöre (1) transfer edilir ve karbonsuzlaştırma muamelesine tabi tutulur.
+______________________________________________________________________________________________________________________
+2025/8  Resmi Patent Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 21.08.2025    117
+
+
+--- record-bearing page #3  p118 ---
+(11) TR 2013 01260 B
+(12) İncelemeli Patent
+(43) Başvuru Yayın Tarihi
+2014/03/21, 2014/3 Nolu Bülten
+(10) Başvuru Yayın No
+TR 2013 01260 T1
+(21) Başvuru Numarası
+2013/01260
+(22) Başvuru Tarihi
+2011/08/19
+(45) Patent Belgesinin Veriliş Tarihi
+2025/08/21
+(51) Buluşun tasnif sınıfı
+A61B 17/326
+(86) Uluslararası Başvuru No
+PCT/CN2011/001385
+(30) Rüçhan Bilgileri (32) (33) (31)
+2010/08/19  CN  201020297600.6
+(74) Vekil
+ÖZNUR GENÇ İLHAN (İSTANBUL PATENT A.Ş.)
+(73) Patent Sahibi
+JİANZHONG SHANG
+(72) Buluşu Yapan
+JİANZHONG SHANG
+(54) Buluş Başlığı
+Tek kullanımlık sünnet aparatı.
+(57) Özet
+Tek kullanımlık sünnet aparatı, bir iç halka ve bir açıklıga sahip olan dıs halkadan olusmaktadır. İç halka yapı
+olarak dıs halka ile iç içe geçmektedir. Dıs halka bir yan çepere sahiptir. Yan çeper üzerinde, salmastranın tutulması
+için bir mahfaza bulunmaktadır.Mahfaza, dıs halkanın yan çeperinden iç tarafa dogru uzanan bir dairesel halkadır.
+Dairesel halka, dıs halka üzerindeki açıklıga karsılık gelen bir açıklık ile donatılmıstır. Dairesel halkanın genisligi,
+bıçagın genisliginden küçüktür. Aparat güvenli ve güvenilir olup, cerrahi islemin ardından hastaların hissettigi acıyı
+azaltabilmektedir.
+______________________________________________________________________________________________________________________
+118    Yayın Tarihi : 21.08.2025
+Türk Patent ve Marka Kurumu
+2025/8  Resmi Patent Bülteni
+
+
+--- record-bearing page #4  p119 ---
+(11) TR 2013 11111 B
+(12) İncelemeli Patent
+(43) Başvuru Yayın Tarihi
+2014/07/21, 2014/7 Nolu Bülten
+(10) Başvuru Yayın No
+TR 2013 11111 A2
+(21) Başvuru Numarası
+2013/11111
+(22) Başvuru Tarihi
+2013/09/23
+(45) Patent Belgesinin Veriliş Tarihi
+2025/08/21
+(51) Buluşun tasnif sınıfları
+G06F 3/00
+B32B 37/00
+(30) Rüçhan Bilgileri (32) (33) (31)
+(74) Vekil
+(73) Patent Sahipleri
+KENT KART EGE ELEKTRONİK SANAYİ VE
+TİCARET ANONİM ŞİRKETİ
+GÜMÜŞSUYU MAH. MUHTAR KAMİL SK.
+BASMACI BINASI 3 4  Beyoğlu  İstanbul TÜRKİYE
+(72) Buluşu Yapan
+AHMET EMİR BASMACI
+(54) Buluş Başlığı
+Kapasitif dokunmatik ekranlarda kırılmazlığı sağlayan laminasyon yöntemi.
+(57) Özet
+Bu buluş, kapasitif dokunmatik ekranların kırılganlığını azaltmayı/yok etmeyi amaçlayan bir laminasyon yöntemini
+konu almaktadır.
+______________________________________________________________________________________________________________________
+2025/8  Resmi Patent Bülteni
+Türk Patent ve Marka Kurumu
+Yayın Tarihi : 21.08.2025    119
+
+
+--- record-bearing page #5  p120 ---
+(11) TR 2013 11118 B
+(12) İncelemeli Patent
+(43) Başvuru Yayın Tarihi
+2014/04/21, 2014/4 Nolu Bülten
+(10) Başvuru Yayın No
+TR 2013 11118 A2
+(21) Başvuru Numarası
+2013/11118
+(22) Başvuru Tarihi
+2013/09/23
+(45) Patent Belgesinin Veriliş Tarihi
+2025/08/21
+(51) Buluşun tasnif sınıfları
+G06F 3/041
+H04B 1/38
+H01Q 7/00
+(30) Rüçhan Bilgileri (32) (33) (31)
+(74) Vekil
+(73) Patent Sahipleri
+KENT KART EGE ELEKTRONİK SANAYİ VE
+TİCARET ANONİM ŞİRKETİ
+GÜMÜŞSUYU MAH. MUHTAR KAMİL SK.
+BASMACI BINASI 3 4  Beyoğlu  İstanbul TÜRKİYE
+(72) Buluşu Yapan
+AHMET EMİR BASMACI
+(54) Buluş Başlığı
+Kapasitif dokunmatik ekran ve arkasındaki rf anteni ile oluşturulan sistem kombinasyonu.
+(57) Özet
+Bu buluş, kapasitif ekran üzerine bir katman daha eklemek ve bu katmanda iletken telleri ?loop? (çerçeve anten)
+şeklinde kullanmak suretiyle ekran yakınında bir RF etki yaratılmasını ve bunun sonucu olarak RF sinyal
+enerjisinde kayıplara neden olmaksızın cihaz hacminin küçültülmesini sağlayan bir RF Anten-Kapasitif dokunmatik
+ekran kombinasyonunu konu alır.
+______________________________________________________________________________________________________________________
+120    Yayın Tarihi : 21.08.2025
+Türk Patent ve Marka Kurumu
+2025/8  Resmi Patent Bülteni
+
+
+==============================================================================
+8. FAYDALI MODEL vs PATENT
+==============================================================================
+Patent-section header hits: 1112 (first 10)
+  p5:  Bültende  yayımlanan   patentler  /faydalı  model  belgeleri  patent/faydalı   model
+  p9: Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p10: Yıllık Ücretlerinin Ödenmemesi Nedeniyle Geçersiz Olan Patent/FM Başvurularının Yeniden Geçerlilik İlanı
+  p11: Patent/FM Başvurularının Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p12: Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p13: Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p14: Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p17: Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p20: Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+  p21: Patent/FM Başvurularının Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı
+Faydalı Model header hits: 194 (first 10)
+  p27: Reddedilen Patent/Faydalı Model Başvurularının İlanı (6769 SMK)
+  p28: Geri Çekilmiş Sayılan Patent / Faydalı Model Başvurularının İlanı (6769 SMK)
+  p30: Reddedilen Patent/Faydalı Model Başvurularının İlanı (6769 SMK)
+  p32: Reddedilen Patent/Faydalı Model Başvurularının İlanı (6769 SMK)
+  p41: Araştırma Raporu İle Birlikte Yayımlanan Faydalı Model Başvuruları (6769 SMK)
+  p45: Devir İşlemi Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)
+  p48: Geri Çekilmiş Sayılan Patent / Faydalı Model Başvurularının İlanı (6769 SMK)
+  p50: Yayımlanmış Faydalı Model Başvurularının Araştırma Raporları (6769 SMK)
+  p56: Devir İşlemi Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)
+  p81: Devir İşlemi Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)
+
+==============================================================================
+9. TURKISH FIELD LABELS NEAR INID CODES
+==============================================================================
+
+(11) examples (1815 hits):
+   - TR 2013 11118 B
+   - TR 2013 01260 B
+   - TR 2021 011498 B
+   - TR 2013 11111 B
+
+(12) examples (1787 hits):
+   - en fazla 125 µm?lik
+   - İncelemeli Patent
+   - Başvurunun Türü
+   - Patent Belgesi
+
+(30) examples (1787 hits):
+   - Rüçhan Bilgileri (32) (33) (31)
+   - yer almaktadır.
+   - Rüçhan Bilgileri
+   - sahip en az bir süspansiyon sistemi (10) ile ilgilidir.
+
+(21) examples (1732 hits):
+   - Başvuru Numarası
+   - irtibatlanan ve diğer
+   - arasında konumlanarak bahsedilen avare
+   - aracın kendi ekseni etrafında dönebilmesine imkân verebilecek şekilde ilişkilend
+
+(31) examples (1682 hits):
+   - 2010/08/19  CN  201020297600.6
+   - 2013/01/18  JP  2013-007188
+   - Rüçhan Numarası
+   - 2016/04/15  CN  CN201610233157.8
+
+(32) examples (1663 hits):
+   - en azından kısmen yerleşen bir dış bilezik (20) ve iç
+   - arasında karşılıklı sağlanarak birbirine radyal yönde kilitleme yapar şekilde an
+   - vasıtasıyla irtibatlanarak
+   - Rüçhan Tarihi
+
+(33) examples (1639 hits):
+   - ve
+   - içermektedir.
+   - Rüçhan Ülkesi
+   - , her bir platformlarının dikey taşıyıcı (2) üzerinde yukarı ve aşağı şekilde ha
+
+(51) examples (1629 hits):
+   - içermesidir.
+   - Uluslararası Tasnif Sınıfı
+   - Buluşun tasnif sınıfı
+   - Buluşun tasnif sınıfları
+
+(72) examples (1618 hits):
+   - içerdiği ve üst
+   - Buluşu Yapan
+   - Buluşu Yapanlar
+   - oluşur. Başlık (4), dairesel bir şekle
+
+(54) examples (1616 hits):
+   - Buluş Başlığı
+   - içermektedir.
+   - önceden belirlenen bir sıcaklıkta muflaya (1) emaye kaplanır şekilde ısıtılması,
+
+(57) examples (1614 hits):
+   - Özet
+
+(74) examples (1614 hits):
+   - Vekil
+   - Patent Vekili
+
+(96) examples (1145 hits):
+   - Başvuru Tarihi
+   - EP Başvuru No
+   - içerir. Valf iticilerinin (40, 42) bir diğeri, manşon kısmına (84) kaydırılabili
+
+(97) examples (1144 hits):
+   - EP Yayın Tarihi
+   - EP Yayın No
+
+(22) examples (1122 hits):
+   - dik uzanan bir ikinci duvarının (123) üzerine
+   - Başvuru Tarihi
+   - içermesi, bahsedilen birinci kanalın (21),
+   - vasıtasıyla bir eşsiz kimlik bilgisinin yüksek sıcaklıktan etkilenmeyecek şekild
+
+(43) examples (1051 hits):
+   - ve
+   - içermesi, iş parçasının işleme sırasında
+   - Başvuru Yayın Tarihi
+   - İncelenmemiş Başvurunun Yayın Tarihi
+
+(73) examples (975 hits):
+   - Faydalı Model Sahibi
+   - Patent/Faydalı Model Belgesi Sahipleri
+   - Patent Sahipleri
+   - Patent Sahibi
+
+(10) examples (823 hits):
+   - ile ilgilidir.
+   - parçaları ile oluşturulan masa (12) konseptinden oluşan kamyon
+   - Başvuru Yayın No
+   - anlatılmaktadır.
+
+(19) examples (663 hits):
+   - ,  kumaş aktarma
+   - elde edilmesi işlem adımlarını
+   - , Motor (20),  Araç Şase Destek Çubukları (21), Amortisör (22), Rot (23),
+   - ; kurutma tamburu
+
+(71) examples (657 hits):
+   - Başvuru Sahipleri
+   - kısmen çevreleyen en az bir kanala (30) sahip en az bir üst yuva (11) içermesi,
+   - presleyen bir sap şişirme aparatı (1) ile ilgilidir. Buna göre yeniliği, sapın (
+   - üzerinde dönme engelleyici form (711) oluşturmak için
+
+(45) examples (408 hits):
+   - içermesidir.
+   - Patent Belgesinin Veriliş Tarihi
+   - Faydalı Model Belgesinin Veriliş Tarihi
+   - Belgenin Veriliş Tarihi
+
+(20) examples (281 hits):
+   - ve bahsedilen atık ısı iletim hattı (20) vasıtasıyla potanın (10) ısıtılıp sıcak
+   - içerisinden çıkmasını engellenmesi ve konteynerın yükleme
+   - , iş parçasının (80) geometrisini ölçmeyi sağlayan en az bir adet sensör (60), b
+   - ve bahsedilen tahrik tekerleğine (20) en az bir bağlantı braketi (32) vasıtasıyl
+
+(100) examples (150 hits):
+   - ile
+   - ile ilgidir.
+   - , çalışma kutusu taşıyıcı sistemleri (200), çalışma kutuları (300),
+   - kullanılan somun (8) ve pulu (9) cıvataya (7)
+
+(14) examples (111 hits):
+   - sinterlenerek bir sinterli cevher üretme yönteminde, bir yüksek hızlı karıştırma
+   - ile ilgilidir.
+   - üretkenliği artırabilen bir sinterli cevher üretim yöntemi
+   - ile
+
+(13) examples (98 hits):
+   - ve hazneden (9) çıktığı bir hava çıkış ağzı (14) ile
+   - X-ışını tüpünü (7) ve kolimatörü (8) taşıyan ikincil
+   - sentetik halatların kullanılmasına imkan sunan
+   - ve gövde (13) tarafından çevrelenen en az bir saklama bölmesini (11) ve saklama
+
+(40) examples (88 hits):
+   - ve göbek elemanının (40) bir yakın
+   - , bahsedilen iş parçasının (80)
+   - etrafını örter biçimde radyal mesafeli olarak
+   - açısal olarak
+
+(16) examples (75 hits):
+   - elde edilmesi; uygulanan
+   - ; basınçlandırılmak istenen hatları iç yapısı gereği direk
+   - konularak çoklu elektrik makinası sargısının (14) elde edilmesidir. Buluşa
+   - primer çözeltisi sağlanarak primer
+
+(15) examples (70 hits):
+   - üreten, hava besleme borusu (14)
+   - ;
+   - üretilmesi için ihtiyaç duyulan
+   - ve benzeri veri algılayıcı ve ileticileri bulunduran, bir dış ve iç halkadan (2,
+
+(110) examples (64 hits):
+   - arka yüzüne lamine edilen bir film katmanı (130) ve film katmanını
+   - vana (400) içeren; pompa (100)
+   - ve alt bant tam dubleks (SBFD) modunda haberleşebilen
+   - , hareket yuvası (120), bağlantı kolonu (300) içeren, kara/hava/deniz araçlarınd
+
+(120) examples (56 hits):
+   - geçmektedir.
+   - dönme hareketini alan sol freze dişlisi (140) ile sol çıkış şaftı (10)
+   - , bağlantı kolonu (300) içeren, kara/hava/deniz araçlarında
+   - ; bahsedilen brülörde (120) kıvılcım yaratmak için elektrik besleme hatlarıyla (

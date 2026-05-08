@@ -3786,7 +3786,9 @@ async function generateLogos() {
     var classes = getStudioNiceClasses('studio-logo-classes');
 
     // Show loading, hide others
-    document.getElementById('studio-logo-loading').classList.remove('hidden');
+    var firstGenLoadingEl = document.getElementById('studio-logo-loading');
+    if (firstGenLoadingEl) firstGenLoadingEl.classList.remove('is-revising');
+    firstGenLoadingEl.classList.remove('hidden');
     var logoIdleEl = document.getElementById('studio-logo-idle');
     if (logoIdleEl) logoIdleEl.classList.add('hidden');
     document.getElementById('studio-logo-results').classList.add('hidden');
@@ -3927,6 +3929,20 @@ async function reviseSelectedLogo() {
     if (studioLogoLoading) return;
     studioLogoLoading = true;
     stopLogoProjectPolling();
+
+    // Show the same breathing-skeleton loading state as first-gen, but with
+    // the .is-revising modifier so only one centered panel is visible — one
+    // logo in, one logo out.
+    var loadingEl = document.getElementById('studio-logo-loading');
+    if (loadingEl) {
+        loadingEl.classList.add('is-revising');
+        loadingEl.classList.remove('hidden');
+    }
+    var resultsEl = document.getElementById('studio-logo-results');
+    if (resultsEl) resultsEl.classList.add('hidden');
+    var logoErrorEl = document.getElementById('studio-logo-error');
+    if (logoErrorEl) logoErrorEl.classList.add('hidden');
+
     var btn = document.getElementById('studio-logo-revise-btn');
     if (btn) { btn.disabled = true; btn.classList.add('opacity-50'); }
     try {
@@ -3942,14 +3958,23 @@ async function reviseSelectedLogo() {
             updateLogoCreditsFromData(data.credits_remaining);
         }
         _refreshDashboardUsage();
+        if (loadingEl) loadingEl.classList.add('hidden');
         await fetchAndRenderLogoProject(studioActiveLogoProjectId, false);
         startLogoProjectPollingIfNeeded(data);
         showToast(t('studio.revision_started'), 'success');
     } catch (e) {
+        if (loadingEl) loadingEl.classList.add('hidden');
         if (e.message !== 'upgrade_required' && e.message !== 'credits_exhausted' && e.message !== 'unauthorized') {
-            showToast(e.message || t('studio.logo_failed_msg'), 'error');
+            if (logoErrorEl) {
+                logoErrorEl.classList.remove('hidden');
+                var errorMsgEl = document.getElementById('studio-logo-error-msg');
+                if (errorMsgEl) errorMsgEl.textContent = e.message || t('studio.logo_failed_msg');
+            } else {
+                showToast(e.message || t('studio.logo_failed_msg'), 'error');
+            }
         }
     } finally {
+        if (loadingEl) loadingEl.classList.remove('is-revising');
         studioLogoLoading = false;
         if (btn) { btn.disabled = false; btn.classList.remove('opacity-50'); }
     }
