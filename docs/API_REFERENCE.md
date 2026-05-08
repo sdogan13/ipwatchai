@@ -167,6 +167,68 @@ Commercial and workflow:
 - `/api/v1/billing`
 - `/api/v1/payments`
 
+### Lead feed sub-routes (Opposition Radar modes)
+
+All lead-feed routes are plan-gated via `daily_lead_views`; CSV exports
+additionally require `can_export_csv_leads`. They share `LEADS_PER_PAGE`
+defaulting to 20, `page` ≥ 1, and `limit` 1–100.
+
+Existing modes:
+- `GET /api/v1/leads/feed` — opposition leads (similarity-driven, from
+  `universal_conflicts`).
+- `GET /api/v1/leads/stats`, `GET /api/v1/leads/credits`,
+  `GET /api/v1/leads/export/csv`.
+- `GET /api/v1/leads/renewals/feed`, `/renewals/stats`,
+  `/renewals/export/csv` — renewal leads driven by `final_status` +
+  `expiry_date`.
+
+Event-driven modes (Phase 2 — see `phase1_2_events_status` memory):
+- `GET /api/v1/leads/cancellations/feed` — recently-cancelled marks
+  (`event_type='cancellation'`, last 12 months). Filters: `nice_class`,
+  `search` (name + holder ILIKE).
+- `GET /api/v1/leads/cancellations/export/csv`.
+- `GET /api/v1/leads/transfers/feed` — M&A signal (event_type IN
+  `transfer`, `merger`, `partial_transfer`, last 12 months). Filters:
+  `event_type` (single sub-type or omitted for all), `nice_class`,
+  `search` (name + holder + previous_holder + new_holder ILIKE).
+  Each row exposes `transfer_event_type`, `previous_holder_name`, and
+  `new_holder_name` from `te.old_value` / `te.new_value`.
+- `GET /api/v1/leads/transfers/export/csv`.
+- `GET /api/v1/leads/bankruptcies/feed` — bankrupt holders
+  (`event_type='bankruptcy'`, last 24 months — longer window because
+  bankruptcy effects play out over time). Filters: `nice_class`,
+  `search`. Each row exposes `bankruptcy_details` from `te.new_value`.
+- `GET /api/v1/leads/bankruptcies/export/csv`.
+
+Caveat: event-driven exports skip the `_log_lead_access` audit insert
+because its `lead_access_log_conflict_id_fkey` constraint can't be
+satisfied without a real `universal_conflicts.id`. The renewal CSV
+export has the same latent FK bug. Tracked as open follow-up.
+
+### Holder/attorney portfolio response shape (Phase 1)
+
+`GET /api/v1/holders/{tpe_client_id}/trademarks` and
+`GET /api/v1/attorneys/{attorney_no}/trademarks` (and their
+`/trademarks/csv` siblings) include event-derived fields populated by
+`ingest_events.materialize_all`:
+
+- `holder_changed_at` (ISO date or null)
+- `last_event_type` (e.g. `transfer`, `cancellation`, `renewal`)
+- `last_event_date` (ISO date)
+- `last_event_severity` (`critical | high | medium | low | null`,
+  classified by `utils.event_severity.classify_event_severity`)
+- `has_restrictions` (bool)
+- `active_restriction_count` (int)
+
+The CSV exports add 4 trailing columns: `Sahip Degisim Tarihi`,
+`Son Olay`, `Son Olay Tarihi`, `Aktif Kisitlama`.
+
+`GET /api/v1/alerts/aggregate` items now include `alert_type`
+(`event` | `similarity`) and `source_type` (event_type for event
+alerts; legacy bucket for similarity alerts). Severity-rank tiebreaker
+in the SQL `ORDER BY` keeps similarity-alert ordering unchanged but
+sorts event alerts critical → low within their bucket.
+
 Admin, tooling, and pipeline:
 - `/api/v1/admin`
 - `/api/v1/tools`
