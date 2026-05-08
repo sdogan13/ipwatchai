@@ -11,8 +11,10 @@ import pytest
 from cd_extract_patent import (
     DEFAULT_SEVEN_ZIP,
     TABLE_COLUMNS,
+    cd_to_metadata,
     decode_hsqldb_escapes,
     extract_cd_archive,
+    parse_bulletin_inf,
     parse_hsqldb_log,
     parse_hsqldb_log_line,
     resolve_image_path,
@@ -718,3 +720,120 @@ def test_extract_cd_archive_real_2025_12_smoke(tmp_path):
     assert total_bytes > 10 * 1024 * 1024, (
         f"extracted only {total_bytes} bytes — likely a partial extract"
     )
+
+
+# ---------------------------------------------------------------------------
+# Step 2.7 — parse_bulletin_inf
+# ---------------------------------------------------------------------------
+
+def test_parse_bulletin_inf_real_format(tmp_path):
+    """The real format captured from 2025_12_CD.rar."""
+    inf = tmp_path / "bulletin.inf"
+    inf.write_text("NO=2025/12\nDATE=22/12/2025\n", encoding="utf-8")
+    out = parse_bulletin_inf(inf)
+    assert out == {"bulletin_no": "2025/12", "bulletin_date": "2025-12-22"}
+
+
+def test_parse_bulletin_inf_handles_crlf(tmp_path):
+    inf = tmp_path / "bulletin.inf"
+    inf.write_text("NO=2024/07\r\nDATE=22/07/2024\r\n", encoding="utf-8")
+    out = parse_bulletin_inf(inf)
+    assert out == {"bulletin_no": "2024/07", "bulletin_date": "2024-07-22"}
+
+
+def test_parse_bulletin_inf_tolerates_whitespace(tmp_path):
+    inf = tmp_path / "bulletin.inf"
+    inf.write_text("  NO = 2025/12  \n  DATE = 22/12/2025  \n", encoding="utf-8")
+    out = parse_bulletin_inf(inf)
+    assert out["bulletin_no"] == "2025/12"
+    assert out["bulletin_date"] == "2025-12-22"
+
+
+def test_parse_bulletin_inf_returns_none_values_for_missing_file(tmp_path):
+    """A missing inf shouldn't blow up the orchestrator — the caller
+    decides whether to treat that as a hard failure."""
+    out = parse_bulletin_inf(tmp_path / "no_such.inf")
+    assert out == {"bulletin_no": None, "bulletin_date": None}
+
+
+def test_parse_bulletin_inf_returns_none_for_bad_date(tmp_path):
+    """A malformed date is reported as None, not a crash."""
+    inf = tmp_path / "bulletin.inf"
+    inf.write_text("NO=2025/12\nDATE=garbage\n", encoding="utf-8")
+    out = parse_bulletin_inf(inf)
+    assert out == {"bulletin_no": "2025/12", "bulletin_date": None}
+
+
+def test_parse_bulletin_inf_skips_unrecognised_lines(tmp_path):
+    """Stray lines (comments, blanks) shouldn't break the parser."""
+    inf = tmp_path / "bulletin.inf"
+    inf.write_text(
+        "# header\nNO=2025/12\n\nrandom text\nDATE=22/12/2025\n",
+        encoding="utf-8",
+    )
+    out = parse_bulletin_inf(inf)
+    assert out == {"bulletin_no": "2025/12", "bulletin_date": "2025-12-22"}
+
+
+# ---------------------------------------------------------------------------
+# Step 2.7 — cd_to_metadata (LIVE integration smoke)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(
+    not _REAL_CD.is_file(),
+    reason=f"Real CD {_REAL_CD.name} not on disk; skipping integration smoke",
+)
+@pytest.mark.skipif(
+    not Path(DEFAULT_SEVEN_ZIP).is_file(),
+    reason="7-Zip not installed at the platform default path",
+)
+def test_cd_to_metadata_real_2025_12_smoke(tmp_path):
+    """End-to-end smoke: orchestrate the full CD pipeline on the real
+    2025_12 archive and verify the JSON-ready document.
+
+    Hard checks anchored to the data-shape README's documented numbers:
+      - bulletin_no == "2025/12", bulletin_date == "2025-12-22"
+      - stats.patents == 2718 / holders == 3422 / inventors == 6046 /
+        attorneys == 2371 / priorities == 688
+      - figures_resolved == 653 (the resolver step's measured truth)
+      - len(patents) == 2718
+      - one specific record (2017/15048) has the expected joined
+        holders, inventors, attorneys, image_path, IPC list, and
+        decoded title
+    """
+    doc = cd_to_metadata(_REAL_CD, tmp_path)
+
+    # Header
+    assert doc["bulletin_no"] == "2025/12"
+    assert doc["bulletin_date"] == "2025-12-22"
+    assert doc["source_archive"] == "2025_12_CD.rar"
+    assert "extracted_at" in doc
+
+    # Aggregate stats
+    s = doc["stats"]
+    assert s["patents"]    == 2718
+    assert s["holders"]    == 3422
+    assert s["inventors"]  == 6046
+    assert s["attorneys"]  == 2371
+    assert s["priorities"] == 688
+    assert s["figures_resolved"] == 653
+    assert s["figures_missing"]  == 2065
+
+    # Record list shape
+    assert len(doc["patents"]) == 2718
+    sample = next(p for p in doc["patents"] if p["application_no"] == "2017/15048")
+    assert sample["application_date"] == "05/10/2017"
+    assert sample["title"].startswith("EMNİYET BELİRTEÇLİ ENJEKTÖR")
+    # IPC list — at least the first class is preserved
+    assert isinstance(sample["ipc_codes"], list)
+    assert "A61M 5/31" in sample["ipc_codes"]
+    # Image was resolved (this app has 15048.tif on disk per step 2.5)
+    assert sample["image_path"] == "data/images/2017/15048.tif"
+
+    # Joined parties — at least one inventor matches the captured row
+    inventor_names = [i["title"] for i in sample["inventors"]]
+    assert "ATİLLA SEVİNÇLİ" in inventor_names
+
+    # JSON-serialisable end-to-end (no Path / datetime objects leaking)
+    import json
+    json.dumps(doc, ensure_ascii=False)

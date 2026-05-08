@@ -25,6 +25,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -466,3 +467,191 @@ def extract_cd_archive(
         f"could not identify CD root in {scratch}: "
         f"{[c.name for c in candidates]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Step 2.7 — bulletin.inf header + cd_to_metadata orchestrator
+# ---------------------------------------------------------------------------
+
+_INF_LINE_RE = re.compile(r"^([A-Z]+)\s*=\s*(.*)$")
+
+
+def _parse_dmy_to_iso(value: str) -> Optional[str]:
+    """Convert ``22/12/2025`` to ``2025-12-22`` (or ``None`` if unparseable)."""
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value.strip(), "%d/%m/%Y").date().isoformat()
+    except ValueError:
+        return None
+
+
+def parse_bulletin_inf(inf_path: str | Path) -> Dict[str, Optional[str]]:
+    """Parse the small ``data/bulletin.inf`` header file.
+
+    Format::
+
+        NO=2025/12
+        DATE=22/12/2025
+
+    Returns ``{"bulletin_no": "2025/12", "bulletin_date": "2025-12-22"}``.
+    Missing fields and malformed lines surface as ``None`` values rather
+    than exceptions — the caller is the right place to decide whether
+    those gaps are acceptable.
+    """
+    out: Dict[str, Optional[str]] = {"bulletin_no": None, "bulletin_date": None}
+    path = Path(inf_path)
+    if not path.is_file():
+        return out
+
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        m = _INF_LINE_RE.match(raw.strip())
+        if not m:
+            continue
+        key, value = m.group(1).upper(), m.group(2).strip()
+        if key == "NO":
+            out["bulletin_no"] = value or None
+        elif key == "DATE":
+            out["bulletin_date"] = _parse_dmy_to_iso(value)
+
+    return out
+
+
+# Per-table key remapping for the JSON output. Keeps DB column names
+# uppercase inside parsed rows but presents party / priority lists as
+# nested objects with friendlier snake_case keys.
+_HOLDER_KEYS = {
+    "TITLE": "title", "ADDRESS": "address", "STATE": "state",
+    "POSTALCODE": "postal_code", "CITY": "city", "COUNTRYNO": "country",
+}
+_INVENTER_KEYS = _HOLDER_KEYS  # same shape
+_ATTORNEY_KEYS = {
+    "NO": "no", "NAME": "name", "ADDRESS": "address", "TITLE": "firm",
+}
+_PRIORITY_KEYS = {
+    "PRIORITYNO": "priority_no", "PRIORITYDATE": "priority_date",
+    "COUNTRYNO": "country",
+}
+
+
+def _project(row: Dict[str, Any], key_map: Dict[str, str]) -> Dict[str, Any]:
+    """Pick + rename keys from a parsed row, dropping APPLICATIONNO."""
+    return {new: row.get(old, "") for old, new in key_map.items()}
+
+
+def _group_by_application_no(rows: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(row.get("APPLICATIONNO", ""), []).append(row)
+    return grouped
+
+
+def cd_to_metadata(
+    rar_path: str | Path,
+    scratch_dir: str | Path,
+    *,
+    seven_zip: Optional[str | Path] = None,
+) -> Dict[str, Any]:
+    """Extract a Patent CD ``.rar`` and produce a fully joined JSON-ready dict.
+
+    Pipeline:
+      1. ``extract_cd_archive`` (drops ``data/java/``)
+      2. ``parse_bulletin_inf`` for issue header
+      3. ``parse_hsqldb_log`` over ``data/ptbulletin.log``
+      4. group HOLDER / INVENTER / ATTORNEY / PRIORITY rows by APPLICATIONNO
+      5. join + resolve figure path per patent via ``resolve_image_path``
+      6. emit a single document
+
+    The returned dict has this shape (snake_case)::
+
+        {
+          "bulletin_no":   "2025/12",
+          "bulletin_date": "2025-12-22",
+          "source_archive": "2025_12_CD.rar",
+          "extracted_at":   "2026-05-08T12:34:56+00:00",
+          "stats": { "patents": 2718, "holders": 3422, ..., "figures_resolved": 653 },
+          "patents": [
+            {
+              "application_no": "2017/15048",
+              "application_date": "05/10/2017",
+              "patent_no": "", "patent_date": "",
+              "ipc_codes": ["A61M 5/31", ...],
+              "publication_no": "TR 2017 15048 U3",
+              "publication_type": "73",
+              "publication_date": "22/12/2025",
+              "title": "EMNİYET BELİRTEÇLİ …",
+              "patent_type": "2",
+              "abstract": "Başvuru konusu …",
+              "image_path": "data/images/2017/15048.tif",   # or null
+              "holders":    [...], "inventors": [...],
+              "attorneys":  [...], "priorities": [...],
+            }, …
+          ],
+        }
+
+    The CD's extracted folder is left in place under ``scratch_dir`` —
+    the caller is responsible for cleanup, since downstream stages
+    (figure embedding) typically still need the TIFFs on disk.
+    """
+    rar = Path(rar_path)
+    cd_root = extract_cd_archive(rar, scratch_dir, seven_zip=seven_zip)
+
+    inf = parse_bulletin_inf(cd_root / "data" / "bulletin.inf")
+    log = parse_hsqldb_log(cd_root / "data" / "ptbulletin.log")
+    images_root = cd_root / "data" / "images"
+
+    holders_by_app   = _group_by_application_no(log.get("HOLDER", []))
+    inventors_by_app = _group_by_application_no(log.get("INVENTER", []))
+    attorneys_by_app = _group_by_application_no(log.get("ATTORNEY", []))
+    priorities_by_app = _group_by_application_no(log.get("PRIORITY", []))
+
+    figures_resolved = 0
+    patents: List[Dict[str, Any]] = []
+
+    for row in log.get("PATENT", []):
+        app_no = row.get("APPLICATIONNO", "")
+        image = resolve_image_path(app_no, images_root)
+        if image is not None:
+            figures_resolved += 1
+            try:
+                rel = image.relative_to(cd_root).as_posix()
+            except ValueError:
+                rel = str(image)
+        else:
+            rel = None
+
+        patents.append({
+            "application_no":    app_no,
+            "application_date":  row.get("APPLICATIONDATE", ""),
+            "patent_no":         row.get("PATENTNO", ""),
+            "patent_date":       row.get("PATENTDATE", ""),
+            "ipc_codes":         row.get("IPCCODE", []),
+            "publication_no":    row.get("PUBLICATIONNO", ""),
+            "publication_type":  row.get("PUBLICATIONTYPE", ""),
+            "publication_date":  row.get("PUBLICATIONDATE", ""),
+            "title":             row.get("PATENTTITLE", ""),
+            "patent_type":       row.get("PATENTTYPE", ""),
+            "abstract":          row.get("PATENTABSTRACT", ""),
+            "image_path":        rel,
+            "holders":    [_project(r, _HOLDER_KEYS)   for r in holders_by_app.get(app_no, [])],
+            "inventors":  [_project(r, _INVENTER_KEYS) for r in inventors_by_app.get(app_no, [])],
+            "attorneys":  [_project(r, _ATTORNEY_KEYS) for r in attorneys_by_app.get(app_no, [])],
+            "priorities": [_project(r, _PRIORITY_KEYS) for r in priorities_by_app.get(app_no, [])],
+        })
+
+    return {
+        "bulletin_no":   inf.get("bulletin_no"),
+        "bulletin_date": inf.get("bulletin_date"),
+        "source_archive": rar.name,
+        "extracted_at":  datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "stats": {
+            "patents":           len(log.get("PATENT", [])),
+            "holders":           len(log.get("HOLDER", [])),
+            "inventors":         len(log.get("INVENTER", [])),
+            "attorneys":         len(log.get("ATTORNEY", [])),
+            "priorities":        len(log.get("PRIORITY", [])),
+            "figures_resolved":  figures_resolved,
+            "figures_missing":   len(log.get("PATENT", [])) - figures_resolved,
+        },
+        "patents": patents,
+    }
