@@ -2269,7 +2269,7 @@ function buyCredits(amount) {
 // ============================================
 function showDashboardTab(tabId) {
     // Hide ALL tab content panels
-    var panels = ['overview', 'watchlist', 'search', 'design-search', 'opposition-radar', 'ai-studio', 'reports', 'applications'];
+    var panels = ['overview', 'watchlist', 'search', 'design-search', 'design-watchlist', 'opposition-radar', 'ai-studio', 'reports', 'applications'];
     panels.forEach(function (id) {
         var el = document.getElementById('tab-content-' + id);
         if (el) el.classList.add('hidden');
@@ -2349,6 +2349,10 @@ function showDashboardTab(tabId) {
     // Lazy-init design search tab on first activation
     if (tabId === 'design-search' && typeof window.initDesignSearchTab === 'function') {
         window.initDesignSearchTab();
+    }
+    // Lazy-init design watchlist tab on first activation
+    if (tabId === 'design-watchlist' && typeof window.initDesignWatchlistTab === 'function') {
+        window.initDesignWatchlistTab();
     }
 }
 

@@ -1,0 +1,119 @@
+<!-- ============================================ -->
+<!-- DESIGN WATCHLIST TAB (Tasarım Takibi)         -->
+<!-- ============================================ -->
+<div id="tab-content-design-watchlist" class="hidden max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-4">
+
+  <!-- Header + add button -->
+  <div class="flex items-start justify-between flex-wrap gap-3 mb-4">
+    <div>
+      <h2 class="text-lg font-semibold" style="color:var(--color-text-primary)"
+          x-text="t('design_watchlist.panel_title')">Tasarım Takibi</h2>
+      <p class="text-xs mt-1" style="color:var(--color-text-muted)"
+         x-text="t('design_watchlist.panel_description')">
+        Track competitor designs and get notified when similar designs are filed.
+      </p>
+    </div>
+    <button type="button" id="design-watchlist-add-toggle"
+            class="px-4 py-2 rounded-lg font-medium text-sm bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+            x-text="t('design_watchlist.add_button')">+ Yeni Takip</button>
+  </div>
+
+  <!-- Status bar (shared across actions) -->
+  <div id="design-watchlist-status" class="hidden mb-3 p-3 rounded-lg text-sm"
+       style="background:var(--color-bg-card);color:var(--color-text-secondary);border:1px solid var(--color-border)"></div>
+  <div id="design-watchlist-error" class="hidden mb-3 p-3 rounded-lg text-sm"
+       style="background:var(--color-bg-error,#fee2e2);color:var(--color-text-error,#991b1b)"></div>
+
+  <!-- Add form (collapsed by default) -->
+  <div id="design-watchlist-add-card" class="hidden rounded-xl shadow-sm border p-5 mb-4"
+       style="background:var(--color-bg-card);border-color:var(--color-border)">
+    <h3 class="text-sm font-semibold mb-3" style="color:var(--color-text-primary)"
+        x-text="t('design_watchlist.add_form_title')">Yeni Takip Ekle</h3>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+
+      <!-- Product name -->
+      <div class="md:col-span-2">
+        <label class="block text-xs font-medium mb-1" style="color:var(--color-text-secondary)"
+               x-text="t('design_watchlist.product_name_label')">Ürün Adı</label>
+        <input type="text" id="design-watchlist-product-name"
+               :placeholder="t('design_watchlist.product_name_placeholder')"
+               class="w-full px-3 py-2 rounded-lg outline-none text-sm"
+               style="background:var(--color-bg-card);border:1px solid var(--color-border);color:var(--color-text-primary)"
+               maxlength="500" />
+      </div>
+
+      <!-- Locarno -->
+      <div>
+        <label class="block text-xs font-medium mb-1" style="color:var(--color-text-secondary)"
+               x-text="t('design_watchlist.locarno_label')">Locarno Sınıfları</label>
+        <input type="text" id="design-watchlist-locarno"
+               :placeholder="t('design_watchlist.locarno_placeholder')"
+               class="w-full px-3 py-2 rounded-lg outline-none text-sm"
+               style="background:var(--color-bg-card);border:1px solid var(--color-border);color:var(--color-text-primary)" />
+        <p class="text-xs mt-1" style="color:var(--color-text-faint)"
+           x-text="t('design_watchlist.locarno_hint')">Örn: 06-01, 26-05</p>
+      </div>
+
+      <!-- Customer application no -->
+      <div>
+        <label class="block text-xs font-medium mb-1" style="color:var(--color-text-secondary)"
+               x-text="t('design_watchlist.customer_app_no_label')">Kendi Başvuru No (opsiyonel)</label>
+        <input type="text" id="design-watchlist-app-no"
+               :placeholder="t('design_watchlist.customer_app_no_placeholder')"
+               class="w-full px-3 py-2 rounded-lg outline-none text-sm"
+               style="background:var(--color-bg-card);border:1px solid var(--color-border);color:var(--color-text-primary)" />
+      </div>
+    </div>
+
+    <div class="flex items-center gap-2 mt-4">
+      <button type="button" id="design-watchlist-submit"
+              class="px-4 py-2 rounded-lg font-medium text-sm bg-indigo-600 text-white hover:bg-indigo-700 transition-colors disabled:opacity-50"
+              x-text="t('design_watchlist.submit')">Kaydet</button>
+      <button type="button" id="design-watchlist-cancel"
+              class="px-4 py-2 rounded-lg font-medium text-sm hover:opacity-80 transition-colors"
+              style="background:var(--color-bg-muted);color:var(--color-text-secondary)"
+              x-text="t('design_watchlist.cancel')">İptal</button>
+    </div>
+  </div>
+
+  <!-- List card -->
+  <div class="rounded-xl shadow-sm border p-5"
+       style="background:var(--color-bg-card);border-color:var(--color-border)">
+
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="text-sm font-semibold" style="color:var(--color-text-primary)">
+        <span x-text="t('design_watchlist.list_title')">Takip Listesi</span>
+        <span id="design-watchlist-total-badge"
+              class="ml-2 text-xs px-2 py-0.5 rounded-full"
+              style="background:var(--color-bg-muted);color:var(--color-text-secondary)">0</span>
+      </h3>
+    </div>
+
+    <!-- Loading -->
+    <div id="design-watchlist-loading" class="hidden py-12 text-center">
+      <div class="inline-block animate-spin rounded-full h-8 w-8 border-2 border-indigo-600 border-t-transparent"></div>
+      <p class="text-sm mt-3" style="color:var(--color-text-muted)"
+         x-text="t('design_watchlist.loading')">Yükleniyor…</p>
+    </div>
+
+    <!-- Empty -->
+    <div id="design-watchlist-empty" class="hidden py-12 text-center">
+      <svg class="w-12 h-12 mx-auto mb-2" style="color:var(--color-text-faint)"
+           fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+      </svg>
+      <p class="text-sm font-medium" style="color:var(--color-text-secondary)"
+         x-text="t('design_watchlist.empty_title')">Henüz takip kaydı yok</p>
+      <p class="text-xs mt-1" style="color:var(--color-text-faint)"
+         x-text="t('design_watchlist.empty_body')">Yukarıdaki butonla ilk kaydı ekleyin.</p>
+    </div>
+
+    <!-- Items list -->
+    <div id="design-watchlist-list" class="space-y-3"></div>
+  </div>
+
+  <!-- Hidden file input for image uploads -->
+  <input type="file" id="design-watchlist-image-input" accept="image/*" class="hidden" />
+</div>
