@@ -273,3 +273,124 @@ def normalize_cd_record(cd_record: Dict[str, Any]) -> CanonicalRecord:
         patent_type=_clean_str(cd_record.get("patent_type")),
         source_format="CD",
     )
+
+
+# ---------------------------------------------------------------------------
+# Step 4.3 — normalize_pdf_record
+# ---------------------------------------------------------------------------
+#
+# Converts one entry from PDF-side ``records[]`` into a CanonicalRecord.
+# PDF is closer to canonical than CD — dates already ISO, ``ipc_classes``
+# already named correctly, party shape uses ``name``. Two real differences:
+#
+#   1. ``attorney`` is a single object, not a list. Wrap into a 1-element
+#      ``attorneys`` list (or drop entirely if missing).
+#   2. Empty / null per-field values must be elided so downstream code
+#      doesn't have to ``if value is not None and value.strip()`` checks.
+
+
+def _normalize_pdf_party(party: Dict[str, Any]) -> Dict[str, Any]:
+    """Drop empty fields from a PDF holder/inventor dict.
+
+    PDF parties already use ``name`` (no rename needed) and only ship
+    ``name``, ``address``, ``country``. Same dict shape, just stripped.
+    """
+    out: Dict[str, Any] = {"name": _clean_str(party.get("name")) or ""}
+    for key in ("address", "country"):
+        value = _clean_str(party.get(key))
+        if value:
+            out[key] = value
+    return out
+
+
+def _normalize_pdf_attorney_to_list(
+    attorney: Optional[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Wrap PDF's single-object ``attorney`` into a 1-element list.
+
+    The canonical shape is ``attorneys`` (list) for both sources because
+    CD ships multiple attorneys per record and DB ingest needs a single
+    code path. Returns ``[]`` when PDF didn't extract an attorney
+    (missing key or an empty dict).
+    """
+    if not attorney:
+        return []
+    cleaned: Dict[str, Any] = {}
+    for key in ("name", "firm"):
+        value = _clean_str(attorney.get(key))
+        if value:
+            cleaned[key] = value
+    return [cleaned] if cleaned else []
+
+
+def _normalize_pdf_priority(priority: Dict[str, Any]) -> Dict[str, Any]:
+    """Drop empty fields from a PDF priority dict — date already ISO."""
+    out: Dict[str, Any] = {}
+    for key in ("priority_no", "country"):
+        value = _clean_str(priority.get(key))
+        if value:
+            out[key] = value
+    iso = _clean_str(priority.get("priority_date"))
+    if iso:
+        out["priority_date"] = iso
+    return out
+
+
+def _normalize_pdf_figure(figure: Dict[str, Any]) -> Dict[str, Any]:
+    """Pass-through PDF figure dict, dropping empty string fields.
+
+    PDF figures carry ``image_path``, ``page``, ``image_xref``, ``bbox``
+    (all from pdf_extract_patent step 3.6). Numeric fields preserved
+    even when zero; only empty/None strings stripped.
+    """
+    out: Dict[str, Any] = {}
+    path = _clean_str(figure.get("image_path"))
+    if path:
+        out["image_path"] = path
+    for key in ("page", "image_xref"):
+        if figure.get(key) is not None:
+            out[key] = figure[key]
+    bbox = figure.get("bbox")
+    if bbox:
+        out["bbox"] = list(bbox)
+    return out
+
+
+def _page_range_or_none(value: Any) -> Optional[List[int]]:
+    """Coerce PDF page_range into a clean list[int], or None."""
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        return None
+    try:
+        return [int(value[0]), int(value[1])]
+    except (TypeError, ValueError):
+        return None
+
+
+def normalize_pdf_record(pdf_record: Dict[str, Any]) -> CanonicalRecord:
+    """Convert a single PDF ``records[]`` entry into a ``CanonicalRecord``.
+
+    PDF source already uses canonical field names for most fields. The
+    main work is wrapping the single-object ``attorney`` into a list,
+    eliding empty strings, and preserving PDF-only fields
+    (``grant_date``, ``page_range``).
+    """
+    return CanonicalRecord(
+        application_no=_clean_str(pdf_record.get("application_no")),
+        application_date=_clean_str(pdf_record.get("application_date")),
+        publication_no=_clean_str(pdf_record.get("publication_no")),
+        publication_date=_clean_str(pdf_record.get("publication_date")),
+        grant_date=_clean_str(pdf_record.get("grant_date")),
+        kind_code=_clean_str(pdf_record.get("kind_code")),
+        record_type=_clean_str(pdf_record.get("record_type")),
+        title=_clean_str(pdf_record.get("title")),
+        abstract=_clean_str(pdf_record.get("abstract")),
+        ipc_classes=list(pdf_record.get("ipc_classes") or []),
+        holders=[_normalize_pdf_party(h) for h in (pdf_record.get("holders") or [])],
+        inventors=[_normalize_pdf_party(i) for i in (pdf_record.get("inventors") or [])],
+        attorneys=_normalize_pdf_attorney_to_list(pdf_record.get("attorney")),
+        priorities=[_normalize_pdf_priority(p) for p in (pdf_record.get("priorities") or [])],
+        figures=[_normalize_pdf_figure(f) for f in (pdf_record.get("figures") or [])],
+        patent_type=None,                         # CD-only field, never set from PDF
+        page_range=_page_range_or_none(pdf_record.get("page_range")),
+        source_format="PDF",
+    )

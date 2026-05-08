@@ -18,9 +18,15 @@ from pipeline.reconcile_patent import (
     _normalize_cd_attorney,
     _normalize_cd_party,
     _normalize_cd_priority,
+    _normalize_pdf_attorney_to_list,
+    _normalize_pdf_figure,
+    _normalize_pdf_party,
+    _normalize_pdf_priority,
+    _page_range_or_none,
     load_cd_metadata,
     load_pdf_metadata,
     normalize_cd_record,
+    normalize_pdf_record,
 )
 
 
@@ -348,3 +354,186 @@ def test_normalize_cd_record_handles_missing_publication_no() -> None:
     assert rec.application_date is None
     assert rec.holders == []
     assert rec.figures == []
+
+
+# ---------------------------------------------------------------------------
+# Step 4.3 — normalize_pdf_record
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_pdf_party_drops_empty_fields() -> None:
+    party = {"name": "ACME", "address": "", "country": "TR"}
+    assert _normalize_pdf_party(party) == {"name": "ACME", "country": "TR"}
+
+
+def test_normalize_pdf_party_handles_null_address() -> None:
+    """PDF parser ships null for absent address — must not survive output."""
+    party = {"name": "ACME", "address": None, "country": None}
+    assert _normalize_pdf_party(party) == {"name": "ACME"}
+
+
+def test_normalize_pdf_attorney_object_to_list() -> None:
+    """Single attorney object wraps into a 1-element list."""
+    attorney = {"name": "OYA YALVAÇ", "firm": "DERİŞ PATENT VE MARKA ACENTALIĞI A.Ş."}
+    out = _normalize_pdf_attorney_to_list(attorney)
+    assert out == [{
+        "name": "OYA YALVAÇ",
+        "firm": "DERİŞ PATENT VE MARKA ACENTALIĞI A.Ş.",
+    }]
+
+
+def test_normalize_pdf_attorney_missing_returns_empty_list() -> None:
+    """No attorney = []; not [None], not {}, not [{}]."""
+    assert _normalize_pdf_attorney_to_list(None) == []
+    assert _normalize_pdf_attorney_to_list({}) == []
+    assert _normalize_pdf_attorney_to_list({"name": "", "firm": None}) == []
+
+
+def test_normalize_pdf_priority_passes_iso_through() -> None:
+    """PDF priority date is already ISO — don't re-parse."""
+    priority = {
+        "priority_no": "2013-007188",
+        "priority_date": "2013-01-18",
+        "country": "JP",
+    }
+    assert _normalize_pdf_priority(priority) == priority
+
+
+def test_normalize_pdf_figure_passes_known_fields() -> None:
+    figure = {
+        "image_path": "2025_08_figures/0042.jpg",
+        "page": 117,
+        "image_xref": 4204,
+        "bbox": [10.0, 20.0, 100.0, 200.0],
+    }
+    out = _normalize_pdf_figure(figure)
+    assert out == {
+        "image_path": "2025_08_figures/0042.jpg",
+        "page": 117,
+        "image_xref": 4204,
+        "bbox": [10.0, 20.0, 100.0, 200.0],
+    }
+
+
+def test_normalize_pdf_figure_drops_empty_fields() -> None:
+    """Empty image_path or absent bbox must not survive."""
+    figure = {"image_path": "", "page": 117, "image_xref": None, "bbox": []}
+    out = _normalize_pdf_figure(figure)
+    assert out == {"page": 117}
+
+
+def test_page_range_or_none_happy_path() -> None:
+    assert _page_range_or_none([117, 118]) == [117, 118]
+    assert _page_range_or_none((117, 117)) == [117, 117]
+
+
+def test_page_range_or_none_rejects_garbage() -> None:
+    assert _page_range_or_none(None) is None
+    assert _page_range_or_none([]) is None
+    assert _page_range_or_none([117]) is None
+    assert _page_range_or_none([117, 118, 119]) is None
+    assert _page_range_or_none(["a", "b"]) is None
+
+
+def test_normalize_pdf_record_full() -> None:
+    """Real shape pulled from 2025_08_pdf_metadata.json."""
+    pdf = {
+        "record_index": 1,
+        "page_range": [117, 117],
+        "publication_no": "TR 2021 011498 B",
+        "kind_code": "B",
+        "record_type": "GRANTED_PATENT",
+        "publication_kind_label": "İncelemeli Patent",
+        "application_no": "2021/011498",
+        "application_date": "2014-01-10",
+        "publication_date": "2023-01-23",
+        "grant_date": "2025-08-21",
+        "title": "KONVERTÖR İÇİNDE ÇELİK YAPIM YÖNTEMİ.",
+        "abstract": "[Problem] ...",
+        "ipc_classes": ["C21C 5/28", "C21C 1/02"],
+        "holders": [
+            {
+                "name": "JFE STEEL CORPORATION",
+                "address": "TOKYO 1000011",
+                "country": "JAPONYA",
+            }
+        ],
+        "inventors": [{"name": "NAOKI KIKUCHI"}],
+        "attorney": {
+            "name": "OYA YALVAÇ",
+            "firm": "DERİŞ PATENT VE MARKA ACENTALIĞI A.Ş.",
+        },
+        "priorities": [
+            {
+                "priority_no": "2013-007188",
+                "priority_date": "2013-01-18",
+                "country": "JP",
+            }
+        ],
+        "figures": [],
+    }
+
+    rec = normalize_pdf_record(pdf)
+
+    assert rec.application_no == "2021/011498"
+    assert rec.application_date == "2014-01-10"          # already ISO
+    assert rec.publication_no == "TR 2021 011498 B"
+    assert rec.publication_date == "2023-01-23"
+    assert rec.grant_date == "2025-08-21"                # PDF-only, preserved
+    assert rec.kind_code == "B"
+    assert rec.record_type == "GRANTED_PATENT"
+    assert rec.title.startswith("KONVERTÖR")
+    assert rec.abstract.startswith("[Problem]")
+    assert rec.ipc_classes == ["C21C 5/28", "C21C 1/02"]
+    assert rec.holders == [{
+        "name": "JFE STEEL CORPORATION",
+        "address": "TOKYO 1000011",
+        "country": "JAPONYA",
+    }]
+    assert rec.inventors == [{"name": "NAOKI KIKUCHI"}]
+    assert rec.attorneys == [{
+        "name": "OYA YALVAÇ",
+        "firm": "DERİŞ PATENT VE MARKA ACENTALIĞI A.Ş.",
+    }]
+    assert rec.priorities == [{
+        "priority_no": "2013-007188",
+        "priority_date": "2013-01-18",
+        "country": "JP",
+    }]
+    assert rec.figures == []
+    assert rec.patent_type is None                       # CD-only; PDF never sets
+    assert rec.page_range == [117, 117]
+    assert rec.source_format == "PDF"
+
+
+def test_normalize_pdf_record_no_attorney() -> None:
+    """Some PDF records have no attorney; canonical attorneys must be []."""
+    pdf = {
+        "application_no": "2013/11111",
+        "publication_no": "TR 2013 11111 B",
+        "kind_code": "B",
+        "record_type": "GRANTED_PATENT",
+        "ipc_classes": [],
+        "holders": [],
+        "inventors": [],
+        "priorities": [],
+        "figures": [],
+    }
+    rec = normalize_pdf_record(pdf)
+    assert rec.attorneys == []
+    assert rec.application_date is None
+    assert rec.page_range is None
+
+
+def test_normalize_pdf_record_drops_holder_address_null() -> None:
+    """Real PDF data includes holders with address=null. Must not survive."""
+    pdf = {
+        "application_no": "2013/11111",
+        "holders": [{"name": "JİANZHONG SHANG", "address": None, "country": None}],
+        "inventors": [],
+        "priorities": [],
+        "figures": [],
+        "ipc_classes": [],
+    }
+    rec = normalize_pdf_record(pdf)
+    assert rec.holders == [{"name": "JİANZHONG SHANG"}]
