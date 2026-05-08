@@ -18,18 +18,22 @@ from pipeline.reconcile_patent import (
     _normalize_cd_attorney,
     _normalize_cd_party,
     _normalize_cd_priority,
+    _build_stats,
     _merge_figures,
+    _normalise_bulletin_no,
     _normalize_pdf_attorney_to_list,
     _normalize_pdf_figure,
     _normalize_pdf_party,
     _normalize_pdf_priority,
     _page_range_or_none,
     _pick_longer_title,
+    _record_to_dict,
     load_cd_metadata,
     load_pdf_metadata,
     merge_records,
     normalize_cd_record,
     normalize_pdf_record,
+    reconcile_metadata,
 )
 
 
@@ -723,3 +727,184 @@ def test_merge_records_raises_on_app_no_mismatch() -> None:
     pdf.application_no = "9999/99999"
     with pytest.raises(ValueError, match="mismatched application_no"):
         merge_records(cd, pdf)
+
+
+# ---------------------------------------------------------------------------
+# Step 4.5 — reconcile_metadata orchestrator
+# ---------------------------------------------------------------------------
+
+
+def test_normalise_bulletin_no_canonicalises_both_formats() -> None:
+    """CD ships '2025/8'; PDF ships '2025-08'. Both -> '2025/8' canonical."""
+    assert _normalise_bulletin_no("2025/8") == "2025/8"
+    assert _normalise_bulletin_no("2025-08") == "2025/8"
+    assert _normalise_bulletin_no("2025/12") == "2025/12"
+    assert _normalise_bulletin_no("2025-12") == "2025/12"
+
+
+def test_normalise_bulletin_no_returns_none_on_empty() -> None:
+    assert _normalise_bulletin_no(None) is None
+    assert _normalise_bulletin_no("") is None
+    assert _normalise_bulletin_no("   ") is None
+
+
+def test_normalise_bulletin_no_passes_unrecognised_through_stripped() -> None:
+    """Defensive: keep the raw value if it doesn't match either format."""
+    assert _normalise_bulletin_no("  weird-value  ") == "weird-value"
+
+
+def test_record_to_dict_drops_none_scalars_keeps_empty_lists() -> None:
+    """JSON output should be tidy but distinguishable from absent."""
+    rec = CanonicalRecord(application_no="X", title=None, ipc_classes=[])
+    out = _record_to_dict(rec)
+    assert "application_no" in out and out["application_no"] == "X"
+    assert "title" not in out                  # None scalars dropped
+    assert out["ipc_classes"] == []            # empty list preserved
+
+
+def test_build_stats_counts_source_format_and_record_type() -> None:
+    records = [
+        CanonicalRecord(application_no="A", source_format="BOTH", record_type="GRANTED_PATENT"),
+        CanonicalRecord(application_no="B", source_format="CD", record_type="UNKNOWN"),
+        CanonicalRecord(application_no="C", source_format="PDF", record_type="PUBLISHED_APP"),
+        CanonicalRecord(application_no="D", source_format="CD", record_type=None,
+                         figures=[{"image_path": "x.tif"}, {"image_path": "y.jpg"}]),
+    ]
+    stats = _build_stats(records)
+    assert stats["records"] == 4
+    assert stats["by_source_format"] == {"CD": 2, "PDF": 1, "BOTH": 1}
+    assert stats["by_record_type"]["GRANTED_PATENT"] == 1
+    assert stats["by_record_type"]["PUBLISHED_APP"] == 1
+    assert stats["by_record_type"]["UNKNOWN"] == 2     # explicit + None-coerced
+    assert stats["figures_total"] == 2
+
+
+def _cd_doc(records=None, bulletin_no="2025/8") -> dict:
+    return {
+        "bulletin_no": bulletin_no,
+        "bulletin_date": "2025-08-21",
+        "source_archive": "2025_07_CD.rar",
+        "stats": {"patents": len(records or [])},
+        "patents": records or [],
+    }
+
+
+def _pdf_doc(records=None, bulletin_no="2025-08") -> dict:
+    return {
+        "bulletin_no": bulletin_no,
+        "bulletin_date": "2025-08-21",
+        "source_pdf": "2025_08.pdf",
+        "stats": {"records": len(records or [])},
+        "records": records or [],
+    }
+
+
+def test_reconcile_metadata_pairs_overlap_on_application_no() -> None:
+    """Records sharing application_no merge to BOTH; one-side stays one-side."""
+    cd = _cd_doc(records=[
+        {
+            "application_no": "2017/15048",
+            "publication_no": "TR 2017 15048 U3",
+            "title": "CD title",
+            "ipc_codes": ["A61M 5/31"],
+            "holders": [{"title": "ACME"}],
+        },
+        {
+            "application_no": "2018/22222",          # CD-only (PDF didn't see)
+            "publication_no": "TR 2018 22222 U3",
+            "title": "Only in CD",
+            "ipc_codes": [],
+            "holders": [],
+        },
+    ])
+    pdf = _pdf_doc(records=[
+        {
+            "application_no": "2017/15048",
+            "publication_no": "TR 2017 15048 U3",
+            "kind_code": "U3",
+            "record_type": "UNKNOWN",
+            "title": "PDF title is much longer than CD title",
+            "abstract": "Long PDF abstract.",
+            "ipc_classes": ["A61M 5/31"],
+            "holders": [{"name": "ACME"}],
+            "inventors": [],
+            "priorities": [],
+            "figures": [],
+        },
+        {
+            "application_no": "2019/33333",          # PDF-only
+            "publication_no": "TR 2019 33333 B",
+            "kind_code": "B",
+            "record_type": "GRANTED_PATENT",
+            "title": "Only in PDF",
+            "abstract": "PDF.",
+            "ipc_classes": [],
+            "holders": [],
+            "inventors": [],
+            "priorities": [],
+            "figures": [],
+        },
+    ])
+
+    doc = reconcile_metadata(cd, pdf)
+
+    assert doc["bulletin_no"] == "2025/8"          # canonicalised
+    assert doc["bulletin_date"] == "2025-08-21"
+    assert doc["source_archive"] == "2025_07_CD.rar"
+    assert doc["source_pdf"] == "2025_08.pdf"
+    assert "reconciled_at" in doc
+
+    # 3 records: 1 BOTH + 1 CD-only + 1 PDF-only
+    assert doc["stats"]["records"] == 3
+    assert doc["stats"]["by_source_format"] == {"CD": 1, "PDF": 1, "BOTH": 1}
+
+    # Sorted by application_no for determinism
+    app_nos = [r["application_no"] for r in doc["records"]]
+    assert app_nos == ["2017/15048", "2018/22222", "2019/33333"]
+
+    # Spot-check the merged record
+    both = doc["records"][0]
+    assert both["source_format"] == "BOTH"
+    assert both["title"] == "PDF title is much longer than CD title"   # PDF longer
+    assert both["abstract"] == "Long PDF abstract."                     # PDF wins
+
+
+def test_reconcile_metadata_raises_on_bulletin_mismatch() -> None:
+    cd = _cd_doc(bulletin_no="2025/8")
+    pdf = _pdf_doc(bulletin_no="2025-09")           # different bulletin
+    with pytest.raises(ValueError, match="bulletin_no mismatch"):
+        reconcile_metadata(cd, pdf)
+
+
+def test_reconcile_metadata_accepts_format_difference() -> None:
+    """CD '2025/8' and PDF '2025-08' are the same bulletin — must NOT raise."""
+    cd = _cd_doc(bulletin_no="2025/8")
+    pdf = _pdf_doc(bulletin_no="2025-08")
+    doc = reconcile_metadata(cd, pdf)              # no exception
+    assert doc["bulletin_no"] == "2025/8"
+
+
+def test_reconcile_metadata_drops_records_without_application_no_from_index() -> None:
+    """Defensive: a CD row with blank application_no must not pair on falsy key."""
+    cd = _cd_doc(records=[
+        {"application_no": "", "publication_no": "TR x", "ipc_codes": [], "holders": []},
+    ])
+    pdf = _pdf_doc(records=[
+        {"application_no": "", "publication_no": "TR y", "kind_code": "B",
+         "record_type": "GRANTED_PATENT", "title": "x", "abstract": "y",
+         "ipc_classes": [], "holders": [], "inventors": [], "priorities": [], "figures": []},
+    ])
+    doc = reconcile_metadata(cd, pdf)
+    # Both should appear separately (CD-only + PDF-only), NOT merged on blank
+    assert doc["stats"]["by_source_format"]["BOTH"] == 0
+
+
+def test_reconcile_metadata_record_count_deterministic_sort() -> None:
+    """Output ordering must be stable across runs (diff-of-runs friendliness)."""
+    cd = _cd_doc(records=[
+        {"application_no": "2017/99999", "publication_no": "x", "ipc_codes": [], "holders": []},
+        {"application_no": "2017/00001", "publication_no": "y", "ipc_codes": [], "holders": []},
+    ])
+    pdf = _pdf_doc(records=[])
+    doc = reconcile_metadata(cd, pdf)
+    assert [r["application_no"] for r in doc["records"]] == ["2017/00001", "2017/99999"]

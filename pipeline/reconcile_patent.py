@@ -37,8 +37,8 @@ import json
 import logging
 import re
 import sys
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -497,3 +497,156 @@ def merge_records(cd: CanonicalRecord, pdf: CanonicalRecord) -> CanonicalRecord:
         page_range=pdf.page_range,                     # PDF-only field
         source_format="BOTH",
     )
+
+
+# ---------------------------------------------------------------------------
+# Step 4.5 — reconcile_metadata orchestrator
+# ---------------------------------------------------------------------------
+#
+# Top-level reconciler: takes the two upstream JSON docs (already loaded
+# by the loaders from step 4.1), validates that they describe the same
+# bulletin, indexes by application_no, and produces the unified output
+# document Stage 5 will ingest.
+#
+# Bulletin-no equality is the only cross-doc invariant the reconciler
+# enforces. Pairing two unrelated bulletins is silently catastrophic
+# (zero overlap, mixed dates) so we raise on mismatch.
+
+
+_RECORD_TYPES_FOR_STATS = (
+    "GRANTED_PATENT",
+    "GRANTED_UM",
+    "PUBLISHED_APP",
+    "PUBLISHED_UM_APP",
+    "EP_FASCICLE",
+    "UNKNOWN",
+)
+
+
+def _normalise_bulletin_no(raw: Optional[str]) -> Optional[str]:
+    """Canonicalise the two formats CD/PDF use into one shape.
+
+    CD ships ``"2025/8"`` (HSQLDB-derived), PDF ships ``"2025-08"``
+    (PDF cover-page-parsed). Reconcile uses ``"2025/8"`` (no zero-pad)
+    since that's what cd_extract_patent emits and the rest of the
+    pipeline already speaks.
+    """
+    if not raw:
+        return None
+    match = re.match(r"^\s*(\d{4})[/-](\d{1,2})\s*$", raw)
+    if not match:
+        return raw.strip() or None
+    year, month = match.group(1), match.group(2).lstrip("0") or "0"
+    return f"{year}/{month}"
+
+
+def _utcnow_iso() -> str:
+    """Current UTC time as ISO 8601 with seconds precision (matches upstream)."""
+    return datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
+
+
+def _build_stats(records: List[CanonicalRecord]) -> Dict[str, Any]:
+    """Aggregate stats over the unified records list.
+
+    Mirrors the per-stage stats blocks in cd_extract_patent + pdf_extract_patent
+    (records, by_record_type, figures_total) plus the new by_source_format
+    distribution which is the headline Stage 4 quality signal.
+    """
+    by_source_format = {"CD": 0, "PDF": 0, "BOTH": 0}
+    by_record_type = {key: 0 for key in _RECORD_TYPES_FOR_STATS}
+    figures_total = 0
+
+    for rec in records:
+        by_source_format[rec.source_format] = by_source_format.get(rec.source_format, 0) + 1
+        rt = rec.record_type or "UNKNOWN"
+        by_record_type[rt] = by_record_type.get(rt, 0) + 1
+        figures_total += len(rec.figures)
+
+    return {
+        "records": len(records),
+        "by_source_format": by_source_format,
+        "by_record_type": by_record_type,
+        "figures_total": figures_total,
+    }
+
+
+def _record_to_dict(rec: CanonicalRecord) -> Dict[str, Any]:
+    """Serialise a CanonicalRecord into JSON-ready dict, dropping None scalars.
+
+    Empty lists are preserved (downstream reads them as "no holders"
+    distinct from "field absent"); only None scalars are stripped to
+    keep the unified JSON tidy for human eyeballing in Stage 4.8.
+    """
+    out = asdict(rec)
+    return {k: v for k, v in out.items() if v is not None}
+
+
+def reconcile_metadata(
+    cd_doc: Dict[str, Any],
+    pdf_doc: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Merge two per-bulletin metadata docs into one canonical doc.
+
+    Inputs are the dicts returned by ``load_cd_metadata`` and
+    ``load_pdf_metadata``. Output is a JSON-ready dict with:
+
+      - ``bulletin_no``, ``bulletin_date``, ``source_archive``,
+        ``source_pdf`` — provenance preserved from both upstream docs.
+      - ``records`` — list of canonical-shape dicts, sorted by
+        ``application_no`` for deterministic output.
+      - ``stats`` — record count, by_source_format distribution,
+        by_record_type distribution, total figures.
+
+    Raises ``ValueError`` when the two docs describe different
+    bulletins (``bulletin_no`` mismatch). Step 4.6 adds support for
+    single-side reconcile (CD-only or PDF-only month).
+    """
+    cd_bulletin = cd_doc.get("bulletin_no")
+    pdf_bulletin = pdf_doc.get("bulletin_no")
+    # Normalise format mismatch: CD ships "2025/8", PDF ships "2025-08"
+    # (this is a real shape diff observed on bulletin 2025/8 paired data).
+    if _normalise_bulletin_no(cd_bulletin) != _normalise_bulletin_no(pdf_bulletin):
+        raise ValueError(
+            f"bulletin_no mismatch: CD={cd_bulletin!r} PDF={pdf_bulletin!r} "
+            f"(reconcile would silently produce wrong overlap; aborting)"
+        )
+
+    cd_records = [normalize_cd_record(p) for p in cd_doc.get("patents", [])]
+    pdf_records = [normalize_pdf_record(r) for r in pdf_doc.get("records", [])]
+
+    cd_by_app: Dict[str, CanonicalRecord] = {}
+    for rec in cd_records:
+        if rec.application_no:
+            cd_by_app[rec.application_no] = rec
+
+    merged: List[CanonicalRecord] = []
+    matched_keys: set = set()
+
+    for pdf_rec in pdf_records:
+        cd_match = cd_by_app.get(pdf_rec.application_no) if pdf_rec.application_no else None
+        if cd_match is not None:
+            merged.append(merge_records(cd_match, pdf_rec))
+            matched_keys.add(pdf_rec.application_no)
+        else:
+            merged.append(pdf_rec)
+
+    # CD-only records are everything in cd_by_app that PDF didn't claim.
+    for app_no, cd_rec in cd_by_app.items():
+        if app_no not in matched_keys:
+            merged.append(cd_rec)
+
+    # Deterministic order by application_no — keeps diff-of-runs noise-free
+    # and helps human eyeballing.
+    merged.sort(key=lambda r: r.application_no or "")
+
+    return {
+        "bulletin_no": _normalise_bulletin_no(cd_bulletin or pdf_bulletin),
+        "bulletin_date": cd_doc.get("bulletin_date") or pdf_doc.get("bulletin_date"),
+        "source_archive": cd_doc.get("source_archive"),
+        "source_pdf": pdf_doc.get("source_pdf"),
+        "reconciled_at": _utcnow_iso(),
+        "stats": _build_stats(merged),
+        "records": [_record_to_dict(r) for r in merged],
+    }
+
+
