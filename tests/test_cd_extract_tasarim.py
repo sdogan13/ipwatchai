@@ -4,17 +4,22 @@ Built one helper at a time. Each step adds its own test block so failures
 point cleanly at the unit under test.
 """
 
+import json
 from pathlib import Path
 
 import pytest
 
 from cd_extract_tasarim import (
+    CD_METADATA_FILENAME,
     DEFAULT_SEVEN_ZIP,
     TABLE_COLUMNS,
     CDLayout,
     cd_to_metadata,
     decode_hsqldb_escapes,
     extract_cd_archive,
+    issue_folder_name,
+    main,
+    parse_argv,
     parse_bulletin_inf,
     parse_hsqldb_log,
     parse_hsqldb_log_line,
@@ -22,6 +27,7 @@ from cd_extract_tasarim import (
     split_locarno_codes,
 )
 from cd_extract_tasarim import (
+    _all_cd_rars,
     _application_image_folder,
     _layout_to_metadata,
     _locate_cd_layout,
@@ -923,3 +929,252 @@ def test_cd_to_metadata_uses_extract_then_layout(monkeypatch, tmp_path):
     doc = cd_to_metadata(fake_rar, tmp_path)
     assert doc["source_archive"] == "240_CD.rar"
     assert doc["stats"]["dossiers"] == 3
+
+
+# ---------------------------------------------------------------------------
+# Step 2.8 — CLI entrypoint
+# ---------------------------------------------------------------------------
+
+def test_issue_folder_name_canonical():
+    """``TS_{N}_{date}`` matches the modern PDF collector's folder shape."""
+    assert issue_folder_name("240", "2016-03-09") == "TS_240_2016-03-09"
+    assert issue_folder_name("483", "2026-04-24") == "TS_483_2026-04-24"
+
+
+def test_all_cd_rars_picks_modern_and_verbose_only(tmp_path):
+    """Mixed folder containing modern, verbose, and legacy archive names —
+    only the HSQLDB-shape ones should match."""
+    (tmp_path / "230_CD.rar").write_bytes(b"")
+    (tmp_path / "240_CD.rar").write_bytes(b"")
+    (tmp_path / "242_cd.rar").write_bytes(b"")  # case-insensitive
+    (tmp_path / "231 say_l_ resmi endüstriyel tasar_m bülteni cd içeri_i.rar").write_bytes(b"")
+    # legacy PDF-only — must be excluded
+    (tmp_path / "Tasar_m Bülteni 219.rar").write_bytes(b"")
+    (tmp_path / "1-56.rar").write_bytes(b"")
+    (tmp_path / "94-111.rar").write_bytes(b"")
+    # noise
+    (tmp_path / "readme.txt").write_bytes(b"")
+
+    matches = _all_cd_rars(tmp_path)
+    names = sorted(p.name for p in matches)
+    assert names == [
+        "230_CD.rar",
+        "231 say_l_ resmi endüstriyel tasar_m bülteni cd içeri_i.rar",
+        "240_CD.rar",
+        "242_cd.rar",
+    ]
+
+
+def test_parse_argv_rar_and_all_mutually_exclusive(tmp_path, capsys):
+    """``--rar`` and ``--all`` together is an explicit user error."""
+    with pytest.raises(SystemExit):
+        parse_argv(["--rar", str(tmp_path / "x.rar"), "--all"])
+    err = capsys.readouterr().err
+    assert "mutually exclusive" in err
+
+
+def test_parse_argv_requires_rar_or_all(capsys):
+    """Neither flag passed -> argparse error."""
+    with pytest.raises(SystemExit):
+        parse_argv([])
+    assert "provide --rar" in capsys.readouterr().err
+
+
+def test_parse_argv_all_with_empty_dir_errors(tmp_path, capsys):
+    """``--all`` with no matching archives -> explicit error message."""
+    with pytest.raises(SystemExit):
+        parse_argv(["--all", "--bulletins-dir", str(tmp_path)])
+    assert "no HSQLDB-shape" in capsys.readouterr().err
+
+
+def test_parse_argv_all_collects_rars(tmp_path):
+    """``--all`` with a populated bulletins-dir collects matching rars."""
+    (tmp_path / "240_CD.rar").write_bytes(b"")
+    (tmp_path / "Tasar_m Bülteni 219.rar").write_bytes(b"")  # excluded
+    args = parse_argv(["--all", "--bulletins-dir", str(tmp_path)])
+    assert [p.name for p in args.rar_paths] == ["240_CD.rar"]
+
+
+def test_parse_argv_out_dir_defaults_to_bulletins_dir(tmp_path):
+    """Without ``--out-dir``, output root mirrors ``--bulletins-dir``."""
+    (tmp_path / "240_CD.rar").write_bytes(b"")
+    args = parse_argv(["--all", "--bulletins-dir", str(tmp_path)])
+    assert args.out_root == tmp_path
+    assert args.force is False
+    assert args.keep_scratch is False
+
+
+def test_parse_argv_explicit_overrides(tmp_path):
+    """Each override flag plumbed through to CLIArgs."""
+    rar = tmp_path / "240_CD.rar"
+    rar.write_bytes(b"")
+    args = parse_argv([
+        "--rar", str(rar),
+        "--out-dir", str(tmp_path / "out"),
+        "--scratch-dir", str(tmp_path / "scratch"),
+        "--seven-zip", "C:/custom7z.exe",
+        "--keep-scratch",
+        "--force",
+    ])
+    assert args.rar_paths == [rar]
+    assert args.out_root == tmp_path / "out"
+    assert args.scratch_dir == tmp_path / "scratch"
+    assert args.seven_zip == Path("C:/custom7z.exe")
+    assert args.keep_scratch is True
+    assert args.force is True
+
+
+def _fake_cd_to_metadata(bulletin_no="240", bulletin_date="2016-03-09",
+                         dossiers_count=1, designs_count=1, images_count=1):
+    """Return a fake cd_to_metadata that produces a controllable doc."""
+    def _impl(rar, scratch, **kw):
+        return {
+            "bulletin_no": bulletin_no,
+            "bulletin_date": bulletin_date,
+            "source_archive": Path(rar).name,
+            "extracted_at": "2026-05-08T00:00:00+00:00",
+            "stats": {
+                "dossiers": dossiers_count, "designs": designs_count,
+                "holders": 0, "designers": 0, "annotations": 0,
+                "images_resolved": images_count, "designs_without_images": 0,
+            },
+            "dossiers": [], "annotations": [],
+        }
+    return _impl
+
+
+def test_main_writes_to_TS_folder(monkeypatch, tmp_path):
+    """End-to-end: CLI on one rar produces TS_{N}_{date}/cd_metadata.json."""
+    rar = tmp_path / "240_CD.rar"
+    rar.write_bytes(b"")
+    out_root = tmp_path / "out"
+
+    monkeypatch.setattr("cd_extract_tasarim.cd_to_metadata", _fake_cd_to_metadata())
+
+    rc = main([
+        "--rar", str(rar),
+        "--out-dir", str(out_root),
+        "--scratch-dir", str(tmp_path / "scratch"),
+    ])
+    assert rc == 0
+    expected = out_root / "TS_240_2016-03-09" / "cd_metadata.json"
+    assert expected.is_file()
+    doc = json.loads(expected.read_text(encoding="utf-8"))
+    assert doc["bulletin_no"] == "240"
+    assert doc["bulletin_date"] == "2016-03-09"
+
+
+def test_main_skips_existing_without_force(monkeypatch, tmp_path):
+    """Pre-existing cd_metadata.json -> skip with warning, return 0."""
+    rar = tmp_path / "240_CD.rar"
+    rar.write_bytes(b"")
+    out_root = tmp_path / "out"
+    folder = out_root / "TS_240_2016-03-09"
+    folder.mkdir(parents=True)
+    existing = folder / CD_METADATA_FILENAME
+    existing.write_text('{"original":"keepme"}', encoding="utf-8")
+
+    monkeypatch.setattr("cd_extract_tasarim.cd_to_metadata", _fake_cd_to_metadata())
+
+    rc = main([
+        "--rar", str(rar),
+        "--out-dir", str(out_root),
+        "--scratch-dir", str(tmp_path / "scratch"),
+    ])
+    assert rc == 0  # skip is not a failure
+    # Original file untouched
+    assert json.loads(existing.read_text(encoding="utf-8")) == {"original": "keepme"}
+
+
+def test_main_force_overwrites_existing(monkeypatch, tmp_path):
+    """``--force`` replaces an existing cd_metadata.json."""
+    rar = tmp_path / "240_CD.rar"
+    rar.write_bytes(b"")
+    out_root = tmp_path / "out"
+    folder = out_root / "TS_240_2016-03-09"
+    folder.mkdir(parents=True)
+    existing = folder / CD_METADATA_FILENAME
+    existing.write_text('{"original":"replaceme"}', encoding="utf-8")
+
+    monkeypatch.setattr("cd_extract_tasarim.cd_to_metadata", _fake_cd_to_metadata())
+
+    rc = main([
+        "--rar", str(rar),
+        "--out-dir", str(out_root),
+        "--scratch-dir", str(tmp_path / "scratch"),
+        "--force",
+    ])
+    assert rc == 0
+    doc = json.loads(existing.read_text(encoding="utf-8"))
+    assert doc["bulletin_no"] == "240"
+
+
+def test_main_returns_1_when_archive_missing(monkeypatch, tmp_path):
+    """Path passed to --rar that doesn't exist counts as failure."""
+    rc = main([
+        "--rar", str(tmp_path / "missing.rar"),
+        "--out-dir", str(tmp_path / "out"),
+        "--scratch-dir", str(tmp_path / "scratch"),
+    ])
+    assert rc == 1
+
+
+def test_main_returns_1_when_cd_to_metadata_raises(monkeypatch, tmp_path):
+    """An exception from cd_to_metadata is logged, not re-raised; rc=1."""
+    rar = tmp_path / "240_CD.rar"
+    rar.write_bytes(b"")
+
+    def boom(*a, **kw):
+        raise RuntimeError("simulated 7-Zip explosion")
+
+    monkeypatch.setattr("cd_extract_tasarim.cd_to_metadata", boom)
+    rc = main([
+        "--rar", str(rar),
+        "--out-dir", str(tmp_path / "out"),
+        "--scratch-dir", str(tmp_path / "scratch"),
+    ])
+    assert rc == 1
+
+
+def test_main_refuses_when_bulletin_metadata_missing(monkeypatch, tmp_path):
+    """If parse_bulletin_inf returned None for either field, we cannot
+    compute the TS_{N}_{date} folder. Treat as failure (return 1)."""
+    rar = tmp_path / "240_CD.rar"
+    rar.write_bytes(b"")
+    monkeypatch.setattr(
+        "cd_extract_tasarim.cd_to_metadata",
+        _fake_cd_to_metadata(bulletin_no=None, bulletin_date=None),
+    )
+    rc = main([
+        "--rar", str(rar),
+        "--out-dir", str(tmp_path / "out"),
+        "--scratch-dir", str(tmp_path / "scratch"),
+    ])
+    assert rc == 1
+
+
+def test_main_processes_multiple_rars(monkeypatch, tmp_path):
+    """Two --rar flags -> two TS folders written, rc=0."""
+    a = tmp_path / "240_CD.rar"
+    a.write_bytes(b"")
+    b = tmp_path / "242_CD.rar"
+    b.write_bytes(b"")
+
+    docs = {
+        "240_CD.rar": ("240", "2016-03-09"),
+        "242_CD.rar": ("242", "2016-04-24"),
+    }
+
+    def fake(rar, scratch, **kw):
+        no, date = docs[Path(rar).name]
+        return _fake_cd_to_metadata(no, date)(rar, scratch, **kw)
+
+    monkeypatch.setattr("cd_extract_tasarim.cd_to_metadata", fake)
+    rc = main([
+        "--rar", str(a), "--rar", str(b),
+        "--out-dir", str(tmp_path / "out"),
+        "--scratch-dir", str(tmp_path / "scratch"),
+    ])
+    assert rc == 0
+    assert (tmp_path / "out" / "TS_240_2016-03-09" / CD_METADATA_FILENAME).is_file()
+    assert (tmp_path / "out" / "TS_242_2016-04-24" / CD_METADATA_FILENAME).is_file()

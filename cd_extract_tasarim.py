@@ -40,9 +40,14 @@ Built incrementally. Each helper has its own unit-test file.
 
 from __future__ import annotations
 
+import argparse
+import json
+import logging
 import os
 import re
+import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -746,3 +751,260 @@ def cd_to_metadata(
     rar = Path(rar_path)
     layout = extract_cd_archive(rar, scratch_dir, seven_zip=seven_zip)
     return _layout_to_metadata(layout, rar.name, scratch_dir)
+
+
+# ---------------------------------------------------------------------------
+# Step 2.8 — CLI entrypoint
+# ---------------------------------------------------------------------------
+
+_LOCAL_PROJECT_ROOT = Path(__file__).resolve().parent
+_DEFAULT_BULLETINS_DIR = _LOCAL_PROJECT_ROOT / "bulletins" / "Tasarim"
+_DEFAULT_SCRATCH_DIR = _LOCAL_PROJECT_ROOT / "_scratch_cd_tasarim"
+
+CD_METADATA_FILENAME = "cd_metadata.json"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - [TASARIM-CD] - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger("turkpatent.tasarim_cd")
+
+
+@dataclass
+class CLIArgs:
+    rar_paths: List[Path]
+    out_root: Path
+    scratch_dir: Path
+    seven_zip: Optional[Path]
+    keep_scratch: bool
+    force: bool
+
+
+def issue_folder_name(bulletin_no: str, bulletin_date: str) -> str:
+    """Compute the canonical issue folder stem ``TS_{N}_{YYYY-MM-DD}``.
+
+    Mirrors the naming the modern PDF collector (``data_collection_tasarim``)
+    already uses, so a CD output drops alongside any existing PDF
+    extraction for the same issue.
+    """
+    return f"TS_{bulletin_no}_{bulletin_date}"
+
+
+def _all_cd_rars(bulletins_dir: Path) -> List[Path]:
+    """Return sorted HSQLDB-shape Tasarım CD archives under ``bulletins_dir``.
+
+    Two real naming patterns:
+
+      - modern ``{N}_CD.rar``                    (case-insensitive ``_cd.rar`` suffix)
+      - verbose ``{N} say_l_ ... cd içeri_i.rar`` (substring ``cd içeri``)
+
+    Legacy PDF-only archives (``Tasar_m Bülteni N.rar``, ``N-N.rar``) are
+    deliberately excluded — they are not HSQLDB CDs and cd_to_metadata
+    cannot process them.
+    """
+    out: set[Path] = set()
+    for p in bulletins_dir.glob("*.rar"):
+        name = p.name.lower()
+        if name.endswith("_cd.rar") or "cd içeri" in name:
+            out.add(p)
+    return sorted(out)
+
+
+def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
+    """Parse CLI arguments for the Tasarım CD-extractor entrypoint."""
+    parser = argparse.ArgumentParser(
+        prog="cd_extract_tasarim",
+        description="Extract a Tasarım (industrial design) CD bundle to JSON metadata.",
+    )
+    parser.add_argument(
+        "--rar",
+        action="append",
+        type=Path,
+        help="Path to a CD .rar archive. Repeat for multiple files.",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Process every HSQLDB-shape *_CD.rar / *cd içeri*.rar in --bulletins-dir.",
+    )
+    parser.add_argument(
+        "--bulletins-dir",
+        type=Path,
+        default=_DEFAULT_BULLETINS_DIR,
+        help=f"Bulletins directory for --all and default --out-dir "
+             f"(default: {_DEFAULT_BULLETINS_DIR}).",
+    )
+    parser.add_argument(
+        "--out-dir",
+        type=Path,
+        default=None,
+        help="Where to write per-issue TS_{N}_{date}/cd_metadata.json folders "
+             "(default: --bulletins-dir).",
+    )
+    parser.add_argument(
+        "--scratch-dir",
+        type=Path,
+        default=_DEFAULT_SCRATCH_DIR,
+        help=f"Scratch folder for unrar output (default: {_DEFAULT_SCRATCH_DIR}; "
+             f"per-CD subfolder cleaned up unless --keep-scratch).",
+    )
+    parser.add_argument(
+        "--seven-zip",
+        type=Path,
+        default=None,
+        help="Override path to 7z.exe.",
+    )
+    parser.add_argument(
+        "--keep-scratch",
+        action="store_true",
+        help="Don't delete the per-CD scratch folder after extraction.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite an existing cd_metadata.json (default: skip with warning).",
+    )
+    ns = parser.parse_args(argv)
+
+    if ns.all and ns.rar:
+        parser.error("--rar and --all are mutually exclusive")
+
+    if ns.all:
+        rar_paths = _all_cd_rars(ns.bulletins_dir)
+        if not rar_paths:
+            parser.error(
+                f"--all matched no HSQLDB-shape *.rar files in {ns.bulletins_dir}"
+            )
+    elif ns.rar:
+        rar_paths = list(ns.rar)
+    else:
+        parser.error("provide --rar (one or more) or --all")
+
+    out_root = ns.out_dir if ns.out_dir is not None else ns.bulletins_dir
+
+    return CLIArgs(
+        rar_paths=rar_paths,
+        out_root=out_root,
+        scratch_dir=ns.scratch_dir,
+        seven_zip=ns.seven_zip,
+        keep_scratch=ns.keep_scratch,
+        force=ns.force,
+    )
+
+
+def _process_one(
+    rar: Path,
+    out_root: Path,
+    scratch_dir: Path,
+    seven_zip: Optional[Path],
+    keep_scratch: bool,
+    force: bool,
+) -> Dict[str, Any]:
+    """Extract one CD .rar, write its cd_metadata.json sidecar, return a
+    small summary dict for the run-level report.
+
+    Returns ``{"rar": str, "out": str|None, "stats": dict, "skipped": bool}``.
+    A skipped entry (existing file, no --force) carries ``out`` and
+    ``skipped=True`` but no ``stats`` (cd_to_metadata is not run).
+    """
+    cd_scratch = scratch_dir / rar.stem
+    if cd_scratch.exists():
+        shutil.rmtree(cd_scratch, ignore_errors=True)
+    cd_scratch.mkdir(parents=True, exist_ok=True)
+
+    try:
+        doc = cd_to_metadata(rar, cd_scratch, seven_zip=seven_zip)
+    except Exception:
+        if not keep_scratch:
+            shutil.rmtree(cd_scratch, ignore_errors=True)
+        raise
+
+    bulletin_no = doc.get("bulletin_no")
+    bulletin_date = doc.get("bulletin_date")
+    if not bulletin_no or not bulletin_date:
+        if not keep_scratch:
+            shutil.rmtree(cd_scratch, ignore_errors=True)
+        raise RuntimeError(
+            f"{rar.name}: cannot resolve TS_*_* folder — bulletin_no="
+            f"{bulletin_no!r}, bulletin_date={bulletin_date!r}"
+        )
+
+    issue_folder = out_root / issue_folder_name(bulletin_no, bulletin_date)
+    out_path = issue_folder / CD_METADATA_FILENAME
+
+    if out_path.exists() and not force:
+        logger.warning("[skip] %s already exists; pass --force to overwrite", out_path)
+        if not keep_scratch:
+            shutil.rmtree(cd_scratch, ignore_errors=True)
+        return {"rar": rar.name, "out": str(out_path), "skipped": True}
+
+    issue_folder.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(
+        json.dumps(doc, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    if not keep_scratch:
+        shutil.rmtree(cd_scratch, ignore_errors=True)
+
+    return {
+        "rar": rar.name,
+        "out": str(out_path),
+        "stats": doc["stats"],
+        "skipped": False,
+    }
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    """CLI entrypoint. Returns 0 if no archive raised an exception, 1 otherwise.
+
+    A "skipped" entry (existing cd_metadata.json + no --force) is **not**
+    a failure — it's an idempotent no-op.
+    """
+    args = parse_argv(argv)
+    args.out_root.mkdir(parents=True, exist_ok=True)
+    args.scratch_dir.mkdir(parents=True, exist_ok=True)
+
+    started = time.time()
+    succeeded: List[str] = []
+    skipped: List[str] = []
+    failed: List[tuple[str, str]] = []
+
+    for rar in args.rar_paths:
+        if not rar.is_file():
+            logger.warning("[skip] %s: not found", rar)
+            failed.append((rar.name, "not found"))
+            continue
+
+        logger.info("[*] %s", rar.name)
+        try:
+            result = _process_one(
+                rar, args.out_root, args.scratch_dir,
+                args.seven_zip, args.keep_scratch, args.force,
+            )
+        except Exception as e:
+            failed.append((rar.name, repr(e)))
+            logger.error("[!] %s: %r", rar.name, e)
+            continue
+
+        if result.get("skipped"):
+            skipped.append(rar.name)
+        else:
+            succeeded.append(rar.name)
+            s = result["stats"]
+            logger.info(
+                "[+] %s: %d dossiers, %d designs, %d images, wrote %s",
+                rar.name, s["dossiers"], s["designs"], s["images_resolved"],
+                result["out"],
+            )
+
+    duration = time.time() - started
+    logger.info(
+        "Done in %.1fs: %d succeeded, %d skipped, %d failed",
+        duration, len(succeeded), len(skipped), len(failed),
+    )
+    return 0 if not failed else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
