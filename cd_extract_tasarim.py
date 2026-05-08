@@ -41,7 +41,7 @@ Built incrementally. Each helper has its own unit-test file.
 from __future__ import annotations
 
 import re
-from typing import Optional
+from typing import List, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -71,3 +71,36 @@ def decode_hsqldb_escapes(s: Optional[str]) -> str:
         return chr(int(match.group(1), 16))
 
     return _HSQLDB_ESCAPE_RE.sub(_replace, s)
+
+
+# ---------------------------------------------------------------------------
+# Step 2.2 — LOCARNOCODES splitter
+# ---------------------------------------------------------------------------
+
+
+def split_locarno_codes(value: Optional[str]) -> List[str]:
+    """Split a comma-separated ``IDDOSSIER.LOCARNOCODES`` value into codes.
+
+    The Tasarım CD stores Locarno classifications as a single
+    ``VARCHAR(255)`` packed with comma-separated ``NN-NN`` codes:
+
+      - ``"25-02"``                (single code)
+      - ``"12-16,12-05"``          (no space)
+      - ``"07-01, 32-00"``         (comma + space — real-data edge case)
+      - ``"06-04,06-02,06-05"``    (three codes)
+
+    Empirically across 240_CD.rar's 365 IDDOSSIER rows, comma is the
+    only separator and codes are uniformly ``NN-NN``. The helper does
+    not normalise the code shape — ``26-05`` and ``06.01`` (the dotted
+    legacy variant ``pdf_extract_tasarim`` recognises) both pass
+    through verbatim.
+
+    Behaviour:
+      - empty / None input -> ``[]``
+      - whitespace-only input -> ``[]``
+      - leading / trailing / inter-code whitespace stripped per code
+      - empty entries (e.g. trailing comma) filtered out
+    """
+    if not value:
+        return []
+    return [code for part in value.split(",") if (code := part.strip())]
