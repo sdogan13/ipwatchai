@@ -9,6 +9,7 @@ import pytest
 from cd_extract_tasarim import (
     TABLE_COLUMNS,
     decode_hsqldb_escapes,
+    parse_hsqldb_log,
     parse_hsqldb_log_line,
     split_locarno_codes,
 )
@@ -280,3 +281,87 @@ def test_parse_log_line_column_count_mismatch_raises():
     bad = "INSERT INTO IDDESIGN VALUES('a','b','c','d')"
     with pytest.raises(ValueError, match=r"IDDESIGN: expected 3 columns, got 4"):
         parse_hsqldb_log_line(bad)
+
+
+# ---------------------------------------------------------------------------
+# Step 2.4 — parse_hsqldb_log (file-level wrapper)
+# ---------------------------------------------------------------------------
+
+def test_parse_hsqldb_log_empty_file_returns_empty_dict(tmp_path):
+    """Empty file produces an empty dict — not a dict with empty lists."""
+    log = tmp_path / "idbulletin.log"
+    log.write_text("", encoding="utf-8")
+    assert parse_hsqldb_log(log) == {}
+
+
+def test_parse_hsqldb_log_no_insert_lines_returns_empty_dict(tmp_path):
+    """A log of only DDL / connection lines yields no rows."""
+    log = tmp_path / "idbulletin.log"
+    log.write_text(
+        "/*C1*/CONNECT USER SA\n"
+        "CREATE TABLE IDDOSSIER (APPLICATIONNO VARCHAR(20))\n"
+        "DISCONNECT\n",
+        encoding="utf-8",
+    )
+    assert parse_hsqldb_log(log) == {}
+
+
+def test_parse_hsqldb_log_groups_rows_by_table(tmp_path):
+    """One INSERT per table — verify grouping + per-table ordering preserved."""
+    log = tmp_path / "idbulletin.log"
+    log.write_text(
+        "/*C1*/CONNECT USER SA\n"
+        "INSERT INTO IDDOSSIER VALUES('2016/01059','10.02.2016','2016 01059',"
+        "'10.02.2016','1','25-02','','','','','')\n"
+        "INSERT INTO IDDESIGN VALUES('2016/01059','1','Profil ')\n"
+        "INSERT INTO IDDESIGN VALUES('2016/01059','2','Kanat ')\n"
+        "INSERT INTO IDHOLDER VALUES('2016/01059','234974','TEST','','','TÜRKİYE')\n"
+        "DISCONNECT\n",
+        encoding="utf-8",
+    )
+    result = parse_hsqldb_log(log)
+    assert set(result) == {"IDDOSSIER", "IDDESIGN", "IDHOLDER"}
+    assert len(result["IDDOSSIER"]) == 1
+    assert len(result["IDDESIGN"]) == 2
+    assert len(result["IDHOLDER"]) == 1
+    # Ordering preserved within a table
+    assert result["IDDESIGN"][0]["NO"] == "1"
+    assert result["IDDESIGN"][1]["NO"] == "2"
+    # LOCARNOCODES list-ified through the chain
+    assert result["IDDOSSIER"][0]["LOCARNOCODES"] == ["25-02"]
+
+
+def test_parse_hsqldb_log_omits_empty_tables(tmp_path):
+    """A table with zero parsed rows is absent from the result, not present-with-[]."""
+    log = tmp_path / "idbulletin.log"
+    log.write_text(
+        "INSERT INTO IDDESIGN VALUES('2016/01059','1','Profil ')\n",
+        encoding="utf-8",
+    )
+    result = parse_hsqldb_log(log)
+    assert "IDDOSSIER" not in result
+    assert "IDHOLDER" not in result
+    assert result["IDDESIGN"][0]["PRODUCTNAME"] == "Profil "
+
+
+def test_parse_hsqldb_log_prefixes_filename_and_line_on_error(tmp_path):
+    """Malformed line must surface as ``<filename> line N: <inner error>``."""
+    log = tmp_path / "broken.log"
+    log.write_text(
+        "/*C1*/CONNECT USER SA\n"
+        "INSERT INTO IDDESIGN VALUES('only','two')\n",  # 2 vals, expects 3
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match=r"broken\.log line 2: IDDESIGN: expected 3 columns, got 2"):
+        parse_hsqldb_log(log)
+
+
+def test_parse_hsqldb_log_accepts_path_or_str(tmp_path):
+    """Both Path and str work as input."""
+    log = tmp_path / "idbulletin.log"
+    log.write_text(
+        "INSERT INTO IDDESIGN VALUES('2016/01059','1','Profil ')\n",
+        encoding="utf-8",
+    )
+    assert len(parse_hsqldb_log(log)["IDDESIGN"]) == 1
+    assert len(parse_hsqldb_log(str(log))["IDDESIGN"]) == 1
