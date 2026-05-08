@@ -10,7 +10,12 @@ import pytest
 
 from pdf_extract_patent import (
     PATENT_INID_CODES,
+    Attorney,
+    EPReference,
+    Holder,
+    Inventor,
     PageKind,
+    Priority,
     RecordType,
     classify_kind_code,
     clean_text,
@@ -20,7 +25,18 @@ from pdf_extract_patent import (
     extract_kind_code,
     normalize_iso_date,
     normalize_tr_date,
+    parse_abstract,
+    parse_application_no,
+    parse_attorney,
+    parse_date_field,
+    parse_ep_reference,
+    parse_holders,
     parse_inid_block,
+    parse_inventors,
+    parse_ipc_classes,
+    parse_priorities,
+    parse_publication_no,
+    parse_title,
 )
 
 
@@ -565,3 +581,325 @@ def test_detect_page_kind_event_index_ignores_random_parens():
     # Confirm classification — (6769) is too long to match the 2-digit
     # whitelist, AND it's mid-line so line-anchoring rejects it anyway.
     assert detect_page_kind(page) is PageKind.EVENT_INDEX
+
+
+# ---------------------------------------------------------------------------
+# Step 3.4 — parse_publication_no
+# ---------------------------------------------------------------------------
+
+def test_parse_publication_no_real_grants():
+    assert parse_publication_no("TR 2022 014462 B") == "TR 2022 014462 B"
+    assert parse_publication_no("TR 2025 010866 T4") == "TR 2025 010866 T4"
+
+
+def test_parse_publication_no_real_apps():
+    assert parse_publication_no("TR 2024 000746 A1") == "TR 2024 000746 A1"
+    assert parse_publication_no("TR 2024 000746 A2") == "TR 2024 000746 A2"
+
+
+def test_parse_publication_no_strips_label_prefix():
+    raw = "Yayın No\nTR 2022 014462 A2"
+    assert parse_publication_no(raw) == "TR 2022 014462 A2"
+
+
+def test_parse_publication_no_returns_none_for_missing():
+    assert parse_publication_no(None) is None
+    assert parse_publication_no("") is None
+    assert parse_publication_no("just text, no pub no") is None
+
+
+# ---------------------------------------------------------------------------
+# Step 3.4 — parse_application_no
+# ---------------------------------------------------------------------------
+
+def test_parse_application_no_real_format():
+    assert parse_application_no("Başvuru Numarası\n2022/014462") == "2022/014462"
+    assert parse_application_no("2024/000746") == "2024/000746"
+
+
+def test_parse_application_no_handles_missing():
+    assert parse_application_no(None) is None
+    assert parse_application_no("") is None
+    assert parse_application_no("no app no here") is None
+
+
+# ---------------------------------------------------------------------------
+# Step 3.4 — parse_date_field
+# ---------------------------------------------------------------------------
+
+def test_parse_date_field_extracts_iso_date():
+    assert parse_date_field("Başvuru Tarihi\n2022/09/20") == "2022-09-20"
+    assert parse_date_field("2025/08/21") == "2025-08-21"
+
+
+def test_parse_date_field_returns_none_for_missing():
+    assert parse_date_field(None) is None
+    assert parse_date_field("") is None
+    assert parse_date_field("no date") is None
+
+
+# ---------------------------------------------------------------------------
+# Step 3.4 — parse_ipc_classes
+# ---------------------------------------------------------------------------
+
+def test_parse_ipc_classes_real_multi_class():
+    raw = "Buluşun tasnif sınıfları\nF25B 9/14\nF25D 17/04\nF25D 23/04"
+    assert parse_ipc_classes(raw) == ["F25B 9/14", "F25D 17/04", "F25D 23/04"]
+
+
+def test_parse_ipc_classes_normalises_no_space_form():
+    """Codes ship with or without internal whitespace; output is
+    consistently ``[main] [sub]`` with one space."""
+    raw = "Buluşun tasnif sınıfları\nH02G3/12\nE03C1/02"
+    assert parse_ipc_classes(raw) == ["H02G 3/12", "E03C 1/02"]
+
+
+def test_parse_ipc_classes_dedups_repeated_codes():
+    raw = "F25B 9/14\nF25B 9/14\nF25B 9/14"
+    assert parse_ipc_classes(raw) == ["F25B 9/14"]
+
+
+def test_parse_ipc_classes_empty_input_returns_empty_list():
+    assert parse_ipc_classes(None) == []
+    assert parse_ipc_classes("") == []
+    assert parse_ipc_classes("Buluşun tasnif sınıfları") == []  # label only
+
+
+# ---------------------------------------------------------------------------
+# Step 3.4 — parse_title / parse_abstract
+# ---------------------------------------------------------------------------
+
+def test_parse_title_drops_label_line():
+    raw = "Buluş Başlığı\nNEM KONTROLLÜ HAZNEYE SAHİP BİR BUZDOLABI"
+    assert parse_title(raw) == "NEM KONTROLLÜ HAZNEYE SAHİP BİR BUZDOLABI"
+
+
+def test_parse_title_collapses_multi_line_titles():
+    """Long titles wrap across lines in the PDF text-extract."""
+    raw = "Buluş Başlığı\nUzatma manşonlu duvara monte\nbağlantı kutusu ünitesi."
+    assert parse_title(raw) == "Uzatma manşonlu duvara monte bağlantı kutusu ünitesi."
+
+
+def test_parse_title_handles_empty():
+    assert parse_title(None) is None
+    assert parse_title("") is None
+    assert parse_title("Buluş Başlığı") is None
+
+
+def test_parse_abstract_preserves_newlines_for_figure_callouts():
+    """The (57) abstract must keep newlines so figure call-outs
+    remain readable. Only intra-line whitespace is collapsed."""
+    raw = (
+        "Özet\n"
+        "Bu buluş, bir gövde (2),\n"
+        "gövdeye  (2)  erişim sağlayan bir kapı (3) ile ilgilidir.\n"
+    )
+    out = parse_abstract(raw)
+    assert out is not None
+    assert "Bu buluş, bir gövde (2)," in out
+    assert "kapı (3)" in out
+    assert "\n" in out  # newline boundary preserved
+
+
+def test_parse_abstract_returns_none_for_label_only():
+    assert parse_abstract("Özet") is None
+    assert parse_abstract(None) is None
+
+
+# ---------------------------------------------------------------------------
+# Step 3.4 — parse_holders (single entity vs name list)
+# ---------------------------------------------------------------------------
+
+def test_parse_holders_single_entity_with_address():
+    """Real (73) Patent Sahibi shape — single legal entity + address."""
+    raw = (
+        "Patent Sahibi\n"
+        "ARÇELİK ANONİM ŞİRKETİ\n"
+        "SÜTLÜCE MAH. KARAAĞAÇ CAD. 6  Beyoğlu\n"
+        "İstanbul TÜRKİYE"
+    )
+    holders = parse_holders(raw)
+    assert len(holders) == 1
+    h = holders[0]
+    assert h.name == "ARÇELİK ANONİM ŞİRKETİ"
+    assert "SÜTLÜCE MAH" in h.address
+    assert "Beyoğlu" in h.address
+    assert "İstanbul" in h.address
+    assert h.country == "TÜRKİYE"
+
+
+def test_parse_holders_list_of_natural_persons():
+    """Real (71) Başvuru Sahipleri shape — list of natural-person
+    names, no addresses. Each line is one applicant."""
+    raw = (
+        "Başvuru Sahipleri\n"
+        "EMİNE YILDIRIM\n"
+        "ZEYNEP ERVA YILDIRIM\n"
+        "AHMET ÇARHAN"
+    )
+    holders = parse_holders(raw)
+    assert len(holders) == 3
+    assert [h.name for h in holders] == [
+        "EMİNE YILDIRIM",
+        "ZEYNEP ERVA YILDIRIM",
+        "AHMET ÇARHAN",
+    ]
+    assert all(h.address is None for h in holders)
+    assert all(h.country is None for h in holders)
+
+
+def test_parse_holders_empty_returns_empty_list():
+    assert parse_holders(None) == []
+    assert parse_holders("") == []
+    assert parse_holders("Patent Sahibi") == []
+
+
+# ---------------------------------------------------------------------------
+# Step 3.4 — parse_inventors
+# ---------------------------------------------------------------------------
+
+def test_parse_inventors_list_of_names():
+    """Real (72) shape: label + names, one per line."""
+    raw = (
+        "Buluşu Yapanlar\n"
+        "NİHAL YILMAZ\n"
+        "AYLİN MET ÖZYURT\n"
+        "SEÇİL BAYDEMİR\n"
+        "FATİH MÜMİNOĞLU\n"
+        "ERSİN DÖNMEZ"
+    )
+    inventors = parse_inventors(raw)
+    assert len(inventors) == 5
+    assert inventors[0].name == "NİHAL YILMAZ"
+    assert inventors[-1].name == "ERSİN DÖNMEZ"
+
+
+def test_parse_inventors_handles_mixed_case_names():
+    """EP fascicle inventors often appear in title case (German names)."""
+    raw = "Buluşu Yapanlar\nGünther Lehmann\nThomas Doll\nJürgen Schorer"
+    inv = parse_inventors(raw)
+    assert [i.name for i in inv] == ["Günther Lehmann", "Thomas Doll", "Jürgen Schorer"]
+
+
+def test_parse_inventors_empty_returns_empty_list():
+    assert parse_inventors(None) == []
+    assert parse_inventors("") == []
+    assert parse_inventors("Buluşu Yapanlar") == []
+
+
+# ---------------------------------------------------------------------------
+# Step 3.4 — parse_attorney
+# ---------------------------------------------------------------------------
+
+def test_parse_attorney_real_two_line_firm():
+    """Real (74) shape — name on line 2, firm clause line-wrapped
+    across lines 2-3 with unbalanced parens."""
+    raw = (
+        "Vekil\n"
+        "EMİN KORHAN DERİCİOĞLU (ANKARA PATENT\n"
+        "BÜROSU ANONİM ŞİRKETİ)"
+    )
+    a = parse_attorney(raw)
+    assert a is not None
+    assert a.name == "EMİN KORHAN DERİCİOĞLU"
+    assert a.firm == "ANKARA PATENT BÜROSU ANONİM ŞİRKETİ"
+
+
+def test_parse_attorney_single_line_firm():
+    raw = "Vekil\nFULYA SÜMERALP (SİMAJ PATENT DAN. LTD. ŞTİ.)"
+    a = parse_attorney(raw)
+    assert a is not None
+    assert a.name == "FULYA SÜMERALP"
+    assert a.firm == "SİMAJ PATENT DAN. LTD. ŞTİ."
+
+
+def test_parse_attorney_returns_attorney_with_no_firm_when_parens_absent():
+    raw = "Vekil\nJANE SMITH"
+    a = parse_attorney(raw)
+    assert a is not None
+    assert a.name == "JANE SMITH"
+    assert a.firm is None
+
+
+def test_parse_attorney_returns_none_for_empty():
+    assert parse_attorney(None) is None
+    assert parse_attorney("") is None
+    assert parse_attorney("Vekil") is None
+
+
+# ---------------------------------------------------------------------------
+# Step 3.4 — parse_priorities
+# ---------------------------------------------------------------------------
+
+def test_parse_priorities_real_single_priority():
+    """Real (30) value from page 1000 of 2025_08.pdf."""
+    raw = ["Rüçhan Bilgileri (32) (33) (31)\n2020/03/24  DE  DE 202010203797"]
+    priorities = parse_priorities(raw)
+    assert len(priorities) == 1
+    p = priorities[0]
+    assert p.priority_date == "2020-03-24"
+    assert p.country == "DE"
+    assert p.priority_no == "DE 202010203797"
+
+
+def test_parse_priorities_handles_no_priority_data():
+    """Common case — header line only, no actual priority claim."""
+    raw = ["Rüçhan Bilgileri (32) (33) (31)"]
+    assert parse_priorities(raw) == []
+
+
+def test_parse_priorities_handles_empty():
+    assert parse_priorities([]) == []
+    assert parse_priorities([""]) == []
+
+
+# ---------------------------------------------------------------------------
+# Step 3.4 — parse_ep_reference (EP fascicle dual (96)/(97) quirk)
+# ---------------------------------------------------------------------------
+
+def test_parse_ep_reference_real_ep_fascicle():
+    """Real EP fascicle from page 1000 of 2025_08.pdf:
+
+        (96) Başvuru Tarihi          ->  date  in (96)
+             2021/03/23
+        (97) EP Yayın No             ->  number in (97)
+             EP3885497B1
+        (97) EP Yayın Tarihi         ->  date  in (97)
+             2025/06/04
+        (96) EP Başvuru No           ->  number in (96)
+             EP21164305.1
+
+    Each INID has TWO values; classify each by content shape."""
+    values_96 = ["Başvuru Tarihi\n2021/03/23", "EP Başvuru No\nEP21164305.1"]
+    values_97 = ["EP Yayın No\nEP3885497B1", "EP Yayın Tarihi\n2025/06/04"]
+    ref = parse_ep_reference(values_96, values_97)
+    assert ref is not None
+    assert ref.ep_application_date == "2021-03-23"
+    assert ref.ep_application_no == "EP21164305.1"
+    assert ref.ep_publication_no == "EP3885497B1"
+    assert ref.ep_publication_date == "2025-06-04"
+
+
+def test_parse_ep_reference_handles_reversed_value_order():
+    """The PDF doesn't guarantee the date-first ordering — classify by
+    content shape, not position."""
+    values_96 = ["EP Başvuru No\nEP21164305.1", "Başvuru Tarihi\n2021/03/23"]
+    values_97 = ["EP Yayın Tarihi\n2025/06/04", "EP Yayın No\nEP3885497B1"]
+    ref = parse_ep_reference(values_96, values_97)
+    assert ref is not None
+    assert ref.ep_application_date == "2021-03-23"
+    assert ref.ep_application_no == "EP21164305.1"
+
+
+def test_parse_ep_reference_returns_none_when_no_ep_data():
+    """A non-EP record has no (96)/(97) values at all -> None."""
+    assert parse_ep_reference([], []) is None
+    assert parse_ep_reference(None, None) is None
+
+
+def test_parse_ep_reference_strips_internal_whitespace_in_numbers():
+    """An EP number with stray whitespace should still normalize."""
+    values_97 = ["EP  3885497  B1"]
+    ref = parse_ep_reference([], values_97)
+    assert ref is not None
+    assert ref.ep_publication_no == "EP3885497B1"
