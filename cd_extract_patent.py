@@ -454,8 +454,16 @@ def extract_cd_archive(
             f"{(result.stderr or result.stdout).strip()[:500]}"
         )
 
-    # Identify the extracted CD root. A patent CD has exactly one
-    # top-level folder containing data/, autorun.inf, etc.
+    # Identify the extracted CD root. Modern CDs (2017+) wrap their
+    # contents in a single top-level folder named after the bulletin
+    # month (e.g. `2025_8/data/ptbulletin.log`). Some older CDs
+    # (verified on 2015_12_CD.rar, 2016_1_CD.rar) flatten the archive
+    # and write `data/` directly into the scratch dir with no wrapper —
+    # check for that case first so the caller's `cd_root / "data"`
+    # doesn't double the path.
+    if (scratch / "data" / "ptbulletin.log").is_file():
+        return scratch
+
     candidates = [p for p in scratch.iterdir() if p.is_dir()]
     if not candidates:
         raise RuntimeError(f"no folders found in {scratch} after extracting {rar.name}")

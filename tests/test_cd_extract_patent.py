@@ -671,6 +671,45 @@ def test_extract_cd_archive_raises_when_seven_zip_missing(tmp_path):
         extract_cd_archive(fake_rar, tmp_path / "out", seven_zip=bad_seven)
 
 
+def test_extract_cd_archive_returns_scratch_when_archive_has_no_wrapper(tmp_path):
+    """Some older CDs (verified 2015_12_CD.rar, 2016_1_CD.rar) flatten
+    the archive — `data/` lands directly in the scratch dir with no
+    bulletin-month wrapper. Without this case handled, the caller's
+    `cd_root / "data"` would double-up to `data/data/` and miss the
+    HSQLDB log. Regression for the FileNotFoundError observed during
+    bulk extraction on 2026-05-08.
+
+    This test fakes the scratch layout (no actual 7-Zip call) so it
+    runs in CI even when no real .rar is present. The 7-Zip step is
+    covered separately by the live smoke below.
+    """
+    scratch = tmp_path / "scratch"
+    (scratch / "data").mkdir(parents=True)
+    (scratch / "data" / "ptbulletin.log").write_text("mock", encoding="utf-8")
+
+    fake_rar = tmp_path / "fake.rar"
+    fake_rar.write_bytes(b"\x00")
+
+    # Skip 7-Zip invocation by patching subprocess.run
+    import subprocess as _sub
+    real_run = _sub.run
+    class _Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+    _sub.run = lambda *a, **k: _Result()
+    try:
+        cd_root = extract_cd_archive(fake_rar, scratch, seven_zip=Path(DEFAULT_SEVEN_ZIP))
+    finally:
+        _sub.run = real_run
+
+    # Critical assertion: cd_root is the scratch dir itself, NOT scratch/data.
+    # A wrong return value would make `cd_root / "data" / "ptbulletin.log"`
+    # resolve to `scratch/data/data/ptbulletin.log` — which doesn't exist.
+    assert cd_root == scratch
+    assert (cd_root / "data" / "ptbulletin.log").is_file()
+
+
 # ----- Live integration smoke test (skipped if the real CD is absent) -----
 
 _REAL_CD = Path(
