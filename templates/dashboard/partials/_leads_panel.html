@@ -15,6 +15,11 @@
                 style="color:var(--color-text-secondary)">
             <span x-text="t('leads.mode_renewals')">Yenileme Firsatlari</span>
         </button>
+        <button id="radar-mode-cancellations" onclick="switchRadarMode('cancellations')"
+                class="px-4 py-2 rounded-md text-sm font-medium transition-all"
+                style="color:var(--color-text-secondary)">
+            <span x-text="t('leads.mode_cancellations')">Iptal Firsatlari</span>
+        </button>
     </div>
 
     <!-- Header with Stats -->
@@ -359,6 +364,87 @@
             </div>
         </div>
     </div> <!-- end radar-renewals-section -->
+
+    <!-- ============================================ -->
+    <!-- Mode: Cancellations                          -->
+    <!-- ============================================ -->
+    <div id="radar-cancellations-section" class="hidden">
+        <div class="mb-6">
+            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
+                <div>
+                    <h2 class="text-2xl font-bold flex items-center gap-3" style="color:var(--color-text-primary)">
+                        <span x-text="t('leads.cancellations_title')">Iptal Firsatlari</span>
+                    </h2>
+                    <p class="mt-1" style="color:var(--color-text-muted)" x-text="t('leads.cancellations_subtitle')">Iptal edilmis markalar - Tekrar basvuru firsatlari</p>
+                </div>
+                <div class="flex items-center gap-3">
+                    <div class="rounded-lg px-4 py-2 text-sm" style="background:var(--color-bg-muted);border:1px solid var(--color-border)">
+                        <span style="color:var(--color-text-muted)" x-text="t('leads.daily_credits')">Gunluk Hak:</span>
+                        <span id="cancellation-credits-remaining" class="text-amber-600 font-bold ml-1">-</span>
+                    </div>
+                    <button onclick="exportCancellationsCSV()" id="export-cancellations-btn"
+                            class="hidden px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-medium btn-press min-h-[44px]"
+                            style="background:var(--color-bg-muted);color:var(--color-text-secondary);border:1px solid var(--color-border)">
+                        <span x-text="t('leads.csv_download')">CSV Indir</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Cancellation Filters -->
+        <div class="rounded-xl shadow-sm p-3 sm:p-4 mb-6" style="background:var(--color-bg-card);border:1px solid var(--color-border)">
+            <div class="relative mb-3">
+                <svg class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4" style="color:var(--color-text-faint)" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                <input id="filter-cancellation-search" type="text"
+                       class="w-full pl-9 pr-3 py-2 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 min-h-[38px]"
+                       style="border:1px solid var(--color-border-input);color:var(--color-text-secondary);background:var(--color-bg-input)"
+                       x-bind:placeholder="t('leads.search_placeholder')"
+                       onkeydown="if(event.key==='Enter'){loadCancellationFeed();}" />
+            </div>
+            <div class="flex flex-wrap items-center gap-2 sm:gap-3">
+                <select id="filter-cancellation-nice-class" onchange="loadCancellationFeed()" class="rounded-lg px-2 sm:px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 min-h-[38px] flex-1 min-w-[100px] sm:flex-none" style="border:1px solid var(--color-border-input);color:var(--color-text-secondary);background:var(--color-bg-input)"
+                        x-init="populateNiceClassOptions($el)">
+                    <option value="" x-text="t('leads.filter_all_classes')">Tum Siniflar</option>
+                </select>
+                <button onclick="loadCancellationFeed()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium btn-press min-h-[38px] w-full sm:w-auto" x-text="t('leads.refresh')">
+                    Yenile
+                </button>
+            </div>
+        </div>
+
+        <!-- Cancellation Feed Cards -->
+        <div id="cancellation-feed-container">
+            <div id="cancellation-feed-loading" class="text-center py-16">
+                <div class="space-y-1 max-w-4xl mx-auto mb-6">
+                    <div class="skeleton h-8 rounded"></div>
+                    <div class="skeleton h-8 rounded"></div>
+                    <div class="skeleton h-8 rounded"></div>
+                </div>
+                <p style="color:var(--color-text-faint)" x-text="t('leads.loading')">Yukleniyor...</p>
+            </div>
+            <div id="cancellation-feed-empty" class="hidden text-center py-16">
+                <svg class="mx-auto h-12 w-12 mb-4" style="color:var(--color-text-faint)" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                <p style="color:var(--color-text-faint)" x-text="t('leads.cancellations_empty')">Iptal firsati bulunamadi.</p>
+            </div>
+            <div id="cancellation-feed-cards" class="hidden"></div>
+        </div>
+
+        <!-- Cancellation Pagination -->
+        <div id="cancellation-pagination" class="hidden flex items-center justify-between mt-4">
+            <span id="cancellation-total-info" class="text-xs" style="color:var(--color-text-faint)"></span>
+            <div class="flex items-center gap-3">
+                <button onclick="loadCancellationFeed(currentCancellationPage - 1)" id="cancellation-prev-btn"
+                        class="px-3 py-1.5 rounded-lg disabled:opacity-50 text-sm btn-press min-h-[36px]" style="background:var(--color-bg-card);border:1px solid var(--color-border);color:var(--color-text-secondary)">
+                    <span x-text="t('pagination.prev')">&larr; Onceki</span>
+                </button>
+                <span id="cancellation-page-info" class="text-sm" style="color:var(--color-text-muted)">1</span>
+                <button onclick="loadCancellationFeed(currentCancellationPage + 1)" id="cancellation-next-btn"
+                        class="px-3 py-1.5 rounded-lg disabled:opacity-50 text-sm btn-press min-h-[36px]" style="background:var(--color-bg-card);border:1px solid var(--color-border);color:var(--color-text-secondary)">
+                    <span x-text="t('pagination.next')">Sonraki &rarr;</span>
+                </button>
+            </div>
+        </div>
+    </div> <!-- end radar-cancellations-section -->
 
     <!-- Upgrade Prompt (for non-Pro users) -->
     <div id="lead-upgrade-prompt" class="hidden text-center py-16">

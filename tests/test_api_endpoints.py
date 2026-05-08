@@ -13748,6 +13748,172 @@ async def test_lead_service_export_renewals_csv_data_streams_csv():
     assert "Yenilendi" not in renewal_query_calls[0].args[1][0]
 
 
+@pytest.mark.asyncio
+async def test_lead_service_get_cancellation_feed_data_formats_rows():
+    from services.lead_service import get_cancellation_feed_data
+
+    current_user = SimpleNamespace(id=uuid.uuid4(), organization_id=uuid.uuid4())
+    mock_db_cm = MagicMock()
+    mock_db = MagicMock()
+    mock_cursor = MagicMock()
+    mock_db.cursor.return_value = mock_cursor
+    mock_db_cm.__enter__.return_value = mock_db
+    mock_db_cm.__exit__.return_value = False
+    tm_id = uuid.uuid4()
+    mock_cursor.fetchone.side_effect = [{"cnt": 1}, {"cnt": 1}]
+    mock_cursor.fetchall.return_value = [
+        {
+            "id": tm_id,
+            "name": "CANCELLED MARK",
+            "application_no": "2014/1",
+            "registration_no": "TR-CAN-1",
+            "nice_class_numbers": [25, 35],
+            "image_path": None,
+            "final_status": "Iptal Edildi",
+            "application_date": date(2014, 1, 2),
+            "cancellation_bulletin_no": "BLT_500",
+            "cancellation_date": date(2026, 3, 12),
+            "cancellation_subtype": "voluntary",
+            "days_since_cancellation": 57,
+            "holder_name": "Holder X",
+            "holder_tpe_client_id": "H-1",
+            "attorney_name": "Agent Smith",
+            "attorney_no": "A-1",
+        }
+    ]
+
+    response = await get_cancellation_feed_data(
+        nice_class=25,
+        search="cancel",
+        page=1,
+        limit=20,
+        current_user=current_user,
+        db_factory=MagicMock(return_value=mock_db_cm),
+        user_plan_getter=lambda db, user_id: {"plan_name": "professional"},
+        plan_limit_getter=lambda plan, key: 10,
+    )
+
+    assert response["total_count"] == 1
+    assert response["page"] == 1
+    item = response["items"][0]
+    assert item["id"] == str(tm_id)
+    assert item["application_no"] == "2014/1"
+    assert item["cancellation_date"] == "2026-03-12"
+    assert item["cancellation_bulletin_no"] == "BLT_500"
+    assert item["cancellation_subtype"] == "voluntary"
+    assert item["days_since_cancellation"] == 57
+    assert item["holder_name"] == "Holder X"
+    cancel_query_calls = [
+        call for call in mock_cursor.execute.call_args_list
+        if call.args and isinstance(call.args[0], str) and "trademark_events" in call.args[0]
+    ]
+    assert cancel_query_calls
+    assert any("event_type = 'cancellation'" in call.args[0] for call in cancel_query_calls)
+
+
+@pytest.mark.asyncio
+async def test_lead_service_export_cancellations_csv_data_streams_csv():
+    from services.lead_service import export_cancellations_csv_data
+
+    current_user = SimpleNamespace(id=uuid.uuid4(), organization_id=uuid.uuid4())
+    mock_db_cm = MagicMock()
+    mock_db = MagicMock()
+    mock_cursor = MagicMock()
+    mock_db.cursor.return_value = mock_cursor
+    mock_db_cm.__enter__.return_value = mock_db
+    mock_db_cm.__exit__.return_value = False
+    mock_cursor.fetchone.return_value = {"cnt": 1}
+    mock_cursor.fetchall.return_value = [
+        {
+            "name": "CANCELLED MARK",
+            "application_no": "2014/1",
+            "registration_no": "TR-CAN-1",
+            "holder_name": "Holder X",
+            "attorney_name": "Agent Smith",
+            "attorney_no": "A-1",
+            "nice_class_numbers": [25, 35],
+            "final_status": "Iptal Edildi",
+            "cancellation_bulletin_no": "BLT_500",
+            "cancellation_date": date(2026, 3, 12),
+            "cancellation_subtype": "voluntary",
+            "days_since_cancellation": 57,
+        }
+    ]
+
+    response = await export_cancellations_csv_data(
+        nice_class=25,
+        current_user=current_user,
+        db_factory=MagicMock(return_value=mock_db_cm),
+        user_plan_getter=lambda db, user_id: {"plan_name": "enterprise"},
+        plan_limit_getter=lambda plan, key: True if key == "can_export_csv_leads" else 10,
+        now_getter=lambda: datetime(2026, 5, 8, 14, 0, tzinfo=timezone.utc),
+    )
+
+    chunks = []
+    async for chunk in response.body_iterator:
+        if isinstance(chunk, bytes):
+            chunks.append(chunk)
+        else:
+            chunks.append(chunk.encode("utf-8"))
+    body = b"".join(chunks).decode("utf-8")
+
+    assert response.headers["content-disposition"] == "attachment; filename=cancellations_20260508.csv"
+    assert "Marka,Basvuru No,Tescil No,Sahip,Vekil,Vekil No,Siniflar,Durum,Iptal Tarihi,Iptal Bulten No,Iptal Alt Tipi,Iptalden Sonra Gun" in body
+    assert 'CANCELLED MARK,2014/1,TR-CAN-1,Holder X,Agent Smith,A-1,"25,35",Iptal Edildi,2026-03-12,BLT_500,voluntary,57' in body
+
+
+@pytest.mark.asyncio
+async def test_extracted_cancellation_feed_route_delegates_to_service():
+    from api.leads import get_cancellation_feed
+
+    current_user = MagicMock()
+    expected = {"total_count": 0, "page": 1, "limit": 20, "items": []}
+
+    with patch(
+        "api.leads.get_cancellation_feed_data",
+        new=AsyncMock(return_value=expected),
+    ) as mock_get_cancellation_feed_data:
+        response = await get_cancellation_feed(
+            nice_class=9,
+            search="abc",
+            page=1,
+            limit=20,
+            current_user=current_user,
+        )
+
+    assert response == expected
+    mock_get_cancellation_feed_data.assert_awaited_once_with(
+        nice_class=9,
+        search="abc",
+        page=1,
+        limit=20,
+        current_user=current_user,
+    )
+
+
+@pytest.mark.asyncio
+async def test_extracted_export_cancellations_csv_route_delegates_to_service():
+    from api.leads import export_cancellations_csv
+
+    current_user = MagicMock()
+    expected = StreamingResponse(iter([b"csv"]), media_type="text/csv")
+
+    with patch(
+        "api.leads.export_cancellations_csv_data",
+        new=AsyncMock(return_value=expected),
+    ) as mock_export_cancellations_csv_data:
+        response = await export_cancellations_csv(
+            nice_class=25,
+            current_user=current_user,
+        )
+
+    assert response is expected
+    mock_export_cancellations_csv_data.assert_awaited_once_with(
+        nice_class=25,
+        current_user=current_user,
+    )
+
+
 def test_payment_service_get_client_ip_prefers_proxy_headers():
     from services.payment_service import get_client_ip
     from starlette.requests import Request

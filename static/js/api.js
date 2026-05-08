@@ -325,31 +325,36 @@ window.AppAPI.loadLeadFeed = async function (page) {
 // ============================================
 
 var currentRenewalPage = 1;
+var currentCancellationPage = 1;
 var currentRadarMode = 'conflicts';
 
 window.AppAPI.switchRadarMode = function (mode) {
     currentRadarMode = mode;
-    var conflictsBtn = document.getElementById('radar-mode-conflicts');
-    var renewalsBtn = document.getElementById('radar-mode-renewals');
-    var conflictsSection = document.getElementById('radar-conflicts-section');
-    var renewalsSection = document.getElementById('radar-renewals-section');
+    var modes = {
+        conflicts: { btn: 'radar-mode-conflicts', section: 'radar-conflicts-section' },
+        renewals: { btn: 'radar-mode-renewals', section: 'radar-renewals-section' },
+        cancellations: { btn: 'radar-mode-cancellations', section: 'radar-cancellations-section' }
+    };
+    Object.keys(modes).forEach(function (key) {
+        var btn = document.getElementById(modes[key].btn);
+        var section = document.getElementById(modes[key].section);
+        if (!btn || !section) return;
+        if (key === mode) {
+            btn.style.background = 'var(--color-primary)';
+            btn.style.color = 'white';
+            section.classList.remove('hidden');
+        } else {
+            btn.style.background = 'transparent';
+            btn.style.color = 'var(--color-text-secondary)';
+            section.classList.add('hidden');
+        }
+    });
 
     if (mode === 'renewals') {
-        conflictsBtn.style.background = 'transparent';
-        conflictsBtn.style.color = 'var(--color-text-secondary)';
-        renewalsBtn.style.background = 'var(--color-primary)';
-        renewalsBtn.style.color = 'white';
-        conflictsSection.classList.add('hidden');
-        renewalsSection.classList.remove('hidden');
         loadRenewalStats();
         loadRenewalFeed(1);
-    } else {
-        renewalsBtn.style.background = 'transparent';
-        renewalsBtn.style.color = 'var(--color-text-secondary)';
-        conflictsBtn.style.background = 'var(--color-primary)';
-        conflictsBtn.style.color = 'white';
-        renewalsSection.classList.add('hidden');
-        conflictsSection.classList.remove('hidden');
+    } else if (mode === 'cancellations') {
+        loadCancellationFeed(1);
     }
 };
 
@@ -546,10 +551,148 @@ window.AppAPI.exportRenewalsCSV = async function () {
     }
 };
 
+window.AppAPI.loadCancellationFeed = async function (page) {
+    if (page === undefined) page = 1;
+    currentCancellationPage = page;
+
+    var container = document.getElementById('cancellation-feed-cards');
+    var loading = document.getElementById('cancellation-feed-loading');
+    var empty = document.getElementById('cancellation-feed-empty');
+    var pagination = document.getElementById('cancellation-pagination');
+
+    loading.classList.remove('hidden');
+    container.innerHTML = '';
+    container.classList.add('hidden');
+    empty.classList.add('hidden');
+
+    var niceClass = document.getElementById('filter-cancellation-nice-class').value;
+    var searchEl = document.getElementById('filter-cancellation-search');
+    var search = searchEl ? searchEl.value.trim() : '';
+
+    var url = '/api/v1/leads/cancellations/feed?page=' + page + '&limit=' + LEADS_PER_PAGE;
+    if (niceClass) url += '&nice_class=' + niceClass;
+    if (search) url += '&search=' + encodeURIComponent(search);
+
+    try {
+        var response = await fetch(url, {
+            headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+        });
+        loading.classList.add('hidden');
+
+        if (response.status === 403) {
+            var denied = await _readApiErrorData(response);
+            showLeadUpgradePrompt(denied.detail || denied);
+            return;
+        }
+        if (!response.ok) throw new Error('Failed to load cancellations');
+
+        var data = await response.json();
+        var items = data.items || [];
+        var totalCount = data.total_count != null ? data.total_count : items.length;
+
+        if (items.length === 0) {
+            empty.classList.remove('hidden');
+            pagination.classList.add('hidden');
+            return;
+        }
+
+        container.innerHTML = items.map(renderCancellationCard).join('');
+        container.classList.remove('hidden');
+
+        var totalPages = Math.ceil(totalCount / LEADS_PER_PAGE);
+        pagination.classList.remove('hidden');
+
+        var totalInfoEl = document.getElementById('cancellation-total-info');
+        if (totalInfoEl) totalInfoEl.textContent = t('leads.total_results', { count: totalCount });
+        document.getElementById('cancellation-page-info').textContent = t('leads.page_of', { current: page, total: totalPages });
+        document.getElementById('cancellation-prev-btn').disabled = page === 1;
+        document.getElementById('cancellation-next-btn').disabled = page >= totalPages;
+
+    } catch (error) {
+        loading.classList.add('hidden');
+        console.error('Failed to load cancellations:', error);
+        showToast(t('leads.load_error'), 'error');
+    }
+};
+
+function renderCancellationCard(item) {
+    var displayName = getTrademarkDisplayName(item);
+    var thumbnail = window.AppComponents.renderThumbnail(item.image_path, displayName, item.application_no);
+    var classBadges = window.AppComponents.renderNiceClassBadges(item.nice_classes);
+    var turkpatentBtn = window.AppComponents.renderTurkpatentButton(item.application_no);
+    var regNo = window.AppComponents.renderRegistrationNo(item.registration_no);
+    var holderLink = window.AppComponents.renderHolderLink(item.holder_name, item.holder_tpe_client_id || null);
+    var attorneyLink = window.AppComponents.renderAttorneyLink(item.attorney_name, item.attorney_no);
+    var eventsBtn = window.AppComponents.renderEventsButton(item.application_no);
+
+    var statusHtml = '<span class="text-xs px-2 py-0.5 rounded-full font-medium" style="color:' + getStatusColor(item.status) + ';background:' + getStatusBg(item.status) + '">' + getStatusText(item.status) + '</span>';
+
+    var cancellationLineHtml = item.cancellation_date
+        ? '<div class="text-xs mt-0.5" style="color:var(--color-risk-critical-text)">'
+            + '<svg class="w-3 h-3 inline-block mr-0.5 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>'
+            + t('leads.cancellation_date') + ': ' + formatDateTRShort(item.cancellation_date)
+            + (item.days_since_cancellation != null ? ' &middot; ' + t('leads.days_since', { days: item.days_since_cancellation }) : '')
+            + '</div>'
+        : '';
+
+    var ribbonColor = window.AppComponents.getScoreColor(95);
+    var ribbon = '<div class="flex flex-col items-center gap-1 flex-shrink-0">'
+        + '<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold" style="' + ribbonColor + '" data-cancellation-pill>' + (t('leads.cancelled_short') || 'IPTAL') + '</span>'
+        + '</div>';
+
+    var inner = '<div class="flex justify-between items-start gap-4">'
+        + '<div class="flex items-start gap-3 flex-1 min-w-0">'
+        + thumbnail
+        + '<div class="flex-1 min-w-0">'
+        + '<div class="font-semibold truncate" style="color:var(--color-text-primary)">' + escapeHtml(displayName) + '</div>'
+        + '<div class="mt-0.5">' + statusHtml + '</div>'
+        + cancellationLineHtml
+        + classBadges
+        + turkpatentBtn
+        + regNo
+        + holderLink
+        + attorneyLink
+        + '<div class="mt-1">' + eventsBtn + '</div>'
+        + '</div>'
+        + '</div>'
+        + ribbon
+        + '</div>';
+
+    return window.AppComponents.renderCardShell(inner, { riskLevel: 'critical' });
+}
+
+window.AppAPI.exportCancellationsCSV = async function () {
+    try {
+        var niceClass = document.getElementById('filter-cancellation-nice-class').value;
+        var url = '/api/v1/leads/cancellations/export/csv?';
+        if (niceClass) url += 'nice_class=' + niceClass + '&';
+
+        var response = await fetch(url, {
+            headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+        });
+        if (response.status === 403) {
+            var denied = await _readApiErrorData(response);
+            showUpgradeModal(denied.detail || denied, 'csv_export');
+            return;
+        }
+        if (!response.ok) throw new Error('Export failed');
+
+        var blob = await response.blob();
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'cancellations_' + new Date().toISOString().slice(0, 10) + '.csv';
+        a.click();
+    } catch (error) {
+        showToast(t('common.error') + ': ' + error.message, 'error');
+    }
+};
+
 var switchRadarMode = window.AppAPI.switchRadarMode;
 var loadRenewalStats = window.AppAPI.loadRenewalStats;
 var loadRenewalFeed = window.AppAPI.loadRenewalFeed;
 var exportRenewalsCSV = window.AppAPI.exportRenewalsCSV;
+var loadCancellationFeed = window.AppAPI.loadCancellationFeed;
+var exportCancellationsCSV = window.AppAPI.exportCancellationsCSV;
 
 window.AppAPI.showLeadDetail = async function (leadId) {
     currentLeadId = leadId;

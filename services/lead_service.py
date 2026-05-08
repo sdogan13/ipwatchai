@@ -1047,3 +1047,226 @@ async def export_renewals_csv_data(
             media_type="text/csv",
             headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
+
+
+CANCELLATION_RECENT_MONTHS_DEFAULT = 12
+
+
+def _serialize_cancellation_row(row):
+    """Map a raw cancellation event row to the response payload."""
+    cancellation_date = row.get("cancellation_date")
+    days_since = _as_day_count(row.get("days_since_cancellation"))
+    return {
+        "id": str(row["id"]),
+        "name": row["name"],
+        "application_no": row["application_no"],
+        "registration_no": row.get("registration_no"),
+        "nice_classes": row.get("nice_class_numbers") or [],
+        "image_path": row.get("image_path"),
+        "status": row.get("final_status"),
+        "application_date": (
+            str(row["application_date"]) if row.get("application_date") else None
+        ),
+        "cancellation_date": str(cancellation_date) if cancellation_date else None,
+        "cancellation_bulletin_no": row.get("cancellation_bulletin_no"),
+        "cancellation_subtype": row.get("cancellation_subtype"),
+        "days_since_cancellation": days_since,
+        "holder_name": row.get("holder_name"),
+        "holder_tpe_client_id": row.get("holder_tpe_client_id"),
+        "attorney_name": row.get("attorney_name"),
+        "attorney_no": row.get("attorney_no"),
+    }
+
+
+async def get_cancellation_feed_data(
+    *,
+    nice_class,
+    search,
+    page,
+    limit,
+    current_user,
+    db_factory=Database,
+    user_plan_getter=get_user_plan,
+    plan_limit_getter=get_plan_limit,
+):
+    """Return paginated cancellation leads (recently-cancelled marks → reapply candidates)."""
+    with db_factory() as db:
+        _require_lead_access(
+            db,
+            str(current_user.id),
+            user_plan_getter=user_plan_getter,
+            plan_limit_getter=plan_limit_getter,
+        )
+
+        cur = db.cursor()
+        query = f"""
+            SELECT
+                t.id,
+                t.name,
+                t.application_no,
+                t.registration_no,
+                t.nice_class_numbers,
+                t.image_path,
+                t.final_status,
+                t.application_date,
+                te.bulletin_no AS cancellation_bulletin_no,
+                te.bulletin_date AS cancellation_date,
+                te.event_subtype AS cancellation_subtype,
+                (CURRENT_DATE - te.bulletin_date) AS days_since_cancellation,
+                h.name AS holder_name,
+                t.holder_tpe_client_id,
+                t.attorney_name,
+                t.attorney_no
+            FROM trademark_events te
+            INNER JOIN trademarks t ON t.id = te.trademark_id
+            LEFT JOIN holders h ON t.holder_id = h.id
+            WHERE te.event_type = 'cancellation'
+              AND te.bulletin_date IS NOT NULL
+              AND te.bulletin_date >= CURRENT_DATE - INTERVAL '{CANCELLATION_RECENT_MONTHS_DEFAULT} months'
+        """
+        params = []
+
+        if nice_class is not None:
+            query += " AND %s = ANY(t.nice_class_numbers)"
+            params.append(nice_class)
+
+        if search and search.strip():
+            safe_search = (
+                search.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            )
+            query += """ AND (
+                t.name ILIKE %s ESCAPE '\\' OR
+                h.name ILIKE %s ESCAPE '\\'
+            )"""
+            like_pattern = f"%{safe_search}%"
+            params.extend([like_pattern, like_pattern])
+
+        count_query = "SELECT COUNT(*) as cnt FROM (" + query + ") sub"
+        cur.execute(count_query, params)
+        total_count = cur.fetchone()["cnt"]
+
+        query += " ORDER BY te.bulletin_date DESC NULLS LAST, te.id DESC"
+        offset = (page - 1) * limit
+        query += " LIMIT %s OFFSET %s"
+        params.extend([limit, offset])
+
+        cur.execute(query, params)
+        rows = cur.fetchall()
+        return {
+            "total_count": total_count,
+            "page": page,
+            "limit": limit,
+            "items": [_serialize_cancellation_row(row) for row in rows],
+        }
+
+
+async def export_cancellations_csv_data(
+    *,
+    nice_class,
+    current_user,
+    db_factory=Database,
+    user_plan_getter=get_user_plan,
+    plan_limit_getter=get_plan_limit,
+    now_getter=datetime.now,
+    streaming_response_factory=StreamingResponse,
+):
+    """Export cancellation leads as CSV."""
+    with db_factory() as db:
+        access = _require_lead_access(
+            db,
+            str(current_user.id),
+            user_plan_getter=user_plan_getter,
+            plan_limit_getter=plan_limit_getter,
+        )
+
+        if not plan_limit_getter(access["plan"], "can_export_csv_leads"):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "upgrade_required",
+                    "message": "CSV export is available on paid plans.",
+                    "current_plan": access["plan"],
+                    "upgrade_context": "csv_export",
+                },
+            )
+
+        cur = db.cursor()
+        query = f"""
+            SELECT
+                t.name, t.application_no, t.registration_no,
+                h.name AS holder_name, t.attorney_name, t.attorney_no,
+                t.nice_class_numbers, t.final_status,
+                te.bulletin_no AS cancellation_bulletin_no,
+                te.bulletin_date AS cancellation_date,
+                te.event_subtype AS cancellation_subtype,
+                (CURRENT_DATE - te.bulletin_date) AS days_since_cancellation
+            FROM trademark_events te
+            INNER JOIN trademarks t ON t.id = te.trademark_id
+            LEFT JOIN holders h ON t.holder_id = h.id
+            WHERE te.event_type = 'cancellation'
+              AND te.bulletin_date IS NOT NULL
+              AND te.bulletin_date >= CURRENT_DATE - INTERVAL '{CANCELLATION_RECENT_MONTHS_DEFAULT} months'
+        """
+        params = []
+
+        if nice_class is not None:
+            query += " AND %s = ANY(t.nice_class_numbers)"
+            params.append(nice_class)
+
+        query += " ORDER BY te.bulletin_date DESC NULLS LAST, te.id DESC LIMIT %s"
+        params.append(MAX_EXPORT_LEADS)
+
+        cur.execute(query, params)
+        rows = cur.fetchall()
+
+        output = io.StringIO()
+        output.write("﻿")
+        writer = csv.writer(output)
+        writer.writerow(
+            [
+                "Marka",
+                "Basvuru No",
+                "Tescil No",
+                "Sahip",
+                "Vekil",
+                "Vekil No",
+                "Siniflar",
+                "Durum",
+                "Iptal Tarihi",
+                "Iptal Bulten No",
+                "Iptal Alt Tipi",
+                "Iptalden Sonra Gun",
+            ]
+        )
+
+        for row in rows:
+            classes_str = ",".join(str(item) for item in (row["nice_class_numbers"] or []))
+            writer.writerow(
+                [
+                    row.get("name") or "",
+                    row.get("application_no") or "",
+                    row.get("registration_no") or "",
+                    row.get("holder_name") or "",
+                    row.get("attorney_name") or "",
+                    row.get("attorney_no") or "",
+                    classes_str,
+                    row.get("final_status") or "",
+                    row.get("cancellation_date") or "",
+                    row.get("cancellation_bulletin_no") or "",
+                    row.get("cancellation_subtype") or "",
+                    _as_day_count(row.get("days_since_cancellation")) or "",
+                ]
+            )
+
+        # NOTE: skipping _log_lead_access here — that helper requires a real
+        # universal_conflicts.id and there isn't one for an event-driven export.
+        # The shared placeholder UUID ('00000000-...') the renewal export uses
+        # violates the lead_access_log_conflict_id_fkey constraint and 500s.
+
+        output.seek(0)
+        filename = f"cancellations_{now_getter().strftime('%Y%m%d')}.csv"
+        return streaming_response_factory(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )
