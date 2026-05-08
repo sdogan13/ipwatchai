@@ -2,9 +2,12 @@
 
 The streaming PDF parsing is exercised by a smoke test against the real
 ``bulletins/Tasarim/TS_483_2026-04-24/bulletin.pdf`` fixture. Unit tests here
-target the pure helpers that don't need PyMuPDF.
+target the pure helpers that don't need PyMuPDF, plus a few extract_issue
+tests that mock ``parse_pdf`` so the orchestrator's pre/post logic can be
+exercised without the C library.
 """
 
+from pathlib import Path
 
 from pdf_extract_tasarim import (
     Attorney,
@@ -13,6 +16,7 @@ from pdf_extract_tasarim import (
     detect_deferred_period,
     detect_section_for_page,
     extract_bulletin_metadata,
+    extract_issue,
     normalize_appno_for_filename,
     normalize_tr_date,
     parse_applicant,
@@ -24,6 +28,7 @@ from pdf_extract_tasarim import (
     parse_priorities,
     parse_tr_record,
     parse_view_labels,
+    view_image_key,
 )
 
 
@@ -48,6 +53,107 @@ def test_normalize_appno_for_filename():
     assert normalize_appno_for_filename("2024/007254") == "2024_007254"
     assert normalize_appno_for_filename(None) == "unknown"
     assert normalize_appno_for_filename("DM 244882") == "DM_244882"
+
+
+def test_view_image_key_canonical_shape():
+    """Canonical key is ``{appno_norm}/{d}_{v}.jpg`` with no archive- or
+    images/ wrapper prefix. Same shape cd_extract_tasarim emits, so a
+    future stage-3 reconciler can match PDF and CD output by one string."""
+    assert view_image_key("2024_007254", 1, 1) == "2024_007254/1_1.jpg"
+    assert view_image_key("2024_007254", 4, 3) == "2024_007254/4_3.jpg"
+    assert view_image_key("2016_01205", 18, 7) == "2016_01205/18_7.jpg"
+
+
+# ---------------------------------------------------------------------------
+# extract_issue --force wipes images/ for clean slate
+# ---------------------------------------------------------------------------
+
+def test_extract_issue_force_wipes_existing_images_dir(tmp_path, monkeypatch):
+    """--force must clear any prior images/ tree before re-extracting so
+    legacy flat-named files don't coexist with the new per-application
+    subfolder layout. parse_pdf is mocked so we don't need PyMuPDF."""
+    issue = tmp_path / "TS_999_2026-01-01"
+    issue.mkdir()
+    (issue / "bulletin.pdf").write_bytes(b"not a real pdf")
+    images_dir = issue / "images"
+    images_dir.mkdir()
+    # Stale legacy-layout files
+    (images_dir / "2024_007254_1_1.jpg").write_bytes(b"OLD")
+    (images_dir / "2024_007254_1_2.jpg").write_bytes(b"OLD")
+
+    fake_payload_calls = {}
+
+    def fake_parse_pdf(pdf, *, extract_images=True, images_dir=None):
+        fake_payload_calls["images_dir_existed"] = Path(images_dir).exists()
+        # Simulate what the real parse would write: per-app subfolder layout
+        out = Path(images_dir) / "2024_007254"
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "1_1.jpg").write_bytes(b"NEW")
+        return {
+            "bulletin_no": 999, "bulletin_date": "2026-01-01",
+            "source": Path(pdf).name, "page_count": 0,
+            "record_count": 0, "records": [],
+        }
+
+    monkeypatch.setattr("pdf_extract_tasarim.parse_pdf", fake_parse_pdf)
+
+    extract_issue(issue, force=True, extract_images=True)
+
+    # Old flat files gone, new per-app file present
+    assert not (images_dir / "2024_007254_1_1.jpg").exists()
+    assert not (images_dir / "2024_007254_1_2.jpg").exists()
+    assert (images_dir / "2024_007254" / "1_1.jpg").read_bytes() == b"NEW"
+    # parse_pdf saw an empty dir (we wiped it before invoking)
+    assert fake_payload_calls["images_dir_existed"] is False
+
+
+def test_extract_issue_no_force_does_not_wipe_when_re_extracting(tmp_path, monkeypatch):
+    """If the PDF is newer than metadata.json (rare non-force re-extract),
+    we leave any pre-existing images/ in place — the locked decision was
+    that the wipe is a --force-only behavior."""
+    issue = tmp_path / "TS_999_2026-01-01"
+    issue.mkdir()
+    pdf = issue / "bulletin.pdf"
+    pdf.write_bytes(b"x")
+    # Stale metadata older than pdf forces a re-extract path WITHOUT --force.
+    meta = issue / "metadata.json"
+    meta.write_text("{}", encoding="utf-8")
+    import os
+    older = pdf.stat().st_mtime - 60
+    os.utime(meta, (older, older))
+
+    images_dir = issue / "images"
+    images_dir.mkdir()
+    (images_dir / "stale.jpg").write_bytes(b"PRESERVED")
+
+    def fake_parse_pdf(pdf, *, extract_images=True, images_dir=None):
+        return {"bulletin_no": 999, "bulletin_date": "2026-01-01",
+                "source": Path(pdf).name, "page_count": 0,
+                "record_count": 0, "records": []}
+
+    monkeypatch.setattr("pdf_extract_tasarim.parse_pdf", fake_parse_pdf)
+
+    extract_issue(issue, force=False, extract_images=True)
+
+    # Stale file untouched (no wipe outside --force)
+    assert (images_dir / "stale.jpg").read_bytes() == b"PRESERVED"
+
+
+def test_extract_issue_force_handles_missing_images_dir(tmp_path, monkeypatch):
+    """First-time extraction (no prior images/) doesn't fail when --force is set."""
+    issue = tmp_path / "TS_999_2026-01-01"
+    issue.mkdir()
+    (issue / "bulletin.pdf").write_bytes(b"x")
+
+    def fake_parse_pdf(pdf, *, extract_images=True, images_dir=None):
+        return {"bulletin_no": 999, "bulletin_date": "2026-01-01",
+                "source": Path(pdf).name, "page_count": 0,
+                "record_count": 0, "records": []}
+
+    monkeypatch.setattr("pdf_extract_tasarim.parse_pdf", fake_parse_pdf)
+
+    result = extract_issue(issue, force=True, extract_images=True)
+    assert result["status"] == "ok"
 
 
 # ---------------------------------------------------------------------------
