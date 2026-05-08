@@ -23,9 +23,17 @@
   }
 
   function getAuthToken() {
+    // Prefer AppAuth.getAuthToken (auth.js / auth-guard.js): it walks the
+    // `auth_token` / `access_token` / `token` keys in both storage areas.
+    // Reading only `access_token` here misses the real token (stored under
+    // `auth_token` by the login flow), causing fetches to go out unauthed,
+    // hit the global 401 interceptor, and force-redirect to login.
+    if (window.AppAuth && typeof window.AppAuth.getAuthToken === "function") {
+      return window.AppAuth.getAuthToken() || "";
+    }
     return (
-      (window.localStorage && localStorage.getItem("access_token")) ||
-      (window.sessionStorage && sessionStorage.getItem("access_token")) ||
+      (window.localStorage && (localStorage.getItem("auth_token") || localStorage.getItem("access_token") || localStorage.getItem("token"))) ||
+      (window.sessionStorage && (sessionStorage.getItem("auth_token") || sessionStorage.getItem("access_token") || sessionStorage.getItem("token"))) ||
       ""
     );
   }
