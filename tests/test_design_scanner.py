@@ -164,3 +164,57 @@ class TestTriggerWrapperSwallowsExceptions:
 
     def test_returns_zero_when_no_ids(self):
         assert scanner.trigger_design_watchlist_scan([]) == 0
+
+
+class TestPostIngestEvaluatesAllCandidates:
+    """Regression: scanner caps post-ingest candidate evaluation by limit.
+
+    Bulletins routinely contain >100 designs; capping at the default 100 means
+    most candidates aren't scored, and the matching design can be skipped
+    (verified live against TS_473 / "Cerrahi kafa lambası").
+    """
+
+    def test_select_called_with_limit_at_least_design_id_count(self, monkeypatch):
+        wl_item = {
+            "id": uuid4(),
+            "user_id": uuid4(),
+            "organization_id": uuid4(),
+            "product_name": "Lamba",
+            "locarno_classes": [],
+            "dinov2_embedding": None,
+            "clip_embedding": None,
+            "color_histogram": None,
+            "customer_application_no": None,
+            "customer_registration_no": None,
+            "reference_design_id": None,
+        }
+        monkeypatch.setattr(scanner, "get_active_design_watchlist_items", lambda **kw: [wl_item])
+        monkeypatch.setattr(scanner, "update_last_scan_at", lambda **kw: None)
+        monkeypatch.setattr(scanner, "insert_alert_row", lambda **kw: None)
+
+        captured_kwargs = {}
+        def fake_select(cur, **kwargs):
+            captured_kwargs.update(kwargs)
+            return []
+        monkeypatch.setattr(scanner, "_select_candidates_for_item", fake_select)
+
+        class FakeConn:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def cursor(self, *a, **kw): return MagicMock()
+            def commit(self): pass
+
+        # Simulate a bulletin batch larger than the default limit
+        big_batch = [uuid4() for _ in range(1500)]
+        scanner.scan_new_designs(
+            design_ids=big_batch,
+            source_type="bulletin",
+            source_reference="BLT_BIG",
+            db_factory=FakeConn,
+        )
+
+        assert "limit" in captured_kwargs, "scan_new_designs must pass an explicit limit"
+        assert captured_kwargs["limit"] >= len(big_batch), (
+            f"limit {captured_kwargs['limit']} truncates a {len(big_batch)}-design batch; "
+            "post-ingest must evaluate every candidate, not just the top-N"
+        )

@@ -262,10 +262,14 @@ def scan_new_designs(
         alerts_inserted = 0
         for wl in watchlist_items:
             try:
+                # Post-ingest mode: evaluate every newly-ingested design, not
+                # just the top-100 by created_at. The default LIMIT in
+                # _select_candidates_for_item is for full-corpus scans only.
                 candidates = _select_candidates_for_item(
                     cur,
                     watchlist_item=wl,
                     candidate_design_ids=[str(i) for i in design_ids],
+                    limit=max(100, len(design_ids)),
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.exception("design watchlist %s scan failed: %r", wl.get("id"), exc)
