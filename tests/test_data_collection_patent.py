@@ -22,6 +22,7 @@ from data_collection_patent import (
     DEFAULT_LOOKBACK_DAYS,
     IncrementalScanTracker,
     Track,
+    _looks_like_download_href,
     build_cd_filename,
     build_pdf_filename,
     card_is_complete,
@@ -241,6 +242,36 @@ def test_classify_menu_item_treats_anything_else_as_pdf():
     assert classify_menu_item_text("2025_12") is Track.PDF
     assert classify_menu_item_text("PDF") is Track.PDF
     assert classify_menu_item_text("") is Track.PDF
+
+
+# ---------------------------------------------------------------------------
+# _looks_like_download_href — direct-href fast-path gating
+# ---------------------------------------------------------------------------
+
+def test_looks_like_download_href_accepts_real_turkpatent_url():
+    """Lock in the regression: the Patent UI on 2026-05-08 surfaced anchors
+    of this exact shape, and the collector must accept them as download
+    targets so it stream-downloads the PDF instead of waiting for a
+    (non-existent) dropdown menu.
+    """
+    href = "https://webim.turkpatent.gov.tr/file/a383bb6a-a74f-4fd0-8218-6401e7641de1?name=2026_04&download"
+    assert _looks_like_download_href(href) is True
+
+
+def test_looks_like_download_href_rejects_empty_and_placeholder():
+    assert _looks_like_download_href(None) is False
+    assert _looks_like_download_href("") is False
+    assert _looks_like_download_href("   ") is False
+    assert _looks_like_download_href("#") is False
+
+
+def test_looks_like_download_href_rejects_javascript_void():
+    """Many React/PrimeNG anchors render href='javascript:void(0)' for
+    items that need a click handler. Those are not direct downloads.
+    """
+    assert _looks_like_download_href("javascript:void(0)") is False
+    assert _looks_like_download_href("JavaScript:doSomething()") is False
+    assert _looks_like_download_href("  javascript:void(0)  ") is False
 
 
 # ---------------------------------------------------------------------------

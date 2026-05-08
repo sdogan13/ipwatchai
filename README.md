@@ -193,24 +193,26 @@ If you run archive extraction locally on Windows, make sure `PIPELINE_SEVEN_ZIP_
 
 ### Patent / Faydalı Model collector
 
-`data_collection_patent.py` is the sister collector to `data_collection.py` (Marka) and `data_collection_tasarim.py` (Tasarım). It targets the TÜRKPATENT bulletin page in single-category mode for **Patent / Faydalı Model**, downloading both tracks each modern monthly issue ships:
+`data_collection_patent.py` is the sister collector to `data_collection.py` (Marka) and `data_collection_tasarim.py` (Tasarım). It targets the TÜRKPATENT bulletin page for the **Patent / Faydalı Model** category. Output lands flat under `bulletins/Patent__Faydali_Model/`, matching the existing on-disk convention:
 
-- the CD bundle (`{YYYY_M}_CD.rar`) — HSQLDB-backed structured data
-- the sidecar PDF (`{YYYY_M}.pdf`) — INID-coded bulletin with embedded figures
-
-Output lands flat under `bulletins/Patent__Faydali_Model/`, matching the existing on-disk convention.
+- `{YYYY_M}.pdf` — INID-coded bulletin with embedded figures
+- `{YYYY_M}_CD.rar` — HSQLDB-backed CD bundle (see UI note below)
 
 ```powershell
-python data_collection_patent.py                     # both tracks, incremental, headless
+python data_collection_patent.py                     # incremental, headless, default tracks
 python data_collection_patent.py --full              # walk full archive
-python data_collection_patent.py --pdf-only          # PDF only (skip CD .rar)
-python data_collection_patent.py --cd-only           # CD only (skip PDF)
+python data_collection_patent.py --pdf-only          # only the PDF track
+python data_collection_patent.py --cd-only           # only the CD track (see note)
 python data_collection_patent.py --limit 1           # stop after 1 download
 python data_collection_patent.py --headless=false    # show browser
 python data_collection_patent.py --bulletins-root C:\path\to\elsewhere
 ```
 
-Pure-helper unit tests live in `tests/test_data_collection_patent.py` and cover card-id normalization, recency window, per-track filename construction, completeness check (including the legacy multi-month bundle false-match guard), menu-item CD/PDF classification, and CLI argv parsing.
+**UI reality (verified 2026-05-08):** the live TÜRKPATENT page exposes each Patent bulletin as a **direct-href `<a>` anchor to the PDF only** — there is no dropdown menu and no CD `.rar` download exposed by this UI. The collector takes a fast path on these anchors (stream-downloads via the href with the browser's cookies). When run with the default tracks, missing CDs are reported as skipped (not failed) since the UI does not currently provide them. Existing `_CD.rar` files in the folder predate the current UI shape; their acquisition path is not part of this collector. `--cd-only` is preserved for forward compatibility but will produce all-skips against today's UI.
+
+A legacy menu fallback path is retained in case TÜRKPATENT reintroduces a dropdown UI for some bulletins (Marka and Tasarım both rely on that path), but it is not exercised by the current Patent flow.
+
+Pure-helper unit tests live in `tests/test_data_collection_patent.py` and cover card-id normalization, recency window, per-track filename construction, completeness check (including the legacy multi-month bundle false-match guard), menu-item CD/PDF classification, the direct-href validator, and CLI argv parsing.
 
 ## Development Rules
 

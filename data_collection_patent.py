@@ -557,6 +557,50 @@ async def force_close_menus(page) -> None:
         await page.wait_for_timeout(300)
 
 
+def _looks_like_download_href(href: Optional[str]) -> bool:
+    if not href:
+        return False
+    normalized = href.strip().lower()
+    return normalized not in {"", "#"} and not normalized.startswith("javascript:")
+
+
+async def get_clickable_download_href(clickable) -> Optional[str]:
+    """Resolve a usable direct-download href from the visible card action.
+
+    The Patent / Faydalı Model UI as observed on 2026-05-08 renders each
+    visible İndir as a plain anchor whose href looks like
+    ``https://webim.turkpatent.gov.tr/file/{uuid}?name={YYYY_M}&download``.
+    There is no dropdown menu on this UI — clicking the anchor downloads
+    the PDF directly. This helper extracts that href so we can stream-
+    download with cookies instead of waiting for a non-existent menu.
+
+    Returns the href string when present and useful, otherwise ``None``
+    (which signals the caller to fall through to the legacy menu path).
+    """
+    try:
+        href = await clickable.get_attribute("href")
+        if _looks_like_download_href(href):
+            return href
+    except Exception:
+        pass
+
+    try:
+        href = await clickable.evaluate(
+            """(el) => {
+                const anchor = el.tagName === "A"
+                    ? el
+                    : (el.closest("a[href]") || el.querySelector("a[href]"));
+                return anchor ? anchor.getAttribute("href") : null;
+            }"""
+        )
+        if _looks_like_download_href(href):
+            return href
+    except Exception:
+        pass
+
+    return None
+
+
 async def open_download_menu(page, clickable):
     await force_close_menus(page)
     await click_dropdown_area(page, clickable)
@@ -736,15 +780,33 @@ async def process_card(
                     card_id, sorted(t.value for t in wanted))
         return CollectionCounters(skipped=1)
 
-    menu = await open_download_menu(page, clickable)
-    if not menu:
-        logger.warning("[!] %s: download menu did not open", card_id)
-        return CollectionCounters(failed=1)
-
-    items = await list_menu_items(page, MENU_WAIT_MS)
     by_track: Dict[Track, Dict[str, Any]] = {}
-    for it in items:
-        by_track.setdefault(it["track"], it)
+    is_direct_href_card = False
+
+    # Patent UI fast path: each visible İndir is a direct-href <a> to the
+    # PDF. There is no dropdown menu to open. When the clickable carries a
+    # download href, treat the card as a single-PDF anchor and skip the
+    # menu logic entirely.
+    direct_href = await get_clickable_download_href(clickable)
+    if direct_href:
+        is_direct_href_card = True
+        by_track[Track.PDF] = {
+            "text": f"direct:{card_id}",
+            "href": direct_href,
+            "track": Track.PDF,
+        }
+    else:
+        # Fallback: legacy menu path (kept in case TÜRKPATENT introduces a
+        # dropdown UI for some bulletins). Marka and Tasarım both rely on
+        # this path.
+        menu = await open_download_menu(page, clickable)
+        if not menu:
+            logger.warning("[!] %s: no direct href and download menu did not open", card_id)
+            return CollectionCounters(failed=1)
+
+        items = await list_menu_items(page, MENU_WAIT_MS)
+        for it in items:
+            by_track.setdefault(it["track"], it)
 
     counters = CollectionCounters()
     bulletins_root.mkdir(parents=True, exist_ok=True)
@@ -754,8 +816,18 @@ async def process_card(
             continue
         item = by_track.get(track)
         if not item:
-            logger.warning("[!] %s: no menu item for track %s", card_id, track.value)
-            counters.failed += 1
+            if track is Track.CD and is_direct_href_card:
+                # The current Patent UI exposes only PDFs via direct-href
+                # anchors. CD .rar bundles are not reachable from here as of
+                # 2026-05-08; existing _CD.rar files in the folder predate
+                # this UI shape. Don't count this as a failure — note it
+                # and move on so the run summary stays meaningful.
+                logger.info("[i] %s: CD track not exposed by this UI, skipping CD",
+                            card_id)
+                counters.skipped += 1
+            else:
+                logger.warning("[!] %s: no menu item for track %s", card_id, track.value)
+                counters.failed += 1
             continue
 
         out_path = str(bulletins_root / track_filename(card_id, track))
@@ -769,7 +841,8 @@ async def process_card(
             counters.failed += 1
             logger.warning("[!] %s: %s failed", card_id, track.value)
 
-    await force_close_menus(page)
+    if not is_direct_href_card:
+        await force_close_menus(page)
     return counters
 
 
