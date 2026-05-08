@@ -46,14 +46,6 @@ def test_design_search_block_present(lang):
 
 
 @pytest.mark.parametrize("lang", SUPPORTED_LANGUAGES)
-def test_tabs_design_search_label_present(lang):
-    data = _load_locale(lang)
-    tabs = data.get("tabs") or {}
-    assert "design_search" in tabs, f"{lang}.json missing tabs.design_search label"
-    assert isinstance(tabs["design_search"], str) and tabs["design_search"].strip()
-
-
-@pytest.mark.parametrize("lang", SUPPORTED_LANGUAGES)
 @pytest.mark.parametrize("key", EXPECTED_DESIGN_SEARCH_KEYS)
 def test_design_search_key_present_and_non_empty(lang, key):
     block = _load_locale(lang)["design_search"]

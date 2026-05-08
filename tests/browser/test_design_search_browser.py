@@ -37,19 +37,20 @@ pytestmark = pytest.mark.skip(
 # ---------------------------------------------------------------------------
 
 def _open_design_search_tab(page) -> None:
-    """Activate the Tasarım Arama tab via the public showDashboardTab() API."""
-    page.evaluate("window.showDashboardTab('design-search')")
-    page.wait_for_selector("#tab-content-design-search:not(.hidden)", timeout=5000)
+    """Design search now lives inside the Search tab; activate that and assert
+    the design search subsection scrolls into view.
+    """
+    page.evaluate("window.showDashboardTab('search')")
+    page.wait_for_selector("#tab-content-search:not(.hidden)", timeout=5000)
+    page.wait_for_selector("#design-search-submit", timeout=5000)
 
 
 def _assert_design_panel_visible(page) -> dict:
-    panel = page.locator("#tab-content-design-search")
-    assert panel.is_visible(), "design-search panel hidden after switching tab"
-    title = panel.locator("h2").first.inner_text().strip()
-    assert title, "design search panel title is empty"
+    panel = page.locator("#tab-content-search")
+    assert panel.is_visible(), "search tab panel hidden after activation"
     submit = panel.locator("#design-search-submit")
-    assert submit.is_visible(), "search submit button missing"
-    return {"title": title}
+    assert submit.is_visible(), "design search submit button missing inside search tab"
+    return {"title": "Tasarım Arama section under Search tab"}
 
 
 def _run_design_search(page, query: str) -> dict:
@@ -71,9 +72,13 @@ def _run_design_search(page, query: str) -> dict:
 def _switch_locale_and_assert_label(page, lang_code: str, expected_label: str) -> None:
     page.evaluate(f"window.AppI18n && window.AppI18n.setLocale && window.AppI18n.setLocale('{lang_code}')")
     page.wait_for_timeout(300)
-    label_text = page.locator("#tab-btn-design-search").inner_text().strip()
+    # Target the design-search section title h2 inside the Search tab (the
+    # standalone Tasarım Arama tab is retired).
+    label_text = page.locator(
+        "#tab-content-search h2[x-text*='design_search.panel_title']"
+    ).first.inner_text().strip()
     assert expected_label.lower() in label_text.lower(), (
-        f"Tab label after switching to {lang_code!r}: got {label_text!r}, expected to contain {expected_label!r}"
+        f"Section label after switching to {lang_code!r}: got {label_text!r}, expected to contain {expected_label!r}"
     )
 
 

@@ -211,8 +211,6 @@
 
     {% include 'dashboard/partials/_search_panel.html' %}
 
-    {% include 'dashboard/partials/_design_search_panel.html' %}
-
     {% include 'dashboard/partials/_design_watchlist_panel.html' %}
 
     {% include 'dashboard/partials/_results_panel.html' %}
@@ -262,6 +260,8 @@
         (function() {
         var params = new URLSearchParams(window.location.search);
         var tab = params.get('tab');
+        // Backwards-compat: design-search merged into the search tab
+        if (tab === 'design-search') tab = 'search';
         var claimRiskReport = params.get('claim_risk_report');
         if (tab || claimRiskReport) {
             setTimeout(function () {
