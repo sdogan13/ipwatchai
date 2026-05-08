@@ -10,9 +10,14 @@ import pytest
 
 from pdf_extract_patent import (
     PATENT_INID_CODES,
+    PageKind,
+    RecordType,
+    classify_kind_code,
     clean_text,
+    detect_page_kind,
     extract_bulletin_metadata,
     extract_bulletin_metadata_from_text,
+    extract_kind_code,
     normalize_iso_date,
     normalize_tr_date,
     parse_inid_block,
@@ -407,3 +412,156 @@ def test_extract_bulletin_metadata_doc_respects_max_pages():
 def test_extract_bulletin_metadata_doc_handles_empty_document():
     doc = _FakeDoc([])
     assert extract_bulletin_metadata(doc) == (None, None)
+
+
+# ---------------------------------------------------------------------------
+# Step 3.3 — extract_kind_code
+# ---------------------------------------------------------------------------
+
+def test_extract_kind_code_real_granted_patent():
+    """'TR 2022 014462 B' captured from page 200 of 2025_08.pdf."""
+    assert extract_kind_code("TR 2022 014462 B") == "B"
+
+
+def test_extract_kind_code_real_published_app():
+    """'TR 2024 000746 A1' captured from page 1850 of 2025_08.pdf."""
+    assert extract_kind_code("TR 2024 000746 A1") == "A1"
+
+
+def test_extract_kind_code_real_ep_fascicle():
+    """'TR 2025 010866 T4' captured from page 1000 of 2025_08.pdf."""
+    assert extract_kind_code("TR 2025 010866 T4") == "T4"
+
+
+def test_extract_kind_code_handles_um_kinds():
+    """Real shapes for utility-model kinds."""
+    assert extract_kind_code("TR 2024 020000 Y") == "Y"
+    assert extract_kind_code("TR 2024 020000 U") == "U"
+    assert extract_kind_code("TR 2024 020000 U4") == "U4"
+    assert extract_kind_code("TR 2024 020000 U5") == "U5"
+
+
+def test_extract_kind_code_handles_t_family():
+    """T / T3 / T4 / T5 / T6 — EP fascicle kinds across record families."""
+    for kind in ("T", "T3", "T4", "T5", "T6"):
+        assert extract_kind_code(f"TR 2024 020000 {kind}") == kind
+
+
+def test_extract_kind_code_returns_none_for_missing_or_unparseable():
+    assert extract_kind_code(None) is None
+    assert extract_kind_code("") is None
+    assert extract_kind_code("just plain text") is None
+    assert extract_kind_code("TR 2024") is None  # no app-no, no kind
+
+
+def test_extract_kind_code_ignores_label_prefix():
+    """Some (11) values may have stray label text — search, don't full-match."""
+    raw = "Yayın No\nTR 2022 014462 B"
+    assert extract_kind_code(raw) == "B"
+
+
+# ---------------------------------------------------------------------------
+# Step 3.3 — classify_kind_code
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("kind, expected", [
+    # Granted patents: B (regular), T4 (EP-fascicle Turkish translation of grant)
+    ("B",  RecordType.GRANTED_PATENT),
+    ("T4", RecordType.GRANTED_PATENT),
+    # UM grant
+    ("Y",  RecordType.GRANTED_UM),
+    # Patent applications: A1, A2, T, T3
+    ("A1", RecordType.PUBLISHED_APP),
+    ("A2", RecordType.PUBLISHED_APP),
+    ("T",  RecordType.PUBLISHED_APP),
+    ("T3", RecordType.PUBLISHED_APP),
+    # UM applications: U, U4, U5, T5, T6
+    ("U",  RecordType.PUBLISHED_UM_APP),
+    ("U4", RecordType.PUBLISHED_UM_APP),
+    ("U5", RecordType.PUBLISHED_UM_APP),
+    ("T5", RecordType.PUBLISHED_UM_APP),
+    ("T6", RecordType.PUBLISHED_UM_APP),
+])
+def test_classify_kind_code_documented_mappings(kind, expected):
+    assert classify_kind_code(kind) is expected
+
+
+def test_classify_kind_code_unknown_kinds_fall_through():
+    assert classify_kind_code("Z") is RecordType.UNKNOWN
+    assert classify_kind_code("X9") is RecordType.UNKNOWN
+    assert classify_kind_code("") is RecordType.UNKNOWN
+    assert classify_kind_code(None) is RecordType.UNKNOWN
+
+
+def test_classify_kind_code_is_case_insensitive():
+    """Lower/mixed case kind codes still classify correctly."""
+    assert classify_kind_code("b") is RecordType.GRANTED_PATENT
+    assert classify_kind_code("a1") is RecordType.PUBLISHED_APP
+
+
+# ---------------------------------------------------------------------------
+# Step 3.3 — detect_page_kind
+# ---------------------------------------------------------------------------
+
+def test_detect_page_kind_inid_records_when_tokens_present():
+    """A page with even one line-anchored INID token is INID_RECORDS."""
+    page = "(11) TR 2022 014462 B\n(12) Patent Belgesi\n"
+    assert detect_page_kind(page) is PageKind.INID_RECORDS
+
+
+def test_detect_page_kind_event_index_when_only_appno_lines():
+    """Event-index pages have appno lines + Turkish event phrases, no INIDs."""
+    page = (
+        "2024/010476\n"
+        "Yayımlanmış Faydalı Model Başvurularının Araştırma Raporları (6769 SMK)\n"
+        "2024/010507\n"
+        "Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)\n"
+    )
+    assert detect_page_kind(page) is PageKind.EVENT_INDEX
+
+
+def test_detect_page_kind_skip_for_cover_page():
+    page = (
+        "Sayı 2025-08\n"
+        "Yayım Tarihi  \n"
+        "21.08.2025\n"
+    )
+    assert detect_page_kind(page) is PageKind.SKIP
+
+
+def test_detect_page_kind_skip_for_toc():
+    page = (
+        "İÇİNDEKİLER\n"
+        "AÇIKLAMALAR ........................................... 5\n"
+        "YAYIN İNDEKSLERİ\n"
+    )
+    assert detect_page_kind(page) is PageKind.SKIP
+
+
+def test_detect_page_kind_skip_for_empty_or_whitespace():
+    assert detect_page_kind(None) is PageKind.SKIP
+    assert detect_page_kind("") is PageKind.SKIP
+    assert detect_page_kind("   \n\n   ") is PageKind.SKIP
+
+
+def test_detect_page_kind_inid_takes_priority_over_appno_lines():
+    """A page with BOTH INID tokens and appno lines is INID_RECORDS,
+    not EVENT_INDEX. Real records have appnos in their (21) values."""
+    page = (
+        "(11) TR 2022 014462 B\n"
+        "(21) Başvuru Numarası\n"
+        "2022/014462\n"
+    )
+    assert detect_page_kind(page) is PageKind.INID_RECORDS
+
+
+def test_detect_page_kind_event_index_ignores_random_parens():
+    """The Turkish event phrase '(6769 SMK)' must NOT be misread as INID
+    — it's a 4-digit number, not 2-digit, and it's mid-line anyway."""
+    page = (
+        "2024/010476\n"
+        "Yayımlanmış Faydalı Model Başvurularının Araştırma Raporları (6769 SMK)\n"
+    )
+    # Confirm classification — (6769) is too long to match the 2-digit
+    # whitelist, AND it's mid-line so line-anchoring rejects it anyway.
+    assert detect_page_kind(page) is PageKind.EVENT_INDEX

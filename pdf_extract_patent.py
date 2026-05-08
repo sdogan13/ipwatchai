@@ -31,6 +31,7 @@ CLI (lands in step 3.8)::
 from __future__ import annotations
 
 import re
+from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
 
@@ -199,6 +200,116 @@ def extract_bulletin_metadata(
             break
 
     return bulletin_no, bulletin_date
+
+
+class RecordType(str, Enum):
+    """Top-level record family, derived from the (11) publication-no kind code."""
+
+    GRANTED_PATENT = "GRANTED_PATENT"
+    GRANTED_UM = "GRANTED_UM"
+    PUBLISHED_APP = "PUBLISHED_APP"
+    PUBLISHED_UM_APP = "PUBLISHED_UM_APP"
+    UNKNOWN = "UNKNOWN"
+
+
+# Kind-code → record-type mapping (per bulletins/Patent__Faydali_Model/README.md §3).
+# EP-fascicle status is orthogonal to record_type — that's detected
+# separately via the dual (96)/(97) INID quirk in step 3.4.
+_KIND_TO_RECORD_TYPE: Dict[str, RecordType] = {
+    "B":  RecordType.GRANTED_PATENT,
+    "T4": RecordType.GRANTED_PATENT,  # EP-fascicle Turkish translation of grant
+    "Y":  RecordType.GRANTED_UM,
+    "A1": RecordType.PUBLISHED_APP,
+    "A2": RecordType.PUBLISHED_APP,
+    "T":  RecordType.PUBLISHED_APP,
+    "T3": RecordType.PUBLISHED_APP,
+    "U":  RecordType.PUBLISHED_UM_APP,
+    "U4": RecordType.PUBLISHED_UM_APP,
+    "U5": RecordType.PUBLISHED_UM_APP,
+    "T5": RecordType.PUBLISHED_UM_APP,
+    "T6": RecordType.PUBLISHED_UM_APP,
+}
+
+# Publication-number pattern: ``TR YYYY NNNNNN [kind]``. The kind code is
+# 1 letter optionally followed by 1 digit (so ``B``, ``Y``, ``A1``,
+# ``T4``, ``U5`` all match).
+_PUBLICATION_NO_RE = re.compile(r"\bTR\s+(\d{4})\s+(\d{4,7})\s+([A-Z]\d?)\b")
+
+
+def extract_kind_code(publication_no_value: Optional[str]) -> Optional[str]:
+    """Pull the trailing kind code from a (11) publication-number value.
+
+    Examples:
+
+      ``'TR 2022 014462 B'``    -> ``'B'``
+      ``'TR 2024 000746 A1'``   -> ``'A1'``
+      ``'TR 2025 010866 T4'``   -> ``'T4'``
+
+    Returns ``None`` if the value doesn't match the publication-number
+    shape — defensive, the caller can fall back to ``RecordType.UNKNOWN``.
+    """
+    if not publication_no_value:
+        return None
+    m = _PUBLICATION_NO_RE.search(publication_no_value)
+    return m.group(3) if m else None
+
+
+def classify_kind_code(kind: Optional[str]) -> RecordType:
+    """Map a kind-code string to a ``RecordType``.
+
+    Unknown / missing kinds return ``RecordType.UNKNOWN`` so the caller
+    can keep parsing the rest of the record without losing the row.
+    """
+    if not kind:
+        return RecordType.UNKNOWN
+    return _KIND_TO_RECORD_TYPE.get(kind.upper(), RecordType.UNKNOWN)
+
+
+class PageKind(str, Enum):
+    """Coarse classification of a PDF page, used to gate parsing.
+
+    The patent PDF interleaves three page kinds:
+
+      * ``INID_RECORDS`` — pages we want to parse for full-bibliographic records
+      * ``EVENT_INDEX``  — flat 'appno + Turkish phrase' pages (Stage 7, deferred)
+      * ``SKIP``         — cover, TOC, section headers, blank pages
+    """
+
+    INID_RECORDS = "inid_records"
+    EVENT_INDEX = "event_index"
+    SKIP = "skip"
+
+
+# Heuristics for identifying event-index pages. Empirically derived from
+# 2025_08.pdf pages 7–114 + 1190–1844 — those pages are dominated by
+# application-number + Turkish-phrase pairs, with no INID tokens at all.
+# We require BOTH an application-number pattern AND the absence of
+# line-anchored INID tokens, so a stray page with one numeral doesn't
+# get misclassified.
+_APPNO_LINE_RE = re.compile(r"^\d{4}/\d{4,7}\s*$", re.MULTILINE)
+
+
+def detect_page_kind(page_text: Optional[str]) -> PageKind:
+    """Classify a single page's text.
+
+    Three-way result:
+
+      * ``INID_RECORDS`` — at least one line-anchored 2-digit INID token
+        from the documented whitelist.
+      * ``EVENT_INDEX``  — no INID tokens, but at least one bare
+        ``YYYY/NNNNNN`` application-number line.
+      * ``SKIP``         — neither (cover, TOC, blank, etc.).
+    """
+    if not page_text:
+        return PageKind.SKIP
+
+    if _INID_TOKEN_RE.search(page_text):
+        return PageKind.INID_RECORDS
+
+    if _APPNO_LINE_RE.search(page_text):
+        return PageKind.EVENT_INDEX
+
+    return PageKind.SKIP
 
 
 def parse_inid_block(text: str) -> Dict[str, List[str]]:
