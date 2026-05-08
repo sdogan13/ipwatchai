@@ -278,8 +278,10 @@ See `test.md` for the current test lanes and coverage expectations.
 Pipeline and data-collection code lives in:
 - `data_collection.py` (Marka)
 - `data_collection_patent.py` (Patent / Faydalı Model)
+- `data_collection_tasarim.py` (Tasarım)
 - `zip.py`
 - `pdf_extract.py`
+- `pdf_extract_tasarim.py`, `pdf_extract_tasarim_events.py`, `cd_extract_tasarim.py`, `embeddings_tasarim.py` (Tasarım extractors)
 - `ingest_events.py`
 - `pipeline/`
 
@@ -338,6 +340,47 @@ python data_collection_patent.py --bulletins-root C:\path\to\elsewhere
 A legacy menu fallback path is retained in case TÜRKPATENT reintroduces a dropdown UI for some bulletins (Marka and Tasarım both rely on that path), but it is not exercised by the current Patent flow.
 
 Pure-helper unit tests live in `tests/test_data_collection_patent.py` and cover card-id normalization, recency window, per-track filename construction, completeness check (including the legacy multi-month bundle false-match guard), menu-item CD/PDF classification, the direct-href validator, and CLI argv parsing.
+
+### Tasarım (industrial design) pipeline
+
+The Tasarım pipeline materializes every issue into a single canonical folder so downstream stages have one predictable place to look for sources, metadata, and images:
+
+```
+bulletins/Tasarim/TS_{bulletin_no}_{bulletin_date}/
+├── bulletin.pdf                  ← PDF source (data_collection_tasarim)
+├── metadata.json                 ← PDF-extracted (pdf_extract_tasarim)
+├── events.json                   ← PDF events (pdf_extract_tasarim_events)
+├── images/                       ← PDF figures
+│   └── {appno_norm}/
+│       └── {d}_{v}.jpg
+├── cd_metadata.json              ← HSQLDB-CD-extracted (cd_extract_tasarim)
+└── cd_images/                    ← CD-extracted JPEGs
+    └── {appno_norm}/
+        └── {d}_{v}.jpg
+```
+
+Pipeline modules:
+- `data_collection_tasarim.py` — bulletin collector (TÜRKPATENT Tasarım category, PDF only via the legacy menu fallback)
+- `pdf_extract_tasarim.py` — PDF metadata + per-design view image extraction; saves figures to `images/{appno_norm}/{d}_{v}.jpg`
+- `pdf_extract_tasarim_events.py` — events on existing registrations (12 event types: transfer, seizure, renewal, cancellation variants, etc.)
+- `cd_extract_tasarim.py` — HSQLDB CD bundle extractor for legacy issues 230..466. Reads `idbulletin.{script,log,inf}` plus per-application JPEG folders, persists images to `cd_images/{appno_norm}/{d}_{v}.jpg`, emits `cd_metadata.json` with all dossiers, holders, designers, designs, and IDANNOTATION rows. Handles both modern `{N}_CD.rar` and the verbose-named `* cd içeri *.rar` layouts. Hague (`DM/...`) dossiers are emitted with `views: []` (no images on CD)
+- `embeddings_tasarim.py` — DINOv2 + CLIP + HSV per-view embeddings, mean-pooled per design; written back into `metadata.json`
+- `pipeline/ingest_designs.py` — DB ingest into `designs`, `design_views`, `design_events` (idempotent)
+
+**Canonical image key**: both `metadata.json` and `cd_metadata.json` use the same string shape for `image_path` — `{appno_norm}/{d}_{v}.jpg`, no leading folder prefix. The folder prefix (`images/` vs `cd_images/`) is provided by the consumer when resolving the key against disk. This lets a future stage-3 reconciler match PDF and CD images by a single string.
+
+CD CLI examples:
+```powershell
+python cd_extract_tasarim.py --rar bulletins/Tasarim/240_CD.rar     # one archive
+python cd_extract_tasarim.py --all                                  # every HSQLDB-shape rar in bulletins/Tasarim/
+python cd_extract_tasarim.py --rar ... --force                      # overwrite an existing cd_metadata.json
+```
+
+PDF CLI:
+```powershell
+python pdf_extract_tasarim.py --issue TS_483_2026-04-24             # single issue
+python pdf_extract_tasarim.py --force                               # re-extract; --force wipes images/ for clean slate
+```
 
 ## Development Rules
 

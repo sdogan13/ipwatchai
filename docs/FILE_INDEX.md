@@ -61,6 +61,7 @@ The app still uses several root-level route and assembly modules:
 
 - `pipeline/`: embedding and ingest modules
   canonical ingest modules are `pipeline/ingest.py` (compat wrapper), `pipeline/ingest_rules.py`, `pipeline/ingest_runtime.py`, `pipeline/ingest_bootstrap.py`, and `pipeline/ingest_helpers.py`
+- Tasarım (industrial design) pipeline: `data_collection_tasarim.py`, `pdf_extract_tasarim.py`, `pdf_extract_tasarim_events.py`, `cd_extract_tasarim.py`, `embeddings_tasarim.py`, and `pipeline/ingest_designs.py`. Each issue is materialized into `bulletins/Tasarim/TS_{N}_{date}/` containing `bulletin.pdf`, `metadata.json`, `events.json`, `images/`, `cd_metadata.json`, and `cd_images/`. PDF and CD outputs share a canonical `image_path` key shape `{appno_norm}/{d}_{v}.jpg` so a future reconciler can match them by one string.
 - `bulletins/`: bulletin data root
 - `custom_bulletins/`: local bulletin inputs and experiments
 - `archive_bulletins/`: archived bulletin data

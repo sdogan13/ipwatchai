@@ -76,6 +76,8 @@ Existing suites:
 - `tests/test_plan_features.py`
 - `tests/test_pdf_extract.py`
 - `tests/test_pdf_extract_events.py`
+- `tests/test_pdf_extract_tasarim.py`
+- `tests/test_cd_extract_tasarim.py`
 - `tests/test_scoring_engine.py`
 - `tests/test_settings_manager.py`
 - `tests/test_status_reconciler.py`
@@ -248,6 +250,8 @@ Current environment note:
 
 - `tests/test_auth.py`: password hashing, JWTs, auth model validation
 - `tests/test_data_collection.py`: collector recency-window logic, Gazette validation, issue completeness checks, and download planning
+- `tests/test_pdf_extract_tasarim.py`: Tasarım PDF extraction pure helpers (clean_text, INID-field tokenization, Locarno parsing, applicant/attorney/designer/view-label parsing, hague-record shape) plus extract_issue --force-wipes-images/ behavior and the canonical `view_image_key` shape `{appno_norm}/{d}_{v}.jpg`
+- `tests/test_cd_extract_tasarim.py`: Tasarım HSQLDB CD bundle extractor — `\uXXXX` escape decoder, Locarno comma-splitter, INSERT-line parser across IDDOSSIER/IDHOLDER/IDDESIGN/IDDESIGNER/IDANNOTATION tables, file-level log wrapper with line-prefixed errors, per-design image resolver with numeric sort, 7-Zip wrapper with dynamic CD-root resolution (modern `{N}/` and verbose `setup/` layouts), idbulletin.inf parser, end-to-end metadata orchestrator, image persistence with the canonical key shape, and CLI that materializes each CD into `bulletins/Tasarim/TS_{N}_{date}/cd_metadata.json` plus `cd_images/`
 - `tests/test_subscription.py`: plan eligibility and credit logic
 - `tests/test_subscription_limits.py`: subscription limit behavior
 - `tests/test_scoring_engine.py`: V2 text/visual scoring behavior, common-anchor/generic/descriptor caps, descriptor-stat classifier tests, low-protectability anchor classifier and weak shared-anchor caps, short-anchor and dominant-anchor fuzzy/phonetic guardrails, short-acronym subset and short collapsed translation caps, continuous cap calibration, conservative OCR-vs-OCR visual behavior, image-only OCR staying out of the trademark-name text query, image-only visual quality calibration and strict/balanced layout-variant logo corroboration, plain-text wordmark visual profiling/guardrails, single-anchor asymmetric added-matter caps, weak/limited-text visual guardrails, OCR-disagreement diagnostics, Retrieval V2 normalization/source diagnostics, compact compound retrieval/scoring, added-matter scoring, duplicate/collapsed translation caps, compatibility fields, and combiner behavior
