@@ -715,9 +715,17 @@ def unified_filename(bulletin_no: Optional[str]) -> str:
     """Derive the canonical unified output filename from bulletin_no.
 
     Examples:
-      ``"2025/8"``  -> ``"2025_08_metadata.json"``
-      ``"2025-08"`` -> ``"2025_08_metadata.json"``
-      ``"2025/12"`` -> ``"2025_12_metadata.json"``
+      ``"2025/8"``  -> ``"2025_08_unified_metadata.json"``
+      ``"2025-08"`` -> ``"2025_08_unified_metadata.json"``
+      ``"2025/12"`` -> ``"2025_12_unified_metadata.json"``
+
+    The ``_unified_`` infix is required because the CD-filename-offset
+    (see patent_cd_filename_offset memory) means a unified output's
+    bulletin-derived filename can collide with a DIFFERENT bulletin's
+    CD intermediate. Concrete: bulletin 2024/1 unified would write to
+    ``2024_01_metadata.json``, which is the CD intermediate for
+    bulletin 2024/2 (CD filename offset). The infix prevents that
+    silent overwrite. Symmetric with ``_pdf_metadata.json``.
 
     Raises ``ValueError`` if bulletin_no can't be parsed — the CLI must
     not silently write to a wrong filename.
@@ -729,23 +737,27 @@ def unified_filename(bulletin_no: Optional[str]) -> str:
     if not match:
         raise ValueError(f"cannot derive filename from bulletin_no={bulletin_no!r}")
     year, month = match.group(1), match.group(2).zfill(2)
-    return f"{year}_{month}_metadata.json"
+    return f"{year}_{month}_unified_metadata.json"
 
 
 def classify_metadata_json(path: Path) -> str:
-    """Discriminate file type by top-level keys.
+    """Discriminate file type by filename suffix + top-level keys.
 
-    Returns ``"cd"``, ``"pdf"``, or ``"unified"``. ``"pdf"`` is for
-    files matching the ``_pdf_metadata.json`` stem (handled by filename
-    since the file_classify_metadata test below could collide with
-    unified). Used by --all to skip already-reconciled outputs on
-    re-runs.
+    Returns ``"cd"``, ``"pdf"``, or ``"unified"``.
+
+    Filename suffixes are checked first because they're unambiguous and
+    avoid one JSON parse:
+      - ``*_pdf_metadata.json``     -> ``"pdf"``
+      - ``*_unified_metadata.json`` -> ``"unified"``
+      - everything else: parse and inspect top-level keys.
 
     Raises ``ValueError`` for files that don't look like any known
     metadata shape.
     """
     if path.name.endswith("_pdf_metadata.json"):
         return "pdf"
+    if path.name.endswith("_unified_metadata.json"):
+        return "unified"
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as e:
@@ -754,24 +766,45 @@ def classify_metadata_json(path: Path) -> str:
         raise ValueError(f"{path}: top-level JSON is not an object")
     if "patents" in doc:
         return "cd"
-    if "records" in doc:
-        # Distinguish unified output (has reconciled_at) from a stray
-        # PDF-shaped doc renamed without _pdf_ infix.
-        return "unified" if "reconciled_at" in doc else "pdf"
+    if "records" in doc and "reconciled_at" in doc:
+        # Defensive: a unified file without the canonical suffix can
+        # still be identified by its content — happens if a user passes
+        # --out-dir to a different directory and renames manually.
+        return "unified"
     raise ValueError(f"{path}: not a recognised CD/PDF/unified metadata doc")
 
 
 def _group_by_bulletin(
     bulletins_dir: Path,
-) -> Dict[str, Dict[str, Path]]:
-    """Walk a bulletins dir, group CD + PDF JSONs by canonical bulletin_no.
+) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    """Walk a bulletins dir, group CD + PDF JSON DOCS by canonical bulletin_no.
 
-    Returns ``{bulletin_no: {"cd": Path, "pdf": Path}}``. Unified outputs
-    from prior runs are skipped — a re-run produces the same output and
-    using the prior unified file as input would compound stats blocks
-    incorrectly.
+    Returns ``{bulletin_no: {"cd": <doc>, "pdf": <doc>}}``. Critically,
+    we load and KEEP each doc's parsed JSON in memory rather than just
+    its path, because:
+
+      1. CD filenames don't reliably encode bulletin_no (see
+         CD-filename-offset memory): ``2024_01_CD.rar`` is bulletin
+         2024/2.
+      2. Unified outputs derive their filename from the canonical
+         ``bulletin_no``: bulletin 2024/1 writes to
+         ``2024_01_metadata.json``.
+      3. As --all processes bulletins, the unified for 2024/1
+         OVERWRITES the on-disk file at ``2024_01_metadata.json``.
+         A path-only snapshot would then re-read that file when
+         processing bulletin 2024/2 and find a unified doc instead
+         of a CD doc — which is exactly the failure mode observed
+         on 2026-05-08.
+
+    Pre-loading every doc decouples read from write. Memory cost is
+    bounded by total CD+PDF JSON size on disk (~500 MB for the full
+    historical archive), which is fine for a dev machine.
+
+    Unified outputs from prior runs are skipped at scan time — re-running
+    --all on a partially-reconciled directory must not feed the prior
+    output back as input.
     """
-    groups: Dict[str, Dict[str, Path]] = {}
+    groups: Dict[str, Dict[str, Dict[str, Any]]] = {}
     for path in sorted(bulletins_dir.glob("*_metadata.json")):
         try:
             kind = classify_metadata_json(path)
@@ -780,7 +813,6 @@ def _group_by_bulletin(
             continue
         if kind == "unified":
             continue
-        # Read enough to extract bulletin_no without re-classifying.
         try:
             doc = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
@@ -790,29 +822,25 @@ def _group_by_bulletin(
         if not bulletin:
             logger.warning("[skip] %s: missing bulletin_no", path.name)
             continue
-        groups.setdefault(bulletin, {})[kind] = path
+        groups.setdefault(bulletin, {})[kind] = doc
     return groups
 
 
-def _process_one(
-    cd_path: Optional[Path],
-    pdf_path: Optional[Path],
+def _process_pair(
+    cd_doc: Optional[Dict[str, Any]],
+    pdf_doc: Optional[Dict[str, Any]],
     out_dir: Path,
     force: bool,
 ) -> Dict[str, Any]:
-    """Reconcile one (cd, pdf) pair and write the unified output.
+    """Reconcile already-loaded CD + PDF docs and write the unified output.
 
-    At least one of ``cd_path`` / ``pdf_path`` must be set. Returns a
+    At least one of ``cd_doc`` / ``pdf_doc`` must be set. Returns a
     summary dict so ``main`` can report aggregate progress.
     """
-    cd_doc = load_cd_metadata(cd_path) if cd_path else None
-    pdf_doc = load_pdf_metadata(pdf_path) if pdf_path else None
     unified = reconcile_metadata(cd_doc=cd_doc, pdf_doc=pdf_doc)
 
     out_path = out_dir / unified_filename(unified["bulletin_no"])
     if out_path.exists() and not force:
-        # The CD intermediate uses the same filename pattern; overwriting
-        # silently would surprise the caller.
         raise FileExistsError(
             f"{out_path} already exists; pass --force to overwrite"
         )
@@ -827,6 +855,18 @@ def _process_one(
         "bulletin_no": unified["bulletin_no"],
         "stats": unified["stats"],
     }
+
+
+def _process_one(
+    cd_path: Optional[Path],
+    pdf_path: Optional[Path],
+    out_dir: Path,
+    force: bool,
+) -> Dict[str, Any]:
+    """Single-pair reconcile entry point used by --cd-json/--pdf-json mode."""
+    cd_doc = load_cd_metadata(cd_path) if cd_path else None
+    pdf_doc = load_pdf_metadata(pdf_path) if pdf_path else None
+    return _process_pair(cd_doc, pdf_doc, out_dir, force)
 
 
 def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
@@ -880,11 +920,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         if not groups:
             logger.warning("--all: no metadata JSON files found in %s", args.bulletins_dir)
             return 1
-        for bulletin, paths in sorted(groups.items()):
+        for bulletin, docs in sorted(groups.items()):
             label = f"bulletin {bulletin}"
             try:
-                result = _process_one(
-                    paths.get("cd"), paths.get("pdf"),
+                result = _process_pair(
+                    docs.get("cd"), docs.get("pdf"),
                     args.out_dir, args.force,
                 )
                 succeeded.append(label)
