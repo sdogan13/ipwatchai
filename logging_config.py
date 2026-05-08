@@ -26,6 +26,7 @@ import os
 import sys
 import json
 import time
+import asyncio
 import logging
 import functools
 import threading
@@ -617,12 +618,6 @@ class RequestLoggingMiddleware:
             )
 
             clear_request_id()
-
-
-# =============================================================================
-# Import asyncio for decorator type checking
-# =============================================================================
-import asyncio
 
 
 # =============================================================================
