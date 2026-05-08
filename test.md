@@ -284,6 +284,7 @@ Current environment note:
 - `tests/browser/test_opposition_browser.py`: opposition guidance modal plus inline alert-to-appeal handoff coverage on seeded alert data
 - `tests/browser/test_billing_browser.py`: pricing/checkout locale render coverage for Turkish and Arabic RTL, mobile viewport billing coverage, checkout registration, checkout login, checkout forgot-password reset/login recovery, and paid-checkout initialization browser coverage
 - `tests/browser/test_admin_browser.py`: admin-capable browser coverage for `/admin` navigation plus landing-page Education tester moderation controls
+- `tests/browser/test_design_search_browser.py`: dashboard "Tasarım Arama" tab activation, design quick-search submission, result-card render, and en/tr/ar locale label coverage
 - `tests/test_browser_e2e.py`: aggregate browser smoke runner
 
 ## Planned Suite Structure

@@ -57,7 +57,8 @@
     "reports": "التقارير",
     "applications": "الطلبات",
     "pro": "PRO",
-    "new": "جديد"
+    "new": "جديد",
+    "design_search": "بحث التصاميم"
   },
   "search": {
     "placeholder": "أدخل اسم العلامة التجارية... (مثل: Nike, Apple, Samsung)",
@@ -1753,5 +1754,31 @@
     "appeal_grounds_ph": "اذكر أسباب اعتراضك...",
     "your_brand_label": "علامتك (طرف الاعتراض)",
     "auto_saved_draft": "تم حفظ المسودة تلقائياً"
+  },
+  "design_search": {
+    "panel_title": "بحث التصاميم",
+    "query_placeholder": "اسم المنتج، مثال: مصباح",
+    "locarno_label": "تصنيف لوكارنو",
+    "locarno_placeholder": "مثال: 06-01، 26-05",
+    "locarno_hint": "افصل بين الأصناف بفاصلة؛ اتركها فارغة للبحث في جميع الأصناف",
+    "upload_label": "تحميل صورة",
+    "upload_hint": "الحد الأقصى 10 م.ب · JPG / PNG / WebP",
+    "image_clear": "مسح",
+    "submit": "بحث",
+    "reset": "إعادة تعيين",
+    "results_title": "النتائج",
+    "loading": "جارٍ البحث…",
+    "empty_title": "لا توجد نتائج",
+    "empty_body": "جرّب مصطلحاً آخر أو حمّل صورة.",
+    "no_image": "لا توجد صورة",
+    "appno_label": "رقم الطلب",
+    "holder_label": "المالك",
+    "error_empty": "أدخل مصطلح بحث أو حمّل صورة",
+    "error_generic": "فشل البحث. حاول مرة أخرى.",
+    "error_network": "خطأ في الشبكة. حاول مرة أخرى.",
+    "error_quota": "وصلت إلى الحد اليومي للبحث. حاول غداً.",
+    "error_auth": "يرجى تسجيل الدخول لاستخدام بحث التصاميم.",
+    "error_image_too_large": "الصورة كبيرة جداً (الحد الأقصى 10 م.ب).",
+    "error_invalid_input": "إدخال غير صالح."
   }
 }

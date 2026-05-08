@@ -57,7 +57,8 @@
     "reports": "Reports",
     "applications": "Applications",
     "pro": "PRO",
-    "new": "NEW"
+    "new": "NEW",
+    "design_search": "Design Search"
   },
   "search": {
     "placeholder": "Enter a trademark name... (e.g. Nike, Apple, Samsung)",
@@ -1751,5 +1752,31 @@
     "appeal_grounds_ph": "State your grounds for opposition (e.g. visual/phonetic similarity, conflict in same classes, prior registration rights...)",
     "your_brand_label": "Your Brand (Opposing Party)",
     "auto_saved_draft": "Draft auto-saved"
+  },
+  "design_search": {
+    "panel_title": "Design Search",
+    "query_placeholder": "Product name, e.g. Lamp",
+    "locarno_label": "Locarno class",
+    "locarno_placeholder": "e.g. 06-01, 26-05",
+    "locarno_hint": "Comma-separated; leave empty to search all classes",
+    "upload_label": "Upload an image",
+    "upload_hint": "Max 10 MB · JPG / PNG / WebP",
+    "image_clear": "Clear",
+    "submit": "Search",
+    "reset": "Reset",
+    "results_title": "Results",
+    "loading": "Searching…",
+    "empty_title": "No results",
+    "empty_body": "Try a different term or upload an image.",
+    "no_image": "No image",
+    "appno_label": "App",
+    "holder_label": "Holder",
+    "error_empty": "Provide a search term or upload an image",
+    "error_generic": "Search failed. Please try again.",
+    "error_network": "Network error. Please try again.",
+    "error_quota": "Daily search limit reached. Try again tomorrow.",
+    "error_auth": "Please sign in to use design search.",
+    "error_image_too_large": "Image is too large (max 10 MB).",
+    "error_invalid_input": "Invalid input."
   }
 }

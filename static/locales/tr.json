@@ -57,7 +57,8 @@
     "reports": "Raporlar",
     "applications": "Başvurular",
     "pro": "PRO",
-    "new": "YENI"
+    "new": "YENI",
+    "design_search": "Tasarım Arama"
   },
   "search": {
     "placeholder": "Marka adı girin... (ör: Nike, Apple, Samsung)",
@@ -1756,5 +1757,31 @@
     "appeal_grounds_ph": "Bu markaya itiraz gerekçelerinizi yazın (örn. görsel/fonetik benzerlik, aynı sınıflarda çakışma, önceki tescil hakkı...)",
     "your_brand_label": "Sizin Markanız (İtiraz Eden)",
     "auto_saved_draft": "Taslak otomatik kaydedildi"
+  },
+  "design_search": {
+    "panel_title": "Tasarım Arama",
+    "query_placeholder": "Ürün adı, ör. Lamba",
+    "locarno_label": "Locarno sınıfı",
+    "locarno_placeholder": "ör. 06-01, 26-05",
+    "locarno_hint": "Virgülle ayırın; boş bırakmanız tüm sınıflarda arar",
+    "upload_label": "Görsel yükle",
+    "upload_hint": "Maks 10 MB · JPG / PNG / WebP",
+    "image_clear": "Temizle",
+    "submit": "Ara",
+    "reset": "Sıfırla",
+    "results_title": "Sonuçlar",
+    "loading": "Aranıyor…",
+    "empty_title": "Sonuç bulunamadı",
+    "empty_body": "Farklı bir terim veya görselle deneyin.",
+    "no_image": "Görsel yok",
+    "appno_label": "Başvuru",
+    "holder_label": "Sahip",
+    "error_empty": "Bir arama terimi girin veya görsel yükleyin",
+    "error_generic": "Arama başarısız. Lütfen tekrar deneyin.",
+    "error_network": "Ağ hatası. Lütfen tekrar deneyin.",
+    "error_quota": "Günlük arama limitinize ulaştınız. Yarın tekrar deneyin.",
+    "error_auth": "Tasarım araması için giriş yapın.",
+    "error_image_too_large": "Görsel çok büyük (maks 10 MB).",
+    "error_invalid_input": "Geçersiz girdi."
   }
 }

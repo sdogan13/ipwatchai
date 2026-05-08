@@ -37,6 +37,11 @@
                             role="tab" aria-selected="false" style="color:var(--color-text-muted)">
                         <span x-text="t('tabs.search')">Arama</span>
                     </button>
+                    <button onclick="showDashboardTab('design-search')" id="tab-btn-design-search"
+                            class="dashboard-tab-btn nav-tab-btn px-3 lg:px-4 py-1.5 rounded-lg text-sm font-medium transition-all whitespace-nowrap"
+                            role="tab" aria-selected="false" style="color:var(--color-text-muted)">
+                        <span x-text="t('tabs.design_search')">Tasarım Arama</span>
+                    </button>
                     <button onclick="showDashboardTab('opposition-radar')" id="tab-btn-opposition-radar"
                             class="dashboard-tab-btn nav-tab-btn px-3 lg:px-4 py-1.5 rounded-lg text-sm font-medium transition-all flex items-center gap-1.5 whitespace-nowrap"
                             role="tab" aria-selected="false" style="color:var(--color-text-muted)">
@@ -235,6 +240,10 @@
             <button onclick="showDashboardTab('search'); closeMobileDrawer();" class="w-full flex items-center gap-3 px-4 py-3 text-sm min-h-[48px]" style="color:var(--color-text-primary)">
                 <svg class="w-5 h-5" style="color:var(--color-text-muted)" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                 <span x-text="t('tabs.search')">Arama</span>
+            </button>
+            <button onclick="showDashboardTab('design-search'); closeMobileDrawer();" class="w-full flex items-center gap-3 px-4 py-3 text-sm min-h-[48px]" style="color:var(--color-text-primary)">
+                <svg class="w-5 h-5" style="color:var(--color-text-muted)" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5h16v2H4zm0 6h16v2H4zm0 6h10v2H4z"/></svg>
+                <span x-text="t('tabs.design_search')">Tasarım Arama</span>
             </button>
             <button onclick="showDashboardTab('opposition-radar'); closeMobileDrawer();" class="w-full flex items-center gap-3 px-4 py-3 text-sm min-h-[48px]" style="color:var(--color-text-primary)">
                 <svg class="w-5 h-5" style="color:var(--color-text-muted)" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
