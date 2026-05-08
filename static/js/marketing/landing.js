@@ -1926,6 +1926,10 @@ function landing() {
                 this.searchError = this.t('search.live_search_name_required');
                 return;
             }
+            if (!this.selectedClasses || this.selectedClasses.length === 0) {
+                this.searchError = this.t('search.risk_report_classes_required');
+                return;
+            }
 
             var token = this.getAuthToken();
             var endpoint = token

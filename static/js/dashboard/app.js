@@ -717,6 +717,10 @@ function dashboard() {
                 showToast(this.t('search.live_search_name_required'), 'warning');
                 return;
             }
+            if (!this.selectedClasses || this.selectedClasses.length === 0) {
+                showToast(this.t('search.risk_report_classes_required'), 'warning');
+                return;
+            }
 
             this.riskReportLoading = true;
             this.searchLoading = true;

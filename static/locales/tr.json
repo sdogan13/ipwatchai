@@ -102,6 +102,7 @@
     "monthly_credits_title": "Kalan aylık Agentik Arama hakkı",
     "enter_brand_name": "Lütfen bir marka adı girin",
     "live_search_name_required": "Agentik Arama için marka adı zorunludur. Lütfen bir marka adı girin.",
+    "risk_report_classes_required": "Risk raporu oluşturmak için en az bir Nice sınıfı seçmelisiniz.",
     "recent_searches": "Son Aramalar",
     "clear_history": "Temizle",
     "search_failed": "Arama başarısız",

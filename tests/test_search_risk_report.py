@@ -1580,13 +1580,50 @@ def test_intelligent_risk_report_cancelled_mid_search_consumes_no_quota(client):
 
         resp = client.post(
             "/api/v1/search/intelligent-risk-report",
-            data={"query": "wosen", "language": "tr"},
+            data={"query": "wosen", "classes": "25", "language": "tr"},
         )
 
     assert resp.status_code == 200
     body = resp.json()
     assert body.get("cancelled") is True
     assert mock_gen.await_count == 0
+
+
+def test_intelligent_risk_report_rejects_missing_classes_with_422(client):
+    """Combined risk-report flow must require Nice class selection."""
+    with patch("agentic_search.is_feature_enabled", return_value=True), \
+         patch("agentic_search._run_search_sync") as mock_search, \
+         patch("agentic_search.generate_search_risk_report_data", new_callable=AsyncMock) as mock_gen:
+
+        resp = client.post(
+            "/api/v1/search/intelligent-risk-report",
+            data={"query": "wosen", "language": "en"},  # no classes
+        )
+
+    assert resp.status_code == 422, resp.text
+    detail = resp.json().get("detail", {})
+    assert detail.get("error") == "classes_required"
+    assert mock_search.call_count == 0, "scrape must not run when classes are missing"
+    assert mock_gen.await_count == 0
+
+
+def test_public_intelligent_risk_report_rejects_missing_classes_with_422(client):
+    """Public combined risk-report flow must also require Nice class selection."""
+    import agentic_search as _ag
+    _ag._search_limiter.reset()  # public endpoint is 1/min — clear bucket so order-of-tests doesn't 429
+
+    with patch("agentic_search.is_feature_enabled", return_value=True), \
+         patch("agentic_search._run_search_sync") as mock_search, \
+         patch("agentic_search.generate_pending_search_risk_report_data", new_callable=AsyncMock) as mock_pending:
+
+        resp = client.post(
+            "/api/v1/search/intelligent-risk-report/public",
+            data={"query": "wosen", "language": "en"},  # no classes
+        )
+
+    assert resp.status_code == 422, resp.text
+    assert mock_search.call_count == 0
+    assert mock_pending.await_count == 0
 
 
 def test_intelligent_risk_report_quota_exhausted_short_circuits_before_scrape(client):
@@ -1599,7 +1636,7 @@ def test_intelligent_risk_report_quota_exhausted_short_circuits_before_scrape(cl
 
         resp = client.post(
             "/api/v1/search/intelligent-risk-report",
-            data={"query": "wosen", "language": "tr"},
+            data={"query": "wosen", "classes": "25", "language": "tr"},
         )
 
     assert resp.status_code == 403
@@ -1608,6 +1645,9 @@ def test_intelligent_risk_report_quota_exhausted_short_circuits_before_scrape(cl
 
 def test_public_intelligent_risk_report_returns_pending_with_claim_token(client):
     """Unauthenticated combined endpoint returns a pending report and passes user_id=None to agentic."""
+    import agentic_search as _ag
+    _ag._search_limiter.reset()  # public endpoint is 1/min — clear bucket so order-of-tests doesn't 429
+
     pending_payload = _report_response_payload()
     pending_payload["is_pending"] = True
     pending_payload["claim_token"] = "abc-token-123"

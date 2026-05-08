@@ -1042,6 +1042,21 @@ def _parse_classes_csv(classes: Optional[str]) -> List[int]:
     return [int(c.strip()) for c in classes.split(",") if c.strip().isdigit()]
 
 
+def _require_nice_classes(nice_classes: List[int]):
+    """Reject a combined risk-report request that has no Nice classes selected."""
+    if not nice_classes:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "classes_required",
+                "message": "Please select at least one Nice class to generate a risk report.",
+                "message_en": "Please select at least one Nice class to generate a risk report.",
+                "message_tr": "Risk raporu olusturmak icin en az bir Nice sinifi secmelisiniz.",
+                "message_ar": "يرجى اختيار فئة Nice واحدة على الأقل لإنشاء تقرير المخاطر.",
+            },
+        )
+
+
 @router.post("/intelligent-risk-report")
 @_search_limiter.limit(lambda: get_rate_limit_value("rate_limit.intelligent_search", "10/minute"))
 async def intelligent_risk_report(
@@ -1072,6 +1087,10 @@ async def intelligent_risk_report(
     if not is_feature_enabled("live_scraping_enabled"):
         raise HTTPException(status_code=503, detail="Live scraping is temporarily disabled")
 
+    # The combined flow runs an LLM risk report — Nice classes are required input.
+    nice_classes = _parse_classes_csv(classes)
+    _require_nice_classes(nice_classes)
+
     # Pre-flight quota check so we don't waste a scrape on a quota-exhausted user.
     user_id = str(current_user.id)
     org_id = str(current_user.organization_id)
@@ -1081,7 +1100,6 @@ async def intelligent_risk_report(
         if not eligibility["eligible"]:
             raise HTTPException(status_code=403, detail=_report_limit_detail(plan, eligibility))
 
-    nice_classes = _parse_classes_csv(classes)
     image_bytes, image_mime, image_path = await _read_report_image_upload(image)
     image_used = image_path is not None
 
@@ -1162,6 +1180,8 @@ async def public_intelligent_risk_report(
         raise HTTPException(status_code=503, detail="Live scraping is temporarily disabled")
 
     nice_classes = _parse_classes_csv(classes)
+    _require_nice_classes(nice_classes)
+
     image_bytes, image_mime, image_path = await _read_report_image_upload(image)
     image_used = image_path is not None
 
