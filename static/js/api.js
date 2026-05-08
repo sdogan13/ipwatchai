@@ -326,6 +326,7 @@ window.AppAPI.loadLeadFeed = async function (page) {
 
 var currentRenewalPage = 1;
 var currentCancellationPage = 1;
+var currentTransferPage = 1;
 var currentRadarMode = 'conflicts';
 
 window.AppAPI.switchRadarMode = function (mode) {
@@ -333,7 +334,8 @@ window.AppAPI.switchRadarMode = function (mode) {
     var modes = {
         conflicts: { btn: 'radar-mode-conflicts', section: 'radar-conflicts-section' },
         renewals: { btn: 'radar-mode-renewals', section: 'radar-renewals-section' },
-        cancellations: { btn: 'radar-mode-cancellations', section: 'radar-cancellations-section' }
+        cancellations: { btn: 'radar-mode-cancellations', section: 'radar-cancellations-section' },
+        transfers: { btn: 'radar-mode-transfers', section: 'radar-transfers-section' }
     };
     Object.keys(modes).forEach(function (key) {
         var btn = document.getElementById(modes[key].btn);
@@ -355,6 +357,8 @@ window.AppAPI.switchRadarMode = function (mode) {
         loadRenewalFeed(1);
     } else if (mode === 'cancellations') {
         loadCancellationFeed(1);
+    } else if (mode === 'transfers') {
+        loadTransferFeed(1);
     }
 };
 
@@ -687,12 +691,169 @@ window.AppAPI.exportCancellationsCSV = async function () {
     }
 };
 
+window.AppAPI.loadTransferFeed = async function (page) {
+    if (page === undefined) page = 1;
+    currentTransferPage = page;
+
+    var container = document.getElementById('transfer-feed-cards');
+    var loading = document.getElementById('transfer-feed-loading');
+    var empty = document.getElementById('transfer-feed-empty');
+    var pagination = document.getElementById('transfer-pagination');
+
+    loading.classList.remove('hidden');
+    container.innerHTML = '';
+    container.classList.add('hidden');
+    empty.classList.add('hidden');
+
+    var eventType = document.getElementById('filter-transfer-event-type').value;
+    var niceClass = document.getElementById('filter-transfer-nice-class').value;
+    var searchEl = document.getElementById('filter-transfer-search');
+    var search = searchEl ? searchEl.value.trim() : '';
+
+    var url = '/api/v1/leads/transfers/feed?page=' + page + '&limit=' + LEADS_PER_PAGE;
+    if (eventType) url += '&event_type=' + encodeURIComponent(eventType);
+    if (niceClass) url += '&nice_class=' + niceClass;
+    if (search) url += '&search=' + encodeURIComponent(search);
+
+    try {
+        var response = await fetch(url, {
+            headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+        });
+        loading.classList.add('hidden');
+
+        if (response.status === 403) {
+            var denied = await _readApiErrorData(response);
+            showLeadUpgradePrompt(denied.detail || denied);
+            return;
+        }
+        if (!response.ok) throw new Error('Failed to load transfers');
+
+        var data = await response.json();
+        var items = data.items || [];
+        var totalCount = data.total_count != null ? data.total_count : items.length;
+
+        if (items.length === 0) {
+            empty.classList.remove('hidden');
+            pagination.classList.add('hidden');
+            return;
+        }
+
+        container.innerHTML = items.map(renderTransferCard).join('');
+        container.classList.remove('hidden');
+
+        var totalPages = Math.ceil(totalCount / LEADS_PER_PAGE);
+        pagination.classList.remove('hidden');
+
+        var totalInfoEl = document.getElementById('transfer-total-info');
+        if (totalInfoEl) totalInfoEl.textContent = t('leads.total_results', { count: totalCount });
+        document.getElementById('transfer-page-info').textContent = t('leads.page_of', { current: page, total: totalPages });
+        document.getElementById('transfer-prev-btn').disabled = page === 1;
+        document.getElementById('transfer-next-btn').disabled = page >= totalPages;
+
+    } catch (error) {
+        loading.classList.add('hidden');
+        console.error('Failed to load transfers:', error);
+        showToast(t('leads.load_error'), 'error');
+    }
+};
+
+function renderTransferCard(item) {
+    var displayName = getTrademarkDisplayName(item);
+    var thumbnail = window.AppComponents.renderThumbnail(item.image_path, displayName, item.application_no);
+    var classBadges = window.AppComponents.renderNiceClassBadges(item.nice_classes);
+    var turkpatentBtn = window.AppComponents.renderTurkpatentButton(item.application_no);
+    var regNo = window.AppComponents.renderRegistrationNo(item.registration_no);
+    var attorneyLink = window.AppComponents.renderAttorneyLink(item.attorney_name, item.attorney_no);
+    var eventsBtn = window.AppComponents.renderEventsButton(item.application_no);
+
+    var statusHtml = '<span class="text-xs px-2 py-0.5 rounded-full font-medium" style="color:' + getStatusColor(item.status) + ';background:' + getStatusBg(item.status) + '">' + getStatusText(item.status) + '</span>';
+
+    var transferDateHtml = item.transfer_date
+        ? '<div class="text-xs mt-0.5" style="color:var(--color-risk-high-text)">'
+            + '<svg class="w-3 h-3 inline-block mr-0.5 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>'
+            + t('leads.transfer_date') + ': ' + formatDateTRShort(item.transfer_date)
+            + (item.days_since_transfer != null ? ' &middot; ' + t('leads.days_since', { days: item.days_since_transfer }) : '')
+            + '</div>'
+        : '';
+
+    var partiesHtml = '';
+    if (item.previous_holder_name || item.new_holder_name) {
+        var prev = item.previous_holder_name ? escapeHtml(item.previous_holder_name).slice(0, 80) : '?';
+        var nxt = (item.new_holder_name || item.holder_name) ? escapeHtml(item.new_holder_name || item.holder_name).slice(0, 80) : '?';
+        partiesHtml = '<div class="text-xs mt-0.5 truncate" style="color:var(--color-text-secondary)" data-transfer-parties>'
+            + '<span style="color:var(--color-text-faint)">' + t('leads.previous_holder') + ':</span> '
+            + prev
+            + ' <span style="color:var(--color-text-faint)">&rarr;</span> '
+            + '<span style="color:var(--color-text-faint)">' + t('leads.new_holder') + ':</span> '
+            + nxt
+            + '</div>';
+    }
+
+    var eventTypeKey = 'events.type_' + (item.transfer_event_type || 'transfer');
+    var eventTypeLabel = t(eventTypeKey);
+    if (eventTypeLabel === eventTypeKey) eventTypeLabel = item.transfer_event_type || 'transfer';
+    var ribbonColor = window.AppComponents.getScoreColor(85);
+    var ribbon = '<div class="flex flex-col items-center gap-1 flex-shrink-0">'
+        + '<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold" style="' + ribbonColor + '" data-transfer-pill>' + escapeHtml(eventTypeLabel) + '</span>'
+        + '</div>';
+
+    var inner = '<div class="flex justify-between items-start gap-4">'
+        + '<div class="flex items-start gap-3 flex-1 min-w-0">'
+        + thumbnail
+        + '<div class="flex-1 min-w-0">'
+        + '<div class="font-semibold truncate" style="color:var(--color-text-primary)">' + escapeHtml(displayName) + '</div>'
+        + '<div class="mt-0.5">' + statusHtml + '</div>'
+        + transferDateHtml
+        + partiesHtml
+        + classBadges
+        + turkpatentBtn
+        + regNo
+        + attorneyLink
+        + '<div class="mt-1">' + eventsBtn + '</div>'
+        + '</div>'
+        + '</div>'
+        + ribbon
+        + '</div>';
+
+    return window.AppComponents.renderCardShell(inner, { riskLevel: 'high' });
+}
+
+window.AppAPI.exportTransfersCSV = async function () {
+    try {
+        var eventType = document.getElementById('filter-transfer-event-type').value;
+        var niceClass = document.getElementById('filter-transfer-nice-class').value;
+        var url = '/api/v1/leads/transfers/export/csv?';
+        if (eventType) url += 'event_type=' + encodeURIComponent(eventType) + '&';
+        if (niceClass) url += 'nice_class=' + niceClass + '&';
+
+        var response = await fetch(url, {
+            headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+        });
+        if (response.status === 403) {
+            var denied = await _readApiErrorData(response);
+            showUpgradeModal(denied.detail || denied, 'csv_export');
+            return;
+        }
+        if (!response.ok) throw new Error('Export failed');
+
+        var blob = await response.blob();
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'transfers_' + new Date().toISOString().slice(0, 10) + '.csv';
+        a.click();
+    } catch (error) {
+        showToast(t('common.error') + ': ' + error.message, 'error');
+    }
+};
+
 var switchRadarMode = window.AppAPI.switchRadarMode;
 var loadRenewalStats = window.AppAPI.loadRenewalStats;
 var loadRenewalFeed = window.AppAPI.loadRenewalFeed;
 var exportRenewalsCSV = window.AppAPI.exportRenewalsCSV;
 var loadCancellationFeed = window.AppAPI.loadCancellationFeed;
 var exportCancellationsCSV = window.AppAPI.exportCancellationsCSV;
+var loadTransferFeed = window.AppAPI.loadTransferFeed;
+var exportTransfersCSV = window.AppAPI.exportTransfersCSV;
 
 window.AppAPI.showLeadDetail = async function (leadId) {
     currentLeadId = leadId;

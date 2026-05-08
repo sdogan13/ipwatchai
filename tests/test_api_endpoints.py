@@ -13914,6 +13914,229 @@ async def test_extracted_export_cancellations_csv_route_delegates_to_service():
     )
 
 
+@pytest.mark.asyncio
+async def test_lead_service_get_transfer_feed_data_formats_rows():
+    from services.lead_service import get_transfer_feed_data, TRANSFER_EVENT_TYPES
+
+    current_user = SimpleNamespace(id=uuid.uuid4(), organization_id=uuid.uuid4())
+    mock_db_cm = MagicMock()
+    mock_db = MagicMock()
+    mock_cursor = MagicMock()
+    mock_db.cursor.return_value = mock_cursor
+    mock_db_cm.__enter__.return_value = mock_db
+    mock_db_cm.__exit__.return_value = False
+    tm_id = uuid.uuid4()
+    mock_cursor.fetchone.side_effect = [{"cnt": 1}, {"cnt": 1}]
+    mock_cursor.fetchall.return_value = [
+        {
+            "id": tm_id,
+            "name": "TRANSFERRED MARK",
+            "application_no": "2010/9999",
+            "registration_no": "TR-T-1",
+            "nice_class_numbers": [9],
+            "image_path": None,
+            "final_status": "Tescil Edildi",
+            "application_date": date(2010, 5, 1),
+            "event_type": "transfer",
+            "transfer_bulletin_no": "BLT_500",
+            "transfer_date": date(2026, 4, 1),
+            "previous_holder_name": "Old Holder Inc.",
+            "new_holder_name": "New Holder Ltd.",
+            "days_since_transfer": 37,
+            "holder_name": "New Holder Ltd.",
+            "holder_tpe_client_id": "H-2",
+            "attorney_name": "Agent Smith",
+            "attorney_no": "A-1",
+        }
+    ]
+
+    response = await get_transfer_feed_data(
+        event_type=None,
+        nice_class=9,
+        search="trans",
+        page=1,
+        limit=20,
+        current_user=current_user,
+        db_factory=MagicMock(return_value=mock_db_cm),
+        user_plan_getter=lambda db, user_id: {"plan_name": "professional"},
+        plan_limit_getter=lambda plan, key: 10,
+    )
+
+    assert response["total_count"] == 1
+    item = response["items"][0]
+    assert item["id"] == str(tm_id)
+    assert item["transfer_event_type"] == "transfer"
+    assert item["transfer_date"] == "2026-04-01"
+    assert item["previous_holder_name"] == "Old Holder Inc."
+    assert item["new_holder_name"] == "New Holder Ltd."
+    assert item["days_since_transfer"] == 37
+    transfer_query_calls = [
+        call for call in mock_cursor.execute.call_args_list
+        if call.args and isinstance(call.args[0], str) and "trademark_events" in call.args[0]
+    ]
+    assert transfer_query_calls
+    # When no event_type filter is set, all 3 transfer event types should be in the params.
+    found_full_set = False
+    for call in transfer_query_calls:
+        if call.args and len(call.args) > 1 and isinstance(call.args[1], list) and call.args[1]:
+            first_param = call.args[1][0]
+            if isinstance(first_param, list) and set(first_param) == set(TRANSFER_EVENT_TYPES):
+                found_full_set = True
+                break
+    assert found_full_set, "expected feed query to scope to all 3 transfer event types"
+
+
+@pytest.mark.asyncio
+async def test_lead_service_get_transfer_feed_data_respects_event_type_filter():
+    from services.lead_service import get_transfer_feed_data
+
+    current_user = SimpleNamespace(id=uuid.uuid4(), organization_id=uuid.uuid4())
+    mock_db_cm = MagicMock()
+    mock_db = MagicMock()
+    mock_cursor = MagicMock()
+    mock_db.cursor.return_value = mock_cursor
+    mock_db_cm.__enter__.return_value = mock_db
+    mock_db_cm.__exit__.return_value = False
+    mock_cursor.fetchone.side_effect = [{"cnt": 0}, {"cnt": 0}]
+    mock_cursor.fetchall.return_value = []
+
+    await get_transfer_feed_data(
+        event_type="merger",
+        nice_class=None,
+        search=None,
+        page=1,
+        limit=20,
+        current_user=current_user,
+        db_factory=MagicMock(return_value=mock_db_cm),
+        user_plan_getter=lambda db, user_id: {"plan_name": "professional"},
+        plan_limit_getter=lambda plan, key: 10,
+    )
+
+    transfer_query_calls = [
+        call for call in mock_cursor.execute.call_args_list
+        if call.args and isinstance(call.args[0], str) and "trademark_events" in call.args[0]
+    ]
+    assert transfer_query_calls
+    found_merger_only = False
+    for call in transfer_query_calls:
+        if call.args and len(call.args) > 1 and isinstance(call.args[1], list) and call.args[1]:
+            first_param = call.args[1][0]
+            if isinstance(first_param, list) and first_param == ["merger"]:
+                found_merger_only = True
+                break
+    assert found_merger_only, "expected event_type='merger' filter to scope to ['merger'] only"
+
+
+@pytest.mark.asyncio
+async def test_lead_service_export_transfers_csv_data_streams_csv():
+    from services.lead_service import export_transfers_csv_data
+
+    current_user = SimpleNamespace(id=uuid.uuid4(), organization_id=uuid.uuid4())
+    mock_db_cm = MagicMock()
+    mock_db = MagicMock()
+    mock_cursor = MagicMock()
+    mock_db.cursor.return_value = mock_cursor
+    mock_db_cm.__enter__.return_value = mock_db
+    mock_db_cm.__exit__.return_value = False
+    mock_cursor.fetchone.return_value = {"cnt": 1}
+    mock_cursor.fetchall.return_value = [
+        {
+            "name": "TRANSFERRED MARK",
+            "application_no": "2010/9999",
+            "registration_no": "TR-T-1",
+            "holder_name": "New Holder Ltd.",
+            "attorney_name": "Agent Smith",
+            "attorney_no": "A-1",
+            "nice_class_numbers": [9],
+            "final_status": "Tescil Edildi",
+            "event_type": "transfer",
+            "transfer_bulletin_no": "BLT_500",
+            "transfer_date": date(2026, 4, 1),
+            "previous_holder_name": "Old Holder Inc.",
+            "new_holder_name": "New Holder Ltd.",
+            "days_since_transfer": 37,
+        }
+    ]
+
+    response = await export_transfers_csv_data(
+        event_type=None,
+        nice_class=9,
+        current_user=current_user,
+        db_factory=MagicMock(return_value=mock_db_cm),
+        user_plan_getter=lambda db, user_id: {"plan_name": "enterprise"},
+        plan_limit_getter=lambda plan, key: True if key == "can_export_csv_leads" else 10,
+        now_getter=lambda: datetime(2026, 5, 8, 14, 0, tzinfo=timezone.utc),
+    )
+
+    chunks = []
+    async for chunk in response.body_iterator:
+        if isinstance(chunk, bytes):
+            chunks.append(chunk)
+        else:
+            chunks.append(chunk.encode("utf-8"))
+    body = b"".join(chunks).decode("utf-8")
+
+    assert response.headers["content-disposition"] == "attachment; filename=transfers_20260508.csv"
+    assert "Marka,Basvuru No,Tescil No,Olay Tipi,Onceki Sahip,Yeni Sahip" in body
+    assert "TRANSFERRED MARK,2010/9999,TR-T-1,transfer,Old Holder Inc.,New Holder Ltd.,New Holder Ltd.,Agent Smith,A-1,9,Tescil Edildi,2026-04-01,BLT_500,37" in body
+
+
+@pytest.mark.asyncio
+async def test_extracted_transfer_feed_route_delegates_to_service():
+    from api.leads import get_transfer_feed
+
+    current_user = MagicMock()
+    expected = {"total_count": 0, "page": 1, "limit": 20, "items": []}
+
+    with patch(
+        "api.leads.get_transfer_feed_data",
+        new=AsyncMock(return_value=expected),
+    ) as mock_get_transfer_feed_data:
+        response = await get_transfer_feed(
+            event_type="transfer",
+            nice_class=9,
+            search="abc",
+            page=1,
+            limit=20,
+            current_user=current_user,
+        )
+
+    assert response == expected
+    mock_get_transfer_feed_data.assert_awaited_once_with(
+        event_type="transfer",
+        nice_class=9,
+        search="abc",
+        page=1,
+        limit=20,
+        current_user=current_user,
+    )
+
+
+@pytest.mark.asyncio
+async def test_extracted_export_transfers_csv_route_delegates_to_service():
+    from api.leads import export_transfers_csv
+
+    current_user = MagicMock()
+    expected = StreamingResponse(iter([b"csv"]), media_type="text/csv")
+
+    with patch(
+        "api.leads.export_transfers_csv_data",
+        new=AsyncMock(return_value=expected),
+    ) as mock_export_transfers_csv_data:
+        response = await export_transfers_csv(
+            event_type="merger",
+            nice_class=9,
+            current_user=current_user,
+        )
+
+    assert response is expected
+    mock_export_transfers_csv_data.assert_awaited_once_with(
+        event_type="merger",
+        nice_class=9,
+        current_user=current_user,
+    )
+
+
 def test_payment_service_get_client_ip_prefers_proxy_headers():
     from services.payment_service import get_client_ip
     from starlette.requests import Request

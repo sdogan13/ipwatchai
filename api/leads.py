@@ -13,6 +13,7 @@ from services.lead_service import (
     export_cancellations_csv_data,
     export_leads_csv_data,
     export_renewals_csv_data,
+    export_transfers_csv_data,
     get_cancellation_feed_data,
     get_lead_credits_data,
     get_lead_detail_data,
@@ -20,6 +21,7 @@ from services.lead_service import (
     get_lead_stats_data,
     get_renewal_feed_data,
     get_renewal_stats_data,
+    get_transfer_feed_data,
     mark_lead_contacted_data,
     mark_lead_converted_data,
 )
@@ -256,6 +258,40 @@ async def export_cancellations_csv(
 ):
     """Export cancellation leads as CSV."""
     return await export_cancellations_csv_data(
+        nice_class=nice_class,
+        current_user=current_user,
+    )
+
+
+@router.get("/transfers/feed")
+async def get_transfer_feed(
+    event_type: Optional[str] = Query(None, description="Filter: 'transfer', 'merger', 'partial_transfer', or None for all M&A events"),
+    nice_class: Optional[int] = Query(None, description="Filter by Nice class"),
+    search: Optional[str] = Query(None, description="Search brand name, holder name, or transferring party"),
+    page: int = Query(1, ge=1),
+    limit: int = Query(LEADS_PER_PAGE, ge=1, le=100),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Get the paginated M&A transfer lead feed."""
+    return await get_transfer_feed_data(
+        event_type=event_type,
+        nice_class=nice_class,
+        search=search,
+        page=page,
+        limit=limit,
+        current_user=current_user,
+    )
+
+
+@router.get("/transfers/export/csv")
+async def export_transfers_csv(
+    event_type: Optional[str] = Query(None),
+    nice_class: Optional[int] = Query(None),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Export transfer leads as CSV."""
+    return await export_transfers_csv_data(
+        event_type=event_type,
         nice_class=nice_class,
         current_user=current_user,
     )
