@@ -31,7 +31,6 @@ import logging
 import re
 import unicodedata
 from typing import Dict, List, Tuple, Optional, Set
-from functools import lru_cache
 from difflib import SequenceMatcher
 
 logger = logging.getLogger(__name__)

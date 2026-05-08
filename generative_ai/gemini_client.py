@@ -421,7 +421,6 @@ class GeminiClient:
 
     async def _generate_single_logo(self, prompt, config) -> Optional[bytes]:
         """Generate a single logo image and return its bytes."""
-        from google.genai import types
 
         response = await self._call_with_retry_raw(
             model=self.image_model,
@@ -443,7 +442,7 @@ class GeminiClient:
     def _split_logo_panel(panel_bytes: bytes, count: int = 4) -> list[bytes]:
         """Split a Gemini 2x2 logo panel into standalone square PNG images."""
         try:
-            from PIL import Image, ImageChops
+            from PIL import Image
         except Exception as exc:  # pragma: no cover - dependency is present in runtime/tests
             raise GeminiError(f"Logo panel splitting requires Pillow: {exc}") from exc
 

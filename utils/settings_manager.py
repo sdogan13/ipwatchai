@@ -23,7 +23,7 @@ Usage:
 import time
 import json
 import logging
-from typing import Any, Optional, Dict, List
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 

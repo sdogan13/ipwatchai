@@ -33,7 +33,7 @@ from models.schemas import (
     NameSuggestionResponse,
     SafeNameResult,
 )
-from risk_engine import RISK_THRESHOLDS, calculate_visual_similarity, score_pair
+from risk_engine import RISK_THRESHOLDS, calculate_visual_similarity
 from utils.subscription import (
     check_ai_credit_eligibility,
     check_logo_generation_eligibility,

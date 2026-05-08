@@ -30,7 +30,6 @@ from typing import Optional
 
 import psycopg2
 from psycopg2 import pool as pg_pool
-from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
 
 # Load environment variables

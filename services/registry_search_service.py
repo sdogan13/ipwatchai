@@ -18,7 +18,6 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from services.design_search_service import (
     DEFAULT_LIMIT,
-    PUBLIC_RESULT_CAP,
     TRIGRAM_THRESHOLD,
     cap_limit,
     combine_scores,

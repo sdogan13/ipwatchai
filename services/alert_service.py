@@ -14,7 +14,6 @@ from models.schemas import (
     AlertResponse,
     AlertScores,
     AlertStatus,
-    AlertSeverity,
     ConflictingTrademark,
     PaginatedResponse,
 )

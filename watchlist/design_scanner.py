@@ -23,7 +23,6 @@ Public entry points:
 from __future__ import annotations
 
 import logging
-from datetime import date as date_type
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 from uuid import UUID
 

@@ -16,13 +16,10 @@ upload an image via the route layer to populate the embedding columns.
 """
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any, Dict, List, Optional, Sequence
 from uuid import UUID
 
-import psycopg2
-import psycopg2.extras
 from fastapi import HTTPException, status
 
 from database.crud import Database

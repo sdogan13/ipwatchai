@@ -18,14 +18,10 @@ the route layer (``app_design_search_routes.py``).
 from __future__ import annotations
 
 import logging
-import os
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
-import psycopg2
-import psycopg2.extras
 
 logger = logging.getLogger("turkpatent.design_search")
 

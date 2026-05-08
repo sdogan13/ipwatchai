@@ -42,9 +42,9 @@ class Database:
         self.conn.rollback()
 
 
-from database.repositories.application_repository import ApplicationCRUD
-from database.repositories.alert_repository import AlertCRUD
-from database.repositories.organization_repository import OrganizationCRUD
-from database.repositories.scan_log_repository import ScanLogCRUD
-from database.repositories.user_repository import UserCRUD
-from database.repositories.watchlist_repository import WatchlistCRUD
+from database.repositories.application_repository import ApplicationCRUD  # noqa: F401  re-exported
+from database.repositories.alert_repository import AlertCRUD  # noqa: F401  re-exported
+from database.repositories.organization_repository import OrganizationCRUD  # noqa: F401  re-exported
+from database.repositories.scan_log_repository import ScanLogCRUD  # noqa: F401  re-exported
+from database.repositories.user_repository import UserCRUD  # noqa: F401  re-exported
+from database.repositories.watchlist_repository import WatchlistCRUD  # noqa: F401  re-exported

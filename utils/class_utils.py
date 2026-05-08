@@ -5,7 +5,7 @@ Class 99 is a special designation meaning "Global Brand" - it covers ALL 45 Nice
 This module provides utility functions for handling Class 99 logic across the system.
 """
 
-from typing import List, Set, Optional, Union
+from typing import List, Set, Union
 
 # Class 99 represents a "Global Brand" that covers all 45 Nice classes
 GLOBAL_CLASS = 99

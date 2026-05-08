@@ -41,7 +41,7 @@ try:
 except ImportError:
     easyocr = None
     EASYOCR_AVAILABLE = False
-from PIL import Image, UnidentifiedImageError, ImageFile
+from PIL import Image, ImageFile
 from torchvision import transforms
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
@@ -49,7 +49,7 @@ from utils.model_cache import find_hf_snapshot_dir, find_hf_snapshot_file, find_
 from pipeline.ingest_rules import clean_name
 
 # ===================== STRUCTURED LOGGING =====================
-from logging_config import get_logger, setup_logging, log_timing, log_batch_stats
+from logging_config import get_logger, setup_logging, log_batch_stats
 
 # Initialize logging
 setup_logging()

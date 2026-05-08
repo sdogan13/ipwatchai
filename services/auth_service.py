@@ -12,7 +12,6 @@ from auth.authentication import (
     PasswordChange,
     PasswordReset,
     PasswordResetConfirm,
-    TokenPair,
     UserRegister,
     VerifyEmailRequest,
     create_token_pair,

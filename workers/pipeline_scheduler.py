@@ -29,7 +29,6 @@ import time
 import logging
 import argparse
 import asyncio
-from datetime import datetime
 
 import schedule
 

@@ -3,12 +3,10 @@ import os
 import sys
 import time
 import shutil
-import psycopg2
-import getpass
 import argparse
 from psycopg2.extras import Json, execute_values
 from pathlib import Path
-from datetime import datetime, date, timedelta
+from datetime import datetime, timedelta
 import logging
 from dotenv import load_dotenv
 
@@ -42,7 +40,6 @@ import re as _re
 from db.pool import (
     get_connection,
     release_connection,
-    connection_context,
     close_pool
 )
 from pipeline import ingest_bootstrap as _bootstrap
@@ -860,7 +857,7 @@ def process_file_batch(conn, file_path, force=False):
     try:
         try:
             with open(file_path, 'r', encoding='utf-8') as f: data = json.load(f)
-        except json.JSONDecodeError as jde:
+        except json.JSONDecodeError:
             repair = _repair_corrupt_metadata(file_path)
             if repair["status"] == "repaired":
                 with open(file_path, 'r', encoding='utf-8') as f: data = json.load(f)
@@ -1133,7 +1130,7 @@ def process_file_batch(conn, file_path, force=False):
             try:
                 from utils.status_reconciler import update_final_status_batch
                 update_final_status_batch(conn, app_nos=batch_app_nos)
-            except Exception as fs_err: pass
+            except Exception: pass
 
         logging.info(f"   âœ… Batch Complete. {len(new_inserts)} Ins, {len(updates)} Upd, {skipped_count} Skip.")
 

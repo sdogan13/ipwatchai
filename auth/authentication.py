@@ -5,7 +5,7 @@ JWT-based authentication with password hashing
 import logging
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional, Tuple
+from typing import Optional
 from uuid import UUID
 
 import bcrypt

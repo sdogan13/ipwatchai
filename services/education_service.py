@@ -18,21 +18,14 @@ from config.settings import PROJECT_ROOT
 from database.crud import Database
 from models.schemas import (
     EducationCatalogResponse,
-    EducationFlashcardCard,
     EducationFlashcardDeckDetail,
-    EducationFlashcardDeckSummary,
     EducationModerationItem,
     EducationModerationUpdate,
-    EducationPdfItem,
     EducationProgressItem,
     EducationProgressResponse,
     EducationProgressSyncRequest,
     EducationProgressUpdate,
-    EducationQuizOption,
-    EducationQuizQuestion,
     EducationQuizSectionDetail,
-    EducationQuizSectionSummary,
-    EducationStats,
 )
 
 

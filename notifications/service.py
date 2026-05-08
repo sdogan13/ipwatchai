@@ -11,7 +11,7 @@ import smtplib
 import requests
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Dict, Optional
 from uuid import UUID
 from pathlib import Path

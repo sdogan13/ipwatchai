@@ -24,7 +24,6 @@ from services.scoring_service import (
     resolve_logo_image_path,
 )
 from utils.idf_scoring import (
-    normalize_turkish,
     MAX_ALERTS_PER_ITEM
 )
 from utils.class_utils import (

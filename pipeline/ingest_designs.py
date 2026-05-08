@@ -24,7 +24,7 @@ import os
 import sys
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional
 
 import psycopg2
 import psycopg2.extras

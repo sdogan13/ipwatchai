@@ -7,13 +7,11 @@ import sys
 import logging
 import time
 import signal
-from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Tuple
+from datetime import datetime
 from uuid import UUID
 import schedule
 
-from config.settings import settings
-from database.crud import Database, get_db_connection, WatchlistCRUD, AlertCRUD
+from database.crud import Database, get_db_connection
 from watchlist.scanner import get_scanner
 from notifications.service import NotificationWorker
 

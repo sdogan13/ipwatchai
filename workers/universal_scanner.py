@@ -19,14 +19,12 @@ Usage:
 """
 
 import os
-import sys
 import time
 import logging
 import argparse
 from datetime import datetime, timedelta
 from utils.deadline import calculate_appeal_deadline
 from typing import List, Dict, Optional
-from uuid import UUID
 
 import psycopg2
 from psycopg2.extras import RealDictCursor, execute_values
