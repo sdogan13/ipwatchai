@@ -161,6 +161,8 @@ CREATE TABLE IF NOT EXISTS word_idf_tr (
 -- ==========================================
 CREATE TABLE IF NOT EXISTS trademarks (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    registry_type VARCHAR(20) NOT NULL DEFAULT 'trademark'
+        CHECK (registry_type IN ('trademark', 'design')),
     application_no VARCHAR(255) UNIQUE NOT NULL,
     registration_no VARCHAR(255),
     wipo_no VARCHAR(255),
@@ -1162,6 +1164,136 @@ SELECT
     TRUE,
     TRUE
 WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = 'admin@test.com');
+
+-- ==========================================
+-- TASARIM (INDUSTRIAL DESIGN) TABLES
+-- Mirrors the trademark/holders pattern but adapted for designs:
+--   * multi-design per application
+--   * multi-view per design (per-view embeddings + design-level mean-pool)
+--   * Locarno classification (no Vienna)
+--   * Hague-route entries (registration_no, no application_no)
+-- See migrations/designs.sql + migrations/run_designs_migration.py for the
+-- canonical migration; this block keeps deploy/schema.sql in sync as the
+-- bootstrap source of truth.
+-- ==========================================
+DO $$ BEGIN
+    CREATE TYPE design_status AS ENUM (
+        'Yayında', 'Tescil Edildi', 'Hükümsüz', 'Yenilendi',
+        'Süresi Doldu', 'Devredildi', 'İptal Edildi',
+        'Yayım Ertelendi', 'Bilinmiyor'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE TABLE IF NOT EXISTS locarno_classes_lookup (
+    class_number VARCHAR(2) PRIMARY KEY,
+    name_tr      VARCHAR(500),
+    name_en      VARCHAR(500),
+    description  TEXT,
+    updated_at   TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS designs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    registry_type        VARCHAR(20) NOT NULL DEFAULT 'design'
+                         CHECK (registry_type IN ('trademark', 'design')),
+    application_no       VARCHAR(50),
+    design_index         INTEGER NOT NULL DEFAULT 1,
+    registration_no      VARCHAR(50),
+    section              VARCHAR(20) NOT NULL,
+    current_status       design_status DEFAULT 'Yayında',
+    effective_status     design_status,
+    final_status         design_status,
+    final_status_at      DATE,
+    final_status_source  VARCHAR(10),
+    application_date     DATE,
+    filing_date          DATE,
+    registration_date    DATE,
+    bulletin_no          VARCHAR(10),
+    bulletin_date        DATE,
+    opposition_end       DATE,
+    product_name_tr      VARCHAR(500),
+    product_name_en      VARCHAR(500),
+    locarno_classes      TEXT[],
+    design_count         INTEGER DEFAULT 1,
+    holder_id            UUID REFERENCES holders(id) ON DELETE SET NULL,
+    designers            TEXT[],
+    attorney_name        TEXT,
+    attorney_firm        TEXT,
+    priorities           JSONB DEFAULT '[]'::jsonb,
+    hague_reference      JSONB,
+    deferred_publication JSONB,
+    dinov2_vitl14_mean   halfvec(1024),
+    clip_vitb32_mean     halfvec(512),
+    source_issue_folder  VARCHAR(255),
+    page_range_start     INTEGER,
+    page_range_end       INTEGER,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_designs_tr_natural
+    ON designs (application_no, design_index, section)
+    WHERE application_no IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_designs_hague_natural
+    ON designs (registration_no, section)
+    WHERE application_no IS NULL AND registration_no IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_des_app_no ON designs(application_no);
+CREATE INDEX IF NOT EXISTS idx_des_reg_no ON designs(registration_no);
+CREATE INDEX IF NOT EXISTS idx_des_status ON designs(current_status);
+CREATE INDEX IF NOT EXISTS idx_des_section ON designs(section);
+CREATE INDEX IF NOT EXISTS idx_des_holder ON designs(holder_id);
+CREATE INDEX IF NOT EXISTS idx_des_locarno_arr ON designs USING GIN (locarno_classes);
+CREATE INDEX IF NOT EXISTS idx_des_designers_arr ON designs USING GIN (designers);
+CREATE INDEX IF NOT EXISTS idx_des_application_date ON designs(application_date DESC);
+CREATE INDEX IF NOT EXISTS idx_des_bulletin_date ON designs(bulletin_date DESC);
+CREATE INDEX IF NOT EXISTS idx_des_product_trgm ON designs USING GIST (product_name_tr gist_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_des_dinov2_vec ON designs USING hnsw (dinov2_vitl14_mean halfvec_cosine_ops)
+    WITH (m=16, ef_construction=200) WHERE dinov2_vitl14_mean IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_des_clip_vec ON designs USING hnsw (clip_vitb32_mean halfvec_cosine_ops)
+    WITH (m=16, ef_construction=200) WHERE clip_vitb32_mean IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS design_views (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    design_id UUID NOT NULL REFERENCES designs(id) ON DELETE CASCADE,
+    view_index INTEGER NOT NULL,
+    page INTEGER,
+    image_xref INTEGER,
+    bbox NUMERIC[],
+    image_path TEXT,
+    dinov2_vitl14 halfvec(1024),
+    clip_vitb32   halfvec(512),
+    color_hsv     halfvec(512),
+    created_at TIMESTAMP DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_design_view ON design_views (design_id, view_index);
+CREATE INDEX IF NOT EXISTS idx_dv_design ON design_views(design_id);
+CREATE INDEX IF NOT EXISTS idx_dv_dinov2_vec ON design_views USING hnsw (dinov2_vitl14 halfvec_cosine_ops)
+    WITH (m=16, ef_construction=200) WHERE dinov2_vitl14 IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_dv_clip_vec ON design_views USING hnsw (clip_vitb32 halfvec_cosine_ops)
+    WITH (m=16, ef_construction=200) WHERE clip_vitb32 IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_dv_color_vec ON design_views USING hnsw (color_hsv halfvec_cosine_ops)
+    WITH (m=16, ef_construction=200) WHERE color_hsv IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS design_events (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    design_id UUID REFERENCES designs(id) ON DELETE SET NULL,
+    application_no  VARCHAR(50),
+    registration_no VARCHAR(50),
+    event_type      VARCHAR(50) NOT NULL,
+    event_date      DATE,
+    bulletin_no     VARCHAR(10),
+    bulletin_date   DATE,
+    page            INTEGER,
+    details         JSONB DEFAULT '{}'::jsonb,
+    free_text       TEXT,
+    event_fingerprint VARCHAR(64) NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_design_event ON design_events(event_fingerprint);
+CREATE INDEX IF NOT EXISTS idx_de_app_no ON design_events(application_no);
+CREATE INDEX IF NOT EXISTS idx_de_reg_no ON design_events(registration_no) WHERE registration_no IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_de_type ON design_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_de_design ON design_events(design_id) WHERE design_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_de_bulletin_date ON design_events(bulletin_date);
 
 -- ==========================================
 -- SCHEMA COMPLETE

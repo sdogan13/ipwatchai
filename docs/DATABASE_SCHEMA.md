@@ -26,6 +26,7 @@ Important migration add-ons:
 - `migrations/logo_studio_projects.sql`
 - `migrations/pipeline_runs.sql`
 - `migrations/descriptor_idf_stats.sql`
+- `migrations/designs.sql` plus `migrations/run_designs_migration.py` (industrial-design tables)
 
 ## Main Table Groups
 
@@ -115,6 +116,35 @@ Notes:
 - `trademark_events` stores reconciled per-bulletin event timelines; exact duplicate rows are prevented by a full-payload `event_fingerprint` unique key
 - event-derived materialized fields such as effective status, current holder, renewal expiry, and event counts live on `trademarks` and are recomputed from `trademark_events`
 - `final_status`, `final_status_source`, and `final_status_at` on `trademarks` are reconciler-owned derived fields computed from ingest-owned `current_status`/source dates and event-owned `effective_status`/`last_event_date`
+
+### Registry Discriminator
+
+Both `trademarks` and `designs` carry a `registry_type VARCHAR(20) NOT NULL` column constrained by `CHECK (registry_type IN ('trademark', 'design'))`. The trademark side defaults to `'trademark'`, the design side to `'design'`. Stable internal identifier — UI labels live in i18n locale files, not in the column.
+
+Joint queries can branch on this column without table-name inspection:
+
+```sql
+SELECT registry_type, application_no, name AS title FROM trademarks
+UNION ALL
+SELECT registry_type, application_no, product_name_tr AS title FROM designs;
+```
+
+Migration: `migrations/registry_type.sql` (trademarks side) + the column shipped with `migrations/designs.sql` (designs side).
+
+### Tasarım (Industrial Design) Tables
+
+Mirror of the trademark/holders pattern, adapted for designs:
+- `locarno_classes_lookup`: 32 top-level Locarno classes seeded with Turkish + English names; subclasses (~241) deferred to a follow-up migration if needed for UI display
+- `designs`: main table; one row per (application, design_index) for TR records, one row per (registration_no) for Hague-route entries; reuses existing `holders` via `holder_id` FK because TPECLIENT IDs are shared between the trademark and design registries
+- `design_views`: per-view embeddings (DINOv2 ViT-L/14 1024-dim, CLIP ViT-B/32 512-dim, HSV histogram 512-dim) with HNSW indexes on each vector column
+- `design_events`: events on existing designs (transfer, seizure, renewal, cancellation in 4 sub-flavors, …); `event_fingerprint` UNIQUE for idempotent ingest
+
+Notes:
+- `designs.section` enum-by-string: `tr_native | deferred | deferred_lifted | republished | hague`
+- `designs.dinov2_vitl14_mean` and `designs.clip_vitb32_mean` are mean-pool aggregates across the design's views; per-view vectors stay on `design_views` for refined "any-view-matches" queries
+- `designs.locarno_classes` is `TEXT[]` (e.g. `['06-01','06-02']`); a multi-design application is limited to a single Locarno class but the bulletin lists all subclasses present, so the array preserves them
+- `designs.holder_id` is nullable to accommodate Hague entries where TPECLIENT lookup may fail (foreign holders)
+- `design_events.details` JSONB packs per-event-type fields (transfer: previous_holder/new_holder; seizure: court+case_no; partial_*: design_indices; YİDK board: decision_date/decision_no/referenced_bulletin_*)
 
 ### Legacy Compatibility Tables
 
