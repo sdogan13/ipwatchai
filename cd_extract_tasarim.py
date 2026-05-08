@@ -44,6 +44,7 @@ import os
 import re
 import subprocess
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -537,3 +538,211 @@ def extract_cd_archive(
         )
 
     return _locate_cd_layout(scratch)
+
+
+# ---------------------------------------------------------------------------
+# Step 2.7 — bulletin.inf parser + cd_to_metadata orchestrator
+# ---------------------------------------------------------------------------
+
+_INF_LINE_RE = re.compile(r"^([A-Z]+)\s*=\s*(.*)$")
+
+
+def _parse_dotted_dmy_to_iso(value: str) -> Optional[str]:
+    """Convert ``"09.03.2016"`` to ``"2016-03-09"`` (or ``None`` if unparseable).
+
+    Tasarım CDs use dot-separated DD.MM.YYYY in ``idbulletin.inf``,
+    differing from the patent CDs' DD/MM/YYYY format.
+    """
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value.strip(), "%d.%m.%Y").date().isoformat()
+    except ValueError:
+        return None
+
+
+def parse_bulletin_inf(inf_path: str | Path) -> Dict[str, Optional[str]]:
+    """Parse the small ``idbulletin.inf`` header file.
+
+    Format (real data from ``240_CD.rar``)::
+
+        NO=240
+        DATE=09.03.2016
+
+    Returns ``{"bulletin_no": "240", "bulletin_date": "2016-03-09"}``.
+    Missing fields, missing file, or malformed date all surface as
+    ``None`` values rather than exceptions — the caller decides
+    whether those gaps are acceptable.
+    """
+    out: Dict[str, Optional[str]] = {"bulletin_no": None, "bulletin_date": None}
+    path = Path(inf_path)
+    if not path.is_file():
+        return out
+
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        m = _INF_LINE_RE.match(raw.strip())
+        if not m:
+            continue
+        key, value = m.group(1).upper(), m.group(2).strip()
+        if key == "NO":
+            out["bulletin_no"] = value or None
+        elif key == "DATE":
+            out["bulletin_date"] = _parse_dotted_dmy_to_iso(value)
+
+    return out
+
+
+# Per-table key remapping for the JSON output. Keeps DB column names
+# uppercase inside parsed rows but presents party / annotation lists as
+# nested objects with friendlier snake_case keys. Drops APPLICATIONNO
+# from holders/designers (it's already on the parent dossier) but
+# preserves it on annotations (where it points at a DIFFERENT
+# application than the bulletin's own dossiers — annotations are
+# events on existing registrations).
+_HOLDER_KEYS = {
+    "CLIENTNO": "client_no", "TITLE": "title", "ADDRESS": "address",
+    "CITY": "city", "COUNTRY": "country",
+}
+_DESIGNER_KEYS = {
+    "NO": "no", "NAME": "name", "ADDRESS": "address", "COUNTRY": "country",
+}
+_ANNOTATION_KEYS = {
+    "PUBLICATIONKEY": "publication_key", "APPLICATIONNO": "application_no",
+    "REQUESTTYPE": "request_type", "CONTENT": "content",
+}
+
+
+def _project(row: Dict[str, Any], key_map: Dict[str, str]) -> Dict[str, Any]:
+    """Pick + rename a subset of keys from a parsed row."""
+    return {new: row.get(old, "") for old, new in key_map.items()}
+
+
+def _group_by_application_no(rows: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    """Group a list of HSQLDB-parsed rows by their ``APPLICATIONNO`` field."""
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(row.get("APPLICATIONNO", ""), []).append(row)
+    return grouped
+
+
+def _layout_to_metadata(
+    layout: CDLayout,
+    source_archive_name: str,
+    scratch_dir: str | Path,
+) -> Dict[str, Any]:
+    """Build the canonical metadata dict from a pre-extracted CD layout.
+
+    Pure data-shaping over an already-extracted CD: parses the inf and
+    log, joins parties + designs + images by ``APPLICATIONNO``, and
+    assembles the document. Factored out of ``cd_to_metadata`` so tests
+    can exercise the full join without mocking 7-Zip.
+
+    Image paths are rendered relative to ``scratch_dir`` with forward
+    slashes — the orchestrator's caller chose ``scratch_dir``, so
+    rendering against it produces stable, portable strings.
+    """
+    scratch = Path(scratch_dir)
+    inf = parse_bulletin_inf(layout.cd_root / "idbulletin.inf")
+    rows = parse_hsqldb_log(layout.log_path)
+
+    holders_by_app   = _group_by_application_no(rows.get("IDHOLDER", []))
+    designers_by_app = _group_by_application_no(rows.get("IDDESIGNER", []))
+    designs_by_app   = _group_by_application_no(rows.get("IDDESIGN", []))
+
+    images_resolved = 0
+    designs_without_images = 0
+    dossiers: List[Dict[str, Any]] = []
+
+    for d in rows.get("IDDOSSIER", []):
+        app_no = d.get("APPLICATIONNO", "")
+
+        # Resolve all images for this application, then bucket by design_no.
+        images_by_design: Dict[str, List[Dict[str, str]]] = {}
+        for img in resolve_design_images(app_no, layout.images_root):
+            try:
+                rel = img["image_path"].relative_to(scratch).as_posix()
+            except ValueError:
+                rel = str(img["image_path"])
+            images_by_design.setdefault(img["design_no"], []).append({
+                "view_no": img["view_no"],
+                "image_path": rel,
+            })
+            images_resolved += 1
+
+        emitted_designs: List[Dict[str, Any]] = []
+        for des in designs_by_app.get(app_no, []):
+            no = des.get("NO", "")
+            views = images_by_design.get(no, [])
+            if not views:
+                designs_without_images += 1
+            emitted_designs.append({
+                "no": no,
+                "product_name": des.get("PRODUCTNAME", ""),
+                "views": views,
+            })
+
+        dossiers.append({
+            "application_no":   app_no,
+            "application_date": d.get("APPLICATIONDATE", ""),
+            "register_no":      d.get("REGISTERNO", ""),
+            "register_date":    d.get("REGISTERDATE", ""),
+            "design_count":     d.get("DESIGNCOUNT", ""),
+            "type":             d.get("TYPE", ""),
+            "locarno_codes":    d.get("LOCARNOCODES", []),
+            "attorney": {
+                "no":      d.get("ATTORNEYNO", ""),
+                "name":    d.get("ATTORNEYNAME", ""),
+                "title":   d.get("ATTORNEYTITLE", ""),
+                "address": d.get("ATTORNEYADDRESS", ""),
+            },
+            "holders":   [_project(r, _HOLDER_KEYS)   for r in holders_by_app.get(app_no, [])],
+            "designers": [_project(r, _DESIGNER_KEYS) for r in designers_by_app.get(app_no, [])],
+            "designs":   emitted_designs,
+        })
+
+    annotations = [_project(r, _ANNOTATION_KEYS) for r in rows.get("IDANNOTATION", [])]
+
+    return {
+        "bulletin_no":   inf["bulletin_no"],
+        "bulletin_date": inf["bulletin_date"],
+        "source_archive": source_archive_name,
+        "extracted_at":  datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "stats": {
+            "dossiers":               len(rows.get("IDDOSSIER", [])),
+            "designs":                len(rows.get("IDDESIGN", [])),
+            "holders":                len(rows.get("IDHOLDER", [])),
+            "designers":              len(rows.get("IDDESIGNER", [])),
+            "annotations":            len(rows.get("IDANNOTATION", [])),
+            "images_resolved":        images_resolved,
+            "designs_without_images": designs_without_images,
+        },
+        "dossiers": dossiers,
+        "annotations": annotations,
+    }
+
+
+def cd_to_metadata(
+    rar_path: str | Path,
+    scratch_dir: str | Path,
+    *,
+    seven_zip: Optional[str | Path] = None,
+) -> Dict[str, Any]:
+    """Extract a Tasarım CD ``.rar`` and produce a fully joined JSON-ready dict.
+
+    Pipeline:
+      1. ``extract_cd_archive`` (no Java exclude; dynamic layout)
+      2. ``parse_bulletin_inf`` for issue header
+      3. ``parse_hsqldb_log`` over ``idbulletin.log``
+      4. group HOLDER / DESIGNER / DESIGN rows by APPLICATIONNO
+      5. join + resolve per-design view images via ``resolve_design_images``
+      6. emit IDANNOTATION as a sibling ``annotations`` array
+      7. assemble the final document
+
+    The CD's extracted folder is left in place under ``scratch_dir`` —
+    the caller is responsible for cleanup, since downstream stages
+    (image embedding, future stage-3 reconciler) typically still need
+    the JPEGs on disk.
+    """
+    rar = Path(rar_path)
+    layout = extract_cd_archive(rar, scratch_dir, seven_zip=seven_zip)
+    return _layout_to_metadata(layout, rar.name, scratch_dir)

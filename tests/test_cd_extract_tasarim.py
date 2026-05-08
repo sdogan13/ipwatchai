@@ -12,8 +12,10 @@ from cd_extract_tasarim import (
     DEFAULT_SEVEN_ZIP,
     TABLE_COLUMNS,
     CDLayout,
+    cd_to_metadata,
     decode_hsqldb_escapes,
     extract_cd_archive,
+    parse_bulletin_inf,
     parse_hsqldb_log,
     parse_hsqldb_log_line,
     resolve_design_images,
@@ -21,6 +23,7 @@ from cd_extract_tasarim import (
 )
 from cd_extract_tasarim import (
     _application_image_folder,
+    _layout_to_metadata,
     _locate_cd_layout,
     _parse_sql_values,
     _resolve_seven_zip,
@@ -689,3 +692,234 @@ def test_extract_cd_archive_command_excludes_no_java_dir(monkeypatch, tmp_path):
     assert all("data/java" not in arg for arg in cmd), cmd
     # Sanity: required flags still present
     assert "-y" in cmd and "-bso0" in cmd and "-bsp0" in cmd
+
+
+# ---------------------------------------------------------------------------
+# Step 2.7 — parse_bulletin_inf + cd_to_metadata orchestrator
+# ---------------------------------------------------------------------------
+
+def test_parse_bulletin_inf_real_240(tmp_path):
+    """Real ``idbulletin.inf`` from 240_CD.rar (NO=240, DATE=09.03.2016).
+
+    Confirms the dot-separated DD.MM.YYYY -> ISO conversion.
+    """
+    inf = tmp_path / "idbulletin.inf"
+    inf.write_text("NO=240\nDATE=09.03.2016\n", encoding="utf-8")
+    assert parse_bulletin_inf(inf) == {
+        "bulletin_no": "240",
+        "bulletin_date": "2016-03-09",
+    }
+
+
+def test_parse_bulletin_inf_missing_file_returns_nones(tmp_path):
+    """Missing inf file -> both fields ``None``, not an error."""
+    assert parse_bulletin_inf(tmp_path / "nope.inf") == {
+        "bulletin_no": None,
+        "bulletin_date": None,
+    }
+
+
+def test_parse_bulletin_inf_missing_date_keeps_no(tmp_path):
+    """``NO=...`` with no ``DATE=`` line -> bulletin_no set, date None."""
+    inf = tmp_path / "idbulletin.inf"
+    inf.write_text("NO=240\n", encoding="utf-8")
+    assert parse_bulletin_inf(inf) == {
+        "bulletin_no": "240",
+        "bulletin_date": None,
+    }
+
+
+def test_parse_bulletin_inf_malformed_date_yields_none(tmp_path):
+    """Date that doesn't match DD.MM.YYYY -> date is None, no preserved."""
+    inf = tmp_path / "idbulletin.inf"
+    inf.write_text("NO=240\nDATE=2016-03-09\n", encoding="utf-8")  # ISO not DMY
+    assert parse_bulletin_inf(inf) == {
+        "bulletin_no": "240",
+        "bulletin_date": None,
+    }
+
+
+def test_parse_bulletin_inf_empty_no_value(tmp_path):
+    """Empty ``NO=`` value -> bulletin_no is None (not empty string)."""
+    inf = tmp_path / "idbulletin.inf"
+    inf.write_text("NO=\nDATE=09.03.2016\n", encoding="utf-8")
+    assert parse_bulletin_inf(inf)["bulletin_no"] is None
+
+
+def test_parse_bulletin_inf_tolerates_whitespace(tmp_path):
+    """Spaces around ``=`` and trailing whitespace are tolerated."""
+    inf = tmp_path / "idbulletin.inf"
+    inf.write_text("NO = 240   \n  DATE  =  09.03.2016  \n", encoding="utf-8")
+    assert parse_bulletin_inf(inf) == {
+        "bulletin_no": "240",
+        "bulletin_date": "2016-03-09",
+    }
+
+
+def _build_pre_extracted_cd(tmp_path: Path) -> CDLayout:
+    """Test helper: build a full pre-extracted CD layout on disk so we can
+    exercise _layout_to_metadata / cd_to_metadata without 7-Zip.
+
+    Uses three real-data IDDOSSIER shapes:
+      - 2016/01059: 1 design "Profil", 2 views (resolved)
+      - 2015/06749: 2 designs "A"/"B", 3 views design 1, 0 views design 2
+      - DM/086402:  1 design "Hague", no images at all (Hague case)
+    """
+    cd_root = tmp_path / "240"
+    cd_root.mkdir()
+
+    (cd_root / "idbulletin.inf").write_text(
+        "NO=240\nDATE=09.03.2016\n", encoding="utf-8"
+    )
+    (cd_root / "idbulletin.log").write_text(
+        # 2016/01059 — 1 design, 2 views
+        "INSERT INTO IDDOSSIER VALUES('2016/01059','10.02.2016','2016 01059','10.02.2016','1','25-02','','RABİA','','MECİDİYEKÖY','')\n"
+        "INSERT INTO IDDESIGN VALUES('2016/01059','1','Profil ')\n"
+        "INSERT INTO IDHOLDER VALUES('2016/01059','234974','BİRLİK','ADDR','İSTANBUL','TÜRKİYE')\n"
+        "INSERT INTO IDDESIGNER VALUES('2016/01059','1','VEDAT','ADDR','TÜRKİYE')\n"
+        # 2015/06749 — 2 designs; only design 1 has images
+        "INSERT INTO IDDOSSIER VALUES('2015/06749','01.01.2016','2015 06749','01.01.2016','2','06-04,06-02','','ATTY','','','1')\n"
+        "INSERT INTO IDDESIGN VALUES('2015/06749','1','A ')\n"
+        "INSERT INTO IDDESIGN VALUES('2015/06749','2','B ')\n"
+        # DM/086402 — Hague, no images on CD
+        "INSERT INTO IDDOSSIER VALUES('DM/086402','01.01.2016','DM 086402','01.01.2016','1','21-02','','','','','')\n"
+        "INSERT INTO IDDESIGN VALUES('DM/086402','1','Hague ')\n"
+        # Annotation row
+        "INSERT INTO IDANNOTATION VALUES('262752','2011/01410','Yenileme','event content')\n",
+        encoding="utf-8",
+    )
+    images_root = cd_root / "images"
+    # 2016/01059: design 1, views 1+2
+    folder = images_root / "2016_01059"
+    folder.mkdir(parents=True)
+    (folder / "1_1.jpg").write_bytes(b"")
+    (folder / "1_2.jpg").write_bytes(b"")
+    # 2015/06749: only design 1 has 3 views; design 2 has no files
+    folder = images_root / "2015_06749"
+    folder.mkdir(parents=True)
+    (folder / "1_1.jpg").write_bytes(b"")
+    (folder / "1_2.jpg").write_bytes(b"")
+    (folder / "1_3.jpg").write_bytes(b"")
+    # DM/086402: deliberately no folder
+
+    return CDLayout(
+        cd_root=cd_root,
+        log_path=cd_root / "idbulletin.log",
+        images_root=images_root,
+    )
+
+
+def test_layout_to_metadata_full_join(tmp_path):
+    """End-to-end shape check on a hand-built CD with three dossiers
+    spanning the realistic value space (turkish, multi-design, Hague)."""
+    layout = _build_pre_extracted_cd(tmp_path)
+    doc = _layout_to_metadata(layout, "240_CD.rar", tmp_path)
+
+    # Top-level metadata
+    assert doc["bulletin_no"] == "240"
+    assert doc["bulletin_date"] == "2016-03-09"
+    assert doc["source_archive"] == "240_CD.rar"
+    assert "extracted_at" in doc and "T" in doc["extracted_at"]
+
+    # Stats
+    s = doc["stats"]
+    assert s["dossiers"] == 3
+    assert s["designs"] == 4         # 1 + 2 + 1
+    assert s["holders"] == 1
+    assert s["designers"] == 1
+    assert s["annotations"] == 1
+    assert s["images_resolved"] == 5  # 2 + 3 + 0
+    assert s["designs_without_images"] == 2  # design 2 of 06749 + Hague design
+
+    # Dossier ordering preserved
+    apps = [d["application_no"] for d in doc["dossiers"]]
+    assert apps == ["2016/01059", "2015/06749", "DM/086402"]
+
+
+def test_layout_to_metadata_first_dossier_full_shape(tmp_path):
+    """Walk every emitted field for the first dossier."""
+    layout = _build_pre_extracted_cd(tmp_path)
+    doc = _layout_to_metadata(layout, "240_CD.rar", tmp_path)
+
+    d = doc["dossiers"][0]
+    assert d["application_no"] == "2016/01059"
+    assert d["application_date"] == "10.02.2016"
+    assert d["register_no"] == "2016 01059"
+    assert d["register_date"] == "10.02.2016"
+    assert d["design_count"] == "1"
+    assert d["type"] == ""
+    assert d["locarno_codes"] == ["25-02"]
+    assert d["attorney"] == {"no": "", "name": "RABİA", "title": "", "address": "MECİDİYEKÖY"}
+
+    assert len(d["holders"]) == 1
+    h = d["holders"][0]
+    assert h == {"client_no": "234974", "title": "BİRLİK", "address": "ADDR",
+                 "city": "İSTANBUL", "country": "TÜRKİYE"}
+
+    assert len(d["designers"]) == 1
+    assert d["designers"][0] == {"no": "1", "name": "VEDAT", "address": "ADDR", "country": "TÜRKİYE"}
+
+    assert len(d["designs"]) == 1
+    des = d["designs"][0]
+    assert des["no"] == "1"
+    assert des["product_name"] == "Profil "
+    assert len(des["views"]) == 2
+    assert des["views"][0] == {"view_no": "1", "image_path": "240/images/2016_01059/1_1.jpg"}
+    assert des["views"][1] == {"view_no": "2", "image_path": "240/images/2016_01059/1_2.jpg"}
+
+
+def test_layout_to_metadata_design_without_images_emits_empty_views(tmp_path):
+    """The 2015/06749 fixture has 2 designs but only design 1 has images.
+    Design 2 must still be emitted with views=[]."""
+    layout = _build_pre_extracted_cd(tmp_path)
+    doc = _layout_to_metadata(layout, "240_CD.rar", tmp_path)
+
+    multi = next(d for d in doc["dossiers"] if d["application_no"] == "2015/06749")
+    assert len(multi["designs"]) == 2
+    assert len(multi["designs"][0]["views"]) == 3
+    assert multi["designs"][1]["views"] == []
+    assert multi["locarno_codes"] == ["06-04", "06-02"]
+
+
+def test_layout_to_metadata_hague_dossier_emits_with_no_views(tmp_path):
+    """Hague (DM/...) dossiers have no image folder. Must still appear
+    in the dossiers list with views=[]."""
+    layout = _build_pre_extracted_cd(tmp_path)
+    doc = _layout_to_metadata(layout, "240_CD.rar", tmp_path)
+
+    hague = next(d for d in doc["dossiers"] if d["application_no"] == "DM/086402")
+    assert len(hague["designs"]) == 1
+    assert hague["designs"][0]["views"] == []
+    assert hague["locarno_codes"] == ["21-02"]
+
+
+def test_layout_to_metadata_annotations_emitted_as_sibling_array(tmp_path):
+    """IDANNOTATION rows go to a top-level ``annotations`` array, NOT
+    nested inside their own dossier (they reference different
+    applications than the bulletin's own dossiers)."""
+    layout = _build_pre_extracted_cd(tmp_path)
+    doc = _layout_to_metadata(layout, "240_CD.rar", tmp_path)
+
+    assert len(doc["annotations"]) == 1
+    a = doc["annotations"][0]
+    assert a == {
+        "publication_key": "262752",
+        "application_no": "2011/01410",   # different from any dossier above
+        "request_type": "Yenileme",
+        "content": "event content",
+    }
+
+
+def test_cd_to_metadata_uses_extract_then_layout(monkeypatch, tmp_path):
+    """The public entry runs extract_cd_archive then _layout_to_metadata.
+    Mock the extractor so we don't need 7-Zip in the unit suite."""
+    layout = _build_pre_extracted_cd(tmp_path)
+    monkeypatch.setattr(
+        "cd_extract_tasarim.extract_cd_archive",
+        lambda rar, scratch, **kw: layout,
+    )
+    fake_rar = tmp_path / "240_CD.rar"
+    fake_rar.write_bytes(b"")
+    doc = cd_to_metadata(fake_rar, tmp_path)
+    assert doc["source_archive"] == "240_CD.rar"
+    assert doc["stats"]["dossiers"] == 3
