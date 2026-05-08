@@ -41,7 +41,7 @@ Built incrementally. Each helper has its own unit-test file.
 from __future__ import annotations
 
 import re
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -104,3 +104,141 @@ def split_locarno_codes(value: Optional[str]) -> List[str]:
     if not value:
         return []
     return [code for part in value.split(",") if (code := part.strip())]
+
+
+# ---------------------------------------------------------------------------
+# Step 2.3 — INSERT-line parser
+# ---------------------------------------------------------------------------
+
+# DDL column order per CREATE TABLE in the .script header. The parser
+# trusts these orders when zipping VALUES(...) to a row dict.
+TABLE_COLUMNS: Dict[str, List[str]] = {
+    "IDDOSSIER":    ["APPLICATIONNO", "APPLICATIONDATE", "REGISTERNO", "REGISTERDATE",
+                     "DESIGNCOUNT", "LOCARNOCODES", "ATTORNEYNO", "ATTORNEYNAME",
+                     "ATTORNEYTITLE", "ATTORNEYADDRESS", "TYPE"],
+    "IDHOLDER":     ["APPLICATIONNO", "CLIENTNO", "TITLE", "ADDRESS", "CITY", "COUNTRY"],
+    "IDDESIGN":     ["APPLICATIONNO", "NO", "PRODUCTNAME"],
+    "IDDESIGNER":   ["APPLICATIONNO", "NO", "NAME", "ADDRESS", "COUNTRY"],
+    "IDANNOTATION": ["PUBLICATIONKEY", "APPLICATIONNO", "REQUESTTYPE", "CONTENT"],
+}
+
+_INSERT_RE = re.compile(r"^INSERT\s+INTO\s+(\w+)\s+VALUES\s*\((.*)\)\s*$", re.IGNORECASE | re.DOTALL)
+
+
+def _parse_sql_values(values_str: str) -> List[str]:
+    """Parse a comma-separated list of single-quoted SQL string literals.
+
+    Implements only the syntax the HSQLDB 1.7.2 log writer actually
+    emits in these CD bundles:
+
+      - every value is single-quoted: ``'text'``
+      - an empty string is ``''``
+      - an embedded apostrophe is doubled: ``'TÜRKİYE''NİN'`` -> ``TÜRKİYE'NİN``
+      - the literal ``NULL`` keyword does not appear in any captured CD log
+
+    Raises ``ValueError`` on any unexpected character (we want loud
+    failure, not silent data loss).
+    """
+    out: List[str] = []
+    i = 0
+    n = len(values_str)
+
+    while i < n:
+        # Skip whitespace before next value
+        while i < n and values_str[i] in " \t":
+            i += 1
+        if i >= n:
+            break
+
+        if values_str[i] != "'":
+            raise ValueError(
+                f"expected single quote at position {i}, "
+                f"got {values_str[i:i+10]!r}"
+            )
+        i += 1  # consume opening quote
+
+        chars: List[str] = []
+        while i < n:
+            ch = values_str[i]
+            if ch == "'":
+                # SQL-escape: doubled apostrophe == literal '
+                if i + 1 < n and values_str[i + 1] == "'":
+                    chars.append("'")
+                    i += 2
+                    continue
+                # Unescaped quote = end of string
+                i += 1
+                break
+            chars.append(ch)
+            i += 1
+        else:
+            raise ValueError(f"unterminated string starting near {values_str[max(0,i-30):i]!r}")
+
+        out.append("".join(chars))
+
+        # Expect comma or end-of-string
+        while i < n and values_str[i] in " \t":
+            i += 1
+        if i >= n:
+            break
+        if values_str[i] != ",":
+            raise ValueError(
+                f"expected comma at position {i}, "
+                f"got {values_str[i:i+10]!r}"
+            )
+        i += 1  # consume comma
+
+    return out
+
+
+def parse_hsqldb_log_line(line: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Parse one INSERT line of an HSQLDB 1.7.2 ``idbulletin.log`` file.
+
+    Returns ``{"table": "IDDOSSIER", "row": {...column->decoded value...}}``
+    for recognised INSERT statements (one of the five Tasarım-CD tables).
+
+    Returns ``None`` for:
+      - blank / whitespace-only lines
+      - non-INSERT lines (``CREATE TABLE``, ``/*C1*/CONNECT USER SA``,
+        ``DISCONNECT``, ``SET ...`` — all real shapes seen in
+        ``240/idbulletin.log``)
+      - INSERT statements targeting a table not in ``TABLE_COLUMNS``
+
+    Raises ``ValueError`` when an INSERT *is* recognised but the value
+    count doesn't match the expected column count — that's a real schema
+    drift signal and should fail loudly rather than be papered over.
+
+    Per-column transforms are applied automatically:
+      - ``LOCARNOCODES`` is comma-split to a list (see ``split_locarno_codes``)
+      - all other columns get ``\\uXXXX`` escapes decoded
+    """
+    if not line:
+        return None
+    line = line.rstrip("\r\n")
+    if not line.startswith("INSERT INTO ") and not line.startswith("INSERT into "):
+        return None
+
+    m = _INSERT_RE.match(line)
+    if not m:
+        return None
+
+    table = m.group(1).upper()
+    columns = TABLE_COLUMNS.get(table)
+    if columns is None:
+        return None
+
+    raw_values = _parse_sql_values(m.group(2))
+    if len(raw_values) != len(columns):
+        raise ValueError(
+            f"{table}: expected {len(columns)} columns, got {len(raw_values)} "
+            f"in line {line[:100]!r}..."
+        )
+
+    row: Dict[str, Any] = {}
+    for col, raw in zip(columns, raw_values):
+        if col == "LOCARNOCODES":
+            row[col] = split_locarno_codes(decode_hsqldb_escapes(raw))
+        else:
+            row[col] = decode_hsqldb_escapes(raw)
+
+    return {"table": table, "row": row}

@@ -4,10 +4,15 @@ Built one helper at a time. Each step adds its own test block so failures
 point cleanly at the unit under test.
 """
 
+import pytest
+
 from cd_extract_tasarim import (
+    TABLE_COLUMNS,
     decode_hsqldb_escapes,
+    parse_hsqldb_log_line,
     split_locarno_codes,
 )
+from cd_extract_tasarim import _parse_sql_values
 
 
 # ---------------------------------------------------------------------------
@@ -106,3 +111,172 @@ def test_split_locarno_codes_preserves_dotted_variant():
     accepts both shapes; the CD ships dashed but defensively pass dotted
     through verbatim if it ever appears."""
     assert split_locarno_codes("06.01,26-05") == ["06.01", "26-05"]
+
+
+# ---------------------------------------------------------------------------
+# Step 2.3 — _parse_sql_values + parse_hsqldb_log_line + TABLE_COLUMNS
+# ---------------------------------------------------------------------------
+
+def test_table_columns_match_idbulletin_script_ddl():
+    """Pin the column counts we trust from 240/idbulletin.script DDL."""
+    assert len(TABLE_COLUMNS["IDDOSSIER"]) == 11
+    assert len(TABLE_COLUMNS["IDHOLDER"]) == 6
+    assert len(TABLE_COLUMNS["IDDESIGN"]) == 3
+    assert len(TABLE_COLUMNS["IDDESIGNER"]) == 5
+    assert len(TABLE_COLUMNS["IDANNOTATION"]) == 4
+
+
+def test_parse_sql_values_simple():
+    """Three plain ASCII values."""
+    assert _parse_sql_values("'a','b','c'") == ["a", "b", "c"]
+
+
+def test_parse_sql_values_empty_string_value():
+    """An empty value is two consecutive single quotes."""
+    assert _parse_sql_values("'a','','c'") == ["a", "", "c"]
+
+
+def test_parse_sql_values_doubled_apostrophe():
+    """SQL-escaped apostrophe — '' inside a value collapses to one '."""
+    # Real-world: Turkish possessive ÜLKE'NİN
+    assert _parse_sql_values("'\\u00dcLKE''N\\u0130N'") == ["\\u00dcLKE'N\\u0130N"]
+
+
+def test_parse_sql_values_raises_on_unterminated():
+    """Missing closing quote should fail loudly, not silently truncate."""
+    with pytest.raises(ValueError, match="unterminated"):
+        _parse_sql_values("'oops")
+
+
+def test_parse_sql_values_raises_on_missing_comma():
+    """Two values without a comma between is malformed."""
+    with pytest.raises(ValueError, match="comma"):
+        _parse_sql_values("'a' 'b'")
+
+
+def test_parse_log_line_returns_none_for_non_insert_lines():
+    """Real non-INSERT shapes seen in 240/idbulletin.log are all skipped."""
+    assert parse_hsqldb_log_line(None) is None
+    assert parse_hsqldb_log_line("") is None
+    assert parse_hsqldb_log_line("   ") is None
+    assert parse_hsqldb_log_line("/*C1*/CONNECT USER SA") is None
+    assert parse_hsqldb_log_line("DISCONNECT") is None
+    # Embedded DDL line — Tasarim CDs put the CREATE TABLE inside the log
+    ddl = (
+        r"CREATE TABLE IDDOSSIER (	APPLICATIONNO VARCHAR ( 20 ),"
+        r"	APPLICATIONDATE VARCHAR ( 30 ))"
+    )
+    assert parse_hsqldb_log_line(ddl) is None
+
+
+def test_parse_log_line_unknown_table_returns_none():
+    """Tables outside TABLE_COLUMNS (e.g. legacy / unrelated tables) skip."""
+    assert parse_hsqldb_log_line(
+        "INSERT INTO MYSTERY_TABLE VALUES('a','b')"
+    ) is None
+
+
+def test_parse_log_line_iddossier_real_row():
+    """Real IDDOSSIER row from 240/idbulletin.log for application 2016/01059.
+
+    Confirms:
+      - 11 columns zip to the right names
+      - LOCARNOCODES is run through split_locarno_codes (returns list)
+      - other columns are HSQLDB-decoded (Turkish escapes -> Unicode)
+    """
+    line = (
+        r"INSERT INTO IDDOSSIER VALUES("
+        r"'2016/01059','10.02.2016','2016 01059','10.02.2016','1','25-02','',"
+        r"'RABİA ÇETİN (DEV PATENT MARKA VE FİKRİ HAK. DAN. TİC. LTD. ŞTİ.)','',"
+        r"'MECİDİYEKÖY MAH. ESKİ OSMANLI SOK. ARIKAN İŞ MRK. NO:30/18 - ŞİŞLİ / İSTANBUL',"
+        r"'')"
+    )
+    parsed = parse_hsqldb_log_line(line)
+    assert parsed is not None
+    assert parsed["table"] == "IDDOSSIER"
+    row = parsed["row"]
+    assert row["APPLICATIONNO"] == "2016/01059"
+    assert row["LOCARNOCODES"] == ["25-02"]   # list, not string
+    assert row["ATTORNEYNAME"] == "RABİA ÇETİN (DEV PATENT MARKA VE FİKRİ HAK. DAN. TİC. LTD. ŞTİ.)"
+    assert "MECİDİYEKÖY" in row["ATTORNEYADDRESS"]
+    assert row["TYPE"] == ""
+
+
+def test_parse_log_line_idholder_real_row():
+    """Real IDHOLDER row — 6 columns, includes CLIENTNO (TPECLIENT id)."""
+    line = (
+        r"INSERT INTO IDHOLDER VALUES("
+        r"'2016/01059','234974',"
+        r"'BİRLİK MENFEZ HAV. EKİP. SANAYİ TİCARET LİMİTED ŞİRKETİ',"
+        r"'Organize San. Böl. Esot San. Sit. J Blok No.5 İkitelli Başakşehir',"
+        r"'İSTANBUL','TÜRKİYE')"
+    )
+    parsed = parse_hsqldb_log_line(line)
+    assert parsed["table"] == "IDHOLDER"
+    row = parsed["row"]
+    assert row["CLIENTNO"] == "234974"
+    assert row["TITLE"].startswith("BİRLİK MENFEZ")
+    assert row["CITY"] == "İSTANBUL"
+    assert row["COUNTRY"] == "TÜRKİYE"
+
+
+def test_parse_log_line_iddesign_real_row():
+    """Real IDDESIGN row — 3 columns, plain ASCII product name."""
+    parsed = parse_hsqldb_log_line(
+        "INSERT INTO IDDESIGN VALUES('2016/01059','1','Profil ')"
+    )
+    assert parsed["table"] == "IDDESIGN"
+    assert parsed["row"] == {
+        "APPLICATIONNO": "2016/01059",
+        "NO": "1",
+        "PRODUCTNAME": "Profil ",  # trailing space preserved verbatim
+    }
+
+
+def test_parse_log_line_iddesigner_real_row():
+    """Real IDDESIGNER row — 5 columns."""
+    line = (
+        r"INSERT INTO IDDESIGNER VALUES("
+        r"'2016/01059','68364','VEDAT ÇELİK',"
+        r"'Enverpaşa Cad. Açelya Evleri E-30 Kat.2 Daire.6 Esenkent/İSTANBUL',"
+        r"'TÜRKİYE')"
+    )
+    parsed = parse_hsqldb_log_line(line)
+    assert parsed["table"] == "IDDESIGNER"
+    row = parsed["row"]
+    assert row["NAME"] == "VEDAT ÇELİK"
+    assert row["COUNTRY"] == "TÜRKİYE"
+
+
+def test_parse_log_line_idannotation_real_row():
+    """Real IDANNOTATION row — 4 columns. Event-like CONTENT carries
+    INID-coded text (this is what the future stage-3 reconciler will
+    likely cross-check against pdf_extract_tasarim_events output)."""
+    line = (
+        r"INSERT INTO IDANNOTATION VALUES("
+        r"'262752','2011/01410','Yenileme',"
+        r"'(11) 2011 01410 (15) 03.03.2011 (73) ÖZTİRYAKİLER MADENİ EŞYA SANAYİ VE TİCARET ANONİM ŞİRKETİ (Cumhuriyet Mahallesi Hadımköy Yolu Caddesi No:8/1 Büyükçekmece 34900 İSTANBUL) (58) 22.02.2016 ')"
+    )
+    parsed = parse_hsqldb_log_line(line)
+    assert parsed["table"] == "IDANNOTATION"
+    row = parsed["row"]
+    assert row["PUBLICATIONKEY"] == "262752"
+    assert row["REQUESTTYPE"] == "Yenileme"
+    assert "ÖZTİRYAKİLER" in row["CONTENT"]
+
+
+def test_parse_log_line_multi_locarno_real_row():
+    """Multi-Locarno IDDOSSIER row from application 2016/01186."""
+    line = (
+        r"INSERT INTO IDDOSSIER VALUES("
+        r"'2016/01186','x','x','x','2','12-16,12-05','','x','','x','1')"
+    )
+    parsed = parse_hsqldb_log_line(line)
+    assert parsed["row"]["LOCARNOCODES"] == ["12-16", "12-05"]
+
+
+def test_parse_log_line_column_count_mismatch_raises():
+    """Schema drift must fail loudly — IDDESIGN expects 3 columns, give it 4."""
+    bad = "INSERT INTO IDDESIGN VALUES('a','b','c','d')"
+    with pytest.raises(ValueError, match=r"IDDESIGN: expected 3 columns, got 4"):
+        parse_hsqldb_log_line(bad)
