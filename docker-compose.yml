@@ -148,7 +148,11 @@ services:
       - ./foreign_generics.py:/app/foreign_generics.py:ro
       - ./idf_lookup.py:/app/idf_lookup.py:ro
       - ./data_collection.py:/app/data_collection.py:ro
+      - ./data_collection_tasarim.py:/app/data_collection_tasarim.py:ro
       - ./pdf_extract.py:/app/pdf_extract.py:ro
+      - ./pdf_extract_tasarim.py:/app/pdf_extract_tasarim.py:ro
+      - ./pdf_extract_tasarim_events.py:/app/pdf_extract_tasarim_events.py:ro
+      - ./embeddings_tasarim.py:/app/embeddings_tasarim.py:ro
       # Mount API and database modules for development
       - ./api:/app/api:ro
       - ./database:/app/database:ro
