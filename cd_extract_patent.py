@@ -23,7 +23,7 @@ Built incrementally. Each helper has its own unit-test file.
 from __future__ import annotations
 
 import re
-from typing import Optional
+from typing import List, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -51,3 +51,44 @@ def decode_hsqldb_escapes(s: Optional[str]) -> str:
         return chr(int(match.group(1), 16))
 
     return _HSQLDB_ESCAPE_RE.sub(_replace, s)
+
+
+# ---------------------------------------------------------------------------
+# Step 2.2 — IPCCODE HTML wrapper stripper
+# ---------------------------------------------------------------------------
+
+_HTML_P_RE = re.compile(r"<p>(.*?)</p>", re.DOTALL | re.IGNORECASE)
+_HTML_OUTER_RE = re.compile(r"</?html\s*/?>", re.IGNORECASE)
+
+
+def strip_ipc_html(value: Optional[str]) -> List[str]:
+    """Convert an HSQLDB IPCCODE HTML-wrapped string into a list of codes.
+
+    The CD bundle stores IPC classifications as
+    ``<html><p>A61M 5/31</p><p>A61J 1/14</p></html>``. This helper
+    returns ``["A61M 5/31", "A61J 1/14"]`` — preserving the inner string
+    verbatim. Codes legitimately appear with or without internal
+    whitespace (``E04C 3/34`` and ``G01H13/00`` are both real), so the
+    helper does not normalise spacing.
+
+    Behaviour:
+      - empty / None input -> ``[]``
+      - well-formed ``<html><p>...</p>...</html>`` -> list of inner texts
+      - plain code with no HTML at all (defensive) -> single-element list
+      - malformed (HTML tags but no <p>) -> ``[]``
+    """
+    if not value:
+        return []
+
+    matches = _HTML_P_RE.findall(value)
+    if matches:
+        return [m.strip() for m in matches if m.strip()]
+
+    # No <p> tags. If the input contains <html>/<…> tags but no <p>,
+    # treat as malformed and return [] rather than passing HTML garbage
+    # through as a code.
+    if "<" in value and ">" in value:
+        return []
+
+    cleaned = value.strip()
+    return [cleaned] if cleaned else []
