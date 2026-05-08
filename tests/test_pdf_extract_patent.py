@@ -41,9 +41,16 @@ from pdf_extract_patent import (
     parse_title,
 )
 from pdf_extract_patent import (
+    DEFAULT_BANNER_PAGE_THRESHOLD,
+    build_figure_inventory,
+    detect_banner_xrefs,
+    extract_record_figures,
+)
+from pdf_extract_patent import (
     _build_global_text,
     _char_pos_to_page,
     _find_record_boundaries,
+    _normalize_appno_for_filename,
 )
 
 
@@ -1174,3 +1181,165 @@ def test_patent_record_dataclass_fields_all_present():
     assert r.priorities == []
     assert r.ep_reference is None
     assert r.figures == []
+
+
+# ---------------------------------------------------------------------------
+# Step 3.6 — _normalize_appno_for_filename
+# ---------------------------------------------------------------------------
+
+def test_normalize_appno_for_filename_replaces_slash():
+    assert _normalize_appno_for_filename("2022/014462") == "2022_014462"
+    assert _normalize_appno_for_filename("2024/000746") == "2024_000746"
+
+
+def test_normalize_appno_for_filename_handles_none_and_empty():
+    assert _normalize_appno_for_filename(None) == "unknown"
+    assert _normalize_appno_for_filename("") == "unknown"
+    assert _normalize_appno_for_filename("  ") == "unknown"
+
+
+def test_normalize_appno_for_filename_strips_unsafe_chars():
+    """Anything that isn't [0-9A-Za-z_] gets folded to underscore."""
+    assert _normalize_appno_for_filename("2022/014462!") == "2022_014462_"
+    # Real-world: the EP fascicle synthetic format. Letters preserved.
+    assert _normalize_appno_for_filename("LEGACY_1996_6_p07") == "LEGACY_1996_6_p07"
+
+
+# ---------------------------------------------------------------------------
+# Step 3.6 — detect_banner_xrefs
+# ---------------------------------------------------------------------------
+
+def test_detect_banner_xrefs_above_threshold_classified_as_banner():
+    """An xref appearing on >threshold pages is the page banner."""
+    inventory = {
+        0: [4204, 100],  # banner + figure
+        1: [4204, 101],
+        2: [4204],
+        3: [4204],
+        4: [4204],
+        5: [4204, 102],  # banner present on 6 pages -> classified
+    }
+    banners = detect_banner_xrefs(inventory, threshold=5)
+    assert banners == {4204}
+
+
+def test_detect_banner_xrefs_at_threshold_kept_as_real_figure():
+    """At-threshold (== threshold) xrefs are KEPT as real figures.
+    Strict greater-than is the documented rule."""
+    inventory = {i: [42] for i in range(5)}  # exactly 5 pages with xref=42
+    banners = detect_banner_xrefs(inventory, threshold=5)
+    assert banners == set()
+
+
+def test_detect_banner_xrefs_handles_multiple_banners():
+    """Some PDFs have two recurring header glyphs (e.g. a logo + a
+    boilerplate strip). Both should be detected."""
+    inventory = {
+        0: [100, 200, 1000],
+        1: [100, 200, 1001],
+        2: [100, 200],
+        3: [100, 200],
+        4: [100, 200],
+        5: [100, 200],
+    }
+    banners = detect_banner_xrefs(inventory, threshold=4)
+    assert banners == {100, 200}
+
+
+def test_detect_banner_xrefs_empty_inventory():
+    assert detect_banner_xrefs({}) == set()
+
+
+def test_detect_banner_xrefs_real_2025_08_proportions():
+    """Synthetic inventory mimicking 2025_08.pdf's documented shape:
+    one banner xref on ~1600 pages, ~190 unique drawings each on
+    1-3 pages. Result: only the banner is classified."""
+    inventory = {}
+    inventory[0] = [4204, 1]
+    for i in range(1, 1600):
+        inventory[i] = [4204]
+    for i in range(1600, 1700):
+        inventory[i] = [200 + (i - 1600), 4204]
+    banners = detect_banner_xrefs(inventory, threshold=5)
+    assert banners == {4204}
+
+
+# ---------------------------------------------------------------------------
+# Step 3.6 — build_figure_inventory + extract_record_figures (live)
+# ---------------------------------------------------------------------------
+
+# Use the same real PDF the rest of the live tests rely on.
+_REAL_PDF = Path(
+    "C:/Users/701693/turk_patent/bulletins/Patent__Faydali_Model/2025_08.pdf"
+)
+
+
+@pytest.mark.skipif(
+    not _REAL_PDF.is_file(),
+    reason=f"Real PDF {_REAL_PDF.name} not on disk; skipping integration smoke",
+)
+def test_build_figure_inventory_real_2025_08_smoke():
+    """End-to-end smoke: walk the real 1976-page 2025_08.pdf, count
+    image references and uniques. Anchored to the README's documented
+    numbers (~1,806 references / ~195 uniques) with reasonable slack."""
+    import fitz
+    doc = fitz.open(str(_REAL_PDF))
+    inventory = build_figure_inventory(doc)
+    assert len(inventory) == doc.page_count
+
+    total_refs = sum(len(xrefs) for xrefs in inventory.values())
+    unique_xrefs = {x for xrefs in inventory.values() for x in xrefs}
+
+    # Refs / uniques should be in the documented ballpark
+    assert 1500 <= total_refs <= 2200, f"unexpected total references: {total_refs}"
+    assert 100 <= len(unique_xrefs) <= 250, f"unexpected unique xrefs: {len(unique_xrefs)}"
+
+    banners = detect_banner_xrefs(inventory)
+    # Exactly one banner xref expected (the header strip)
+    assert 1 <= len(banners) <= 3
+    doc.close()
+
+
+@pytest.mark.skipif(
+    not _REAL_PDF.is_file(),
+    reason=f"Real PDF {_REAL_PDF.name} not on disk; skipping integration smoke",
+)
+def test_extract_record_figures_dry_run_real_pdf(tmp_path):
+    """Dry run (save_images=False) on the first 50 records of the real
+    PDF. Verifies the metadata shape without doing any disk I/O."""
+    import fitz
+    from pdf_extract_patent import (
+        _build_global_text, _find_record_boundaries,
+        parse_full_bibliographic_record,
+    )
+    doc = fitz.open(str(_REAL_PDF))
+
+    page_texts = [doc[i].get_text("text") for i in range(doc.page_count)]
+    full, starts = _build_global_text(page_texts)
+    boundaries = _find_record_boundaries(full, starts)
+    inventory = build_figure_inventory(doc)
+    banners = detect_banner_xrefs(inventory)
+
+    sampled_with_figures = 0
+    for i, (start, end, sp, ep) in enumerate(boundaries[:50]):
+        block = full[start:end]
+        rec = parse_full_bibliographic_record(
+            block, record_index=i + 1, page_range=(sp, ep),
+        )
+        if rec is None:
+            continue
+        figures = extract_record_figures(
+            doc, rec, banner_xrefs=banners,
+            figures_dir=None, save_images=False,
+        )
+        for f in figures:
+            assert f["page"] in range(sp, ep + 1)
+            assert f["xref"] not in banners
+            assert f["image_path"] is None  # dry run
+        if figures:
+            sampled_with_figures += 1
+
+    # Some records should have figures (granted patents typically do)
+    assert sampled_with_figures > 0, \
+        "expected at least 1 of the first 50 records to have a figure"
+    doc.close()

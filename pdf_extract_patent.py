@@ -30,10 +30,13 @@ CLI (lands in step 3.8)::
 
 from __future__ import annotations
 
+import logging
 import re
+from collections import Counter
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Sequence, Tuple
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 
 def _get_fitz():
@@ -879,3 +882,175 @@ def parse_full_bibliographic_record(
     )
 
     return record
+
+
+# ---------------------------------------------------------------------------
+# Step 3.6 — figure extraction + xref dedup
+# ---------------------------------------------------------------------------
+
+logger = logging.getLogger("turkpatent.patent_extract")
+
+# Default threshold for "this xref is the page-banner image". The README
+# documents a banner referenced ~1,600 times in 2025_08.pdf; real
+# invention drawings appear on at most a handful of pages even when a
+# record's figures span 2-3 pages. 5 is a comfortable cutoff.
+DEFAULT_BANNER_PAGE_THRESHOLD = 5
+
+
+def _normalize_appno_for_filename(application_no: Optional[str]) -> str:
+    """``2022/014462`` -> ``2022_014462``. Used to make figure filenames
+    safe across platforms while still being human-recognisable."""
+    if not application_no:
+        return "unknown"
+    return re.sub(r"[^0-9A-Za-z_]", "_", application_no.strip()) or "unknown"
+
+
+def build_figure_inventory(doc) -> Dict[int, List[int]]:
+    """Walk every page of ``doc`` and return ``{page_index: [xref, …]}``.
+
+    ``page_index`` is 0-indexed, matching PyMuPDF's own indexing.
+    Each value is the list of unique image xrefs on that page (the
+    same xref isn't double-counted on the same page even if it appears
+    twice in PDF object dictionaries).
+    """
+    inventory: Dict[int, List[int]] = {}
+    for i in range(doc.page_count):
+        page = doc[i]
+        seen: Set[int] = set()
+        ordered: List[int] = []
+        try:
+            images = page.get_images(full=True)
+        except Exception:
+            images = []
+        for info in images:
+            xref = info[0] if info else None
+            if isinstance(xref, int) and xref not in seen:
+                seen.add(xref)
+                ordered.append(xref)
+        inventory[i] = ordered
+    return inventory
+
+
+def detect_banner_xrefs(
+    inventory: Mapping[int, Iterable[int]],
+    threshold: int = DEFAULT_BANNER_PAGE_THRESHOLD,
+) -> Set[int]:
+    """Return the set of xrefs that appear on more than ``threshold`` pages.
+
+    These are almost certainly page-banner images (header / footer
+    glyphs reused across the whole document). Real invention drawings
+    appear on at most a handful of pages even for records that span
+    multiple pages.
+
+    Pure function over the inventory dict — no PDF library calls — so
+    it's easy to unit-test against synthetic inventories.
+    """
+    page_counts: Counter = Counter()
+    for page_xrefs in inventory.values():
+        for xref in page_xrefs:
+            page_counts[xref] += 1
+    return {xref for xref, n in page_counts.items() if n > threshold}
+
+
+def _save_image_from_xref(doc, xref: int, dest: Path) -> bool:
+    """Write the image referenced by ``xref`` to ``dest``.
+
+    Converts CMYK pixmaps to RGB (PNG/JPEG can't carry CMYK reliably).
+    Returns ``True`` on success. On any error, logs a warning and
+    returns ``False`` — figure extraction is best-effort, not a hard
+    failure for the rest of the record's metadata.
+    """
+    fitz = _get_fitz()
+    try:
+        pix = fitz.Pixmap(doc, xref)
+        if pix.n - pix.alpha >= 4:  # CMYK
+            pix = fitz.Pixmap(fitz.csRGB, pix)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        pix.save(str(dest))
+        return dest.is_file() and dest.stat().st_size > 0
+    except Exception as e:
+        logger.warning("image extract failed for xref=%d: %r", xref, e)
+        return False
+
+
+def extract_record_figures(
+    doc,
+    record: PatentRecord,
+    *,
+    banner_xrefs: Set[int],
+    figures_dir: Optional[Path] = None,
+    save_images: bool = True,
+) -> List[Dict[str, Any]]:
+    """Walk the record's page range, collect non-banner figure metadata.
+
+    For each non-banner image on each page in ``record.page_range``,
+    builds an entry of the form::
+
+        {
+          "page": 200,
+          "xref": 1234,
+          "image_path": "figures/2022_014462_p200_1.png",  # relative to figures_dir's parent
+          "width":  400,
+          "height": 300,
+        }
+
+    When ``save_images=True`` and ``figures_dir`` is given, the image
+    bytes are written to disk under that folder. With ``save_images=False``
+    the metadata is returned but no I/O happens — useful for stats /
+    dry runs.
+
+    The same xref appearing on multiple pages of the same record is
+    extracted only once (first-page wins) so the page-banner exclusion
+    is robust even if a banner xref happens to slip past the threshold.
+    """
+    if not record.page_range:
+        return []
+    start_page, end_page = record.page_range[0], record.page_range[-1]
+
+    appno_norm = _normalize_appno_for_filename(record.application_no)
+    figures: List[Dict[str, Any]] = []
+    seen_xrefs: Set[int] = set()
+
+    for page_no in range(start_page, end_page + 1):
+        if page_no < 1 or page_no > doc.page_count:
+            continue
+        page = doc[page_no - 1]
+        try:
+            images = page.get_images(full=True)
+        except Exception:
+            images = []
+
+        for idx, img_info in enumerate(images):
+            xref = img_info[0] if img_info else None
+            if not isinstance(xref, int):
+                continue
+            if xref in banner_xrefs:
+                continue
+            if xref in seen_xrefs:
+                continue
+            seen_xrefs.add(xref)
+
+            # Width / height come straight from the PDF object stream;
+            # they're cheap to read and useful for filtering tiny stamps.
+            width = img_info[2] if len(img_info) > 2 else None
+            height = img_info[3] if len(img_info) > 3 else None
+
+            entry: Dict[str, Any] = {
+                "page": page_no,
+                "xref": xref,
+                "width": width,
+                "height": height,
+                "image_path": None,
+            }
+
+            if save_images and figures_dir is not None:
+                # Pick an extension that PyMuPDF will encode losslessly.
+                ext = ".png"
+                fname = f"{appno_norm}_p{page_no}_{idx + 1}{ext}"
+                dest = figures_dir / fname
+                if _save_image_from_xref(doc, xref, dest):
+                    entry["image_path"] = f"figures/{fname}"
+
+            figures.append(entry)
+
+    return figures
