@@ -1309,8 +1309,9 @@ def _dedup_pdf_pngs_against_cd_tifs(
     payload: Dict[str, Any],
 ) -> int:
     """Drop PDF PNGs whose ``{year}_{appno}`` prefix matches a CD TIFF
-    in the same dir. Updates ``payload['records'][].figures[].image_path``
-    to ``None`` for the dropped files (page/xref/bbox preserved).
+    in the same dir, and remove the matching entries from
+    ``payload['records'][].figures``. The CD TIFF survives as the
+    canonical figure for that record.
 
     Returns the count of PNGs deleted.
 
@@ -1333,9 +1334,12 @@ def _dedup_pdf_pngs_against_cd_tifs(
 
     if dropped_paths:
         for record in payload.get("records", []):
-            for fig in record.get("figures", []):
-                if fig.get("image_path") in dropped_paths:
-                    fig["image_path"] = None
+            figs = record.get("figures")
+            if not figs:
+                continue
+            record["figures"] = [
+                f for f in figs if f.get("image_path") not in dropped_paths
+            ]
 
     return len(dropped_paths)
 

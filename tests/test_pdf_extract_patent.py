@@ -1634,10 +1634,11 @@ def test_parse_argv_out_dir_defaults_to_bulletins_dir(tmp_path):
 # Step 3.8 — main returns nonzero on missing source
 # ---------------------------------------------------------------------------
 
-def test_dedup_pdf_pngs_drops_duplicates_and_nulls_paths(tmp_path):
+def test_dedup_pdf_pngs_drops_duplicates_and_removes_payload_entries(tmp_path):
     """When a CD TIFF for app X exists in figures/, any PDF PNG with
-    matching {year}_{appno} prefix is dropped and its image_path is
-    nulled in the payload (page/xref preserved)."""
+    matching {year}_{appno} prefix is dropped from disk AND its figure
+    entry is removed from ``record['figures']`` so DB ingest does not
+    see a stub row pointing at a non-existent file."""
     figures = tmp_path / "figures"
     figures.mkdir()
     # CD TIFFs (already there from a prior cd_extract run)
@@ -1656,8 +1657,11 @@ def test_dedup_pdf_pngs_drops_duplicates_and_nulls_paths(tmp_path):
             {
                 "application_no": "2017/15048",
                 "figures": [
+                    # one duplicate, one standalone-on-same-record
                     {"image_path": "figures/2017_15048_p120_2.png",
                      "page": 120, "xref": 4204},
+                    {"image_path": "figures/2017_15048_p121_1.png",
+                     "page": 121, "xref": 4500},
                 ],
             },
             {
@@ -1679,14 +1683,15 @@ def test_dedup_pdf_pngs_drops_duplicates_and_nulls_paths(tmp_path):
     assert standalone.exists()
     # CD TIFFs untouched
     assert (figures / "2017_15048.tif").is_file()
-    # Payload's first figure image_path nulled, page/xref preserved
-    fig0 = payload["records"][0]["figures"][0]
-    assert fig0["image_path"] is None
-    assert fig0["page"] == 120
-    assert fig0["xref"] == 4204
-    # Payload's second figure (no CD match) untouched
-    fig1 = payload["records"][1]["figures"][0]
-    assert fig1["image_path"] == "figures/2099_99999_p1_1.png"
+    # First record: duplicate entry removed, sibling non-dup entry preserved
+    figs0 = payload["records"][0]["figures"]
+    assert len(figs0) == 1
+    assert figs0[0]["image_path"] == "figures/2017_15048_p121_1.png"
+    assert figs0[0]["page"] == 121
+    # Second record (no CD match) untouched
+    figs1 = payload["records"][1]["figures"]
+    assert len(figs1) == 1
+    assert figs1[0]["image_path"] == "figures/2099_99999_p1_1.png"
 
 
 def test_dedup_pdf_pngs_returns_zero_when_no_cd_tifs(tmp_path):
