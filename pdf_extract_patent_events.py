@@ -190,6 +190,92 @@ _PHRASE_TO_EVENT_TYPE: List[Tuple[str, str]] = [
     ("6769 Sayılı SMK'nın 99 uncu Maddesi Hükmü Uyarınca YIDK Tarafından Patent Hakkının "
      "Değiştirilmiş Haliyle Devamına Karar Verilen Patentler",
      "YIDK_AMENDED_CONTINUATION"),
+
+    # ===== Pre-2017 (551 KHK era) phrases =====
+    # The 551 KHK regime had a two-track system (incelemeli "examined" vs
+    # incelemesiz "non-examined"). 6769 SMK (2017) collapsed both. These
+    # phrases only appear on bulletins up to ~2017_5; modern parsers can
+    # ignore the distinction but we want them mapped, not UNKNOWN, so
+    # downstream queries can filter by event_type.
+    ("Başvuru Yayınının İlanı",
+     "APPLICATION_PUBLISHED"),
+    ("İncelemeli Sistem Tercihinin İlanı",
+     "EXAM_SYSTEM_CHOICE_LEGACY_551"),
+    ("İncelemesiz Sistem Tercihinin İlanı",
+     "NONEXAM_SYSTEM_CHOICE_LEGACY_551"),
+    ("İncelemesiz Sistem Tercihini Kabul Etmiş Sayılan Başvuruların İlanı",
+     "NONEXAM_SYSTEM_CHOICE_DEEMED_LEGACY_551"),
+    ("İnceleme Ücretinin Ödenmemesi Nedeniyle İncelemesiz Sistem Tercihini "
+     "Kabul Etmiş Sayılan Başvuruların İlanı",
+     "NONEXAM_SYSTEM_CHOICE_DEEMED_LEGACY_551"),
+    ("İncelemesiz Patent Sisteminden İncelemeli Patent Sistemine Dönüşen Başvuruların İlanı",
+     "CONVERSION_NONEXAM_TO_EXAM_LEGACY_551"),
+    ("Araştırma Raporunun İlanı",
+     "SEARCH_REPORT_LEGACY_551"),
+    ("Araştırma Raporu İle Birlikte Yayımlandığı İlan Edilen Başvurular",
+     "SEARCH_REPORT_WITH_APPLICATION_LEGACY_551"),
+    ("Düzeltme - İncelemesiz Sistem Tercihinin İlanı",
+     "NONEXAM_SYSTEM_CHOICE_LEGACY_551"),
+    # Spelling variants of POST_PUB_AMENDMENT — bulletin layout drifted
+    # over the years between "Patent/FM Model" / "Patent/Faydalı Model"
+    # with vs without "/Belgelerinde".
+    ("Patent/FM Model Başvurularında Yayından Sonraki Değişikliğin İlanı",
+     "POST_PUB_AMENDMENT"),
+    ("Patent/Faydalı Model Başvurularında/Belgelerinde Yayından Sonraki Değişikliğin İlanı",
+     "POST_PUB_AMENDMENT"),
+    # Spelling variant of APPLICATION_FEE_LAPSE.
+    ("Patent/Faydalı Model Başvurularının Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı",
+     "APPLICATION_FEE_LAPSE"),
+    # "İptal - " prefix marks an annulment of a previously announced
+    # cancellation (re-validation event). Same event_type as the original.
+    ("İptal - Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı",
+     "GRANT_FEE_LAPSE_CANCELLED"),
+    ("İptal - Patent/FM Başvurularının Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı",
+     "APPLICATION_FEE_LAPSE_CANCELLED"),
+    # EP-fascicle correction announcement (rare; legacy bulletins).
+    ("Düzeltme - Avrupa Patent Fasiküllerinin İlanı",
+     "EP_FASCICLE_CORRECTION"),
+    # EP claim-level publication (precedes the fascicle on PCT entries).
+    ("Başvuru İstemlerinin Yayımlandığı İlan Edilen Avrupa Patent Başvuruları",
+     "EP_CLAIMS_PUBLISHED"),
+    # PCT international phase II (national entry) announcement.
+    ("PCT II. Kısımdan Gelen Başvuruların İlanı",
+     "PCT_PHASE_II_ENTRY"),
+    # Force-majeure relief announcement (551-era, rarely used).
+    ("Patent / Faydalı Model İçin Mücbir Sebep İlanı",
+     "FORCE_MAJEURE_LEGACY_551"),
+    # Annulment under 551 KHK Articles 129/165 (invalidation of granted right).
+    ("551 Sayılı KHK'nin 129 uncu veya 165 inci Maddeleri Hükmü Uyarınca "
+     "Hükümsüzlüğüne Karar Verilen Patent/Faydalı Model Belgeleri",
+     "GRANT_INVALIDATED_LEGACY_551"),
+    # Same phrase prefixed with "Mülga" (= "abolished") — used in newer
+    # bulletins when referring to the now-superseded 551 KHK regime.
+    ("Mülga 551 Sayılı KHK'nin 129 uncu veya 165 inci Maddeleri Hükmü Uyarınca "
+     "Hükümsüzlüğüne Karar Verilen Patent/Faydalı Model Belgeleri",
+     "GRANT_INVALIDATED_LEGACY_551"),
+
+    # ===== Administrative corrections — "İptal -" (cancellation of a
+    # prior announcement) and "Düzeltme -" (correction of a prior
+    # announcement). Each gets its own event_type so callers can
+    # filter / un-apply the original event downstream. =====
+    ("İptal - Araştırma Raporunun İlanı",
+     "SEARCH_REPORT_CANCELLED"),
+    ("İptal - Başvuru Yayınının İlanı",
+     "APPLICATION_PUBLICATION_CANCELLED"),
+    ("Düzeltme - Başvuru Yayınının İlanı",
+     "APPLICATION_PUBLICATION_CORRECTED"),
+    ("Düzeltme - Verilen Patent / Faydalı Model İlanı",
+     "GRANT_CORRECTED"),
+    ("İptal - Terk Edilen / Geri Çevrilen / Geri Çekilmiş Sayılan Başvuru / Belgelerin İlanı",
+     "APPLICATION_ABANDONED_CANCELLED"),
+    ("İptal - İncelemeli Sistem Tercihinin İlanı",
+     "EXAM_SYSTEM_CHOICE_LEGACY_551"),
+
+    # Variant of APPLICATION_WITHDRAWN — modern bulletins occasionally
+    # use "Geri Çekilen" (withdrawn) instead of the canonical
+    # "Geri Çekilmiş Sayılan" (deemed withdrawn). Same effective event.
+    ("Geri Çekilen Patent / Faydalı Model Başvurularının İlanı (6769 SMK)",
+     "APPLICATION_WITHDRAWN"),
 ]
 
 # Sentinel for descriptions that don't match any known phrase. The
@@ -685,6 +771,9 @@ def parse_argv(argv: Optional[Sequence[str]] = None) -> CLIArgs:
         parser.error("--pdf and --all are mutually exclusive")
     if ns.all_mode:
         candidates = sorted(ns.bulletins_dir.glob("*.pdf"))
+        # Skip legacy multi-UUID bundle parts (RAR payloads with .pdf names) —
+        # see pdf_extract_patent for the same reasoning.
+        candidates = [p for p in candidates if "_legacy_part" not in p.stem]
         if not candidates:
             parser.error(f"--all matched no *.pdf files in {ns.bulletins_dir}")
         pdf_paths = candidates

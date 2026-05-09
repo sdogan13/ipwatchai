@@ -158,6 +158,37 @@ def test_classify_empty_input() -> None:
     assert classify_event_phrase("   ") == EVENT_TYPE_UNKNOWN
 
 
+def test_classify_pre_2017_legacy_551_phrases() -> None:
+    """Pre-2017 (551 KHK era) bulletins use a different vocabulary —
+    two-track exam/non-exam system, simpler search-report wording, no
+    "(6769 SMK)" suffix on the publication phrase. The classifier must
+    map these to dedicated _LEGACY_551 event_types or to the modern
+    canonical event_type when the meaning is identical."""
+    # Spelling variant of APPLICATION_PUBLISHED (no SMK suffix).
+    assert classify_event_phrase(
+        "Başvuru Yayınının İlanı"
+    ) == "APPLICATION_PUBLISHED"
+    # Two-track system events (551-only concept, distinct event_type).
+    assert classify_event_phrase(
+        "İncelemeli Sistem Tercihinin İlanı"
+    ) == "EXAM_SYSTEM_CHOICE_LEGACY_551"
+    assert classify_event_phrase(
+        "İncelemesiz Sistem Tercihinin İlanı"
+    ) == "NONEXAM_SYSTEM_CHOICE_LEGACY_551"
+    # Generic search-report announcement (legacy form).
+    assert classify_event_phrase(
+        "Araştırma Raporunun İlanı"
+    ) == "SEARCH_REPORT_LEGACY_551"
+    # POST_PUB_AMENDMENT spelling variant ("Patent/FM Model" no slash).
+    assert classify_event_phrase(
+        "Patent/FM Model Başvurularında Yayından Sonraki Değişikliğin İlanı"
+    ) == "POST_PUB_AMENDMENT"
+    # PCT phase II national entry (rare; legacy).
+    assert classify_event_phrase(
+        "PCT II. Kısımdan Gelen Başvuruların İlanı"
+    ) == "PCT_PHASE_II_ENTRY"
+
+
 # ---------------------------------------------------------------------------
 # event_fingerprint
 # ---------------------------------------------------------------------------
@@ -419,6 +450,18 @@ def test_parse_argv_pdf_and_all_mutex() -> None:
     from pdf_extract_patent_events import parse_argv
     with pytest.raises(SystemExit):
         parse_argv(["--pdf", "x.pdf", "--all"])
+
+
+def test_parse_argv_all_skips_legacy_part_pdfs(tmp_path) -> None:
+    """*_legacy_partNN.pdf files are RAR archives the collector saved with
+    a .pdf extension. --all should filter them out before they reach
+    PyMuPDF."""
+    from pdf_extract_patent_events import parse_argv
+    (tmp_path / "2025_08.pdf").write_bytes(b"")
+    (tmp_path / "1996_6_legacy_part01.pdf").write_bytes(b"Rar!\x1a\x07\x00")
+    args = parse_argv(["--all", "--bulletins-dir", str(tmp_path)])
+    names = [p.name for p in args.pdf_paths]
+    assert names == ["2025_08.pdf"]
 
 
 def test_parse_argv_force_flag() -> None:

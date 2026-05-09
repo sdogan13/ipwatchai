@@ -154,6 +154,20 @@ _BULLETIN_DATE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# 2023_03.pdf cover page rendered some digit glyphs as Coptic / Greek
+# letters because of a font-substitution glitch at TPMK publication time
+# (header reads ``Sayı ϮϬϮϯͲϬϯ`` / ``Ϯ1.03.202ϯ`` instead of
+# ``Sayı 2023-03`` / ``21.03.2023``). Normalise the handful of mapped
+# codepoints back to ASCII before regex matching. Other PDFs we have
+# don't trigger this — keep the table tiny and deliberate; expand only
+# when a new failing bulletin shows another glyph.
+_TR_DIGIT_GLYPH_FIX = str.maketrans({
+    "Ϭ": "0",  # Ϭ COPTIC CAPITAL LETTER SHIMA
+    "Ϯ": "2",  # Ϯ COPTIC CAPITAL LETTER DEI
+    "ϯ": "3",  # ϯ COPTIC SMALL LETTER DEI
+    "Ͳ": "-",  # Ͳ GREEK CAPITAL LETTER ARCHAIC SAMPI
+})
+
 
 def extract_bulletin_metadata_from_text(
     text: Optional[str],
@@ -167,6 +181,8 @@ def extract_bulletin_metadata_from_text(
     """
     if not text:
         return None, None
+
+    text = text.translate(_TR_DIGIT_GLYPH_FIX)
 
     bulletin_no: Optional[str] = None
     m = _BULLETIN_NO_RE.search(text)
@@ -1307,6 +1323,12 @@ def parse_argv(argv: Optional[Sequence[str]] = None) -> CLIArgs:
 
     if ns.all:
         candidates = sorted(ns.bulletins_dir.glob("*.pdf"))
+        # Skip legacy multi-UUID bundle parts. Despite their .pdf extension,
+        # these files are RAR archive payloads (TPMK serves the parts as
+        # application/octet-stream RAR data, the collector saves them as
+        # *_legacy_partNN.pdf). They belong to the deferred Stage-8 legacy
+        # ingestion path, not the modern bibliographic parser.
+        candidates = [p for p in candidates if "_legacy_part" not in p.stem]
         if not candidates:
             parser.error(f"--all matched no *.pdf files in {ns.bulletins_dir}")
         pdf_paths = candidates

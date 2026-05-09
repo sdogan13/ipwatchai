@@ -388,6 +388,21 @@ def test_extract_bulletin_metadata_returns_both_none_for_unrelated_page():
     assert extract_bulletin_metadata_from_text(body) == (None, None)
 
 
+def test_extract_bulletin_metadata_handles_2023_03_coptic_glyph_substitution():
+    """Cover page of 2023_03.pdf has a TPMK font glitch that rendered
+    digits as Coptic letters: ``Sayı ϮϬϮϯͲϬϯ`` / ``Ϯ1.03.202ϯ`` instead
+    of ``Sayı 2023-03`` / ``21.03.2023``. The parser must normalise
+    these glyphs to ASCII before regex matching."""
+    page = (
+        "Sayı ϮϬϮϯͲϬϯ \n"
+        "Yayım Tarihi  \n"
+        "Ϯ1.03.202ϯ \n"
+    )
+    no, date = extract_bulletin_metadata_from_text(page)
+    assert no == "2023-03"
+    assert date == "2023-03-21"
+
+
 def test_extract_bulletin_metadata_handles_none_and_empty():
     assert extract_bulletin_metadata_from_text(None) == (None, None)
     assert extract_bulletin_metadata_from_text("") == (None, None)
@@ -1610,6 +1625,18 @@ def test_parse_argv_all_errors_on_empty_dir(tmp_path):
     """--all against an empty bulletins folder is a hard error."""
     with pytest.raises(SystemExit):
         parse_argv(["--all", "--bulletins-dir", str(tmp_path)])
+
+
+def test_parse_argv_all_skips_legacy_part_pdfs(tmp_path):
+    """*_legacy_partNN.pdf files are RAR archives the collector saved with
+    a .pdf extension. They belong to the deferred Stage-8 path, not Stage 3,
+    so --all must filter them out before we hand them to PyMuPDF."""
+    (tmp_path / "2025_08.pdf").write_bytes(b"")
+    (tmp_path / "1996_6_legacy_part01.pdf").write_bytes(b"Rar!\x1a\x07\x00")
+    (tmp_path / "2015_4_legacy_part10.pdf").write_bytes(b"Rar!\x1a\x07\x00")
+    args = parse_argv(["--all", "--bulletins-dir", str(tmp_path)])
+    names = [p.name for p in args.pdf_paths]
+    assert names == ["2025_08.pdf"]
 
 
 def test_parse_argv_rejects_no_input():
