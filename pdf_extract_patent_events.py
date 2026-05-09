@@ -127,6 +127,11 @@ _PHRASE_TO_EVENT_TYPE: List[Tuple[str, str]] = [
      "DIVISION_RECORDED"),
     ("Lisans Verme Teklifinin İlanı",
      "LICENSE_OFFER"),
+    # Rehin = pledge / lien — released. The bulletin renders this with
+    # a stray space inside "( 6769 SMK)" which the normaliser collapses
+    # away, so the table entry uses the canonical no-space form.
+    ("Rehin Kaldırılması İşlemi Sicile Kayıt Edilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)",
+     "PLEDGE_RELEASED"),
 
     # ===== Conversion (UM ↔ Patent) =====
     ("Faydalı Modele Dönüşüm İlanı (6769 SMK)",
@@ -223,8 +228,7 @@ EVENT_TYPE_UNKNOWN = "UNKNOWN"
 # per-row classification via _PHRASE_TO_EVENT_TYPE. Those are
 # different events than the page-banner-style section.
 _SECTION_HEADERS_TO_EVENT_TYPE: List[Tuple[str, str]] = [
-    # Article 96 search reports (combined patent + UM since the
-    # bulletin doesn't distinguish at the section-banner level).
+    # ── Uppercase page banners (pp 1151+) ───────────────────────────
     ("6769 SAYILI SMK'NIN 96 NCI MADDE HÜKMÜ UYARINCA ARAŞTIRMA RAPORU",
      "SEARCH_REPORT_ARTICLE_96"),
     ("LİSANS VERME TEKLİFİNDE BULUNULAN PATENTLER",
@@ -235,6 +239,20 @@ _SECTION_HEADERS_TO_EVENT_TYPE: List[Tuple[str, str]] = [
      "APPLICATION_FEE_REVALIDATION"),
     ("GEÇERSİZ SAYILAN / REDDEDİLEN VE GERİ ÇEKİLMİŞ SAYILAN BAŞVURULAR",
      "APPLICATION_LAPSED_OR_REJECTED"),
+    # ── Mixed-case section headers (pp 1300+) ──────────────────────
+    # These same phrases appear as ROWS on the flat event-index pages
+    # (7-114) where they classify per-row via _PHRASE_TO_EVENT_TYPE.
+    # When they appear as the FIRST line of a SECTION page, they
+    # govern all UNKNOWN rows on subsequent pages of the section
+    # (where rows are structured fields like date + old_holder +
+    # new_holder, not phrase-shaped). Listing them here makes the
+    # section-state machine recognise the banner.
+    ("Devir İşlemi Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)",
+     "ASSIGNMENT_RECORDED"),
+    ("Birleşme İşlemi Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)",
+     "MERGER_RECORDED"),
+    ("Bölünme İşlemi Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)",
+     "DIVISION_RECORDED"),
 ]
 
 
@@ -379,7 +397,22 @@ def parse_event_index_page(
     if not page_text:
         return []
 
-    lines = [line.strip() for line in page_text.splitlines()]
+    # Strip the page footer template before line-by-line processing.
+    # Footer lines are ~120 underscores followed by "{pageno} Yayın
+    # Tarihi : {date}" and "2025/8 Resmi Patent Bülteni". When the
+    # last app_no anchor on a page has no description before the
+    # footer, the parser otherwise grabs the footer text and emits
+    # it as an event description. Match defensively (8+ underscores
+    # is enough to discriminate from any real text).
+    lines: List[str] = []
+    for raw in page_text.splitlines():
+        stripped = raw.strip()
+        if stripped.startswith("________"):
+            # Footer separator and the two trailing footer lines
+            # (page-no/date + bulletin tagline) get dropped.
+            break
+        lines.append(stripped)
+
     # Find anchor positions
     anchors: List[Tuple[int, str]] = [
         (i, line) for i, line in enumerate(lines)
@@ -531,3 +564,175 @@ def parse_pdf_events(pdf_path: Path | str) -> Dict[str, Any]:
         },
         "events": [asdict(e) for e in events],
     }
+
+
+# ---------------------------------------------------------------------------
+# Step 7.4 — CLI + write events.json with idempotency
+# ---------------------------------------------------------------------------
+#
+# Writes ``PT_{Y}_{M}_{date}/events.json`` alongside metadata.json
+# inside each bulletin folder. Idempotent skip-if-fresh check matches
+# pdf_extract_patent's pattern (events.json mtime ≥ source PDF mtime
+# means we've already extracted; --force overrides).
+
+EVENTS_FILENAME = "events.json"
+
+
+@dataclass
+class CLIArgs:
+    pdf_paths: List[Path]
+    out_dir: Path
+    force: bool
+
+
+def _events_filename_is_fresh(pdf_path: Path, events_path: Path) -> bool:
+    """True when events.json exists, is non-empty, and is at least as
+    recent as the source PDF. Identical pattern to
+    pdf_extract_patent._metadata_is_fresh."""
+    if not events_path.is_file():
+        return False
+    try:
+        if events_path.stat().st_size == 0:
+            return False
+        return events_path.stat().st_mtime >= pdf_path.stat().st_mtime
+    except OSError:
+        return False
+
+
+def _process_one(pdf: Path, out_dir: Path, *, force: bool) -> Dict[str, Any]:
+    """Extract events for one PDF and write events.json into its
+    bulletin parent folder. Mirrors the shape of
+    pdf_extract_patent._process_one for consistency."""
+    from patent_paths import bulletin_folder_path
+
+    if not pdf.is_file():
+        return {"status": "missing", "pdf": pdf.name}
+
+    # Cheap probe: get bulletin_no/date BEFORE the full parse so we
+    # know where events.json should land (fresh-check happens at the
+    # destination path).
+    fitz = _get_fitz()
+    with fitz.open(str(pdf)) as doc:
+        bulletin_no, bulletin_date = extract_bulletin_metadata(doc)
+    if not bulletin_no or not bulletin_date:
+        logger.error(
+            "[!] %s: could not extract bulletin_no/date from cover page",
+            pdf.name,
+        )
+        return {"status": "failed", "pdf": pdf.name,
+                "error": "missing bulletin metadata"}
+
+    parent = bulletin_folder_path(out_dir, bulletin_no, bulletin_date)
+    events_path = parent / EVENTS_FILENAME
+
+    if not force and _events_filename_is_fresh(pdf, events_path):
+        logger.info("[=] %s is fresh, skipping (use --force to override)",
+                    pdf.name)
+        return {"status": "skipped", "pdf": pdf.name,
+                "out": f"{parent.name}/{EVENTS_FILENAME}"}
+
+    parent.mkdir(parents=True, exist_ok=True)
+    payload = parse_pdf_events(pdf)
+    events_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    s = payload["stats"]
+    logger.info(
+        "[+] %s: %d events (unknown=%d, %d index pages) -> %s/%s in %.1fs",
+        pdf.name, s["events_total"], s["unknown_count"],
+        s["event_index_pages_scanned"], parent.name, EVENTS_FILENAME,
+        s["extract_duration_seconds"],
+    )
+    return {
+        "status": "ok", "pdf": pdf.name,
+        "out": f"{parent.name}/{EVENTS_FILENAME}",
+        "stats": s,
+    }
+
+
+def parse_argv(argv: Optional[Sequence[str]] = None) -> CLIArgs:
+    parser = argparse.ArgumentParser(
+        prog="pdf_extract_patent_events",
+        description="Extract Patent / Faydalı Model PDF event-index pages to events.json.",
+    )
+    parser.add_argument(
+        "--pdf", action="append", type=Path, default=[],
+        help="Path to a bulletin .pdf file. Repeat for multiple.",
+    )
+    parser.add_argument(
+        "--all", action="store_true", dest="all_mode",
+        help="Process every YYYY_M.pdf in --bulletins-dir.",
+    )
+    parser.add_argument(
+        "--bulletins-dir", type=Path, default=_LOCAL_DEFAULT_BULLETINS_DIR,
+        help=f"Bulletins directory for --all and default --out-dir "
+             f"(default: {_LOCAL_DEFAULT_BULLETINS_DIR}).",
+    )
+    parser.add_argument(
+        "--out-dir", type=Path, default=None,
+        help="Bulletins root under which PT_{Y}_{M}_{date}/ folders "
+             "are created (default: --bulletins-dir).",
+    )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="Re-extract even when events.json is newer than the source PDF.",
+    )
+    ns = parser.parse_args(argv)
+
+    if ns.all_mode and ns.pdf:
+        parser.error("--pdf and --all are mutually exclusive")
+    if ns.all_mode:
+        candidates = sorted(ns.bulletins_dir.glob("*.pdf"))
+        if not candidates:
+            parser.error(f"--all matched no *.pdf files in {ns.bulletins_dir}")
+        pdf_paths = candidates
+    elif ns.pdf:
+        pdf_paths = list(ns.pdf)
+    else:
+        parser.error("provide --pdf (one or more) or --all")
+
+    out_dir = ns.out_dir if ns.out_dir is not None else ns.bulletins_dir
+
+    return CLIArgs(pdf_paths=pdf_paths, out_dir=out_dir, force=ns.force)
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    args = parse_argv(argv)
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    started = time.time()
+
+    succeeded: List[str] = []
+    skipped: List[str] = []
+    failed: List[Tuple[str, str]] = []
+    missing: List[str] = []
+
+    for pdf in args.pdf_paths:
+        try:
+            result = _process_one(pdf, args.out_dir, force=args.force)
+        except Exception as exc:
+            logger.error("[!] %s: %r", pdf.name, exc)
+            failed.append((pdf.name, repr(exc)))
+            continue
+        status = result.get("status")
+        if status == "ok":
+            succeeded.append(pdf.name)
+        elif status == "skipped":
+            skipped.append(pdf.name)
+        elif status == "missing":
+            missing.append(pdf.name)
+            logger.warning("[skip] %s: not found", pdf.name)
+        elif status == "failed":
+            failed.append((pdf.name, result.get("error", "unknown")))
+
+    duration = time.time() - started
+    logger.info(
+        "Done in %.1fs: %d ok, %d skipped, %d missing, %d failed",
+        duration, len(succeeded), len(skipped), len(missing), len(failed),
+    )
+    return 0 if not failed else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

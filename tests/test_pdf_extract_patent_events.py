@@ -394,3 +394,63 @@ def test_parse_pdf_events_real_2025_08() -> None:
         "application_no", "event_type", "page", "free_text", "fingerprint",
     }
     assert len(first["fingerprint"]) == 16
+
+
+# ---------------------------------------------------------------------------
+# CLI: parse_argv + main
+# ---------------------------------------------------------------------------
+
+
+def test_parse_argv_single_pdf() -> None:
+    from pdf_extract_patent_events import parse_argv
+    args = parse_argv(["--pdf", "x.pdf", "--out-dir", "/tmp/out"])
+    assert args.pdf_paths == [Path("x.pdf")]
+    assert args.out_dir == Path("/tmp/out")
+    assert args.force is False
+
+
+def test_parse_argv_no_args_errors() -> None:
+    from pdf_extract_patent_events import parse_argv
+    with pytest.raises(SystemExit):
+        parse_argv([])
+
+
+def test_parse_argv_pdf_and_all_mutex() -> None:
+    from pdf_extract_patent_events import parse_argv
+    with pytest.raises(SystemExit):
+        parse_argv(["--pdf", "x.pdf", "--all"])
+
+
+def test_parse_argv_force_flag() -> None:
+    from pdf_extract_patent_events import parse_argv
+    args = parse_argv(["--pdf", "x.pdf", "--force"])
+    assert args.force is True
+
+
+@pytest.mark.skipif(
+    not _REAL_PDF.is_file(),
+    reason=f"Real PDF {_REAL_PDF.name} not on disk; skipping live smoke",
+)
+def test_main_writes_events_json_and_skips_on_rerun(tmp_path) -> None:
+    """End-to-end CLI smoke: first run writes events.json, second run
+    skips via the freshness check."""
+    import json as _json
+    import time as _time
+    from pdf_extract_patent_events import main
+
+    rc = main(["--pdf", str(_REAL_PDF), "--out-dir", str(tmp_path)])
+    assert rc == 0
+
+    events_path = tmp_path / "PT_2025_8_2025-08-21" / "events.json"
+    assert events_path.is_file()
+    payload = _json.loads(events_path.read_text(encoding="utf-8"))
+    assert payload["bulletin_no"] == "2025-08"
+    assert payload["stats"]["events_total"] > 1500
+    mtime_before = events_path.stat().st_mtime
+
+    # Sleep at least 1s so a re-write would change mtime perceptibly
+    _time.sleep(1.1)
+    rc2 = main(["--pdf", str(_REAL_PDF), "--out-dir", str(tmp_path)])
+    assert rc2 == 0
+    # File was NOT re-written
+    assert events_path.stat().st_mtime == mtime_before
