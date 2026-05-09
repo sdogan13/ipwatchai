@@ -128,3 +128,107 @@ CREATE INDEX IF NOT EXISTS idx_pat_text_vec          ON patents USING hnsw (titl
     WITH (m=16, ef_construction=200) WHERE title_abstract_embedding IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_pat_fig_vec           ON patents USING hnsw (primary_figure_embedding halfvec_cosine_ops)
     WITH (m=16, ef_construction=200) WHERE primary_figure_embedding IS NOT NULL;
+
+-- ============================================
+-- 4. patent_holders (multi-row; FK to global holders)
+-- ============================================
+-- CD ships multiple holders per patent (verified: app 2017/15048
+-- in bulletin 2025/8 has two holders). Designs put a single
+-- holder_id directly on the row; patents need many-to-one and so
+-- use a join table. holder_id FKs to the existing global holders
+-- table (TPECLIENT IDs are shared across registries — locked decision).
+-- holder_id is nullable: foreign holders without a TPE_CLIENT_ID
+-- can't be linked, so we keep their denormalized name/address.
+CREATE TABLE IF NOT EXISTS patent_holders (
+    id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    patent_id    UUID NOT NULL REFERENCES patents(id) ON DELETE CASCADE,
+    holder_id    UUID REFERENCES holders(id) ON DELETE SET NULL,
+    seq          INTEGER NOT NULL DEFAULT 1,
+    -- Denormalised fields (kept for query convenience + when no
+    -- holder_id link is possible)
+    name         TEXT NOT NULL,
+    address      TEXT,
+    city         VARCHAR(255),
+    state        VARCHAR(255),
+    postal_code  VARCHAR(100),
+    country      VARCHAR(255)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_patent_holder
+    ON patent_holders (patent_id, seq);
+CREATE INDEX IF NOT EXISTS idx_ph_patent
+    ON patent_holders (patent_id);
+CREATE INDEX IF NOT EXISTS idx_ph_holder
+    ON patent_holders (holder_id) WHERE holder_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_ph_name_trgm
+    ON patent_holders USING GIST (name gist_trgm_ops);
+
+-- ============================================
+-- 5. patent_inventors (multi-row)
+-- ============================================
+-- CD ships per-inventor address fields too (state/postal/city/country).
+-- No FK to a global inventors table — inventors aren't currently
+-- normalised across registries.
+CREATE TABLE IF NOT EXISTS patent_inventors (
+    id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    patent_id    UUID NOT NULL REFERENCES patents(id) ON DELETE CASCADE,
+    seq          INTEGER NOT NULL,
+    name         TEXT NOT NULL,
+    address      TEXT,
+    city         VARCHAR(255),
+    state        VARCHAR(255),
+    postal_code  VARCHAR(100),
+    country      VARCHAR(255)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_patent_inventor
+    ON patent_inventors (patent_id, seq);
+CREATE INDEX IF NOT EXISTS idx_pinv_patent
+    ON patent_inventors (patent_id);
+CREATE INDEX IF NOT EXISTS idx_pinv_name_trgm
+    ON patent_inventors USING GIST (name gist_trgm_ops);
+
+-- ============================================
+-- 6. patent_attorneys (multi-row)
+-- ============================================
+-- CD attorneys carry an "agent number" (the TPE patent attorney
+-- registry ID); PDF doesn't extract this. Both carry name + firm.
+CREATE TABLE IF NOT EXISTS patent_attorneys (
+    id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    patent_id    UUID NOT NULL REFERENCES patents(id) ON DELETE CASCADE,
+    seq          INTEGER NOT NULL,
+    agent_no     VARCHAR(50),                                -- CD-only "no" field
+    name         TEXT NOT NULL,
+    firm         TEXT,
+    address      TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_patent_attorney
+    ON patent_attorneys (patent_id, seq);
+CREATE INDEX IF NOT EXISTS idx_patt_patent
+    ON patent_attorneys (patent_id);
+CREATE INDEX IF NOT EXISTS idx_patt_agent_no
+    ON patent_attorneys (agent_no) WHERE agent_no IS NOT NULL;
+
+-- ============================================
+-- 7. patent_priorities (multi-row)
+-- ============================================
+-- Priority claims (Paris Convention) reference foreign filings.
+-- One application can claim multiple priorities; the unified JSON
+-- preserves all of them. priority_date is normalised to ISO at
+-- extract time.
+CREATE TABLE IF NOT EXISTS patent_priorities (
+    id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    patent_id     UUID NOT NULL REFERENCES patents(id) ON DELETE CASCADE,
+    seq           INTEGER NOT NULL,
+    priority_no   VARCHAR(50),
+    priority_date DATE,
+    country       VARCHAR(10)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_patent_priority
+    ON patent_priorities (patent_id, seq);
+CREATE INDEX IF NOT EXISTS idx_ppri_patent
+    ON patent_priorities (patent_id);
+CREATE INDEX IF NOT EXISTS idx_ppri_country
+    ON patent_priorities (country) WHERE country IS NOT NULL;
