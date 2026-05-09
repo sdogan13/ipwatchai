@@ -648,6 +648,21 @@ def test_parse_application_no_handles_missing():
     assert parse_application_no("no app no here") is None
 
 
+def test_derive_application_no_from_publication_no_canonical_forms():
+    # Granted patents and apps both decode the same way.
+    from pdf_extract_patent import derive_application_no_from_publication_no
+    assert derive_application_no_from_publication_no("TR 2023 005859 B") == "2023/005859"
+    assert derive_application_no_from_publication_no("TR 2024 000746 A2") == "2024/000746"
+    assert derive_application_no_from_publication_no("TR 2025 010866 T4") == "2025/010866"
+
+
+def test_derive_application_no_from_publication_no_handles_missing():
+    from pdf_extract_patent import derive_application_no_from_publication_no
+    assert derive_application_no_from_publication_no(None) is None
+    assert derive_application_no_from_publication_no("") is None
+    assert derive_application_no_from_publication_no("not a publication no") is None
+
+
 # ---------------------------------------------------------------------------
 # Step 3.4 — parse_date_field
 # ---------------------------------------------------------------------------

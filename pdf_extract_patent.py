@@ -482,6 +482,26 @@ def parse_application_no(value: Optional[str]) -> Optional[str]:
     return f"{m.group(1)}/{m.group(2)}" if m else None
 
 
+def derive_application_no_from_publication_no(
+    publication_no: Optional[str],
+) -> Optional[str]:
+    """Reconstruct the (21) application_no from a canonical (11) value.
+
+    For Turkish patents the publication number `TR YYYY NNNNNN K`
+    deterministically encodes the application number `YYYY/NNNNNN`.
+    Used as a fallback when the parser missed the (21) field — happens
+    on "Düzeltilmiş Yayın Sayfası" (corrected publication) pages where
+    the bibliographic block sits *before* the (11) boundary marker, so
+    the slice the parser sees only has (11) and the correction note.
+    """
+    if not publication_no:
+        return None
+    m = _PUBLICATION_NO_RE.search(publication_no)
+    if not m:
+        return None
+    return f"{m.group(1)}/{m.group(2)}"
+
+
 def parse_date_field(value: Optional[str]) -> Optional[str]:
     """Pull the first ``YYYY/MM/DD`` date out of an INID value and
     return ISO ``YYYY-MM-DD``. Wraps ``normalize_iso_date``.
@@ -857,6 +877,10 @@ def parse_full_bibliographic_record(
         record.publication_kind_label = clean_text(fields["12"][0]) or None
     if "21" in fields and fields["21"]:
         record.application_no = parse_application_no(fields["21"][0])
+    if record.application_no is None:
+        record.application_no = derive_application_no_from_publication_no(
+            record.publication_no
+        )
     if "22" in fields and fields["22"]:
         record.application_date = parse_date_field(fields["22"][0])
     if "43" in fields and fields["43"]:
