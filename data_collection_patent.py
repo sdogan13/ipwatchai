@@ -409,6 +409,7 @@ class CLIArgs:
     headless: bool
     bulletins_root: Path
     tracks: Set[Track]
+    no_legacy: bool = False
 
 
 def _parse_bool(value: str) -> bool:
@@ -450,6 +451,11 @@ def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
         action="store_true",
         help="only download the CD .rar, skip the sidecar PDF",
     )
+    parser.add_argument(
+        "--no-legacy",
+        action="store_true",
+        help="skip legacy multi-UUID bundle cards (1996_6, 2015_4 era)",
+    )
     ns = parser.parse_args(argv)
 
     if ns.pdf_only:
@@ -465,6 +471,7 @@ def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
         headless=ns.headless,
         bulletins_root=ns.bulletins_root,
         tracks=tracks,
+        no_legacy=ns.no_legacy,
     )
 
 
@@ -934,6 +941,8 @@ async def process_card(
     card_id: str,
     card_date: Optional[str],
     wanted: Set[Track],
+    *,
+    no_legacy: bool = False,
 ) -> CollectionCounters:
     missing = tracks_missing(bulletins_root, card_id, wanted)
     if not missing:
@@ -955,6 +964,10 @@ async def process_card(
         # rejects the multi-UUID request with a connection reset, but each
         # UUID is independently downloadable. Fan out and save each part
         # as {card_id}_legacy_part##.pdf.
+        if no_legacy:
+            logger.info("[i] %s: legacy multi-part bundle, --no-legacy set, skipping",
+                        card_id)
+            return CollectionCounters(skipped=1)
         if Track.PDF not in wanted:
             logger.info("[i] %s: legacy multi-part bundle but PDF track not wanted, skipping",
                         card_id)
@@ -1089,6 +1102,7 @@ async def run_collection(args: CLIArgs) -> CollectionCounters:
                     issue_counters = await process_card(
                         page, context, clickable, args.bulletins_root,
                         card_id, card_date, args.tracks,
+                        no_legacy=args.no_legacy,
                     )
                     counters.downloaded += issue_counters.downloaded
                     counters.failed += issue_counters.failed

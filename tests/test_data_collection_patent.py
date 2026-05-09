@@ -326,6 +326,12 @@ def test_parse_argv_defaults_both_tracks():
     assert args.headless is True
     assert args.bulletins_root.name == CATEGORY_FOLDER_NAME
     assert args.tracks == {Track.CD, Track.PDF}
+    assert args.no_legacy is False
+
+
+def test_parse_argv_no_legacy_flag():
+    args = parse_argv(["--no-legacy"])
+    assert args.no_legacy is True
 
 
 def test_parse_argv_pdf_only_restricts_tracks():
