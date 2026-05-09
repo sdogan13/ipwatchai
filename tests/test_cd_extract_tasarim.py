@@ -597,6 +597,92 @@ def test_persist_cd_images_multi_design_keeps_numeric_order(tmp_path):
     assert order == [("1", "1"), ("2", "1"), ("9", "1"), ("10", "1")]
 
 
+def test_persist_cd_images_unlinks_pdf_dup_at_canonical_key(tmp_path):
+    """D.2 symmetric dedup: when CD copies a JPEG into cd_images/{key},
+    any pre-existing PDF duplicate at the sibling images/{key} is
+    unlinked. CD wins on duplicates per the locked stage-3 rule.
+
+    Layout under tmp_path mirrors the canonical TS folder:
+      ts_root/
+      ├── images/{appno}/{d}_{v}.jpg     ← PDF dup (must be unlinked)
+      ├── cd_images/{appno}/{d}_{v}.jpg  ← CD canonical (must remain)
+      └── src/{appno}/{d}_{v}.jpg        ← scratch source for the copy
+    """
+    ts_root = tmp_path
+    src = ts_root / "src" / "2016_01059"
+    src.mkdir(parents=True)
+    (src / "1_1.jpg").write_bytes(b"CD-bytes")
+
+    pdf_dup = ts_root / "images" / "2016_01059" / "1_1.jpg"
+    pdf_dup.parent.mkdir(parents=True)
+    pdf_dup.write_bytes(b"PDF-bytes")
+
+    cd_dest = ts_root / "cd_images"
+    out = _persist_cd_images_for_app("2016/01059", ts_root / "src", cd_dest)
+
+    assert (cd_dest / "2016_01059" / "1_1.jpg").read_bytes() == b"CD-bytes"
+    assert not pdf_dup.exists(), "PDF duplicate should have been unlinked"
+    assert out[0]["image_path"] == "2016_01059/1_1.jpg"
+
+
+def test_persist_cd_images_no_pdf_dup_unlink_is_noop(tmp_path):
+    """Sibling images/ folder exists but has no matching key — no error,
+    nothing unlinked, and the CD-side write completes normally."""
+    ts_root = tmp_path
+    src = ts_root / "src" / "2016_01059"
+    src.mkdir(parents=True)
+    (src / "1_1.jpg").write_bytes(b"CD-bytes")
+
+    # Sibling images/ exists but holds an unrelated file
+    images_dir = ts_root / "images" / "2016_01059"
+    images_dir.mkdir(parents=True)
+    (images_dir / "Thumbs.db").write_bytes(b"")
+
+    out = _persist_cd_images_for_app("2016/01059", ts_root / "src",
+                                      ts_root / "cd_images")
+    assert (ts_root / "cd_images" / "2016_01059" / "1_1.jpg").read_bytes() == b"CD-bytes"
+    assert (images_dir / "Thumbs.db").exists()  # unrelated file untouched
+    assert len(out) == 1
+
+
+def test_persist_cd_images_no_sibling_images_folder_works(tmp_path):
+    """Tests that exercise _persist_cd_images_for_app in isolation (no
+    canonical TS layout) shouldn't trip on the missing images/ sibling.
+    All existing tests in this file rely on this — pin the contract."""
+    ts_root = tmp_path
+    src = ts_root / "src" / "2016_01059"
+    src.mkdir(parents=True)
+    (src / "1_1.jpg").write_bytes(b"")
+
+    # No images/ sibling at all — common in unit tests
+    out = _persist_cd_images_for_app("2016/01059", ts_root / "src",
+                                      ts_root / "isolated_dest")
+    assert (ts_root / "isolated_dest" / "2016_01059" / "1_1.jpg").is_file()
+    assert len(out) == 1
+
+
+def test_persist_cd_images_unlinks_multiple_pdf_dups(tmp_path):
+    """All copied images get their PDF duplicates removed, one per file."""
+    ts_root = tmp_path
+    src = ts_root / "src" / "2016_01059"
+    src.mkdir(parents=True)
+    (src / "1_1.jpg").write_bytes(b"")
+    (src / "1_2.jpg").write_bytes(b"")
+    (src / "2_1.jpg").write_bytes(b"")
+
+    pdf_folder = ts_root / "images" / "2016_01059"
+    pdf_folder.mkdir(parents=True)
+    for name in ("1_1.jpg", "1_2.jpg", "2_1.jpg"):
+        (pdf_folder / name).write_bytes(b"old")
+
+    _persist_cd_images_for_app("2016/01059", ts_root / "src",
+                               ts_root / "cd_images")
+
+    assert not (pdf_folder / "1_1.jpg").exists()
+    assert not (pdf_folder / "1_2.jpg").exists()
+    assert not (pdf_folder / "2_1.jpg").exists()
+
+
 # ---------------------------------------------------------------------------
 # Step 2.6 — _resolve_seven_zip / _locate_cd_layout / extract_cd_archive
 # ---------------------------------------------------------------------------

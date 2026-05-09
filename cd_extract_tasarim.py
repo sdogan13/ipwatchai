@@ -424,14 +424,29 @@ def _persist_cd_images_for_app(
         # Defensive — resolve_design_images already returned [] for this case.
         return []
 
-    dest_folder = Path(dest_root) / folder_name
+    dest_root_path = Path(dest_root)
+    dest_folder = dest_root_path / folder_name
     dest_folder.mkdir(parents=True, exist_ok=True)
+
+    # Sibling PDF images folder, if the canonical TS_{N}_{date}/ layout
+    # is in use. Symmetric dedup: every CD-side write removes any
+    # pre-existing PDF duplicate at the same canonical key. CD wins.
+    # Only honoured when dest_root_path's parent has an images/ sibling
+    # so unit tests with isolated dest_root don't get unwanted cleanup.
+    pdf_images_root = dest_root_path.parent / "images"
+    pdf_dup_folder = pdf_images_root / folder_name if pdf_images_root.is_dir() else None
 
     out: List[Dict[str, str]] = []
     for img in images:
         src = img["image_path"]
         dst = dest_folder / src.name
         shutil.copyfile(src, dst)
+
+        if pdf_dup_folder is not None:
+            pdf_dup = pdf_dup_folder / src.name
+            if pdf_dup.is_file():
+                pdf_dup.unlink()
+
         out.append({
             "design_no": img["design_no"],
             "view_no": img["view_no"],
