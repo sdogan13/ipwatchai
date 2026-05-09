@@ -214,3 +214,87 @@ def event_fingerprint(
     ]
     payload = "|".join(parts).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()[:16]
+
+
+# ---------------------------------------------------------------------------
+# Step 7.2 — per-page parser
+# ---------------------------------------------------------------------------
+
+# Anchored ^YYYY/NNNNNN$ — same pattern pdf_extract_patent uses for
+# detecting EVENT_INDEX pages. Re-defined here (rather than imported)
+# to keep the events module decoupled from the bibliographic one.
+_APPNO_LINE_RE = re.compile(r"^\d{4}/\d{4,7}$")
+
+
+@dataclass
+class ParsedEvent:
+    """One row in events.json. Stored as a dict via ``asdict`` at
+    serialisation time."""
+    application_no: str
+    event_type: str
+    page: int
+    free_text: str
+    fingerprint: str
+
+
+def parse_event_index_page(
+    page_text: str,
+    page_no: int,
+    bulletin_no: Optional[str],
+) -> List[ParsedEvent]:
+    """Parse one EVENT_INDEX page text into a list of events.
+
+    Algorithm:
+      1. Split page text into lines, strip whitespace per line.
+      2. Find every line matching ``^YYYY/NNNNNN$`` — those are event
+         anchors. Header lines ("BAŞVURU NUMARALARINA..." etc.) get
+         dropped naturally because they don't match.
+      3. For each consecutive pair of anchors (i, i+1), the lines
+         between them are the description for the FIRST anchor.
+         Multi-line descriptions (PDF text-extraction wraps long
+         phrases) get joined with " " before classification.
+      4. The last anchor's description runs to the end of the page;
+         trailing blank lines are stripped.
+
+    The same application_no can have multiple events on one page —
+    each anchor produces one event regardless of duplicates. The
+    fingerprint includes event_type + free_text so dedup at ingest
+    time keeps both rows.
+
+    page_no is 1-based (PyMuPDF doc[i] uses 0-based, callers pass
+    i + 1). Stored in patent_events.page for traceability.
+    """
+    if not page_text:
+        return []
+
+    lines = [line.strip() for line in page_text.splitlines()]
+    # Find anchor positions
+    anchors: List[Tuple[int, str]] = [
+        (i, line) for i, line in enumerate(lines)
+        if _APPNO_LINE_RE.match(line)
+    ]
+    if not anchors:
+        return []
+
+    events: List[ParsedEvent] = []
+    for k, (idx, app_no) in enumerate(anchors):
+        # Description = lines between this anchor and the next (or end)
+        next_idx = anchors[k + 1][0] if k + 1 < len(anchors) else len(lines)
+        desc_lines = [line for line in lines[idx + 1:next_idx] if line]
+        if not desc_lines:
+            # An app_no anchor with no description (rare; possibly a
+            # malformed page). Skip — emitting an event without a
+            # description gives downstream code nothing to work with.
+            continue
+        free_text = " ".join(desc_lines)
+        event_type = classify_event_phrase(free_text)
+        events.append(ParsedEvent(
+            application_no=app_no,
+            event_type=event_type,
+            page=page_no,
+            free_text=free_text,
+            fingerprint=event_fingerprint(
+                bulletin_no, app_no, event_type, free_text,
+            ),
+        ))
+    return events

@@ -10,9 +10,11 @@ import pytest
 
 from pdf_extract_patent_events import (
     EVENT_TYPE_UNKNOWN,
+    ParsedEvent,
     _normalise_phrase,
     classify_event_phrase,
     event_fingerprint,
+    parse_event_index_page,
 )
 
 
@@ -200,3 +202,132 @@ def test_event_fingerprint_returns_16_hex_chars() -> None:
     fp = event_fingerprint("2025/8", "2021/001903", "POST_PUB_AMENDMENT", "x")
     assert len(fp) == 16
     assert all(c in "0123456789abcdef" for c in fp)
+
+
+# ---------------------------------------------------------------------------
+# parse_event_index_page
+# ---------------------------------------------------------------------------
+
+
+def test_parse_event_index_page_real_page_7_excerpt() -> None:
+    """Verbatim excerpt from 2025_08.pdf page 7 — header lines dropped,
+    each app_no anchor produces one event."""
+    page_text = (
+        "BAŞVURU NUMARALARINA GÖRE BÜLTENDE YER ALAN YAYIN İNDEKSİ\n"
+        "Başvuru No\n"
+        "Yayın Açıklaması\n"
+        "2021/001903\n"
+        "Patent/FM Model Başvurularında/Belgelerinde Yayından Sonraki Değişikliğin İlanı\n"
+        "2021/001947\n"
+        "Kesinleşen Patent Verilme Kararının İlanı (6769 SMK)\n"
+        "2021/002025\n"
+        "Kullanma/Kullanmama Beyanı Verilmemiş Olan Başvuru veya Patent/Faydalı Modellerin İlanı\n"
+    )
+    events = parse_event_index_page(page_text, page_no=7, bulletin_no="2025/8")
+
+    assert len(events) == 3
+    assert events[0].application_no == "2021/001903"
+    assert events[0].event_type == "POST_PUB_AMENDMENT"
+    assert events[0].page == 7
+    assert events[1].application_no == "2021/001947"
+    assert events[1].event_type == "GRANT_FINALIZED"
+    assert events[2].application_no == "2021/002025"
+    assert events[2].event_type == "USE_NONUSE_DECLARATION_MISSING"
+    # Each event has a non-empty 16-hex fingerprint
+    assert all(len(e.fingerprint) == 16 for e in events)
+    assert len({e.fingerprint for e in events}) == 3
+
+
+def test_parse_event_index_page_handles_multi_line_descriptions() -> None:
+    """The YIDK phrase wraps to 2 lines in real PDF text extraction.
+    Joiner must concat them before classification."""
+    page_text = (
+        "BAŞVURU NUMARALARINA GÖRE BÜLTENDE YER ALAN YAYIN İNDEKSİ\n"
+        "2021/010013\n"
+        "6769 Sayılı SMK'nın 99 uncu Maddesi Hükmü Uyarınca YIDK Tarafından Patent Hakkının\n"
+        "Değiştirilmiş Haliyle Devamına Karar Verilen Patentler\n"
+        "2021/010013\n"
+        "Kesinleşen Patent Verilme Kararının İlanı (6769 SMK)\n"
+    )
+    events = parse_event_index_page(page_text, page_no=8, bulletin_no="2025/8")
+
+    # Same app appears twice → two events with different event_types.
+    # Critical regression: app 2021/010013 verified to do this on page
+    # 8 of 2025_08.pdf.
+    assert len(events) == 2
+    assert all(e.application_no == "2021/010013" for e in events)
+    assert events[0].event_type == "YIDK_AMENDED_CONTINUATION"
+    assert events[1].event_type == "GRANT_FINALIZED"
+    # Different event_type → different fingerprints (dedup-safe)
+    assert events[0].fingerprint != events[1].fingerprint
+
+
+def test_parse_event_index_page_drops_header_lines() -> None:
+    """The 3 header lines never match the app_no regex, so they don't
+    produce events."""
+    page_text = (
+        "BAŞVURU NUMARALARINA GÖRE BÜLTENDE YER ALAN YAYIN İNDEKSİ\n"
+        "Başvuru No\n"
+        "Yayın Açıklaması\n"
+        "2024/000001\n"
+        "Verilen Patent / Faydalı Model İlanı (6769 SMK)\n"
+    )
+    events = parse_event_index_page(page_text, page_no=7, bulletin_no="2025/8")
+    assert len(events) == 1
+    assert events[0].application_no == "2024/000001"
+
+
+def test_parse_event_index_page_skips_bare_anchor_with_no_description() -> None:
+    """Defensive: if the last anchor has no description (rare,
+    malformed page), skip it rather than emit an empty event."""
+    page_text = (
+        "2024/000001\n"
+        "Verilen Patent / Faydalı Model İlanı (6769 SMK)\n"
+        "2024/000002\n"           # no description follows
+    )
+    events = parse_event_index_page(page_text, page_no=7, bulletin_no="2025/8")
+    assert len(events) == 1
+    assert events[0].application_no == "2024/000001"
+
+
+def test_parse_event_index_page_unknown_phrase_preserved_in_free_text() -> None:
+    """Unknown event_type → caller can still recover the description
+    from free_text and backfill the phrase mapping later."""
+    page_text = (
+        "2024/000001\n"
+        "Some unprecedented event description not in our table\n"
+    )
+    events = parse_event_index_page(page_text, page_no=7, bulletin_no="2025/8")
+    assert len(events) == 1
+    assert events[0].event_type == EVENT_TYPE_UNKNOWN
+    assert "unprecedented event description" in events[0].free_text
+
+
+def test_parse_event_index_page_empty_returns_empty() -> None:
+    assert parse_event_index_page("", page_no=7, bulletin_no="2025/8") == []
+    assert parse_event_index_page("\n\n\n", page_no=7, bulletin_no="2025/8") == []
+
+
+def test_parse_event_index_page_fingerprint_includes_page_independence() -> None:
+    """Same event on different pages should get the SAME fingerprint
+    (page is preserved as a column but doesn't affect dedup)."""
+    text = "2024/000001\nVerilen Patent / Faydalı Model İlanı (6769 SMK)\n"
+    e7 = parse_event_index_page(text, page_no=7, bulletin_no="2025/8")[0]
+    e1500 = parse_event_index_page(text, page_no=1500, bulletin_no="2025/8")[0]
+    assert e7.fingerprint == e1500.fingerprint
+    assert e7.page == 7 and e1500.page == 1500
+
+
+def test_parsed_event_serialisable_via_asdict() -> None:
+    """ParsedEvent must be json.dumps-clean via dataclasses.asdict.
+    events.json serialisation depends on this."""
+    from dataclasses import asdict
+    e = ParsedEvent(
+        application_no="X", event_type="GRANT_ANNOUNCED",
+        page=1, free_text="x", fingerprint="abcd1234efgh5678",
+    )
+    payload = asdict(e)
+    import json as _json
+    encoded = _json.dumps(payload)
+    decoded = _json.loads(encoded)
+    assert decoded["application_no"] == "X"
