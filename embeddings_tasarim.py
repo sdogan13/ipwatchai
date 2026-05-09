@@ -103,6 +103,39 @@ def aggregate_design_embeddings(views: List[Dict[str, Any]], key: str) -> List[f
     return mean_pool(vectors)
 
 
+def resolve_view_image_path(
+    issue_folder: Path, view: Dict[str, Any],
+) -> Optional[Path]:
+    """Resolve a view's ``image_path`` against its containing TS folder.
+
+    Routing rules — driven by the ``image_source`` provenance tag added
+    in stage B.1 of the canonical-folder push:
+
+      - ``image_source == "cd"``  -> ``issue_folder / "cd_images" / image_path``
+      - ``image_source == "pdf"`` -> ``issue_folder / "images" / image_path``
+      - ``None`` (legacy data):    -> ``issue_folder / image_path`` —
+        pre-stage-B.1 metadata.json files shipped image_path with the
+        ``"images/..."`` prefix baked in, so resolving against the
+        TS folder root works for those.
+
+    Returns ``None`` when ``image_path`` is missing/empty (e.g. Hague
+    views where no JPEG was located/persisted).
+
+    Without this routing the embedder would look in ``TS_*/2016_01059/``
+    instead of ``TS_*/cd_images/2016_01059/``, find no file, and mark
+    every view as failed.
+    """
+    rel = view.get("image_path")
+    if not rel:
+        return None
+    source = view.get("image_source")
+    if source == "cd":
+        return issue_folder / "cd_images" / rel
+    if source == "pdf":
+        return issue_folder / "images" / rel
+    return issue_folder / rel  # legacy fallback
+
+
 # ---------------------------------------------------------------------------
 # Image processing (HSV color histogram — pure, unit-testable)
 # ---------------------------------------------------------------------------
@@ -253,13 +286,12 @@ def embed_issue(
         for design in record.get("designs", []):
             views = design.get("views", [])
             for view in views:
-                image_path_rel = view.get("image_path")
-                if not image_path_rel:
+                image_path = resolve_view_image_path(issue_folder, view)
+                if image_path is None:
                     continue
                 if not force and view_already_embedded(view):
                     skipped_views += 1
                     continue
-                image_path = issue_folder / image_path_rel
                 if not image_path.is_file():
                     failed_views += 1
                     continue
