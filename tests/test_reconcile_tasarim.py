@@ -17,12 +17,14 @@ from pipeline.reconcile_tasarim import (
     CanonicalDesignView,
     load_cd_metadata,
     load_pdf_metadata,
+    merge_records,
     normalize_cd_dossier,
     normalize_pdf_record,
 )
 from pipeline.reconcile_tasarim import (
     _clean_str,
     _dmy_to_iso,
+    _normalise_registration_no,
     _parse_design_count,
 )
 
@@ -687,3 +689,256 @@ def test_normalize_pdf_record_locarno_classes_renamed_to_codes():
     }
     rec = normalize_pdf_record(record)
     assert rec.locarno_codes == ["12-16", "12-05"]
+
+
+# ---------------------------------------------------------------------------
+# Step 3.4 — _normalise_registration_no
+# ---------------------------------------------------------------------------
+
+def test_normalise_registration_no_collapses_whitespace():
+    """PDF "DM 244882" and CD "DM244882" both collapse to "DM244882"."""
+    assert _normalise_registration_no("DM 244882") == "DM244882"
+    assert _normalise_registration_no("DM244882") == "DM244882"
+    assert _normalise_registration_no("DM  244882") == "DM244882"  # multiple spaces
+
+
+def test_normalise_registration_no_strip_and_uppercase():
+    assert _normalise_registration_no("  DM 244882  ") == "DM244882"
+    assert _normalise_registration_no("dm 244882") == "DM244882"
+
+
+def test_normalise_registration_no_empty_inputs():
+    assert _normalise_registration_no(None) is None
+    assert _normalise_registration_no("") is None
+    assert _normalise_registration_no("   ") is None
+    assert _normalise_registration_no(42) is None  # not a string
+
+
+# ---------------------------------------------------------------------------
+# Step 3.4 — merge_records
+# ---------------------------------------------------------------------------
+
+def _cd_record(**overrides) -> CanonicalDesignRecord:
+    """Lightweight CD-side record builder for merge tests."""
+    base = dict(
+        application_no="2016/01059",
+        registration_no="2016 01059",
+        application_date="2016-02-10",
+        registration_date="2016-02-10",
+        design_count=1,
+        type="1",
+        section=None,
+        locarno_codes=["25-02"],
+        attorney={"no": "12345", "name": "RABİA", "title": "Patent Vekili",
+                   "address": "MECİDİYEKÖY"},
+        holders=[{"client_no": "234974", "name": "BİRLİK", "country": "TÜRKİYE"}],
+        designers=[{"no": "1", "name": "VEDAT"}],
+        priorities=[],
+        designs=[
+            CanonicalDesign(
+                no="1", product_name="Profil",
+                views=[CanonicalDesignView(view_no="1",
+                                            image_path="2016_01059/1_1.jpg",
+                                            image_source="cd")],
+            ),
+        ],
+        hague_reference=None,
+        page_range=None,
+        deferred_publication=None,
+        source_format="CD",
+    )
+    base.update(overrides)
+    return CanonicalDesignRecord(**base)
+
+
+def _pdf_record(**overrides) -> CanonicalDesignRecord:
+    """Lightweight PDF-side record builder for merge tests."""
+    base = dict(
+        application_no="2016/01059",
+        registration_no="2016 01059",
+        application_date="2016-02-10",
+        registration_date="2016-02-10",
+        design_count=1,
+        type=None,
+        section="tr_native",
+        locarno_codes=["25-02"],
+        attorney={"name": "IŞIK ÖZDOĞAN", "firm": "MOROĞLU ARSEVEN"},
+        holders=[{"client_no": "234974", "name": "PDF-OCR-name"}],
+        designers=[{"name": "VEDAT"}],
+        priorities=[{"date": "2025-06-27", "number": "30/010,422", "country": "US"}],
+        designs=[
+            CanonicalDesign(
+                no="1", product_name="Lamba (PDF noisy)",
+                views=[CanonicalDesignView(view_no="1",
+                                            image_path="2016_01059/1_1.jpg",
+                                            image_source="pdf")],
+            ),
+        ],
+        hague_reference=None,
+        page_range=[17, 17],
+        deferred_publication=None,
+        source_format="PDF",
+    )
+    base.update(overrides)
+    return CanonicalDesignRecord(**base)
+
+
+def test_merge_records_cd_wins_on_overlap():
+    """The headline rule: CD beats PDF for every overlapping scalar."""
+    cd = _cd_record()
+    pdf = _pdf_record()
+    out = merge_records(cd, pdf)
+
+    assert out.application_no == "2016/01059"
+    assert out.registration_no == "2016 01059"
+    assert out.application_date == "2016-02-10"
+    assert out.design_count == 1
+    assert out.locarno_codes == ["25-02"]
+    assert out.designs[0].product_name == "Profil"  # CD wins, not "Lamba (PDF noisy)"
+    assert out.designs[0].views[0].image_source == "cd"
+    assert out.holders[0]["name"] == "BİRLİK"  # CD's clean name, not PDF-OCR-name
+    assert out.source_format == "BOTH"
+
+
+def test_merge_records_pdf_fills_gaps_when_cd_is_none():
+    """When CD is missing/null/empty, PDF fills."""
+    cd = _cd_record(
+        application_no=None,
+        application_date=None,
+        registration_date=None,
+        design_count=None,
+        locarno_codes=[],
+        attorney=None,
+        holders=[],
+        designers=[],
+        designs=[],
+    )
+    pdf = _pdf_record(
+        application_date="2024-09-06",
+        application_no="2024/007254",
+        design_count=4,
+    )
+    out = merge_records(cd, pdf)
+
+    assert out.application_no == "2024/007254"
+    assert out.application_date == "2024-09-06"
+    assert out.design_count == 4
+    assert out.locarno_codes == ["25-02"]  # from PDF (CD was [])
+    assert len(out.holders) == 1            # from PDF (CD was [])
+    assert out.holders[0]["name"] == "PDF-OCR-name"
+    assert out.attorney is not None         # PDF's attorney kept
+
+
+def test_merge_records_attorney_combines_cd_and_pdf_fields():
+    """CD attorney has {no, name, title, address}; PDF has {name, firm}.
+    Merged dict has all five fields, with CD's name winning on overlap."""
+    out = merge_records(_cd_record(), _pdf_record())
+    a = out.attorney
+    assert a is not None
+    assert a["name"] == "RABİA"           # CD wins
+    assert a["title"] == "Patent Vekili"  # CD-only field
+    assert a["no"] == "12345"             # CD-only field
+    assert a["address"] == "MECİDİYEKÖY"  # CD-only field
+    assert a["firm"] == "MOROĞLU ARSEVEN"  # PDF-only field, preserved
+
+
+def test_merge_records_pdf_only_fields_preserved():
+    """section / page_range / hague_reference / deferred_publication
+    come from PDF unchanged."""
+    cd = _cd_record()
+    pdf = _pdf_record(
+        section="tr_native",
+        page_range=[17, 18],
+        hague_reference={"wipo_bulletin": "13/2025"},
+        deferred_publication={"period_months": 30},
+    )
+    out = merge_records(cd, pdf)
+    assert out.section == "tr_native"
+    assert out.page_range == [17, 18]
+    assert out.hague_reference == {"wipo_bulletin": "13/2025"}
+    assert out.deferred_publication == {"period_months": 30}
+
+
+def test_merge_records_views_cd_wins_on_duplicate_view_no():
+    """Same (design_no, view_no) on both sides -> CD wins. The PDF view's
+    image_source ("pdf") is replaced by CD's "cd" tag so the consumer
+    knows to look in cd_images/."""
+    cd = _cd_record()
+    pdf = _pdf_record()
+    out = merge_records(cd, pdf)
+    assert len(out.designs) == 1
+    assert len(out.designs[0].views) == 1
+    v = out.designs[0].views[0]
+    assert v.view_no == "1"
+    assert v.image_source == "cd"
+    assert v.image_path == "2016_01059/1_1.jpg"
+
+
+def test_merge_records_pdf_only_view_added_to_shared_design():
+    """If CD's design has views {1} and PDF's has {1, 2}, the merged
+    design carries views {1 (from CD), 2 (from PDF)}. Numeric sort."""
+    cd = _cd_record()
+    pdf = _pdf_record(designs=[
+        CanonicalDesign(
+            no="1", product_name="x",
+            views=[
+                CanonicalDesignView(view_no="1",
+                                     image_path="2016_01059/1_1.jpg",
+                                     image_source="pdf"),
+                CanonicalDesignView(view_no="2",
+                                     image_path="2016_01059/1_2.jpg",
+                                     image_source="pdf"),
+            ],
+        ),
+    ])
+    out = merge_records(cd, pdf)
+    views = out.designs[0].views
+    assert [v.view_no for v in views] == ["1", "2"]
+    assert views[0].image_source == "cd"   # CD's view 1 wins
+    assert views[1].image_source == "pdf"  # PDF-only view 2
+
+
+def test_merge_records_pdf_only_design_appended():
+    """PDF has a design CD didn't ship -> appended with PDF's data."""
+    cd = _cd_record(designs=[CanonicalDesign(no="1", product_name="A")])
+    pdf = _pdf_record(designs=[
+        CanonicalDesign(no="1", product_name="A-pdf"),
+        CanonicalDesign(no="2", product_name="B-pdf"),
+    ])
+    out = merge_records(cd, pdf)
+    assert [d.no for d in out.designs] == ["1", "2"]
+    assert out.designs[0].product_name == "A"     # CD wins
+    assert out.designs[1].product_name == "B-pdf"  # PDF-only
+
+
+def test_merge_records_designs_sorted_numerically():
+    """Design 10 comes after design 9, not after design 1 (lex sort
+    would break this for multi-design dossiers >=10 designs)."""
+    cd = _cd_record(designs=[
+        CanonicalDesign(no="1", product_name="a"),
+        CanonicalDesign(no="10", product_name="j"),
+        CanonicalDesign(no="2", product_name="b"),
+        CanonicalDesign(no="9", product_name="i"),
+    ])
+    pdf = _pdf_record(designs=[])
+    out = merge_records(cd, pdf)
+    assert [d.no for d in out.designs] == ["1", "2", "9", "10"]
+
+
+def test_merge_records_priorities_pdf_only_field():
+    """CD never carries priorities (IDDOSSIER has no such columns);
+    PDF's priorities pass through to the merged record."""
+    cd = _cd_record()
+    pdf = _pdf_record(priorities=[
+        {"date": "2025-06-27", "number": "30/010,422", "country": "US"},
+    ])
+    out = merge_records(cd, pdf)
+    assert out.priorities == [
+        {"date": "2025-06-27", "number": "30/010,422", "country": "US"},
+    ]
+
+
+def test_merge_records_source_format_is_BOTH():
+    """Tag the merged record so downstream knows it came from a real pair."""
+    out = merge_records(_cd_record(), _pdf_record())
+    assert out.source_format == "BOTH"

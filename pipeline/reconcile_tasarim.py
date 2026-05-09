@@ -556,3 +556,175 @@ def normalize_pdf_record(record: Dict[str, Any]) -> CanonicalDesignRecord:
         ),
         source_format="PDF",
     )
+
+
+# ---------------------------------------------------------------------------
+# Step 3.4 — merge_records + Hague pairing helper
+# ---------------------------------------------------------------------------
+
+_REG_NO_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def _normalise_registration_no(value: Optional[str]) -> Optional[str]:
+    """Collapse whitespace + uppercase a Hague registration_no for pairing.
+
+    PDF ships ``"DM 244882"`` (with space, parsed from the bulletin).
+    CD's IDDOSSIER.REGISTERNO ships either ``"DM 244882"`` or
+    ``"DM244882"`` depending on how the row was written into the
+    HSQLDB. Both collapse to ``"DM244882"`` so the orchestrator can
+    match them as the same Hague registration.
+
+    Returns ``None`` for empty / non-string input.
+    """
+    if not value or not isinstance(value, str):
+        return None
+    cleaned = _REG_NO_WHITESPACE_RE.sub("", value).strip().upper()
+    return cleaned or None
+
+
+def _design_sort_key(design: CanonicalDesign) -> int:
+    """Numeric sort key for designs/views (so design 10 comes after 9
+    not 1). Falls back to a sentinel for non-numeric values."""
+    try:
+        return int(design.no)
+    except (ValueError, TypeError):
+        return 1 << 30
+
+
+def _view_sort_key(view: CanonicalDesignView) -> int:
+    try:
+        return int(view.view_no)
+    except (ValueError, TypeError):
+        return 1 << 30
+
+
+def _merge_design_views(
+    cd_views: List[CanonicalDesignView],
+    pdf_views: List[CanonicalDesignView],
+) -> List[CanonicalDesignView]:
+    """Merge two view lists for the same design.
+
+    CD views win on duplicate ``view_no``. PDF-only views (the rare
+    case where PDF has a view CD didn't ship) are appended. Output is
+    sorted by ``int(view_no)``.
+    """
+    by_no: Dict[str, CanonicalDesignView] = {}
+    for v in cd_views:
+        if v.view_no:
+            by_no[v.view_no] = v
+    for v in pdf_views:
+        if v.view_no and v.view_no not in by_no:
+            by_no[v.view_no] = v
+    return sorted(by_no.values(), key=_view_sort_key)
+
+
+def _merge_designs(
+    cd_designs: List[CanonicalDesign],
+    pdf_designs: List[CanonicalDesign],
+) -> List[CanonicalDesign]:
+    """Merge two design lists by ``no``.
+
+    For each design that appears on both sides:
+      - product_name: CD wins (HSQLDB.PRODUCTNAME is authoritative;
+        PDF's ``product_name_tr`` is OCR-noisy)
+      - views: ``_merge_design_views`` (CD wins on duplicate view_no)
+
+    PDF-only designs (no matching CD design) are appended verbatim.
+    Output sorted by ``int(no)``.
+    """
+    pdf_by_no: Dict[str, CanonicalDesign] = {
+        d.no: d for d in pdf_designs if d.no
+    }
+    out: List[CanonicalDesign] = []
+    seen: set = set()
+
+    for cd_design in cd_designs:
+        if not cd_design.no or cd_design.no in seen:
+            continue
+        seen.add(cd_design.no)
+        pdf_match = pdf_by_no.get(cd_design.no)
+        if pdf_match is None:
+            out.append(cd_design)
+            continue
+        out.append(CanonicalDesign(
+            no=cd_design.no,
+            product_name=cd_design.product_name or pdf_match.product_name,
+            views=_merge_design_views(cd_design.views, pdf_match.views),
+        ))
+
+    for pdf_design in pdf_designs:
+        if pdf_design.no and pdf_design.no not in seen:
+            seen.add(pdf_design.no)
+            out.append(pdf_design)
+
+    return sorted(out, key=_design_sort_key)
+
+
+def _merge_attorneys(
+    cd_attorney: Optional[Dict[str, Any]],
+    pdf_attorney: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Combine CD's ``{no, name, title, address}`` and PDF's
+    ``{name, firm}`` attorneys into a single dict.
+
+    CD wins on every shared key (currently just ``name``); PDF
+    contributes its unique ``firm`` field. Returns ``None`` only when
+    both sides are empty/missing.
+    """
+    if not cd_attorney and not pdf_attorney:
+        return None
+    out: Dict[str, Any] = {}
+    if pdf_attorney:
+        out.update(pdf_attorney)  # PDF first (so CD overrides on conflict)
+    if cd_attorney:
+        out.update(cd_attorney)
+    return out or None
+
+
+def merge_records(
+    cd: CanonicalDesignRecord,
+    pdf: CanonicalDesignRecord,
+) -> CanonicalDesignRecord:
+    """Merge two paired records (one from CD, one from PDF) into one.
+
+    Precedence: **CD wins on every overlapping field**; PDF fills gaps
+    where CD is ``None`` / empty. Caller must guarantee pairing —
+    this function is pure precedence application and doesn't validate
+    that the two records describe the same bulletin entry.
+
+    Field-level precedence:
+
+      Scalar fields           CD or PDF (CD-first via ``or``)
+      type                    CD-only in practice; defensive ``cd or pdf``
+      section                 PDF-only
+      locarno_codes           CD wins; PDF fills if CD list is empty
+      attorney                Merged (see ``_merge_attorneys``)
+      holders / designers /
+       priorities             CD wins; PDF fills if CD list is empty
+      designs                 Merged by design ``no`` (see ``_merge_designs``)
+      hague_reference /
+       page_range /
+       deferred_publication   PDF-only fields
+      source_format           "BOTH"
+    """
+    return CanonicalDesignRecord(
+        application_no=cd.application_no or pdf.application_no,
+        registration_no=cd.registration_no or pdf.registration_no,
+        application_date=cd.application_date or pdf.application_date,
+        registration_date=cd.registration_date or pdf.registration_date,
+        design_count=(
+            cd.design_count if cd.design_count is not None else pdf.design_count
+        ),
+        type=cd.type or pdf.type,
+        section=pdf.section,
+        locarno_codes=cd.locarno_codes if cd.locarno_codes else list(pdf.locarno_codes),
+        attorney=_merge_attorneys(cd.attorney, pdf.attorney),
+        holders=cd.holders if cd.holders else list(pdf.holders),
+        designers=cd.designers if cd.designers else list(pdf.designers),
+        priorities=cd.priorities if cd.priorities else list(pdf.priorities),
+        designs=_merge_designs(cd.designs, pdf.designs),
+        hague_reference=pdf.hague_reference,
+        page_range=list(pdf.page_range) if pdf.page_range else None,
+        deferred_publication=pdf.deferred_publication,
+        source_format="BOTH",
+    )
