@@ -202,3 +202,83 @@ def test_embed_image_returns_zero_vectors_on_pil_failure(monkeypatch, tmp_path: 
     assert len(out["clip_vitb32"]) == CLIP_DIM
     assert all(x == 0.0 for x in out["dinov2_vitl14"])
     assert all(x == 0.0 for x in out["clip_vitb32"])
+
+
+# ---------------------------------------------------------------------------
+# embed_text + _build_text_prompt
+# ---------------------------------------------------------------------------
+
+
+def test_build_text_prompt_combines_title_and_abstract() -> None:
+    from embeddings_patent import _build_text_prompt
+    assert _build_text_prompt("ÇİFT FONKSİYONLU GÖRÜŞ SİSTEMİ", "Bu buluş...") == (
+        "passage: ÇİFT FONKSİYONLU GÖRÜŞ SİSTEMİ. Bu buluş..."
+    )
+
+
+def test_build_text_prompt_title_only() -> None:
+    from embeddings_patent import _build_text_prompt
+    assert _build_text_prompt("Title", None) == "passage: Title"
+    assert _build_text_prompt("Title", "") == "passage: Title"
+    assert _build_text_prompt("Title", "   ") == "passage: Title"
+
+
+def test_build_text_prompt_abstract_only() -> None:
+    from embeddings_patent import _build_text_prompt
+    assert _build_text_prompt(None, "Abstract") == "passage: Abstract"
+    assert _build_text_prompt("", "Abstract") == "passage: Abstract"
+
+
+def test_build_text_prompt_strips_whitespace() -> None:
+    from embeddings_patent import _build_text_prompt
+    assert _build_text_prompt("  Title  ", "  Abstract  ") == "passage: Title. Abstract"
+
+
+def test_build_text_prompt_empty_returns_blank() -> None:
+    """Both inputs blank → empty string; embed_text uses this to
+    short-circuit to a zero vector."""
+    from embeddings_patent import _build_text_prompt
+    assert _build_text_prompt(None, None) == ""
+    assert _build_text_prompt("", "") == ""
+    assert _build_text_prompt("   ", "   ") == ""
+
+
+def test_embed_text_returns_zero_vector_on_empty_input() -> None:
+    """No model call needed when there's nothing to embed."""
+    from embeddings_patent import LoadedModels, embed_text
+    fake_models = LoadedModels(
+        device="cpu", dinov2=None, dinov2_transform=None,
+        clip=None, clip_transform=None, text_encoder=None,
+    )
+    out = embed_text("", "", fake_models)
+    assert len(out) == TEXT_DIM
+    assert all(x == 0.0 for x in out)
+
+
+def test_embed_text_routes_through_text_encoder() -> None:
+    """Happy path: with non-empty prompt, calls models.text_encoder.encode
+    with normalize_embeddings=True and returns the .tolist() of the
+    result."""
+    from embeddings_patent import LoadedModels, embed_text
+
+    captured = {}
+
+    class _FakeEncoder:
+        def encode(self, prompt, normalize_embeddings=False):
+            captured["prompt"] = prompt
+            captured["normalize"] = normalize_embeddings
+            class _V:
+                def tolist(self_inner):
+                    return [0.5] * TEXT_DIM
+            return _V()
+
+    fake_models = LoadedModels(
+        device="cpu", dinov2=None, dinov2_transform=None,
+        clip=None, clip_transform=None, text_encoder=_FakeEncoder(),
+    )
+    out = embed_text("Title", "Abstract", fake_models)
+
+    assert captured["prompt"] == "passage: Title. Abstract"
+    assert captured["normalize"] is True
+    assert len(out) == TEXT_DIM
+    assert all(x == 0.5 for x in out)

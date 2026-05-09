@@ -234,3 +234,51 @@ def embed_image(
         out["clip_vitb32"] = clip_feat.squeeze(0).cpu().float().tolist()
 
     return out
+
+
+# ---------------------------------------------------------------------------
+# Text embedding (E5-large; multilingual incl. Turkish)
+# ---------------------------------------------------------------------------
+
+
+def _build_text_prompt(title: Optional[str], abstract: Optional[str]) -> str:
+    """Build the input prompt for the E5 text encoder.
+
+    E5 models expect a task prefix: ``passage:`` for documents being
+    indexed, ``query:`` for retrieval-time queries. Stage 6 always
+    embeds passages — search-time query encoding is a separate
+    concern (a future search API would prepend ``query:``).
+
+    Concatenation joins title + abstract with ``. ``. Empty parts
+    are dropped. If both are missing/blank, returns ``""`` (caller
+    short-circuits to a zero vector).
+    """
+    parts: List[str] = []
+    if title and title.strip():
+        parts.append(title.strip())
+    if abstract and abstract.strip():
+        parts.append(abstract.strip())
+    if not parts:
+        return ""
+    return "passage: " + ". ".join(parts)
+
+
+def embed_text(
+    title: Optional[str],
+    abstract: Optional[str],
+    models: LoadedModels,
+) -> List[float]:
+    """Encode title + abstract into a normalised 1024-dim vector.
+
+    Uses ``models.text_encoder`` (a SentenceTransformer wrapping
+    ``intfloat/multilingual-e5-large``). ``normalize_embeddings=True``
+    L2-normalises so cosine == dot product, matching the CLIP path.
+
+    Empty / blank input returns a zero vector of the right shape so
+    downstream code never has to special-case ``None``.
+    """
+    prompt = _build_text_prompt(title, abstract)
+    if not prompt:
+        return [0.0] * TEXT_DIM
+    vec = models.text_encoder.encode(prompt, normalize_embeddings=True)
+    return vec.tolist()
