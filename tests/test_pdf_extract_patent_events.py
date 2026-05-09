@@ -6,6 +6,8 @@ real PDF being on disk).
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from pdf_extract_patent_events import (
@@ -90,7 +92,10 @@ def test_classify_known_phrase_exact_match() -> None:
     ) == "APPLICATION_FEE_LAPSE"
     assert classify_event_phrase(
         "Yıllık Ücretlerinin Ödenmemesi Nedeniyle Geçersiz Olan Patent/FM Belgelerinin Yeniden Geçerlilik İlanı"
-    ) == "FEE_REVALIDATION"
+    ) == "GRANT_FEE_REVALIDATION"
+    assert classify_event_phrase(
+        "Yıllık Ücretlerinin Ödenmemesi Nedeniyle Geçersiz Olan Patent/FM Başvurularının Yeniden Geçerlilik İlanı"
+    ) == "APPLICATION_FEE_REVALIDATION"
     assert classify_event_phrase(
         "Yeniden Geçerlilik Kazanan Patent/Faydalı Model Başvurularının İlanı (İşlemlerin Devam Ettirilmesi)"
     ) == "PROCEDURAL_REVALIDATION"
@@ -331,3 +336,61 @@ def test_parsed_event_serialisable_via_asdict() -> None:
     encoded = _json.dumps(payload)
     decoded = _json.loads(encoded)
     assert decoded["application_no"] == "X"
+
+
+# ---------------------------------------------------------------------------
+# parse_pdf_events — live smoke (skipped if real PDF absent)
+# ---------------------------------------------------------------------------
+
+
+_REAL_PDF = (
+    Path(__file__).resolve().parent.parent / "bulletins"
+    / "Patent__Faydali_Model" / "2025_08.pdf"
+)
+
+
+@pytest.mark.skipif(
+    not _REAL_PDF.is_file(),
+    reason=f"Real PDF {_REAL_PDF.name} not on disk; skipping live smoke",
+)
+def test_parse_pdf_events_real_2025_08() -> None:
+    """End-to-end on the real bulletin 2025/8: walks 1976 pages,
+    parses ~274 EVENT_INDEX pages, asserts plausible event counts +
+    distribution."""
+    from pdf_extract_patent_events import parse_pdf_events
+    doc = parse_pdf_events(_REAL_PDF)
+
+    assert doc["bulletin_no"] == "2025-08"
+    assert doc["bulletin_date"] == "2025-08-21"
+    assert doc["source_pdf"] == "2025_08.pdf"
+
+    s = doc["stats"]
+    # detect_page_kind earlier reported 274 EVENT_INDEX pages; allow
+    # some slack since detect_page_kind may evolve.
+    assert 200 < s["event_index_pages_scanned"] < 350, (
+        f"event_index_pages_scanned={s['event_index_pages_scanned']} outside "
+        "the 200-350 window — page-kind detection may have drifted"
+    )
+    # Empirical estimate: ~10–25 events per event-index page → 2K–7K
+    # events for one bulletin. Hard floor at 1500 catches a parser
+    # regression that drops most events.
+    assert s["events_total"] > 1500, (
+        f"events_total={s['events_total']} — parser likely regressed"
+    )
+    # Quality gate: <5% UNKNOWN means the phrase table covers the
+    # event types present in this bulletin. Above 5% means new phrases
+    # need adding (extend _PHRASE_TO_EVENT_TYPE).
+    unknown_ratio = s["unknown_count"] / s["events_total"]
+    assert unknown_ratio < 0.05, (
+        f"unknown_count={s['unknown_count']} / {s['events_total']} = "
+        f"{unknown_ratio:.3f} — phrase mapping is missing common events; "
+        "review free_text on UNKNOWN entries and extend _PHRASE_TO_EVENT_TYPE"
+    )
+
+    # Spot-check first event has the documented shape
+    assert len(doc["events"]) == s["events_total"]
+    first = doc["events"][0]
+    assert set(first.keys()) == {
+        "application_no", "event_type", "page", "free_text", "fingerprint",
+    }
+    assert len(first["fingerprint"]) == 16

@@ -44,10 +44,28 @@ import hashlib
 import json
 import logging
 import re
+import sys
 import time
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+
+_LOCAL_PROJECT_ROOT_BOOT = Path(__file__).resolve().parent
+if str(_LOCAL_PROJECT_ROOT_BOOT) not in sys.path:
+    sys.path.insert(0, str(_LOCAL_PROJECT_ROOT_BOOT))
+
+# Reuse Stage 3's page-kind detector + cover-page probe so this
+# module agrees with pdf_extract_patent on what counts as an
+# EVENT_INDEX page. PyMuPDF stays lazy via _get_fitz.
+from pdf_extract_patent import (  # noqa: E402
+    PageKind,
+    _get_fitz,
+    detect_page_kind,
+    extract_bulletin_metadata,
+)
 
 
 _LOCAL_PROJECT_ROOT = Path(__file__).resolve().parent
@@ -76,45 +94,94 @@ logger = logging.getLogger("turkpatent.patent_events")
 # rename without coordinating with whatever consumer queries by
 # event_type.
 _PHRASE_TO_EVENT_TYPE: List[Tuple[str, str]] = [
-    # Grant lifecycle
-    ("Verilen Patent / Faydalı Model İlanı (6769 SMK)",
-     "GRANT_ANNOUNCED"),
-    ("Kesinleşen Patent Verilme Kararının İlanı (6769 SMK)",
-     "GRANT_FINALIZED"),
+    # ===== Application lifecycle =====
+    # The A1 publication event. NOTE: bulletin ships a typo
+    # ("Yayınıın" instead of "Yayınının") — preserved verbatim so the
+    # match works on real text. If the office fixes the typo we can
+    # add the corrected variant alongside.
+    ("Başvuru Yayınıın İlanı (6769 SMK)",
+     "APPLICATION_PUBLISHED"),
     ("Reddedilen Patent/Faydalı Model Başvurularının İlanı (6769 SMK)",
      "APPLICATION_REJECTED"),
-    # Ownership transfers
+    ("Geri Çekilmiş Sayılan Patent / Faydalı Model Başvurularının İlanı (6769 SMK)",
+     "APPLICATION_WITHDRAWN"),
+    ("Terk Edilen / Geri Çevrilen / Geri Çekilmiş Sayılan Başvuru / Belgelerin İlanı",
+     "APPLICATION_ABANDONED"),
+
+    # ===== Grant lifecycle =====
+    ("Verilen Patent / Faydalı Model İlanı (6769 SMK)",
+     "GRANT_ANNOUNCED"),
+    ("Verilen Patent / Faydalı Model İlanı (Mülga 551 KHK)",
+     "GRANT_ANNOUNCED_LEGACY_551"),
+    ("Kesinleşen Patent Verilme Kararının İlanı (6769 SMK)",
+     "GRANT_FINALIZED"),
+    ("Koruma Süresi Dolan Patent/FM Belgelerinin İlanı",
+     "GRANT_PROTECTION_EXPIRED"),
+
+    # ===== Ownership transfers =====
     ("Devir İşlemi Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)",
      "ASSIGNMENT_RECORDED"),
     ("Birleşme İşlemi Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)",
      "MERGER_RECORDED"),
-    # UM conversion
+    ("Bölünme İşlemi Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)",
+     "DIVISION_RECORDED"),
+    ("Lisans Verme Teklifinin İlanı",
+     "LICENSE_OFFER"),
+
+    # ===== Conversion (UM ↔ Patent) =====
     ("Faydalı Modele Dönüşüm İlanı (6769 SMK)",
      "CONVERSION_TO_UM"),
-    # Post-publication amendments
+    ("Patente Dönüşüm İlanı (6769 SMK)",
+     "CONVERSION_TO_PATENT"),
+
+    # ===== Post-publication amendments =====
     ("Patent/FM Model Başvurularında/Belgelerinde Yayından Sonraki Değişikliğin İlanı",
      "POST_PUB_AMENDMENT"),
-    # Fee lapses (granted vs application — distinct by phrasing)
+
+    # ===== Fee lapses (granted vs application — distinct by phrasing) =====
     ("Verilen Patent/FM Belgelerinin Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı",
      "GRANT_FEE_LAPSE"),
     ("Patent/FM Başvurularının Yıllık Ücretinin Ödenmemesi Nedeniyle Geçersizlik ilanı",
      "APPLICATION_FEE_LAPSE"),
-    # Revalidations (fee-paid vs procedural-resumption — distinct)
+
+    # ===== Revalidations =====
+    # Fee-paid revalidation: granted vs application — distinct rows
     ("Yıllık Ücretlerinin Ödenmemesi Nedeniyle Geçersiz Olan Patent/FM Belgelerinin Yeniden Geçerlilik İlanı",
-     "FEE_REVALIDATION"),
+     "GRANT_FEE_REVALIDATION"),
+    ("Yıllık Ücretlerinin Ödenmemesi Nedeniyle Geçersiz Olan Patent/FM Başvurularının Yeniden Geçerlilik İlanı",
+     "APPLICATION_FEE_REVALIDATION"),
+    # Procedural resumption (separate from fee-paid)
     ("Yeniden Geçerlilik Kazanan Patent/Faydalı Model Başvurularının İlanı (İşlemlerin Devam Ettirilmesi)",
      "PROCEDURAL_REVALIDATION"),
-    # Use declarations
+
+    # ===== Use declarations =====
     ("Kullanma/Kullanmama Beyanı Verilmemiş Olan Başvuru veya Patent/Faydalı Modellerin İlanı",
      "USE_NONUSE_DECLARATION_MISSING"),
     ("Kullanıldığı Beyanı Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)",
      "USE_DECLARATION_RECORDED"),
-    # Search reports (patent vs UM — distinct)
+    ("Kullanılmadığı Beyanı Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)",
+     "NONUSE_DECLARATION_RECORDED"),
+
+    # ===== Search reports (patent vs UM — separate event_types) =====
+    # The "with-application-publication" variants are the section
+    # headers for the listing pages where each row is app_no + title
+    # + holder rather than a full event-phrase. Section-level
+    # classification (set by _SECTION_TO_EVENT_TYPE further down)
+    # picks these up for the per-row entries.
     ("Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)",
      "SEARCH_REPORT_PATENT"),
     ("Yayımlanmış Faydalı Model Başvurularının Araştırma Raporları (6769 SMK)",
      "SEARCH_REPORT_UM"),
-    # YİDK board decisions
+    ("Araştırma Raporu İle Birlikte Yayımlanan Patent Başvuruları (6769 SMK)",
+     "SEARCH_REPORT_WITH_APPLICATION_PATENT"),
+    ("Araştırma Raporu İle Birlikte Yayımlanan Faydalı Model Başvuruları (6769 SMK)",
+     "SEARCH_REPORT_WITH_APPLICATION_UM"),
+
+    # ===== EP fascicles =====
+    ("Avrupa Patent Fasiküllerinin İlanı",
+     "EP_FASCICLE_ANNOUNCED"),
+
+    # ===== YİDK board decisions =====
     ("6769 Sayılı SMK'nın 99 uncu Maddesi Hükmü Uyarınca YIDK Tarafından Patent Hakkının "
      "Değiştirilmiş Haliyle Devamına Karar Verilen Patentler",
      "YIDK_AMENDED_CONTINUATION"),
@@ -124,6 +191,51 @@ _PHRASE_TO_EVENT_TYPE: List[Tuple[str, str]] = [
 # description text is preserved in events[].free_text so the mapping
 # can be extended later without re-extracting.
 EVENT_TYPE_UNKNOWN = "UNKNOWN"
+
+# Section headers that appear ONCE on a page and govern the event_type
+# of every (app_no, free_text) row on that page. Used by the section-
+# state machine in parse_pdf_events: when a section header appears on
+# page N, every UNKNOWN-classified event from page N onwards inherits
+# the section's event_type until the next recognised section header
+# (or until a row whose free_text matches a non-section phrase, which
+# is treated as an inline override — happens on the flat event-index
+# pages that intermix with section pages).
+#
+# Concrete real-data example (verified on 2025_08.pdf):
+#   pp 1190-1844: "Araştırma Raporu İle Birlikte Yayımlanan Patent
+#   Başvuruları (6769 SMK)" header → each row has the patent title +
+#   holder rather than an event-phrase, so the row's free_text won't
+#   classify, and the section state assigns SEARCH_REPORT_WITH_
+#   APPLICATION_PATENT to the event.
+# The real section headers are uppercase "page-banner" titles that
+# appear ONCE on the first page of each section. Subsequent pages
+# inherit until the next section header. Verified on 2025_08.pdf:
+#   page 1151: 6769 SAYILI SMK'NIN 96 NCI MADDE HÜKMÜ UYARINCA ARAŞTIRMA RAPORU
+#   page 1190: LİSANS VERME TEKLİFİNDE BULUNULAN PATENTLER
+#   page 1232: YENİDEN GEÇERLİLİK KAZANAN PATENT/FAYDALI MODELLER
+#   page 1235: YENİDEN GEÇERLİLİK KAZANAN PATENT/FAYDALI MODEL BAŞVURULARI
+#   page 1279: GEÇERSİZ SAYILAN / REDDEDİLEN VE GERİ ÇEKİLMİŞ SAYILAN BAŞVURULAR
+# Each header is followed by "Başvuru No" + "Buluş Başlığı" sub-
+# headers and then a long list of (app_no, title, holder) rows.
+#
+# The "Yayımlanmış … Araştırma Raporları (6769 SMK)" phrases that
+# appear INLINE on the flat-index pages (7-114) keep their existing
+# per-row classification via _PHRASE_TO_EVENT_TYPE. Those are
+# different events than the page-banner-style section.
+_SECTION_HEADERS_TO_EVENT_TYPE: List[Tuple[str, str]] = [
+    # Article 96 search reports (combined patent + UM since the
+    # bulletin doesn't distinguish at the section-banner level).
+    ("6769 SAYILI SMK'NIN 96 NCI MADDE HÜKMÜ UYARINCA ARAŞTIRMA RAPORU",
+     "SEARCH_REPORT_ARTICLE_96"),
+    ("LİSANS VERME TEKLİFİNDE BULUNULAN PATENTLER",
+     "LICENSE_OFFER"),
+    ("YENİDEN GEÇERLİLİK KAZANAN PATENT/FAYDALI MODELLER",
+     "GRANT_FEE_REVALIDATION"),
+    ("YENİDEN GEÇERLİLİK KAZANAN PATENT/FAYDALI MODEL BAŞVURULARI",
+     "APPLICATION_FEE_REVALIDATION"),
+    ("GEÇERSİZ SAYILAN / REDDEDİLEN VE GERİ ÇEKİLMİŞ SAYILAN BAŞVURULAR",
+     "APPLICATION_LAPSED_OR_REJECTED"),
+]
 
 
 _WHITESPACE_RE = re.compile(r"\s+")
@@ -298,3 +410,124 @@ def parse_event_index_page(
             ),
         ))
     return events
+
+
+# ---------------------------------------------------------------------------
+# Step 7.3 — parse_pdf_events orchestrator
+# ---------------------------------------------------------------------------
+
+
+def _utcnow_iso() -> str:
+    return datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
+
+
+def detect_section_event_type(page_text: str) -> Optional[str]:
+    """If a page contains one of the canonical section headers, return
+    the corresponding event_type. ``None`` otherwise.
+
+    The header is looked up in the full page text (not just the first
+    line) because PyMuPDF sometimes places it inline with the first
+    app_no entry on long sections. See ``_SECTION_HEADERS_TO_EVENT_TYPE``.
+    """
+    if not page_text:
+        return None
+    normalised_page = _normalise_phrase(page_text).lower()
+    for header, event_type in _SECTION_HEADERS_TO_EVENT_TYPE:
+        if _normalise_phrase(header).lower() in normalised_page:
+            return event_type
+    return None
+
+
+def parse_pdf_events(pdf_path: Path | str) -> Dict[str, Any]:
+    """Walk a bulletin PDF and produce its full events.json doc.
+
+    Pipeline (mirrors pdf_extract_patent.parse_pdf shape but for the
+    EVENT_INDEX pages it skips):
+      1. open PDF
+      2. extract_bulletin_metadata (cover-page Sayı / Yayım Tarihi)
+      3. iterate pages: detect_page_kind → if EVENT_INDEX, run
+         parse_event_index_page on it
+      4. concatenate events from all pages
+      5. assemble doc with stats (events_total, by_event_type,
+         unknown_count, event_index_pages_scanned)
+
+    Returns a JSON-ready dict matching the ``events.json`` schema
+    documented in the module docstring. Caller writes it to disk.
+
+    On a missing/unparseable bulletin header, ``bulletin_no`` and
+    ``bulletin_date`` are ``None`` — caller should refuse to write
+    events.json in that case (events with ``bulletin_no=None`` can't
+    fingerprint cleanly; better to fail loud).
+    """
+    pdf = Path(pdf_path)
+    if not pdf.is_file():
+        raise FileNotFoundError(f"pdf not found: {pdf}")
+
+    fitz = _get_fitz()
+    started = time.time()
+    with fitz.open(str(pdf)) as doc:
+        bulletin_no, bulletin_date = extract_bulletin_metadata(doc)
+
+        events: List[ParsedEvent] = []
+        event_index_pages_scanned = 0
+
+        # Section-state machine: when the parser encounters a page
+        # that contains a canonical section header, that header's
+        # event_type becomes the default for all UNKNOWN rows on this
+        # and subsequent pages until either (a) another recognised
+        # section header appears, or (b) the page changes back to
+        # INID_RECORDS / SKIP. State resets between INID-vs-event
+        # transitions so a section doesn't bleed across the bulletin.
+        current_section_event_type: Optional[str] = None
+
+        for i in range(doc.page_count):
+            page_text = doc[i].get_text("text")
+            kind = detect_page_kind(page_text)
+            if kind != PageKind.EVENT_INDEX:
+                # Reset section state when leaving event-index pages
+                # (otherwise the bulletin's first INID-records page
+                # after a section would still inherit the section).
+                current_section_event_type = None
+                continue
+            event_index_pages_scanned += 1
+
+            section_hint = detect_section_event_type(page_text)
+            if section_hint is not None:
+                current_section_event_type = section_hint
+
+            page_events = parse_event_index_page(
+                page_text, page_no=i + 1, bulletin_no=bulletin_no,
+            )
+            # Apply section override to UNKNOWN-classified rows. Rows
+            # whose free_text matched a phrase keep their classifier
+            # result (handles intermixed sections where the flat-
+            # event-index style still appears alongside).
+            if current_section_event_type:
+                for ev in page_events:
+                    if ev.event_type == EVENT_TYPE_UNKNOWN:
+                        ev.event_type = current_section_event_type
+                        # Re-fingerprint to incorporate the assigned
+                        # event_type — otherwise dedup at ingest time
+                        # would still see UNKNOWN+free_text variants.
+                        ev.fingerprint = event_fingerprint(
+                            bulletin_no, ev.application_no,
+                            ev.event_type, ev.free_text,
+                        )
+            events.extend(page_events)
+
+    by_event_type = Counter(e.event_type for e in events)
+
+    return {
+        "bulletin_no": bulletin_no,
+        "bulletin_date": bulletin_date,
+        "source_pdf": pdf.name,
+        "extracted_at": _utcnow_iso(),
+        "stats": {
+            "events_total": len(events),
+            "by_event_type": dict(by_event_type),
+            "unknown_count": by_event_type.get(EVENT_TYPE_UNKNOWN, 0),
+            "event_index_pages_scanned": event_index_pages_scanned,
+            "extract_duration_seconds": round(time.time() - started, 1),
+        },
+        "events": [asdict(e) for e in events],
+    }
