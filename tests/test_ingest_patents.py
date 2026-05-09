@@ -16,7 +16,10 @@ from pipeline.ingest_patents import (
     PATENT_UPSERT_COLS,
     _patent_row,
     figure_source,
+    find_bulletin_folders,
     ingest_bulletin,
+    main,
+    parse_argv,
     parse_date_safe,
     replace_attorneys,
     replace_figures,
@@ -660,3 +663,81 @@ def test_ingest_bulletin_rolls_back_on_error(tmp_path) -> None:
     assert conn.rolled_back is True
     assert conn.committed is False
     assert conn.closed is True
+
+
+# ---------------------------------------------------------------------------
+# CLI: find_bulletin_folders + parse_argv + main
+# ---------------------------------------------------------------------------
+
+
+def test_find_bulletin_folders_all_mode_skips_non_pt(tmp_path) -> None:
+    (tmp_path / "PT_2025_8_2025-08-21").mkdir()
+    (tmp_path / "PT_2024_6_2024-06-21").mkdir()
+    (tmp_path / "scratch").mkdir()             # ignored
+    (tmp_path / "stray.txt").write_text("x")   # ignored
+    folders = find_bulletin_folders(tmp_path)
+    assert {p.name for p in folders} == {
+        "PT_2025_8_2025-08-21", "PT_2024_6_2024-06-21",
+    }
+
+
+def test_find_bulletin_folders_only_filter(tmp_path) -> None:
+    folders = find_bulletin_folders(
+        tmp_path, only=["PT_2025_8_2025-08-21"],
+    )
+    assert folders == [tmp_path / "PT_2025_8_2025-08-21"]
+
+
+def test_parse_argv_all_mode() -> None:
+    ns = parse_argv(["--all", "--bulletins-dir", "/data"])
+    assert ns.all_mode is True
+    assert ns.bulletins_dir == Path("/data")
+
+
+def test_parse_argv_specific_bulletin_repeatable() -> None:
+    ns = parse_argv([
+        "--bulletin", "PT_2025_8_2025-08-21",
+        "--bulletin", "PT_2024_6_2024-06-21",
+    ])
+    assert ns.bulletin == ["PT_2025_8_2025-08-21", "PT_2024_6_2024-06-21"]
+
+
+def test_parse_argv_no_args_errors() -> None:
+    with pytest.raises(SystemExit):
+        parse_argv([])
+
+
+def test_parse_argv_all_and_bulletin_mutex() -> None:
+    with pytest.raises(SystemExit):
+        parse_argv(["--all", "--bulletin", "PT_x"])
+
+
+def test_main_returns_one_when_no_folders(tmp_path) -> None:
+    """--all on an empty bulletins-dir is a hard fail."""
+    rc = main(["--all", "--bulletins-dir", str(tmp_path)])
+    assert rc == 1
+
+
+def test_main_calls_ingest_bulletin_for_each(monkeypatch, tmp_path) -> None:
+    """--all loops through every PT_ folder and tallies results."""
+    (tmp_path / "PT_a").mkdir()
+    (tmp_path / "PT_b").mkdir()
+
+    called: List[Path] = []
+
+    def _fake_ingest(folder, *, conn=None):
+        called.append(folder)
+        return {
+            "status": "ok", "bulletin": folder.name,
+            "records_processed": 1, "holders_inserted": 0,
+            "inventors_inserted": 0, "attorneys_inserted": 0,
+            "priorities_inserted": 0, "figures_inserted": 0,
+            "skipped": 0,
+        }
+
+    import pipeline.ingest_patents as ip
+    monkeypatch.setattr(ip, "ingest_bulletin", _fake_ingest)
+
+    rc = main(["--all", "--bulletins-dir", str(tmp_path)])
+    assert rc == 0
+    assert {p.name for p in called} == {"PT_a", "PT_b"}

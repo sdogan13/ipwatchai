@@ -592,3 +592,93 @@ def ingest_bulletin(
 
     stats["status"] = "ok"
     return stats
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+def find_bulletin_folders(
+    bulletins_dir: Path,
+    *,
+    only: Optional[List[str]] = None,
+) -> List[Path]:
+    """Walk bulletins_dir for PT_-prefixed folders. ``only`` filters
+    to a specific list of folder names."""
+    if only:
+        return [bulletins_dir / name for name in only]
+    return sorted(
+        p for p in bulletins_dir.iterdir()
+        if p.is_dir() and p.name.startswith("PT_")
+    )
+
+
+def parse_argv(argv=None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="pipeline.ingest_patents",
+        description="Upsert reconciled patent metadata into the patent tables.",
+    )
+    parser.add_argument(
+        "--bulletins-dir", type=Path, default=_LOCAL_DEFAULT_BULLETINS_DIR,
+        help="Root containing PT_{Y}_{M}_{date}/ folders.",
+    )
+    parser.add_argument(
+        "--bulletin", action="append", default=[],
+        help="Specific PT_{Y}_{M}_{date} folder name. Repeat for multiple.",
+    )
+    parser.add_argument(
+        "--all", action="store_true", dest="all_mode",
+        help="Process every PT_*/metadata.json under --bulletins-dir.",
+    )
+    ns = parser.parse_args(argv)
+    if ns.all_mode and ns.bulletin:
+        parser.error("--all is mutually exclusive with --bulletin")
+    if not ns.all_mode and not ns.bulletin:
+        parser.error("provide --bulletin (one or more) or --all")
+    return ns
+
+
+def main(argv=None) -> int:
+    args = parse_argv(argv)
+    folders = find_bulletin_folders(
+        args.bulletins_dir,
+        only=None if args.all_mode else args.bulletin,
+    )
+    if not folders:
+        logger.warning("no bulletin folders to ingest")
+        return 1
+
+    succeeded: List[str] = []
+    failed: List[str] = []
+
+    for folder in folders:
+        try:
+            result = ingest_bulletin(folder)
+        except Exception as exc:
+            logger.error("[!] %s: %r", folder.name, exc)
+            failed.append(folder.name)
+            continue
+
+        status = result.get("status", "?")
+        if status == "ok":
+            logger.info(
+                "[+] %s: %d records (skipped=%d) — "
+                "holders=%d inventors=%d attorneys=%d priorities=%d figures=%d",
+                result["bulletin"], result["records_processed"], result["skipped"],
+                result["holders_inserted"], result["inventors_inserted"],
+                result["attorneys_inserted"], result["priorities_inserted"],
+                result["figures_inserted"],
+            )
+            succeeded.append(folder.name)
+        else:
+            logger.warning("[~] %s: %s", folder.name, status)
+
+    logger.info(
+        "Done: %d succeeded, %d failed", len(succeeded), len(failed),
+    )
+    return 0 if not failed else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
