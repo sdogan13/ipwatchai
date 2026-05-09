@@ -280,7 +280,9 @@ def embed_text(
     prompt = _build_text_prompt(title, abstract)
     if not prompt:
         return [0.0] * TEXT_DIM
-    vec = models.text_encoder.encode(prompt, normalize_embeddings=True)
+    vec = models.text_encoder.encode(
+        prompt, normalize_embeddings=True, show_progress_bar=False,
+    )
     return vec.tolist()
 
 

@@ -264,9 +264,10 @@ def test_embed_text_routes_through_text_encoder() -> None:
     captured = {}
 
     class _FakeEncoder:
-        def encode(self, prompt, normalize_embeddings=False):
+        def encode(self, prompt, normalize_embeddings=False, show_progress_bar=True):
             captured["prompt"] = prompt
             captured["normalize"] = normalize_embeddings
+            captured["show_progress_bar"] = show_progress_bar
             class _V:
                 def tolist(self_inner):
                     return [0.5] * TEXT_DIM
@@ -280,6 +281,9 @@ def test_embed_text_routes_through_text_encoder() -> None:
 
     assert captured["prompt"] == "passage: Title. Abstract"
     assert captured["normalize"] is True
+    # Progress bar suppressed to keep --all output legible across 113
+    # bulletins × 2316 records each.
+    assert captured["show_progress_bar"] is False
     assert len(out) == TEXT_DIM
     assert all(x == 0.5 for x in out)
 
@@ -298,7 +302,7 @@ def _stub_models(text_vec=None, image_vec=None):
     image_vec_c = [0.3] * CLIP_DIM
 
     class _TxtEnc:
-        def encode(self, prompt, normalize_embeddings=False):
+        def encode(self, prompt, normalize_embeddings=False, show_progress_bar=True):
             class _V:
                 def tolist(self_inner):
                     return list(text_vec)
