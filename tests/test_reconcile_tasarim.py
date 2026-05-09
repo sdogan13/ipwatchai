@@ -15,12 +15,15 @@ from pipeline.reconcile_tasarim import (
     CanonicalDesign,
     CanonicalDesignRecord,
     CanonicalDesignView,
+    MERGED_METADATA_FILENAME,
     dedupe_images_on_disk,
     load_cd_metadata,
     load_pdf_metadata,
+    main,
     merge_records,
     normalize_cd_dossier,
     normalize_pdf_record,
+    parse_argv,
     reconcile_metadata,
 )
 from pipeline.reconcile_tasarim import (
@@ -1224,3 +1227,214 @@ def test_dedupe_images_handles_str_path(tmp_path):
     """Accepts str path as well as Path."""
     out = dedupe_images_on_disk(str(tmp_path))
     assert isinstance(out, dict)
+
+
+# ---------------------------------------------------------------------------
+# Step 3.7 — CLI (parse_argv + main)
+# ---------------------------------------------------------------------------
+
+def _seed_issue_folder(tmp_path: Path, name: str = "TS_240_2016-03-09",
+                       *, with_cd: bool = True, with_pdf: bool = False) -> Path:
+    """Build a TS issue folder for CLI tests."""
+    folder = tmp_path / name
+    folder.mkdir()
+    if with_cd:
+        cd = _minimal_cd_doc()
+        cd["dossiers"] = [_real_cd_dossier_2016_01059()]
+        (folder / "cd_metadata.json").write_text(
+            json.dumps(cd, ensure_ascii=False), encoding="utf-8",
+        )
+    if with_pdf:
+        pdf = _minimal_pdf_doc()
+        pdf["records"] = [_real_pdf_record_2024_007254()]
+        (folder / "metadata.json").write_text(
+            json.dumps(pdf, ensure_ascii=False), encoding="utf-8",
+        )
+    return folder
+
+
+def test_parse_argv_issue_and_all_mutually_exclusive(tmp_path, capsys):
+    folder = _seed_issue_folder(tmp_path)
+    with pytest.raises(SystemExit):
+        parse_argv([
+            "--issue", folder.name,
+            "--all",
+            "--bulletins-root", str(tmp_path),
+        ])
+    assert "mutually exclusive" in capsys.readouterr().err
+
+
+def test_parse_argv_requires_issue_or_all(capsys, tmp_path):
+    with pytest.raises(SystemExit):
+        parse_argv(["--bulletins-root", str(tmp_path)])
+    assert "provide --issue or --all" in capsys.readouterr().err
+
+
+def test_parse_argv_all_with_no_ts_folders_errors(capsys, tmp_path):
+    with pytest.raises(SystemExit):
+        parse_argv(["--all", "--bulletins-root", str(tmp_path)])
+    assert "no TS_* folders" in capsys.readouterr().err
+
+
+def test_parse_argv_all_collects_ts_folders(tmp_path):
+    _seed_issue_folder(tmp_path, "TS_240_2016-03-09")
+    _seed_issue_folder(tmp_path, "TS_241_2016-03-24")
+    (tmp_path / "not_a_ts_folder").mkdir()
+    args = parse_argv(["--all", "--bulletins-root", str(tmp_path)])
+    assert sorted(p.name for p in args.issue_folders) == [
+        "TS_240_2016-03-09", "TS_241_2016-03-24",
+    ]
+
+
+def test_parse_argv_issue_resolves_subfolder(tmp_path):
+    _seed_issue_folder(tmp_path, "TS_240_2016-03-09")
+    args = parse_argv([
+        "--issue", "TS_240_2016-03-09",
+        "--bulletins-root", str(tmp_path),
+    ])
+    assert len(args.issue_folders) == 1
+    assert args.issue_folders[0].name == "TS_240_2016-03-09"
+
+
+def test_parse_argv_unknown_issue_errors(capsys, tmp_path):
+    with pytest.raises(SystemExit):
+        parse_argv([
+            "--issue", "TS_999_2099-01-01",
+            "--bulletins-root", str(tmp_path),
+        ])
+    assert "issue folder not found" in capsys.readouterr().err
+
+
+def test_main_writes_merged_metadata_for_cd_only(tmp_path):
+    folder = _seed_issue_folder(tmp_path, with_cd=True, with_pdf=False)
+    rc = main(["--issue", folder.name, "--bulletins-root", str(tmp_path)])
+    assert rc == 0
+    out = json.loads((folder / MERGED_METADATA_FILENAME).read_text(encoding="utf-8"))
+    assert out["bulletin_no"] == "240"
+    assert len(out["records"]) == 1
+    assert out["records"][0]["source_format"] == "CD"
+
+
+def test_main_writes_merged_metadata_for_pdf_only(tmp_path):
+    folder = _seed_issue_folder(tmp_path, with_cd=False, with_pdf=True)
+    rc = main(["--issue", folder.name, "--bulletins-root", str(tmp_path)])
+    assert rc == 0
+    out = json.loads((folder / MERGED_METADATA_FILENAME).read_text(encoding="utf-8"))
+    assert len(out["records"]) == 1
+    assert out["records"][0]["source_format"] == "PDF"
+
+
+def test_main_writes_merged_metadata_for_both(tmp_path):
+    """Real reconcile path: both CD and PDF present, application_no
+    matches across them, expect a BOTH-tagged merged record."""
+    folder = tmp_path / "TS_240_2016-03-09"
+    folder.mkdir()
+    cd = _minimal_cd_doc()
+    cd["dossiers"] = [_real_cd_dossier_2016_01059()]
+    (folder / "cd_metadata.json").write_text(
+        json.dumps(cd, ensure_ascii=False), encoding="utf-8",
+    )
+    pdf = _minimal_pdf_doc()
+    pdf_record = _real_pdf_record_2024_007254()
+    pdf_record["application_no"] = "2016/01059"   # match the CD dossier
+    pdf["records"] = [pdf_record]
+    (folder / "metadata.json").write_text(
+        json.dumps(pdf, ensure_ascii=False), encoding="utf-8",
+    )
+
+    rc = main(["--issue", folder.name, "--bulletins-root", str(tmp_path)])
+    assert rc == 0
+    out = json.loads((folder / MERGED_METADATA_FILENAME).read_text(encoding="utf-8"))
+    assert len(out["records"]) == 1
+    assert out["records"][0]["source_format"] == "BOTH"
+
+
+def test_main_skips_when_no_source_files(tmp_path):
+    """An empty TS folder with no metadata.json or cd_metadata.json:
+    skip with warning, return 0."""
+    folder = tmp_path / "TS_999_2099-01-01"
+    folder.mkdir()
+    rc = main(["--issue", folder.name, "--bulletins-root", str(tmp_path)])
+    assert rc == 0
+    assert not (folder / MERGED_METADATA_FILENAME).exists()
+
+
+def test_main_skips_existing_without_force(tmp_path):
+    folder = _seed_issue_folder(tmp_path)
+    (folder / MERGED_METADATA_FILENAME).write_text(
+        '{"original":"keepme"}', encoding="utf-8",
+    )
+    rc = main(["--issue", folder.name, "--bulletins-root", str(tmp_path)])
+    assert rc == 0
+    # Original file preserved
+    assert json.loads(
+        (folder / MERGED_METADATA_FILENAME).read_text(encoding="utf-8")
+    ) == {"original": "keepme"}
+
+
+def test_main_force_overwrites_existing(tmp_path):
+    folder = _seed_issue_folder(tmp_path)
+    (folder / MERGED_METADATA_FILENAME).write_text(
+        '{"original":"replaceme"}', encoding="utf-8",
+    )
+    rc = main([
+        "--issue", folder.name,
+        "--bulletins-root", str(tmp_path),
+        "--force",
+    ])
+    assert rc == 0
+    out = json.loads((folder / MERGED_METADATA_FILENAME).read_text(encoding="utf-8"))
+    assert out["bulletin_no"] == "240"
+
+
+def test_main_returns_1_on_bulletin_no_mismatch(tmp_path):
+    """A mismatched bulletin_no across the two source files surfaces as
+    a per-folder failure (caught + reported, rc=1)."""
+    folder = tmp_path / "TS_240_2016-03-09"
+    folder.mkdir()
+    cd = _minimal_cd_doc()
+    cd["bulletin_no"] = "240"
+    pdf = _minimal_pdf_doc()
+    pdf["bulletin_no"] = 999  # different bulletin
+    (folder / "cd_metadata.json").write_text(
+        json.dumps(cd, ensure_ascii=False), encoding="utf-8",
+    )
+    (folder / "metadata.json").write_text(
+        json.dumps(pdf, ensure_ascii=False), encoding="utf-8",
+    )
+
+    rc = main(["--issue", folder.name, "--bulletins-root", str(tmp_path)])
+    assert rc == 1
+
+
+def test_main_all_processes_every_ts_folder(tmp_path):
+    _seed_issue_folder(tmp_path, "TS_240_2016-03-09")
+    _seed_issue_folder(tmp_path, "TS_241_2016-03-24")
+    rc = main(["--all", "--bulletins-root", str(tmp_path)])
+    assert rc == 0
+    assert (tmp_path / "TS_240_2016-03-09" / MERGED_METADATA_FILENAME).is_file()
+    assert (tmp_path / "TS_241_2016-03-24" / MERGED_METADATA_FILENAME).is_file()
+
+
+def test_main_dedupe_images_runs_when_flag_set(tmp_path):
+    """--dedupe-images triggers the disk dedup pass after writing JSON."""
+    folder = _seed_issue_folder(tmp_path)
+
+    # Set up a dedup-able state: same key in both folders
+    cd_dir = folder / "cd_images" / "2016_01059"
+    cd_dir.mkdir(parents=True)
+    (cd_dir / "1_1.jpg").write_bytes(b"CD")
+
+    pdf_dir = folder / "images" / "2016_01059"
+    pdf_dir.mkdir(parents=True)
+    (pdf_dir / "1_1.jpg").write_bytes(b"PDF")
+
+    rc = main([
+        "--issue", folder.name,
+        "--bulletins-root", str(tmp_path),
+        "--dedupe-images",
+    ])
+    assert rc == 0
+    # PDF dup gone, CD copy survives
+    assert not (pdf_dir / "1_1.jpg").exists()
+    assert (cd_dir / "1_1.jpg").read_bytes() == b"CD"

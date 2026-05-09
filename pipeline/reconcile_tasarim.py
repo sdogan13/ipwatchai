@@ -43,10 +43,12 @@ CLI (lands in step 3.7)::
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import re
 import sys
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1002,3 +1004,188 @@ def dedupe_images_on_disk(ts_folder: str | Path) -> Dict[str, int]:
             pdf_only_remaining += 1
 
     return {"unlinked": unlinked, "pdf_only_remaining": pdf_only_remaining}
+
+
+# ---------------------------------------------------------------------------
+# Step 3.7 — CLI entrypoint
+# ---------------------------------------------------------------------------
+
+_LOCAL_DEFAULT_BULLETINS_DIR = PROJECT_ROOT / "bulletins" / "Tasarim"
+MERGED_METADATA_FILENAME = "merged_metadata.json"
+CD_METADATA_FILENAME = "cd_metadata.json"
+PDF_METADATA_FILENAME = "metadata.json"
+
+
+@dataclass
+class CLIArgs:
+    issue_folders: List[Path]
+    force: bool
+    dedupe_images: bool
+
+
+def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
+    """Parse CLI arguments for the Tasarim reconciler."""
+    parser = argparse.ArgumentParser(
+        prog="reconcile_tasarim",
+        description="Reconcile Tasarim CD + PDF metadata into merged_metadata.json",
+    )
+    parser.add_argument(
+        "--issue",
+        type=str,
+        default=None,
+        help="Single issue folder name under --bulletins-root (e.g. TS_240_2016-03-09).",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Process every TS_*/ folder under --bulletins-root.",
+    )
+    parser.add_argument(
+        "--bulletins-root",
+        type=Path,
+        default=_LOCAL_DEFAULT_BULLETINS_DIR,
+        help=f"Bulletins root (default: {_LOCAL_DEFAULT_BULLETINS_DIR}).",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite an existing merged_metadata.json (default: skip).",
+    )
+    parser.add_argument(
+        "--dedupe-images",
+        action="store_true",
+        help="After merging, run dedupe_images_on_disk on the issue folder "
+             "to remove any pre-existing PDF-side image duplicates that "
+             "share a key with the CD-side cd_images/.",
+    )
+    ns = parser.parse_args(argv)
+
+    if ns.all and ns.issue:
+        parser.error("--issue and --all are mutually exclusive")
+
+    if ns.all:
+        if not ns.bulletins_root.is_dir():
+            parser.error(f"--bulletins-root not found: {ns.bulletins_root}")
+        folders = sorted(
+            p for p in ns.bulletins_root.glob("TS_*") if p.is_dir()
+        )
+        if not folders:
+            parser.error(f"--all matched no TS_* folders in {ns.bulletins_root}")
+        return CLIArgs(issue_folders=folders, force=ns.force,
+                       dedupe_images=ns.dedupe_images)
+
+    if ns.issue:
+        folder = ns.bulletins_root / ns.issue
+        if not folder.is_dir():
+            parser.error(f"issue folder not found: {folder}")
+        return CLIArgs(issue_folders=[folder], force=ns.force,
+                       dedupe_images=ns.dedupe_images)
+
+    parser.error("provide --issue or --all")
+    raise SystemExit(2)  # unreachable; satisfies type-checker
+
+
+def _process_folder(
+    folder: Path,
+    *,
+    force: bool,
+    dedupe_images: bool,
+) -> Dict[str, Any]:
+    """Reconcile one TS issue folder and write merged_metadata.json.
+
+    Returns ``{"folder", "skipped", "stats"?, "dedup"?}``. A skipped
+    entry covers either of:
+      - neither cd_metadata.json nor metadata.json exists (nothing
+        to reconcile)
+      - merged_metadata.json already exists and ``force`` is False
+    """
+    cd_path = folder / CD_METADATA_FILENAME
+    pdf_path = folder / PDF_METADATA_FILENAME
+    out_path = folder / MERGED_METADATA_FILENAME
+
+    cd_doc = load_cd_metadata(cd_path) if cd_path.is_file() else None
+    pdf_doc = load_pdf_metadata(pdf_path) if pdf_path.is_file() else None
+
+    if cd_doc is None and pdf_doc is None:
+        logger.warning(
+            "[skip] %s: no cd_metadata.json or metadata.json", folder.name,
+        )
+        return {"folder": folder.name, "skipped": True}
+
+    if out_path.exists() and not force:
+        logger.warning(
+            "[skip] %s already exists; pass --force to overwrite", out_path,
+        )
+        return {"folder": folder.name, "skipped": True}
+
+    doc = reconcile_metadata(cd_doc=cd_doc, pdf_doc=pdf_doc)
+    out_path.write_text(
+        json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8",
+    )
+
+    dedup_result: Optional[Dict[str, int]] = None
+    if dedupe_images:
+        dedup_result = dedupe_images_on_disk(folder)
+
+    return {
+        "folder": folder.name,
+        "skipped": False,
+        "stats": doc["stats"],
+        "dedup": dedup_result,
+    }
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    """CLI entrypoint. Returns 0 if no folder raised an exception, 1 otherwise.
+
+    Skipped entries (no source files present, or output already exists
+    without --force) are NOT failures — they're idempotent no-ops.
+    """
+    args = parse_argv(argv)
+
+    started = time.time()
+    succeeded: List[str] = []
+    skipped: List[str] = []
+    failed: List[Tuple[str, str]] = []
+
+    for folder in args.issue_folders:
+        logger.info("[*] %s", folder.name)
+        try:
+            result = _process_folder(
+                folder, force=args.force, dedupe_images=args.dedupe_images,
+            )
+        except Exception as e:
+            failed.append((folder.name, repr(e)))
+            logger.error("[!] %s: %r", folder.name, e)
+            continue
+
+        if result.get("skipped"):
+            skipped.append(folder.name)
+            continue
+
+        succeeded.append(folder.name)
+        stats = result["stats"]
+        sf = stats["by_source_format"]
+        logger.info(
+            "[+] %s: %d records (CD=%d PDF=%d BOTH=%d), %d designs, %d views",
+            folder.name, stats["records"],
+            sf.get("CD", 0), sf.get("PDF", 0), sf.get("BOTH", 0),
+            stats["designs_total"], stats["views_total"],
+        )
+        if result.get("dedup"):
+            d = result["dedup"]
+            logger.info(
+                "    dedup: unlinked %d, pdf_only_remaining %d",
+                d["unlinked"], d["pdf_only_remaining"],
+            )
+
+    duration = time.time() - started
+    logger.info(
+        "Done in %.1fs: %d succeeded, %d skipped, %d failed",
+        duration, len(succeeded), len(skipped), len(failed),
+    )
+    return 0 if not failed else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
