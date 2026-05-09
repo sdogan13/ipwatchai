@@ -357,3 +357,183 @@ def embed_record(
         "primary_aggregated": primary_aggregated,
         "skipped": False,
     }
+
+
+# ---------------------------------------------------------------------------
+# Per-bulletin orchestration
+# ---------------------------------------------------------------------------
+
+
+def embed_bulletin(
+    bulletin_folder: Path,
+    models: LoadedModels,
+    *,
+    force: bool = False,
+    limit: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Embed every record in one bulletin's metadata.json.
+
+    Reads ``bulletin_folder/metadata.json`` and writes it back with
+    per-record + per-figure embeddings attached. Single write at the
+    end of the bulletin (each metadata.json is several MB; rewriting
+    after every record would dominate runtime).
+
+    ``limit`` caps the records processed (useful for live smoke tests).
+    Returns a small stats dict for the CLI summary log.
+    """
+    metadata_path = bulletin_folder / "metadata.json"
+    if not metadata_path.is_file():
+        return {"status": "no_metadata", "bulletin": bulletin_folder.name}
+
+    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    records = payload.get("records", [])
+    if not records:
+        return {"status": "empty", "bulletin": bulletin_folder.name}
+
+    started = time.time()
+    text_total = figs_total = aggregated_total = skipped_total = 0
+    target = records if limit is None else records[:limit]
+
+    for record in target:
+        summary = embed_record(record, bulletin_folder, models, force=force)
+        text_total += summary["text_embedded"]
+        figs_total += summary["figures_embedded"]
+        aggregated_total += summary["primary_aggregated"]
+        if summary.get("skipped"):
+            skipped_total += 1
+
+    metadata_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    duration = time.time() - started
+    return {
+        "status": "ok",
+        "bulletin": bulletin_folder.name,
+        "records_processed": len(target),
+        "text_embedded": text_total,
+        "figures_embedded": figs_total,
+        "primary_aggregated": aggregated_total,
+        "skipped": skipped_total,
+        "duration_seconds": round(duration, 1),
+    }
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CLIArgs:
+    bulletins_dir: Path
+    bulletin_names: List[str]
+    all_mode: bool
+    device: Optional[str]
+    force: bool
+    limit: Optional[int]
+
+
+def parse_argv(argv: Optional[Sequence[str]] = None) -> CLIArgs:
+    parser = argparse.ArgumentParser(
+        prog="embeddings_patent",
+        description="Generate text + figure embeddings for patent bulletins.",
+    )
+    parser.add_argument(
+        "--bulletins-dir", type=Path, default=_LOCAL_DEFAULT_BULLETINS_DIR,
+        help="Root containing PT_{Y}_{M}_{date}/ folders.",
+    )
+    parser.add_argument(
+        "--bulletin", action="append", default=[],
+        help="Specific PT_{Y}_{M}_{date} folder name. Repeat for multiple.",
+    )
+    parser.add_argument(
+        "--all", action="store_true", dest="all_mode",
+        help="Process every PT_*/metadata.json under --bulletins-dir.",
+    )
+    parser.add_argument(
+        "--device", default=None,
+        help="Force device (cuda|cpu). Default: auto-detect.",
+    )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="Re-embed everything, even records already embedded.",
+    )
+    parser.add_argument(
+        "--limit", type=int, default=None,
+        help="Process at most N records per bulletin (smoke testing).",
+    )
+    ns = parser.parse_args(argv)
+
+    if ns.all_mode and ns.bulletin:
+        parser.error("--all is mutually exclusive with --bulletin")
+    if not ns.all_mode and not ns.bulletin:
+        parser.error("provide --bulletin (one or more) or --all")
+
+    return CLIArgs(
+        bulletins_dir=ns.bulletins_dir,
+        bulletin_names=list(ns.bulletin),
+        all_mode=ns.all_mode,
+        device=ns.device,
+        force=ns.force,
+        limit=ns.limit,
+    )
+
+
+def find_bulletin_folders(args: CLIArgs) -> List[Path]:
+    if args.all_mode:
+        return sorted(
+            p for p in args.bulletins_dir.iterdir()
+            if p.is_dir() and p.name.startswith("PT_")
+        )
+    return [args.bulletins_dir / name for name in args.bulletin_names]
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    args = parse_argv(argv)
+    folders = find_bulletin_folders(args)
+    if not folders:
+        logger.warning("no bulletin folders to process")
+        return 1
+
+    device = detect_device(args.device)
+    models = load_models(device)
+
+    started = time.time()
+    succeeded: List[str] = []
+    failed: List[str] = []
+
+    for folder in folders:
+        try:
+            result = embed_bulletin(
+                folder, models, force=args.force, limit=args.limit,
+            )
+        except Exception as exc:
+            logger.error("[!] %s: %r", folder.name, exc)
+            failed.append(folder.name)
+            continue
+
+        if result["status"] == "ok":
+            succeeded.append(folder.name)
+            logger.info(
+                "[+] %s: %d records (text=%d, figures=%d, primary=%d, "
+                "skipped=%d) in %.1fs",
+                result["bulletin"], result["records_processed"],
+                result["text_embedded"], result["figures_embedded"],
+                result["primary_aggregated"], result["skipped"],
+                result["duration_seconds"],
+            )
+        else:
+            logger.warning("[~] %s: %s", folder.name, result["status"])
+
+    duration = time.time() - started
+    logger.info(
+        "Done in %.1fs: %d succeeded, %d failed",
+        duration, len(succeeded), len(failed),
+    )
+    return 0 if not failed else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

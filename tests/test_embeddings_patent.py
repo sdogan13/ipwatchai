@@ -457,3 +457,147 @@ def test_embed_record_partial_text_only_does_not_aggregate(monkeypatch, tmp_path
     # text NOT changed
     assert record["title_abstract_embedding"] == [0.4] * TEXT_DIM
     assert record["primary_figure_embedding"] == list(dvec)
+
+
+# ---------------------------------------------------------------------------
+# embed_bulletin (per-bulletin file orchestration)
+# ---------------------------------------------------------------------------
+
+
+def test_embed_bulletin_writes_metadata_back_with_embeddings(monkeypatch, tmp_path) -> None:
+    """One full bulletin pass: load metadata.json, embed each record,
+    write back. Subsequent run on the same folder skips (idempotent)."""
+    import json
+    from embeddings_patent import embed_bulletin
+
+    parent = tmp_path / "PT_2025_8_2025-08-21"
+    parent.mkdir()
+    (parent / "metadata.json").write_text(json.dumps({
+        "bulletin_no": "2025/8",
+        "records": [
+            {"application_no": "X1", "title": "T1", "abstract": "A1",
+             "figures": [{"image_path": "figures/X1.tif"}]},
+            {"application_no": "X2", "title": "T2", "abstract": "A2",
+             "figures": []},
+        ],
+    }), encoding="utf-8")
+
+    models, dvec, cvec = _stub_models()
+    _stub_embed_image(monkeypatch, dvec, cvec)
+    # Make the figure file exist on disk so embed_image's path-resolution
+    # would find it (the stub doesn't actually read it but Path.is_file
+    # checks could matter for future code paths).
+    (parent / "figures").mkdir()
+    (parent / "figures" / "X1.tif").write_bytes(b"FAKE")
+
+    summary = embed_bulletin(parent, models)
+
+    assert summary["status"] == "ok"
+    assert summary["records_processed"] == 2
+    assert summary["text_embedded"] == 2
+    assert summary["figures_embedded"] == 1     # only X1 had a figure
+    assert summary["primary_aggregated"] == 1   # only X1 has a primary
+    assert summary["skipped"] == 0
+
+    # Round-trip: written-back JSON has the embeddings
+    payload = json.loads((parent / "metadata.json").read_text(encoding="utf-8"))
+    rec1, rec2 = payload["records"]
+    assert len(rec1["title_abstract_embedding"]) == TEXT_DIM
+    assert len(rec1["primary_figure_embedding"]) == DINOV2_DIM
+    assert "embeddings" in rec1["figures"][0]
+    assert len(rec2["title_abstract_embedding"]) == TEXT_DIM
+    assert "primary_figure_embedding" not in rec2     # no figures
+
+    # Re-run: everything skipped
+    summary2 = embed_bulletin(parent, models)
+    assert summary2["skipped"] == 2
+    assert summary2["text_embedded"] == 0
+    assert summary2["figures_embedded"] == 0
+
+
+def test_embed_bulletin_no_metadata_returns_status(tmp_path) -> None:
+    from embeddings_patent import embed_bulletin
+    models, _, _ = _stub_models()
+    parent = tmp_path / "PT_X"
+    parent.mkdir()
+    summary = embed_bulletin(parent, models)
+    assert summary == {"status": "no_metadata", "bulletin": "PT_X"}
+
+
+def test_embed_bulletin_limit_caps_records(monkeypatch, tmp_path) -> None:
+    import json
+    from embeddings_patent import embed_bulletin
+
+    parent = tmp_path / "PT_2025_8_2025-08-21"
+    parent.mkdir()
+    (parent / "metadata.json").write_text(json.dumps({
+        "records": [
+            {"application_no": str(i), "title": f"T{i}", "abstract": f"A{i}",
+             "figures": []}
+            for i in range(10)
+        ],
+    }), encoding="utf-8")
+
+    models, _, _ = _stub_models()
+    _stub_embed_image(monkeypatch, [0.0]*DINOV2_DIM, [0.0]*CLIP_DIM)
+
+    summary = embed_bulletin(parent, models, limit=3)
+
+    assert summary["records_processed"] == 3
+    assert summary["text_embedded"] == 3
+    payload = json.loads((parent / "metadata.json").read_text(encoding="utf-8"))
+    assert "title_abstract_embedding" in payload["records"][0]
+    assert "title_abstract_embedding" not in payload["records"][3]
+
+
+# ---------------------------------------------------------------------------
+# CLI parse_argv
+# ---------------------------------------------------------------------------
+
+
+def test_parse_argv_all_mode() -> None:
+    from embeddings_patent import parse_argv
+    args = parse_argv(["--all", "--bulletins-dir", "/data/bulletins"])
+    assert args.all_mode is True
+    assert args.bulletins_dir == Path("/data/bulletins")
+    assert args.bulletin_names == []
+
+
+def test_parse_argv_specific_bulletins() -> None:
+    from embeddings_patent import parse_argv
+    args = parse_argv([
+        "--bulletin", "PT_2025_8_2025-08-21",
+        "--bulletin", "PT_2024_6_2024-06-21",
+    ])
+    assert args.bulletin_names == ["PT_2025_8_2025-08-21", "PT_2024_6_2024-06-21"]
+    assert args.all_mode is False
+
+
+def test_parse_argv_no_args_errors() -> None:
+    from embeddings_patent import parse_argv
+    with pytest.raises(SystemExit):
+        parse_argv([])
+
+
+def test_parse_argv_all_and_bulletin_mutex() -> None:
+    from embeddings_patent import parse_argv
+    with pytest.raises(SystemExit):
+        parse_argv(["--all", "--bulletin", "PT_x"])
+
+
+def test_find_bulletin_folders_all_mode_skips_non_pt(tmp_path) -> None:
+    """--all only matches PT_-prefixed dirs; ignores other dirs/files."""
+    from embeddings_patent import CLIArgs, find_bulletin_folders
+    (tmp_path / "PT_2025_8_2025-08-21").mkdir()
+    (tmp_path / "PT_2024_6_2024-06-21").mkdir()
+    (tmp_path / "scratch").mkdir()              # non-PT dir, ignored
+    (tmp_path / "stray.txt").write_text("x")    # file, ignored
+
+    args = CLIArgs(
+        bulletins_dir=tmp_path, bulletin_names=[], all_mode=True,
+        device=None, force=False, limit=None,
+    )
+    folders = find_bulletin_folders(args)
+    assert {p.name for p in folders} == {
+        "PT_2025_8_2025-08-21", "PT_2024_6_2024-06-21",
+    }
