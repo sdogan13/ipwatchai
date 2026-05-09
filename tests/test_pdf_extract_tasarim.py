@@ -12,6 +12,7 @@ from pathlib import Path
 from pdf_extract_tasarim import (
     Attorney,
     Priority,
+    View,
     clean_text,
     detect_deferred_period,
     detect_section_for_page,
@@ -62,6 +63,24 @@ def test_view_image_key_canonical_shape():
     assert view_image_key("2024_007254", 1, 1) == "2024_007254/1_1.jpg"
     assert view_image_key("2024_007254", 4, 3) == "2024_007254/4_3.jpg"
     assert view_image_key("2016_01205", 18, 7) == "2016_01205/18_7.jpg"
+
+
+def test_view_dataclass_image_source_field():
+    """View now carries an image_source provenance tag. None by default
+    (no image), "pdf" when the PDF extractor wrote the file, "cd" when
+    the CD-side image was already on disk and the PDF skipped its own
+    write to avoid a duplicate."""
+    v = View(view_index=1, page=17)
+    assert v.image_source is None
+    assert v.image_path is None
+
+    v_pdf = View(view_index=1, page=17, image_path="2024_007254/1_1.jpg",
+                 image_source="pdf")
+    assert v_pdf.image_source == "pdf"
+
+    v_cd = View(view_index=1, page=17, image_path="2024_007254/1_1.jpg",
+                image_source="cd")
+    assert v_cd.image_source == "cd"
 
 
 # ---------------------------------------------------------------------------

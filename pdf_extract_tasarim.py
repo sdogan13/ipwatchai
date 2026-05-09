@@ -146,6 +146,13 @@ class View:
     image_xref: Optional[int] = None
     bbox: Optional[List[float]] = None
     image_path: Optional[str] = None
+    # Provenance tag for image_path resolution at consumer time:
+    #   "pdf" -> resolve under images/{image_path}
+    #   "cd"  -> resolve under cd_images/{image_path} (CD already had the
+    #            image and we deliberately skipped the PDF write to avoid
+    #            a duplicate; key is canonical so reconcile can match)
+    #   None  -> no image was located/persisted for this view
+    image_source: Optional[str] = None
 
 
 @dataclass
@@ -675,9 +682,21 @@ def populate_designs_for_tr_record(
                 )
                 if extract_images and xref_val is not None:
                     key = view_image_key(appno_norm, d_idx, v_idx)
-                    dest = images_dir / key
-                    if _save_pixmap_jpeg(doc, xref_val, dest):
+                    # Proactive dedup: if the CD-side already persisted this
+                    # exact view image at cd_images/{key}, skip the PDF write
+                    # entirely. CD wins on duplicates per the locked stage-3
+                    # precedence rule. The key is canonical so reconcile can
+                    # match this view to the CD-side record by image_path
+                    # alone.
+                    cd_dest = images_dir.parent / "cd_images" / key
+                    if cd_dest.is_file():
                         view.image_path = key
+                        view.image_source = "cd"
+                    else:
+                        dest = images_dir / key
+                        if _save_pixmap_jpeg(doc, xref_val, dest):
+                            view.image_path = key
+                            view.image_source = "pdf"
                 located_views[(d_idx, v_idx)] = view
 
     # Attach views (located + any unlocated canonical views) to their designs
