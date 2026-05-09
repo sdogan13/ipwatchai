@@ -53,3 +53,78 @@ CREATE TABLE IF NOT EXISTS ipc_classes_lookup (
     description_en  TEXT,
     updated_at      TIMESTAMP DEFAULT NOW()
 );
+
+-- ============================================
+-- 3. patents (main table)
+-- ============================================
+-- Mirrors designs in shape. Differences from designs:
+--   * Natural unique key is publication_no (NOT application_no) — same
+--     application can ship multiple publications in one bulletin (B
+--     grant + A1 republication; verified on app 2024/000746 in 2025/8).
+--     application_no is indexed but not unique; cross-publication
+--     portfolio queries pivot on it.
+--   * record_type enum captures the kind-code classification (designs
+--     use design_status which is a lifecycle state instead).
+--   * patent_holders / patent_inventors / patent_attorneys are
+--     separate join tables (CD ships multiple per record); designs
+--     puts a single holder_id directly on the row.
+--   * Two embedding columns: title_abstract_embedding (text) +
+--     primary_figure_embedding (image, pooled). Designs has only the
+--     image side because they're typically non-textual.
+CREATE TABLE IF NOT EXISTS patents (
+    id                          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    -- Registry discriminator (matches designs.registry_type pattern;
+    -- enables future cross-registry views)
+    registry_type               VARCHAR(20) NOT NULL DEFAULT 'patent'
+                                CHECK (registry_type IN ('trademark', 'design', 'patent')),
+    -- Natural keys
+    application_no              VARCHAR(50) NOT NULL,             -- "2017/15048"
+    publication_no              VARCHAR(50),                       -- "TR 2017 15048 U3"
+    kind_code                   VARCHAR(10),                       -- "B", "A1", "U3", "T4"
+    record_type                 patent_record_type DEFAULT 'UNKNOWN',
+    -- Dates
+    application_date            DATE,
+    publication_date            DATE,
+    grant_date                  DATE,                              -- PDF-only field
+    bulletin_no                 VARCHAR(20),                       -- "2025/8"
+    bulletin_date               DATE,
+    -- Content
+    title                       TEXT,
+    abstract                    TEXT,
+    ipc_classes                 TEXT[] DEFAULT '{}'::TEXT[],
+    patent_type                 VARCHAR(10),                       -- CD-only "1" (patent) or "2" (UM)
+    -- Embeddings (populated by Stage 6)
+    title_abstract_embedding    halfvec(1024),
+    primary_figure_embedding    halfvec(1024),
+    -- Source / provenance
+    source_format               VARCHAR(10) NOT NULL DEFAULT 'CD'
+                                CHECK (source_format IN ('CD','PDF','BOTH')),
+    source_archive              VARCHAR(100),                      -- e.g. "2025_07_CD.rar"
+    source_pdf                  VARCHAR(100),                      -- e.g. "2025_08.pdf"
+    bulletin_folder             VARCHAR(100),                      -- "PT_2025_8_2025-08-21"
+    page_range_start            INTEGER,                           -- PDF-only
+    page_range_end              INTEGER,                           -- PDF-only
+    created_at                  TIMESTAMP DEFAULT NOW(),
+    updated_at                  TIMESTAMP DEFAULT NOW()
+);
+
+-- Natural unique constraint. Partial index because some HSQLDB rows
+-- ship a blank publication_no (verified: 142 records in bulletin
+-- 2019/11 — see patent_kind_code_gap memory). Those records still
+-- need to be ingestable; just not deduped on publication_no.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_patents_publication_no
+    ON patents (publication_no) WHERE publication_no IS NOT NULL;
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_pat_app_no            ON patents (application_no);
+CREATE INDEX IF NOT EXISTS idx_pat_record_type       ON patents (record_type);
+CREATE INDEX IF NOT EXISTS idx_pat_kind_code         ON patents (kind_code);
+CREATE INDEX IF NOT EXISTS idx_pat_application_date  ON patents (application_date DESC);
+CREATE INDEX IF NOT EXISTS idx_pat_publication_date  ON patents (publication_date DESC);
+CREATE INDEX IF NOT EXISTS idx_pat_bulletin_date     ON patents (bulletin_date DESC);
+CREATE INDEX IF NOT EXISTS idx_pat_ipc_arr           ON patents USING GIN (ipc_classes);
+CREATE INDEX IF NOT EXISTS idx_pat_title_trgm        ON patents USING GIST (title gist_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_pat_text_vec          ON patents USING hnsw (title_abstract_embedding halfvec_cosine_ops)
+    WITH (m=16, ef_construction=200) WHERE title_abstract_embedding IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_pat_fig_vec           ON patents USING hnsw (primary_figure_embedding halfvec_cosine_ops)
+    WITH (m=16, ef_construction=200) WHERE primary_figure_embedding IS NOT NULL;
