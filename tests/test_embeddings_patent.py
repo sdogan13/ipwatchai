@@ -166,3 +166,39 @@ def test_select_embeddable_figures_filters_null_image_paths() -> None:
 def test_select_embeddable_figures_no_figures_key() -> None:
     """Defensive: record without a figures field returns []."""
     assert select_embeddable_figures({}) == []
+
+
+# ---------------------------------------------------------------------------
+# embed_image — failure path testable without GPU
+# ---------------------------------------------------------------------------
+
+
+def test_embed_image_returns_zero_vectors_on_pil_failure(monkeypatch, tmp_path: Path) -> None:
+    """PIL open failure (corrupt file) returns zero-vectors of the
+    right dimensions instead of raising. Stage 6 must keep going
+    through bad inputs.
+
+    conftest.py mocks PIL.Image globally so we can't rely on a
+    non-existent path — instead, monkeypatch the real PIL.Image.open
+    that embed_image's local import will resolve to.
+    """
+    from embeddings_patent import LoadedModels, embed_image
+    import PIL.Image as _real_pil_image
+
+    def _raise(_path):
+        raise FileNotFoundError(2, "No such file or directory")
+
+    monkeypatch.setattr(_real_pil_image, "open", _raise)
+
+    fake_models = LoadedModels(
+        device="cpu", dinov2=None, dinov2_transform=None,
+        clip=None, clip_transform=None, text_encoder=None,
+    )
+
+    out = embed_image(tmp_path / "anything.tif", fake_models)
+
+    assert list(out.keys()) == ["dinov2_vitl14", "clip_vitb32"]
+    assert len(out["dinov2_vitl14"]) == DINOV2_DIM
+    assert len(out["clip_vitb32"]) == CLIP_DIM
+    assert all(x == 0.0 for x in out["dinov2_vitl14"])
+    assert all(x == 0.0 for x in out["clip_vitb32"])

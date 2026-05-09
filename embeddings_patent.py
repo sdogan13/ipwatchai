@@ -183,3 +183,54 @@ def load_models(device: str) -> LoadedModels:
         clip_transform=clip_preprocess,
         text_encoder=text_encoder,
     )
+
+
+# ---------------------------------------------------------------------------
+# Per-figure inference
+# ---------------------------------------------------------------------------
+
+
+def embed_image(
+    image_path: Path,
+    models: LoadedModels,
+) -> Dict[str, List[float]]:
+    """Generate DINOv2 + CLIP embeddings for one image file.
+
+    Returns ``{"dinov2_vitl14": [...1024 floats...],
+              "clip_vitb32":   [...512 floats...]}``.
+
+    On PIL open failure (corrupt file, missing path), returns
+    zero-vectors of the right dimensions and logs a warning rather
+    than raising — Stage 6 should keep going through bad inputs.
+    Stage 4's CD-first dedup already nulled image_paths for files
+    we knew were absent, so PIL failures here mean genuinely-
+    corrupt-on-disk images.
+    """
+    import torch
+    from PIL import Image
+
+    try:
+        img = Image.open(image_path).convert("RGB")
+    except Exception as e:
+        logger.warning("PIL open failed for %s: %r", image_path, e)
+        return {
+            "dinov2_vitl14": [0.0] * DINOV2_DIM,
+            "clip_vitb32":   [0.0] * CLIP_DIM,
+        }
+
+    out: Dict[str, List[float]] = {}
+    with torch.no_grad():
+        dino_input = models.dinov2_transform(img).unsqueeze(0).to(models.device)
+        dino_feat = models.dinov2(dino_input)
+        out["dinov2_vitl14"] = dino_feat.squeeze(0).cpu().float().tolist()
+
+        clip_input = models.clip_transform(img).unsqueeze(0).to(models.device)
+        clip_feat = models.clip.encode_image(clip_input)
+        # L2-normalise CLIP features so cosine similarity == dot product
+        # (matches Tasarım convention; the halfvec_cosine_ops index
+        # works either way but normalised vectors are easier to reason
+        # about across providers).
+        clip_feat = clip_feat / clip_feat.norm(dim=-1, keepdim=True).clamp(min=1e-9)
+        out["clip_vitb32"] = clip_feat.squeeze(0).cpu().float().tolist()
+
+    return out
