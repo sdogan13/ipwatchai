@@ -1301,6 +1301,45 @@ def parse_argv(argv: Optional[Sequence[str]] = None) -> CLIArgs:
     )
 
 
+_PDF_PNG_PREFIX_RE = re.compile(r"^(\d{4}_\d+)_p\d+_\d+$")
+
+
+def _dedup_pdf_pngs_against_cd_tifs(
+    figures_dir: Path,
+    payload: Dict[str, Any],
+) -> int:
+    """Drop PDF PNGs whose ``{year}_{appno}`` prefix matches a CD TIFF
+    in the same dir. Updates ``payload['records'][].figures[].image_path``
+    to ``None`` for the dropped files (page/xref/bbox preserved).
+
+    Returns the count of PNGs deleted.
+
+    Mirrors ``cd_extract_patent._carry_cd_images`` dedup pass. The
+    earlier asymmetry meant: CD-first when CD runs LAST; nothing when
+    PDF runs after CD. This closes the gap.
+    """
+    cd_stems = {p.stem for p in figures_dir.glob("*.tif")}
+    if not cd_stems:
+        return 0
+
+    dropped_paths: set = set()
+    for png in list(figures_dir.glob("*.png")):
+        match = _PDF_PNG_PREFIX_RE.match(png.stem)
+        if not match:
+            continue
+        if match.group(1) in cd_stems:
+            png.unlink()
+            dropped_paths.add(f"{FIGURES_DIRNAME}/{png.name}")
+
+    if dropped_paths:
+        for record in payload.get("records", []):
+            for fig in record.get("figures", []):
+                if fig.get("image_path") in dropped_paths:
+                    fig["image_path"] = None
+
+    return len(dropped_paths)
+
+
 def _process_one(
     pdf: Path,
     out_dir: Path,
@@ -1357,6 +1396,19 @@ def _process_one(
     started = time.time()
     payload = parse_pdf(pdf, figures_dir=figures_dir, save_images=save_images)
     payload["extract_duration_seconds"] = round(time.time() - started, 1)
+
+    # CD-first dedup, PDF-side. Symmetric to cd_extract_patent's
+    # carry-time dedup: when PDF writes PNGs into a folder where a CD
+    # TIFF for the same {year}_{appno} already exists, drop the PNG
+    # and null its image_path in the payload (page/xref/bbox metadata
+    # preserved for traceability). Only fires when figures_dir is set
+    # (i.e., save_images=True). Visually verified on app 2023/018085
+    # (2026-05-09) that the CD TIFF and PDF first-figure are the same
+    # drawing in different formats.
+    if figures_dir is not None and figures_dir.is_dir():
+        dropped = _dedup_pdf_pngs_against_cd_tifs(figures_dir, payload)
+        if dropped:
+            payload["stats"]["pdf_pngs_dropped_for_cd_tifs"] = dropped
 
     json_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),

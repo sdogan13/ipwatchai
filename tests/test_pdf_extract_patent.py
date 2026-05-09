@@ -58,6 +58,7 @@ from pdf_extract_patent import _metadata_is_fresh
 from pdf_extract_patent import (
     _build_global_text,
     _char_pos_to_page,
+    _dedup_pdf_pngs_against_cd_tifs,
     _find_record_boundaries,
     _normalize_appno_for_filename,
     _record_to_dict,
@@ -1632,6 +1633,71 @@ def test_parse_argv_out_dir_defaults_to_bulletins_dir(tmp_path):
 # ---------------------------------------------------------------------------
 # Step 3.8 — main returns nonzero on missing source
 # ---------------------------------------------------------------------------
+
+def test_dedup_pdf_pngs_drops_duplicates_and_nulls_paths(tmp_path):
+    """When a CD TIFF for app X exists in figures/, any PDF PNG with
+    matching {year}_{appno} prefix is dropped and its image_path is
+    nulled in the payload (page/xref preserved)."""
+    figures = tmp_path / "figures"
+    figures.mkdir()
+    # CD TIFFs (already there from a prior cd_extract run)
+    (figures / "2017_15048.tif").write_bytes(b"TIFF")
+    (figures / "2018_13083.tif").write_bytes(b"TIFF")
+    # PDF PNGs (just written by parse_pdf)
+    duplicate_a = figures / "2017_15048_p120_2.png"
+    duplicate_a.write_bytes(b"PNG")
+    duplicate_b = figures / "2018_13083_p200_3.png"
+    duplicate_b.write_bytes(b"PNG")
+    standalone = figures / "2099_99999_p1_1.png"  # no matching CD TIFF
+    standalone.write_bytes(b"PNG")
+
+    payload = {
+        "records": [
+            {
+                "application_no": "2017/15048",
+                "figures": [
+                    {"image_path": "figures/2017_15048_p120_2.png",
+                     "page": 120, "xref": 4204},
+                ],
+            },
+            {
+                "application_no": "2099/99999",
+                "figures": [
+                    {"image_path": "figures/2099_99999_p1_1.png",
+                     "page": 1, "xref": 5000},
+                ],
+            },
+        ],
+    }
+    dropped = _dedup_pdf_pngs_against_cd_tifs(figures, payload)
+
+    assert dropped == 2
+    # Duplicate PNGs deleted
+    assert not duplicate_a.exists()
+    assert not duplicate_b.exists()
+    # Standalone PNG (no CD match) survives
+    assert standalone.exists()
+    # CD TIFFs untouched
+    assert (figures / "2017_15048.tif").is_file()
+    # Payload's first figure image_path nulled, page/xref preserved
+    fig0 = payload["records"][0]["figures"][0]
+    assert fig0["image_path"] is None
+    assert fig0["page"] == 120
+    assert fig0["xref"] == 4204
+    # Payload's second figure (no CD match) untouched
+    fig1 = payload["records"][1]["figures"][0]
+    assert fig1["image_path"] == "figures/2099_99999_p1_1.png"
+
+
+def test_dedup_pdf_pngs_returns_zero_when_no_cd_tifs(tmp_path):
+    """No CD TIFFs in the dir → no work, nothing dropped."""
+    figures = tmp_path / "figures"
+    figures.mkdir()
+    (figures / "x_p1_1.png").write_bytes(b"PNG")
+    payload = {"records": []}
+    assert _dedup_pdf_pngs_against_cd_tifs(figures, payload) == 0
+    assert (figures / "x_p1_1.png").is_file()
+
 
 def test_main_returns_nonzero_on_missing_pdf(tmp_path):
     """main() with --pdf pointing at a non-existent file logs a skip
