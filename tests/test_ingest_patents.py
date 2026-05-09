@@ -16,6 +16,7 @@ from pipeline.ingest_patents import (
     PATENT_UPSERT_COLS,
     _patent_row,
     figure_source,
+    ingest_bulletin,
     parse_date_safe,
     replace_attorneys,
     replace_figures,
@@ -480,3 +481,182 @@ def test_replace_figures_handles_xref_synonym() -> None:
     ])
     params = next(p for s, p in cur.executed if "INSERT INTO patent_figures" in s)
     assert params[5] == 4204           # image_xref column gets the value
+
+
+# ---------------------------------------------------------------------------
+# ingest_bulletin (per-bulletin orchestrator)
+# ---------------------------------------------------------------------------
+
+
+class _MockConn:
+    """psycopg2-shaped conn supporting ``with cursor()`` + commit/rollback."""
+
+    def __init__(self, cursor: _MockCursor) -> None:
+        self._cursor = cursor
+        self.committed = False
+        self.rolled_back = False
+        self.closed = False
+
+    def cursor(self):
+        # Cursor as context manager (psycopg2 supports it).
+        cur = self._cursor
+
+        class _Ctx:
+            def __enter__(self_inner):
+                return cur
+            def __exit__(self_inner, *exc):
+                return False
+        return _Ctx()
+
+    def commit(self):
+        self.committed = True
+
+    def rollback(self):
+        self.rolled_back = True
+
+    def close(self):
+        self.closed = True
+
+
+def test_ingest_bulletin_no_metadata_returns_status(tmp_path) -> None:
+    parent = tmp_path / "PT_X"
+    parent.mkdir()
+    out = ingest_bulletin(parent)
+    assert out == {"status": "no_metadata", "bulletin": "PT_X"}
+
+
+def test_ingest_bulletin_empty_records_returns_status(tmp_path) -> None:
+    import json
+    parent = tmp_path / "PT_X"
+    parent.mkdir()
+    (parent / "metadata.json").write_text(json.dumps({
+        "bulletin_no": "2025/8", "bulletin_date": "2025-08-21",
+        "records": [],
+    }), encoding="utf-8")
+
+    out = ingest_bulletin(parent)
+    assert out["status"] == "empty"
+
+
+def test_ingest_bulletin_processes_records_and_commits(tmp_path) -> None:
+    """Happy path: one record → patent + child tables inserted, commit
+    fires, no rollback."""
+    import json
+    parent = tmp_path / "PT_2025_8_2025-08-21"
+    parent.mkdir()
+    (parent / "metadata.json").write_text(json.dumps({
+        "bulletin_no": "2025/8",
+        "bulletin_date": "2025-08-21",
+        "source_archive": "2025_07_CD.rar",
+        "source_pdf": "2025_08.pdf",
+        "records": [{
+            "application_no": "2017/15048",
+            "publication_no": "TR 2017 15048 U3",
+            "kind_code": "U3",
+            "record_type": "PUBLISHED_UM_APP",
+            "title": "T", "abstract": "A",
+            "ipc_classes": ["A61M 5/31"],
+            "holders": [{"name": "ACME", "country": "TR"}],
+            "inventors": [{"name": "JANE DOE"}],
+            "attorneys": [{"no": "361", "name": "ERDEM KAYA"}],
+            "priorities": [],
+            "figures": [
+                {"image_path": "figures/2017_15048.tif"},
+            ],
+        }],
+    }), encoding="utf-8")
+
+    # Mock cursor returns canned UUIDs in the order the orchestrator
+    # asks for them. Each record needs:
+    #   1 SELECT (publication_no lookup) + 1 INSERT (patents) RETURNING id
+    #   1 DELETE patent_holders + (per holder: 1 SELECT + 1 INSERT
+    #   holders + 1 INSERT patent_holders)
+    #   1 DELETE patent_inventors + (per inventor: 1 INSERT)
+    #   1 DELETE patent_attorneys + (per attorney: 1 INSERT)
+    #   1 DELETE patent_priorities (no rows here)
+    #   1 DELETE patent_figures + 1 INSERT
+    cur = _MockCursor(rows=[
+        None,             # publication_no SELECT — no existing
+        "p-uuid",         # patents INSERT RETURNING
+        None,             # holder name lookup — none
+        "h-uuid",         # holders INSERT RETURNING
+    ])
+    conn = _MockConn(cur)
+
+    out = ingest_bulletin(parent, conn=conn)
+
+    assert out["status"] == "ok"
+    assert out["records_processed"] == 1
+    assert out["holders_inserted"] == 1
+    assert out["inventors_inserted"] == 1
+    assert out["attorneys_inserted"] == 1
+    assert out["priorities_inserted"] == 0
+    assert out["figures_inserted"] == 1
+    assert conn.committed is True
+    assert conn.rolled_back is False
+    # Caller-supplied conn → not closed by ingest_bulletin
+    assert conn.closed is False
+
+
+def test_ingest_bulletin_skips_records_with_no_keys(tmp_path) -> None:
+    """A record with neither publication_no nor application_no can't
+    be reliably deduped — skip rather than create unindexable rows."""
+    import json
+    parent = tmp_path / "PT_X"
+    parent.mkdir()
+    (parent / "metadata.json").write_text(json.dumps({
+        "bulletin_no": "2025/8", "bulletin_date": "2025-08-21",
+        "records": [
+            {"title": "no keys"},
+            {"application_no": "X", "publication_no": "TR X",
+             "record_type": "GRANTED_PATENT", "ipc_classes": [],
+             "holders": [], "inventors": [], "attorneys": [],
+             "priorities": [], "figures": []},
+        ],
+    }), encoding="utf-8")
+
+    cur = _MockCursor(rows=[None, "p-uuid"])
+    conn = _MockConn(cur)
+    out = ingest_bulletin(parent, conn=conn)
+    assert out["records_processed"] == 1
+    assert out["skipped"] == 1
+
+
+def test_ingest_bulletin_rolls_back_on_error(tmp_path) -> None:
+    """If any record raises, the whole bulletin transaction rolls back —
+    don't leave a half-ingested bulletin."""
+    import json
+    parent = tmp_path / "PT_X"
+    parent.mkdir()
+    (parent / "metadata.json").write_text(json.dumps({
+        "bulletin_no": "2025/8", "bulletin_date": "2025-08-21",
+        "records": [{
+            "application_no": "X", "publication_no": "TR X",
+            "record_type": "GRANTED_PATENT", "ipc_classes": [],
+            "holders": [], "inventors": [], "attorneys": [],
+            "priorities": [], "figures": [],
+        }],
+    }), encoding="utf-8")
+
+    class _BoomCursor(_MockCursor):
+        def execute(self, sql, params=None):
+            raise RuntimeError("simulated DB error")
+
+    cur = _BoomCursor()
+    conn = _MockConn(cur)
+    with pytest.raises(RuntimeError, match="simulated DB error"):
+        # ingest_bulletin only owns the connection (and rolls back) when
+        # we don't pass one — pass None to test that path.
+        # But we need to inject the broken cursor. Easier: monkey-patch
+        # _connect in this test.
+        import pipeline.ingest_patents as ip
+        original_connect = ip._connect
+        try:
+            ip._connect = lambda: conn
+            ingest_bulletin(parent)
+        finally:
+            ip._connect = original_connect
+
+    assert conn.rolled_back is True
+    assert conn.committed is False
+    assert conn.closed is True

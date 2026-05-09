@@ -500,3 +500,95 @@ def replace_figures(
         )
         inserted += 1
     return inserted
+
+
+# ---------------------------------------------------------------------------
+# Per-bulletin orchestration
+# ---------------------------------------------------------------------------
+
+
+def ingest_bulletin(
+    bulletin_folder: Path,
+    *,
+    conn=None,
+) -> Dict[str, Any]:
+    """Ingest one ``PT_*/metadata.json`` into the patent tables.
+
+    Wraps the entire bulletin in a single transaction: either every
+    record's patent row + children land, or none do. Re-running on
+    the same folder is a no-op for unchanged records (UPDATE on
+    matching publication_no) and safely refreshes children via
+    DELETE+INSERT.
+
+    ``conn`` is optional; if absent, opens a fresh connection. Tests
+    pass an in-memory mock or pre-opened conn for fixture reuse.
+
+    Returns a stats dict for CLI logging:
+      {bulletin, records_processed, holders, inventors, attorneys,
+       priorities, figures}.
+    """
+    metadata_path = bulletin_folder / "metadata.json"
+    if not metadata_path.is_file():
+        return {"status": "no_metadata", "bulletin": bulletin_folder.name}
+
+    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    records = payload.get("records", [])
+    if not records:
+        return {"status": "empty", "bulletin": bulletin_folder.name}
+
+    owns_connection = conn is None
+    if owns_connection:
+        conn = _connect()
+
+    stats = {
+        "bulletin": bulletin_folder.name,
+        "records_processed": 0,
+        "holders_inserted": 0,
+        "inventors_inserted": 0,
+        "attorneys_inserted": 0,
+        "priorities_inserted": 0,
+        "figures_inserted": 0,
+        "skipped": 0,
+    }
+
+    try:
+        with conn.cursor() as cur:
+            for record in records:
+                row = _patent_row(
+                    record, payload, bulletin_folder=bulletin_folder.name,
+                )
+                # Records with no application_no AND no publication_no can't
+                # be deduped reliably — skip them rather than create
+                # rows that re-ingest can't recognise.
+                if not row.get("publication_no") and not row.get("application_no"):
+                    stats["skipped"] += 1
+                    continue
+
+                patent_id = upsert_patent(cur, row)
+                stats["holders_inserted"] += replace_holders(
+                    cur, patent_id, record.get("holders", []),
+                )
+                stats["inventors_inserted"] += replace_inventors(
+                    cur, patent_id, record.get("inventors", []),
+                )
+                stats["attorneys_inserted"] += replace_attorneys(
+                    cur, patent_id, record.get("attorneys", []),
+                )
+                stats["priorities_inserted"] += replace_priorities(
+                    cur, patent_id, record.get("priorities", []),
+                )
+                stats["figures_inserted"] += replace_figures(
+                    cur, patent_id, record.get("figures", []),
+                )
+                stats["records_processed"] += 1
+        conn.commit()
+    except Exception:
+        if owns_connection:
+            conn.rollback()
+        raise
+    finally:
+        if owns_connection:
+            conn.close()
+
+    stats["status"] = "ok"
+    return stats
