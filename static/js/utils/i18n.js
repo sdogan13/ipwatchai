@@ -33,7 +33,7 @@ window.AppI18n._locale = _safeStorageGet('app_locale') || 'tr';
 window.AppI18n._strings = {};
 window.AppI18n._ready = false;
 window.AppI18n._callbacks = [];
-window.AppI18n._localeAssetVersion = '61';
+window.AppI18n._localeAssetVersion = '62';
 window.AppI18n._localeBundleCachePrefix = 'app_locale_bundle::';
 window.AppI18n._requestToken = 0;
 
@@ -229,6 +229,23 @@ var t = window.AppI18n.t;
 // Restore the last versioned locale bundle synchronously so Alpine bindings can
 // render translated copy immediately while the network refresh happens.
 window.AppI18n._hydrateLocaleFromCache(window.AppI18n._locale, false);
+
+// Defer Alpine.js initialization until the locale bundle is ready, so the
+// first paint of `x-text="t('...')"` directives renders against a populated
+// `_strings` map. Without this, first-time visitors and anyone with a stale
+// locale-cache version see raw keys ("landing.nav_search") because Alpine
+// evaluates t() before the fetch resolves and never re-runs the directive
+// when the locale-changed event fires.
+//
+// 3-second hard timeout so a slow / failed locale fetch doesn't lock the
+// page forever — Alpine will start with the partial / empty bundle.
+window.deferLoadingAlpine = function (startAlpine) {
+    if (window.AppI18n._ready) { startAlpine(); return; }
+    var fired = false;
+    var fire = function () { if (fired) return; fired = true; startAlpine(); };
+    window.AppI18n.onReady(fire);
+    setTimeout(fire, 3000);
+};
 
 // Auto-load saved locale on script load
 window.AppI18n.setLocale(window.AppI18n._locale, { skipCacheHydrate: true });
