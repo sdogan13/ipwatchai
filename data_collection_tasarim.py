@@ -243,6 +243,7 @@ class CLIArgs:
     limit: Optional[int]
     headless: bool
     bulletins_root: Path
+    issue: Optional[str] = None
 
 
 def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
@@ -250,6 +251,14 @@ def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
     parser = argparse.ArgumentParser(prog="data_collection_tasarim", add_help=True)
     parser.add_argument("--full", action="store_true", help="walk the entire archive")
     parser.add_argument("--limit", type=int, default=None, help="stop after N downloads")
+    parser.add_argument(
+        "--issue",
+        type=str,
+        default=None,
+        help="restrict to a single bulletin issue number (e.g. --issue 240). "
+             "Implies --full so the incremental tracker doesn't stop early "
+             "before reaching the targeted issue.",
+    )
     parser.add_argument(
         "--headless",
         type=_parse_bool,
@@ -263,11 +272,15 @@ def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
         help=f"output root (default: {_LOCAL_DEFAULT_BULLETINS_DIR})",
     )
     ns = parser.parse_args(argv)
+    # --issue implies --full: the incremental tracker would otherwise stop
+    # walking the archive before reaching old bulletins.
+    full = ns.full or ns.issue is not None
     return CLIArgs(
-        full=ns.full,
+        full=full,
         limit=ns.limit,
         headless=ns.headless,
         bulletins_root=ns.bulletins_root,
+        issue=ns.issue.strip() if ns.issue else None,
     )
 
 
@@ -730,6 +743,11 @@ async def run_collection(args: CLIArgs) -> CollectionCounters:
                     if not card_id or card_id in seen:
                         continue
 
+                    # --issue NNN: silently skip every other card on the page
+                    # so we focus the walk on just the targeted bulletin.
+                    if args.issue is not None and card_id != args.issue:
+                        continue
+
                     if tracker is not None:
                         if not tracker.observe(card_date=card_date):
                             seen.add(card_id)
@@ -745,6 +763,20 @@ async def run_collection(args: CLIArgs) -> CollectionCounters:
                                         card_id, card_date or "?")
                             continue
 
+                    # --issue NNN: skip the download if this bulletin is
+                    # already complete on disk (idempotent re-run friendly),
+                    # then stop after we've handled the targeted card.
+                    if args.issue is not None and check_local_existence(
+                        args.bulletins_root, card_id, card_date=card_date,
+                    ):
+                        seen.add(card_id)
+                        counters.skipped += 1
+                        logger.info(
+                            "[=] %s [%s] already complete locally, --issue stop",
+                            card_id, card_date or "?",
+                        )
+                        return counters
+
                     issue_counters = await process_card(
                         page, context, clickable, args.bulletins_root, card_id, card_date,
                     )
@@ -753,6 +785,13 @@ async def run_collection(args: CLIArgs) -> CollectionCounters:
                     counters.skipped += issue_counters.skipped
                     pass_downloads += issue_counters.downloaded
                     seen.add(card_id)
+
+                    # --issue NNN early-stop: we've now processed the one
+                    # bulletin we were targeting; no point walking further.
+                    if args.issue is not None:
+                        logger.info("[*] --issue %s handled, stopping walk", args.issue)
+                        return counters
+
                     await force_close_menus(page)
                     await page.wait_for_timeout(200)
 

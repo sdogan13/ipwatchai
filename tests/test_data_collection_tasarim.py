@@ -250,6 +250,34 @@ def test_parse_argv_custom_bulletins_root(tmp_path):
     assert args.bulletins_root == tmp_path / "elsewhere"
 
 
+def test_parse_argv_issue_implies_full():
+    """``--issue NNN`` must force --full=True so the incremental tracker
+    doesn't stop walking the archive before reaching old bulletins."""
+    args = parse_argv(["--issue", "240"])
+    assert args.issue == "240"
+    assert args.full is True
+
+
+def test_parse_argv_issue_combined_with_full_explicit():
+    """Passing --full alongside --issue is fine (both same effect)."""
+    args = parse_argv(["--issue", "240", "--full"])
+    assert args.issue == "240"
+    assert args.full is True
+
+
+def test_parse_argv_issue_strips_whitespace():
+    """``--issue " 240 "`` -> issue=='240' so users can paste-with-spaces."""
+    args = parse_argv(["--issue", "  240  "])
+    assert args.issue == "240"
+
+
+def test_parse_argv_issue_default_is_none():
+    """Without --issue, the field is None and full follows its own default."""
+    args = parse_argv([])
+    assert args.issue is None
+    assert args.full is False
+
+
 # ---------------------------------------------------------------------------
 # CollectionCounters
 # ---------------------------------------------------------------------------
