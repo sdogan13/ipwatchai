@@ -222,6 +222,7 @@
                             <template x-for="cls in suggestedClasses" :key="cls.class_number">
                                 <button @click="selectClass(cls)"
                                     class="group flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+                                    :title="cls.reason || ''"
                                     :style="selectedClasses.includes(cls.class_number)
                                             ? 'background:var(--color-primary);color:white;box-shadow:0 2px 8px rgba(99,102,241,0.3)'
                                             : 'background:var(--color-bg-muted);color:var(--color-text-secondary);border:1px solid var(--color-border)'">
@@ -1178,7 +1179,23 @@
                    body: JSON.stringify({ description: desc, language: locale, count: 5 }),
                  })
                    .then(function(r){
-                     if (r.status === 402) { self.designClassError = self.t('design_search.locarno_ai_no_credits'); return null; }
+                     if (r.status === 401 || r.status === 402 || r.status === 403) {
+                       return r.json().catch(function(){ return {}; }).then(function(j){
+                         var d = (j && j.detail) || {};
+                         var handled = window.AppUpgradeModal
+                           && typeof window.AppUpgradeModal.maybeHandle === 'function'
+                           && window.AppUpgradeModal.maybeHandle(d, 'class_suggestions');
+                         if (!handled) {
+                           var msg = locale === 'en'
+                             ? (d.message_en || d.message)
+                             : (d.message || d.message_en);
+                           self.designClassError = msg || self.t('design_search.locarno_ai_no_credits');
+                         } else {
+                           self.designClassError = '';
+                         }
+                         return null;
+                       });
+                     }
                      if (!r.ok) throw new Error('failed');
                      return r.json();
                    })

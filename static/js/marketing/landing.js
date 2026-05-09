@@ -32,6 +32,10 @@ function landing() {
         riskReportLoading: false,
         riskReportError: '',
         riskReport: null,
+        // Sort mode for the results list — mirrors dashboard's sortMode.
+        // Public landing has no risk_report sort because risk report is a
+        // dashboard-only feature.
+        sortMode: 'risk_desc',
 
         // Search history state
         searchHistory: [],
@@ -1551,13 +1555,35 @@ function landing() {
                 body: JSON.stringify({ description: desc, top_k: 5 })
             })
                 .then(function (res) {
-                    if (!res.ok) throw new Error('Suggestion failed');
-                    return res.json();
+                    if (res.ok) return res.json().then(function (d) { return { ok: true, data: d }; });
+                    return res.json().catch(function () { return {}; }).then(function (d) {
+                        return { ok: false, status: res.status, detail: d && d.detail };
+                    });
                 })
-                .then(function (data) {
-                    self.suggestedClasses = data.suggestions || [];
-                    if (self.suggestedClasses.length === 0) {
-                        self.classError = self.t('search.no_class_suggestions');
+                .then(function (r) {
+                    if (r.ok) {
+                        self.suggestedClasses = r.data.suggestions || [];
+                        if (self.suggestedClasses.length === 0) {
+                            self.classError = self.t('search.no_class_suggestions');
+                        }
+                        return;
+                    }
+                    self.suggestedClasses = [];
+                    if (r.status === 401 || r.status === 402 || r.status === 403) {
+                        var d = r.detail || {};
+                        var handled = window.AppUpgradeModal
+                            && typeof window.AppUpgradeModal.maybeHandle === 'function'
+                            && window.AppUpgradeModal.maybeHandle(d, 'class_suggestions');
+                        if (!handled) {
+                            var msg = (window.AppI18n && window.AppI18n.locale === 'en')
+                                ? (d.message_en || d.message)
+                                : (d.message || d.message_en);
+                            self.classError = msg || self.t('search.class_suggestion_upgrade_required');
+                        } else {
+                            self.classError = '';
+                        }
+                    } else {
+                        self.classError = self.t('search.class_suggestion_failed');
                     }
                 })
                 .catch(function () {
@@ -2380,6 +2406,40 @@ function landing() {
                 if (this.searchResults[i].risk_score >= 0.65) return true;
             }
             return false;
+        },
+
+        // Mirror of dashboard's sortedResults getter — supports
+        // similarity (risk_desc/asc) and application date (date_desc/asc).
+        // The dashboard's risk_report_desc mode is omitted since the public
+        // landing page has no risk-report feature.
+        _getResultScore: function (r) {
+            if (r && r.scores && r.scores.total != null) return r.scores.total;
+            if (r && r.risk_score != null) return r.risk_score;
+            return 0;
+        },
+        _parseResultDate: function (s) {
+            if (!s) return 0;
+            var t = Date.parse(s);
+            return isNaN(t) ? 0 : t;
+        },
+        get sortedResults() {
+            var arr = (this.searchResults || []).slice();
+            var self = this;
+            var mode = this.sortMode;
+            if (mode === 'risk_desc') {
+                arr.sort(function (a, b) { return self._getResultScore(b) - self._getResultScore(a); });
+            } else if (mode === 'risk_asc') {
+                arr.sort(function (a, b) { return self._getResultScore(a) - self._getResultScore(b); });
+            } else if (mode === 'date_desc') {
+                arr.sort(function (a, b) { return self._parseResultDate(b.application_date) - self._parseResultDate(a.application_date); });
+            } else if (mode === 'date_asc') {
+                arr.sort(function (a, b) { return self._parseResultDate(a.application_date) - self._parseResultDate(b.application_date); });
+            }
+            return arr;
+        },
+        sortResults: function () {
+            // Reactivity touch — Alpine recomputes the getter when sortMode changes.
+            void this.sortMode;
         },
 
         getStudioCtaTitle: function () {

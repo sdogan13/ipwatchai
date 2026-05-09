@@ -587,6 +587,11 @@
         if (window.AppToast && typeof window.AppToast.success === "function") {
           window.AppToast.success(t("watchlist.add_to_watchlist", "Added to watchlist"));
         }
+        // Land the user on the Tasarım Takibi tab so they immediately see
+        // the new row (toast persists across the tab switch).
+        if (typeof window.showDashboardTab === "function") {
+          window.showDashboardTab("design-watchlist");
+        }
       } else {
         var detail = null;
         try { detail = (await resp.json()).detail; } catch (e) {}

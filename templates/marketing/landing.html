@@ -15,7 +15,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32.png?v=20260427">
     <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png?v=20260427">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon.png?v=20260427">
-    <script src="/static/js/utils/auth-guard.js?v=1"></script>
+    <script src="/static/js/utils/auth-guard.js?v=2"></script>
 
     <!-- Preconnect -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -652,7 +652,21 @@
 
         <!-- Search Results (scrollable) -->
         <div x-show="searchResults.length > 0" x-cloak class="max-w-2xl mx-auto text-left mb-6">
-            <div class="mb-3 text-sm font-medium" style="color:var(--color-text-secondary)" x-text="t('landing.top_matches', { count: searchResults.length })"></div>
+            <div class="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+                <div class="text-sm font-medium" style="color:var(--color-text-secondary)" x-text="t('landing.top_matches', { count: searchResults.length })"></div>
+                <!-- Sort bar (mirrors dashboard sort UX: similarity ↑/↓, application date ↑/↓) -->
+                <div class="flex items-center gap-2 ml-auto">
+                    <span class="text-xs" style="color:var(--color-text-muted)" x-text="t('sort.label')"></span>
+                    <select x-model="sortMode" @change="sortResults()"
+                        class="text-sm rounded-lg px-2 py-1.5 pr-7 cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        style="border:1px solid var(--color-border-input);background:var(--color-bg-input);color:var(--color-text-secondary)">
+                        <option value="risk_desc" x-text="t('sort.risk_desc')"></option>
+                        <option value="risk_asc" x-text="t('sort.risk_asc')"></option>
+                        <option value="date_desc" x-text="t('sort.date_desc')"></option>
+                        <option value="date_asc" x-text="t('sort.date_asc')"></option>
+                    </select>
+                </div>
+            </div>
 
             <!-- Advisory risk report -->
             <div x-show="riskReportLoading || riskReportError" x-cloak
@@ -811,7 +825,7 @@
 
             <div class="relative">
                 <div x-ref="resultsScroll" @scroll="resultsAtBottom = ($refs.resultsScroll.scrollTop + $refs.resultsScroll.clientHeight >= $refs.resultsScroll.scrollHeight - 8)" class="max-h-[420px] overflow-y-auto space-y-3 pr-1" style="scrollbar-width:thin;scroll-behavior:smooth">
-                    <template x-for="(r, i) in searchResults" :key="i">
+                    <template x-for="(r, i) in sortedResults" :key="i">
                         <div class="rounded-xl overflow-hidden transition-all" style="background:var(--color-bg-card);border:1px solid var(--color-border);box-shadow:var(--shadow-card)">
                             <!-- Clickable header row -->
                             <div class="flex items-center gap-3 p-4 cursor-pointer" @click="expandedResult = (expandedResult === i ? null : i)">
@@ -896,6 +910,13 @@
                                         <div x-show="r.registration_no" class="flex gap-1.5">
                                             <span style="color:var(--color-text-muted)" x-text="t('landing.detail_reg_no') + ':'">Tescil No:</span>
                                             <span class="font-medium" style="color:var(--color-text-primary)" x-text="r.registration_no"></span>
+                                        </div>
+                                        <!-- Turkish translation (only when it differs from the displayed name) -->
+                                        <div x-show="r.name_tr && r.name_tr.toLowerCase() !== ((r.name || r.trademark_name || '')).toLowerCase()"
+                                            class="flex gap-1.5">
+                                            <span style="color:var(--color-text-muted)">TR:</span>
+                                            <span class="font-medium" style="color:var(--color-text-primary)"
+                                                x-text="r.name_tr"></span>
                                         </div>
                                         <!-- Extracted Goods: Var/Yok -->
                                         <div class="flex gap-1.5 sm:col-span-2">
@@ -2345,11 +2366,11 @@
     <script>
         window.SERVER_PLANS = {{ plans | default({}, true) | tojson }};
     </script>
-    <script src="/static/js/utils/i18n.js?v=51"></script>
+    <script src="/static/js/utils/i18n.js?v=58"></script>
 <script src="/static/js/utils/helpers.js?v=34"></script>
 <script src="/static/js/utils/toast.js?v=32"></script>
-<script src="/static/js/utils/upgrade-modal.js?v=8"></script>
+<script src="/static/js/utils/upgrade-modal.js?v=10"></script>
 <script src="/static/js/components/score-badge.js?v=33"></script>
-<script src="/static/js/marketing/landing.js?v=64"></script>
+<script src="/static/js/marketing/landing.js?v=67"></script>
 </body>
 </html>

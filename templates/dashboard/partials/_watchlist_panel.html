@@ -1,5 +1,36 @@
-<!-- Tab: Watchlist -->
-<main id="tab-content-watchlist" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 md:py-8 hidden">
+<!-- Tab: Watchlist (unified — Marka + Tasarım sub-views) -->
+<main id="tab-content-watchlist"
+      x-data="{ watchlistView: (localStorage.getItem('watchlistView') === 'design' ? 'design' : 'trademark') }"
+      x-init="$watch('watchlistView', v => { try { localStorage.setItem('watchlistView', v); } catch(_){} });
+              if (watchlistView === 'design' && typeof window.initDesignWatchlistTab === 'function') {
+                  window.initDesignWatchlistTab();
+              }"
+      class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 md:py-8 hidden">
+
+    <!-- Sub-view toggle: Marka ↔ Tasarım. Kept above both sub-views; each
+         sub-view owns its own header / controls. Selection persists via
+         localStorage so the user lands on their last-used view. -->
+    <div class="mb-5 inline-flex rounded-xl p-1"
+         style="background:var(--color-bg-muted);border:1px solid var(--color-border)">
+        <button type="button"
+                @click="watchlistView = 'trademark'"
+                class="px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                :class="watchlistView === 'trademark' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
+                :style="watchlistView === 'trademark' ? '' : 'color:var(--color-text-muted)'"
+                x-text="t('watchlist.view_trademark')">Marka</button>
+        <button type="button"
+                @click="watchlistView = 'design';
+                        if (typeof window.initDesignWatchlistTab === 'function') window.initDesignWatchlistTab();"
+                class="px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                :class="watchlistView === 'design' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
+                :style="watchlistView === 'design' ? '' : 'color:var(--color-text-muted)'"
+                x-text="t('watchlist.view_design')">Tasarım</button>
+    </div>
+
+    <!-- ============================================
+         TRADEMARK SUB-VIEW
+         ============================================ -->
+    <div x-show="watchlistView === 'trademark'">
 
     <!-- Header -->
     <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-3">
@@ -152,6 +183,15 @@
             </div>
             <div id="wl-page-info" class="text-xs text-center mt-2 hidden" style="color:var(--color-text-faint)"></div>
         </div>
+    </div>
+
+    </div><!-- /trademark sub-view -->
+
+    <!-- ============================================
+         DESIGN (TASARIM) SUB-VIEW
+         ============================================ -->
+    <div x-show="watchlistView === 'design'" x-cloak>
+        {% include 'dashboard/partials/_watchlist_design_subview.html' %}
     </div>
 </main>
 

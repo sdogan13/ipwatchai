@@ -319,13 +319,36 @@ function dashboard() {
                 body: JSON.stringify({ description: desc, top_k: 5, lang: self.currentLang || 'tr' })
             })
                 .then(function (res) {
-                    if (!res.ok) throw new Error('Suggestion failed');
-                    return res.json();
+                    if (res.ok) return res.json().then(function (d) { return { ok: true, data: d }; });
+                    return res.json().catch(function () { return {}; }).then(function (d) {
+                        return { ok: false, status: res.status, detail: d && d.detail };
+                    });
                 })
-                .then(function (data) {
-                    self.suggestedClasses = data.suggestions || [];
-                    if (self.suggestedClasses.length === 0) {
-                        self.classError = self.t('search.no_class_suggestions');
+                .then(function (r) {
+                    if (r.ok) {
+                        self.suggestedClasses = r.data.suggestions || [];
+                        if (self.suggestedClasses.length === 0) {
+                            self.classError = self.t('search.no_class_suggestions');
+                        }
+                        return;
+                    }
+                    self.suggestedClasses = [];
+                    if (r.status === 401 || r.status === 402 || r.status === 403) {
+                        var d = r.detail || {};
+                        var handled = window.AppUpgradeModal
+                            && typeof window.AppUpgradeModal.maybeHandle === 'function'
+                            && window.AppUpgradeModal.maybeHandle(d, 'class_suggestions');
+                        if (!handled) {
+                            var msg = (window.AppI18n && window.AppI18n.locale === 'en')
+                                ? (d.message_en || d.message)
+                                : (d.message || d.message_en);
+                            self.classError = msg || self.t('search.class_suggestion_upgrade_required');
+                        } else {
+                            // Modal is showing — clear inline error so it's not duplicated.
+                            self.classError = '';
+                        }
+                    } else {
+                        self.classError = self.t('search.class_suggestion_failed');
                     }
                 })
                 .catch(function () {
@@ -1063,6 +1086,9 @@ function dashboard() {
                     _setScanInProgress(_getScanDurationMs(1), 'item');
                 }
                 if (typeof refreshWatchlistAndStats === 'function') refreshWatchlistAndStats();
+                // Land the user on the Watchlist tab so they immediately see
+                // the new row (toast persists across tab switches).
+                if (typeof showDashboardTab === 'function') showDashboardTab('watchlist');
             } catch (e) {
                 if (e.status === 409) {
                     showToast(this.t('watchlist.already_watching'), 'info');
@@ -2270,8 +2296,17 @@ function buyCredits(amount) {
 // TAB SWITCHING
 // ============================================
 function showDashboardTab(tabId) {
+    // Backwards-compat: 'design-watchlist' is now a sub-view of the unified
+    // Watchlist tab. Redirect callers (deep-links, recent post-add navigation
+    // in design_search.js) to the merged tab and remember the sub-view so
+    // the panel renders Tasarım on activation.
+    if (tabId === 'design-watchlist') {
+        try { localStorage.setItem('watchlistView', 'design'); } catch (_) {}
+        tabId = 'watchlist';
+    }
+
     // Hide ALL tab content panels
-    var panels = ['overview', 'watchlist', 'search', 'design-watchlist', 'opposition-radar', 'ai-studio', 'reports', 'applications'];
+    var panels = ['overview', 'watchlist', 'search', 'opposition-radar', 'ai-studio', 'reports', 'applications'];
     panels.forEach(function (id) {
         var el = document.getElementById('tab-content-' + id);
         if (el) el.classList.add('hidden');
@@ -2321,6 +2356,14 @@ function showDashboardTab(tabId) {
     }
     if (tabId === 'watchlist') {
         initWatchlistTab();
+        // The Watchlist tab hosts both Marka and Tasarım sub-views. When the
+        // user is restoring (or being routed to) the design sub-view we also
+        // need to lazy-init the design list. Idempotent; safe to call twice.
+        var savedView = '';
+        try { savedView = localStorage.getItem('watchlistView') || ''; } catch (_) {}
+        if (savedView === 'design' && typeof window.initDesignWatchlistTab === 'function') {
+            window.initDesignWatchlistTab();
+        }
     }
     if (tabId === 'overview') {
         // Pull fresh stats so any change made elsewhere in the dashboard
@@ -2352,10 +2395,9 @@ function showDashboardTab(tabId) {
     if (tabId === 'search' && typeof window.initDesignSearchTab === 'function') {
         window.initDesignSearchTab();
     }
-    // Lazy-init design watchlist tab on first activation
-    if (tabId === 'design-watchlist' && typeof window.initDesignWatchlistTab === 'function') {
-        window.initDesignWatchlistTab();
-    }
+    // (Legacy 'design-watchlist' tab id is redirected to the merged
+    // Watchlist tab above; the design init runs from the watchlist branch
+    // when the saved sub-view is 'design'.)
 }
 
 // ============================================
@@ -6835,6 +6877,12 @@ function submitBulkUpload() {
             _setScanInProgress(_getScanDurationMs(queuedScans), 'bulk');
         }
         refreshWatchlistAndStats();
+        // Land the user on the Watchlist tab so they see the new rows when
+        // they close the upload modal. Don't auto-close the modal — they
+        // may want to read the skipped / error counts.
+        if ((s.added || 0) > 0 && typeof showDashboardTab === 'function') {
+            showDashboardTab('watchlist');
+        }
     }).catch(function (e) {
         if (e && e.status === 403) {
             var stepTwoVisible = !document.getElementById('upload-wl-step-2').classList.contains('hidden');
