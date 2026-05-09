@@ -47,8 +47,8 @@ import json
 import logging
 import re
 import sys
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -728,3 +728,217 @@ def merge_records(
         deferred_publication=pdf.deferred_publication,
         source_format="BOTH",
     )
+
+
+# ---------------------------------------------------------------------------
+# Step 3.5 — reconcile_metadata orchestrator
+# ---------------------------------------------------------------------------
+
+
+def _normalise_bulletin_no(raw: Any) -> Optional[str]:
+    """Coerce a bulletin_no value to a comparable string. CD ships str
+    (``"240"``), PDF ships int (``240``); both need to compare equal
+    when checking for cross-doc consistency."""
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    return s or None
+
+
+def _utcnow_iso() -> str:
+    """Current UTC time as ISO 8601 with seconds precision."""
+    return datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
+
+
+def _is_hague_record(record: CanonicalDesignRecord) -> bool:
+    """A record is Hague-shaped when either:
+      - PDF tagged it with ``section == "hague"``, or
+      - its application_no carries the ``DM/`` prefix (CD-side dossier
+        for an international design — IDDOSSIER ships application_no
+        like ``"DM/086402"``)."""
+    if record.section == "hague":
+        return True
+    appno = record.application_no
+    if appno and appno.upper().startswith("DM/"):
+        return True
+    return False
+
+
+def _pair_key(record: CanonicalDesignRecord) -> Optional[str]:
+    """Compute the cross-source pairing key for one record.
+
+    TR records pair by ``application_no``. Hague records pair by the
+    normalised registration_no (PDF's ``"DM 244882"`` and CD's
+    ``"DM244882"``/``"DM 244882"`` both collapse to ``"DM244882"``).
+
+    Returns ``None`` when no usable key is available — the record
+    will pass through as a single-side entry without any pairing
+    attempt.
+    """
+    if _is_hague_record(record):
+        return _normalise_registration_no(record.registration_no)
+    return record.application_no
+
+
+def _record_to_dict(rec: CanonicalDesignRecord) -> Dict[str, Any]:
+    """Serialise a record into JSON-ready dict, dropping None scalars
+    so the merged JSON stays tidy. Empty lists are preserved (downstream
+    distinguishes ``"no holders"`` from ``"field absent"``).
+
+    asdict recursively converts nested CanonicalDesign / CanonicalDesignView
+    dataclasses to dicts, which is exactly the shape we want on disk.
+    """
+    out = asdict(rec)
+    return {k: v for k, v in out.items() if v is not None}
+
+
+def _build_stats(records: List[CanonicalDesignRecord]) -> Dict[str, Any]:
+    """Aggregate stats for the reconciler's stats block.
+
+    The headline number is ``by_source_format`` — the CD/PDF/BOTH
+    distribution tells the operator how much of the issue actually
+    came from a paired merge vs a single-side passthrough.
+    ``views_by_source`` is a sanity check: every cd-tagged view should
+    correspond to a real file under cd_images/, every pdf-tagged
+    view to a file under images/.
+    """
+    by_source_format = {"CD": 0, "PDF": 0, "BOTH": 0}
+    by_section: Dict[str, int] = {}
+    designs_total = 0
+    views_total = 0
+    views_by_source = {"cd": 0, "pdf": 0, "none": 0}
+
+    for rec in records:
+        by_source_format[rec.source_format] = (
+            by_source_format.get(rec.source_format, 0) + 1
+        )
+        section = rec.section or "unknown"
+        by_section[section] = by_section.get(section, 0) + 1
+        designs_total += len(rec.designs)
+        for design in rec.designs:
+            for view in design.views:
+                views_total += 1
+                source = view.image_source or "none"
+                views_by_source[source] = views_by_source.get(source, 0) + 1
+
+    return {
+        "records": len(records),
+        "by_source_format": by_source_format,
+        "by_section": by_section,
+        "designs_total": designs_total,
+        "views_total": views_total,
+        "views_by_source": views_by_source,
+    }
+
+
+def reconcile_metadata(
+    cd_doc: Optional[Dict[str, Any]] = None,
+    pdf_doc: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Merge two per-issue metadata docs into one canonical document.
+
+    Inputs are dicts as produced by ``load_cd_metadata`` / ``load_pdf_metadata``.
+    Either may be ``None`` for single-side reconcile:
+      - CD-only:  legacy bulletins where no modern PDF was collected
+      - PDF-only: modern bulletins where no CD was ever produced
+
+    Output document shape::
+
+        {
+          "bulletin_no":   "240",
+          "bulletin_date": "2016-03-09",
+          "source_archive": "240_CD.rar",  # from cd_doc when present
+          "source_pdf":    "bulletin.pdf", # from pdf_doc when present
+          "reconciled_at": "2026-...",
+          "stats":   { ... see _build_stats ... },
+          "records": [ canonical record dict, ... ],   # sorted
+          "cd_annotations": [ ... passthrough from cd_doc ... ],
+        }
+
+    Pairing key:
+      - TR records: ``application_no``
+      - Hague:      normalised ``registration_no`` (whitespace/case
+                    insensitive)
+
+    Raises:
+      - ``ValueError`` when both ``cd_doc`` and ``pdf_doc`` are ``None``.
+      - ``ValueError`` when both docs are present but their
+        ``bulletin_no`` values disagree (silently merging two
+        different bulletins would be catastrophic).
+
+    PDF events (``events.json``) are intentionally NOT included in the
+    output — they live as a sibling file in the TS folder. CD's
+    ``annotations`` array passes through unchanged as
+    ``cd_annotations`` per the locked Q3 decision.
+    """
+    if cd_doc is None and pdf_doc is None:
+        raise ValueError(
+            "reconcile_metadata requires at least one of cd_doc / pdf_doc"
+        )
+
+    cd_bulletin = _normalise_bulletin_no(cd_doc.get("bulletin_no")) if cd_doc else None
+    pdf_bulletin = _normalise_bulletin_no(pdf_doc.get("bulletin_no")) if pdf_doc else None
+
+    if cd_doc is not None and pdf_doc is not None:
+        if cd_bulletin != pdf_bulletin:
+            raise ValueError(
+                f"bulletin_no mismatch: CD={cd_bulletin!r} PDF={pdf_bulletin!r} "
+                f"(reconcile would silently produce wrong overlap; aborting)"
+            )
+
+    cd_records = (
+        [normalize_cd_dossier(d) for d in cd_doc.get("dossiers", []) or []]
+        if cd_doc is not None else []
+    )
+    pdf_records = (
+        [normalize_pdf_record(r) for r in pdf_doc.get("records", []) or []]
+        if pdf_doc is not None else []
+    )
+
+    cd_by_key: Dict[str, CanonicalDesignRecord] = {}
+    for rec in cd_records:
+        key = _pair_key(rec)
+        if key:
+            cd_by_key[key] = rec
+
+    merged: List[CanonicalDesignRecord] = []
+    matched_keys: set = set()
+
+    for pdf_rec in pdf_records:
+        key = _pair_key(pdf_rec)
+        cd_match = cd_by_key.get(key) if key else None
+        if cd_match is not None:
+            merged.append(merge_records(cd_match, pdf_rec))
+            matched_keys.add(key)
+        else:
+            merged.append(pdf_rec)  # source_format already "PDF"
+
+    for cd_rec in cd_records:
+        key = _pair_key(cd_rec)
+        if key and key in matched_keys:
+            continue
+        merged.append(cd_rec)  # source_format already "CD"
+
+    # Sort for deterministic output. Application_no first (most records
+    # have one); registration_no as the tiebreak for Hague-only records.
+    merged.sort(key=lambda r: (r.application_no or "", r.registration_no or ""))
+
+    bulletin_no = cd_bulletin or pdf_bulletin
+    bulletin_date = (
+        (cd_doc.get("bulletin_date") if cd_doc else None)
+        or (pdf_doc.get("bulletin_date") if pdf_doc else None)
+    )
+    source_archive = cd_doc.get("source_archive") if cd_doc else None
+    source_pdf = pdf_doc.get("source") if pdf_doc else None
+    cd_annotations = list(cd_doc.get("annotations", []) or []) if cd_doc else []
+
+    return {
+        "bulletin_no":   bulletin_no,
+        "bulletin_date": bulletin_date,
+        "source_archive": source_archive,
+        "source_pdf":    source_pdf,
+        "reconciled_at": _utcnow_iso(),
+        "stats":         _build_stats(merged),
+        "records":       [_record_to_dict(r) for r in merged],
+        "cd_annotations": cd_annotations,
+    }

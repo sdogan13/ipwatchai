@@ -20,10 +20,12 @@ from pipeline.reconcile_tasarim import (
     merge_records,
     normalize_cd_dossier,
     normalize_pdf_record,
+    reconcile_metadata,
 )
 from pipeline.reconcile_tasarim import (
     _clean_str,
     _dmy_to_iso,
+    _normalise_bulletin_no,
     _normalise_registration_no,
     _parse_design_count,
 )
@@ -942,3 +944,201 @@ def test_merge_records_source_format_is_BOTH():
     """Tag the merged record so downstream knows it came from a real pair."""
     out = merge_records(_cd_record(), _pdf_record())
     assert out.source_format == "BOTH"
+
+
+# ---------------------------------------------------------------------------
+# Step 3.5 — _normalise_bulletin_no + reconcile_metadata
+# ---------------------------------------------------------------------------
+
+def test_normalise_bulletin_no_handles_str_and_int():
+    """CD ships str ('240'), PDF ships int (240) — both equal '240'."""
+    assert _normalise_bulletin_no("240") == "240"
+    assert _normalise_bulletin_no(240) == "240"
+    assert _normalise_bulletin_no("  240  ") == "240"
+    assert _normalise_bulletin_no(None) is None
+    assert _normalise_bulletin_no("") is None
+
+
+def test_reconcile_metadata_requires_at_least_one_doc():
+    with pytest.raises(ValueError, match=r"requires at least one"):
+        reconcile_metadata()
+
+
+def test_reconcile_metadata_bulletin_no_mismatch_raises():
+    cd = _minimal_cd_doc()
+    cd["bulletin_no"] = "240"
+    pdf = _minimal_pdf_doc()
+    pdf["bulletin_no"] = 250
+    with pytest.raises(ValueError, match=r"bulletin_no mismatch"):
+        reconcile_metadata(cd_doc=cd, pdf_doc=pdf)
+
+
+def test_reconcile_metadata_str_int_bulletin_compare_equal():
+    """CD '240' (str) and PDF 240 (int) MUST not raise — they describe
+    the same bulletin."""
+    cd = _minimal_cd_doc()
+    pdf = _minimal_pdf_doc()
+    out = reconcile_metadata(cd_doc=cd, pdf_doc=pdf)
+    assert out["bulletin_no"] == "240"
+    assert out["records"] == []
+
+
+def test_reconcile_metadata_cd_only_passes_records_through():
+    """Single-side CD reconcile: every record carries source_format='CD'."""
+    cd = _minimal_cd_doc()
+    cd["dossiers"] = [_real_cd_dossier_2016_01059()]
+    out = reconcile_metadata(cd_doc=cd)
+    assert len(out["records"]) == 1
+    assert out["records"][0]["source_format"] == "CD"
+    assert out["records"][0]["application_no"] == "2016/01059"
+    assert out["source_archive"] is None or out["source_archive"] == cd.get("source_archive")
+    assert out["source_pdf"] is None
+    assert out["stats"]["by_source_format"] == {"CD": 1, "PDF": 0, "BOTH": 0}
+
+
+def test_reconcile_metadata_pdf_only_passes_records_through():
+    pdf = _minimal_pdf_doc()
+    pdf["records"] = [_real_pdf_record_2024_007254()]
+    out = reconcile_metadata(pdf_doc=pdf)
+    assert len(out["records"]) == 1
+    assert out["records"][0]["source_format"] == "PDF"
+    assert out["records"][0]["section"] == "tr_native"
+    assert out["stats"]["by_source_format"] == {"CD": 0, "PDF": 1, "BOTH": 0}
+
+
+def test_reconcile_metadata_pairs_tr_records_by_application_no():
+    """The headline test: CD dossier and PDF record with the same
+    application_no get merged into one BOTH-tagged record."""
+    cd = _minimal_cd_doc()
+    cd["dossiers"] = [_real_cd_dossier_2016_01059()]
+    pdf = _minimal_pdf_doc()
+    pdf_record = _real_pdf_record_2024_007254()
+    pdf_record["application_no"] = "2016/01059"  # match the CD dossier
+    pdf["records"] = [pdf_record]
+
+    out = reconcile_metadata(cd_doc=cd, pdf_doc=pdf)
+    assert len(out["records"]) == 1
+    assert out["records"][0]["source_format"] == "BOTH"
+    # CD wins on registration_no (CD ships "2016 01059", PDF "2024 007254"
+    # for this fabricated test — CD's value is what survives the merge)
+    assert out["records"][0]["registration_no"] == "2016 01059"
+
+
+def test_reconcile_metadata_unmatched_records_kept_as_single_side():
+    """CD records with no PDF counterpart stay as 'CD'; PDF records
+    with no CD counterpart stay as 'PDF'. Mixed inputs allowed."""
+    cd = _minimal_cd_doc()
+    cd["dossiers"] = [_real_cd_dossier_2016_01059()]  # 2016/01059
+    pdf = _minimal_pdf_doc()
+    pdf["records"] = [_real_pdf_record_2024_007254()]  # 2024/007254
+
+    out = reconcile_metadata(cd_doc=cd, pdf_doc=pdf)
+    by_app = {r["application_no"]: r for r in out["records"]}
+    assert by_app["2016/01059"]["source_format"] == "CD"
+    assert by_app["2024/007254"]["source_format"] == "PDF"
+    assert out["stats"]["by_source_format"] == {"CD": 1, "PDF": 1, "BOTH": 0}
+
+
+def test_reconcile_metadata_pairs_hague_by_normalised_registration_no():
+    """Hague pairing key: registration_no with whitespace/case removed.
+    PDF 'DM 244882' and CD with register_no 'DM244882' must pair."""
+    cd_dossier = {
+        "application_no": "DM/244882",       # CD-side Hague form
+        "application_date": "01.01.2024",
+        "register_no": "DM244882",            # CD's Hague reg no without space
+        "register_date": "01.01.2024",
+        "design_count": "1",
+        "type": "",
+        "locarno_codes": ["11-01"],
+        "holders": [],
+        "designers": [],
+        "designs": [{"no": "1", "product_name": "Jewelry", "views": []}],
+    }
+    pdf_record = {
+        "section": "hague",
+        "registration_no": "DM 244882",        # PDF-side Hague reg no with space
+        "filing_date": "2024-02-15",
+        "registration_date": "2024-02-15",
+        "design_count": 1,
+        "locarno_classes": ["11-01"],
+        "applicants": [], "designers": [], "priorities": [],
+        "designs": [{"design_index": 1, "product_name_tr": "Jewelry", "views": []}],
+        "hague_reference": {"wipo_bulletin": "13/2025"},
+    }
+    cd_doc = _minimal_cd_doc()
+    cd_doc["dossiers"] = [cd_dossier]
+    pdf_doc = _minimal_pdf_doc()
+    pdf_doc["records"] = [pdf_record]
+
+    out = reconcile_metadata(cd_doc=cd_doc, pdf_doc=pdf_doc)
+    assert len(out["records"]) == 1
+    assert out["records"][0]["source_format"] == "BOTH"
+    assert out["records"][0]["registration_no"] == "DM244882"   # CD won
+    # PDF-only fields preserved
+    assert out["records"][0]["section"] == "hague"
+    assert out["records"][0]["hague_reference"] == {"wipo_bulletin": "13/2025"}
+
+
+def test_reconcile_metadata_passes_through_cd_annotations():
+    """CD annotations array goes verbatim into the merged doc as
+    'cd_annotations' (separate top-level array per locked Q3 decision)."""
+    cd = _minimal_cd_doc()
+    cd["annotations"] = [
+        {
+            "publication_key": "262752", "application_no": "2011/01410",
+            "request_type": "Yenileme",
+            "content": "(11) 2011 01410 (15) 03.03.2011 ...",
+        },
+    ]
+    out = reconcile_metadata(cd_doc=cd)
+    assert out["cd_annotations"] == cd["annotations"]
+
+
+def test_reconcile_metadata_no_cd_annotations_when_pdf_only():
+    """No CD doc -> empty cd_annotations array."""
+    pdf = _minimal_pdf_doc()
+    out = reconcile_metadata(pdf_doc=pdf)
+    assert out["cd_annotations"] == []
+
+
+def test_reconcile_metadata_top_level_provenance_fields():
+    """source_archive comes from CD doc, source_pdf from PDF doc."""
+    cd = _minimal_cd_doc()
+    cd["source_archive"] = "240_CD.rar"
+    pdf = _minimal_pdf_doc()
+    pdf["source"] = "bulletin.pdf"
+
+    out = reconcile_metadata(cd_doc=cd, pdf_doc=pdf)
+    assert out["source_archive"] == "240_CD.rar"
+    assert out["source_pdf"] == "bulletin.pdf"
+    assert "reconciled_at" in out and "T" in out["reconciled_at"]
+
+
+def test_reconcile_metadata_records_sorted_deterministically():
+    """Records are sorted by (application_no, registration_no) so
+    re-running on identical input yields byte-for-byte identical output."""
+    cd = _minimal_cd_doc()
+    cd["dossiers"] = [
+        {**_real_cd_dossier_2016_01059(), "application_no": "2016/05000"},
+        {**_real_cd_dossier_2016_01059(), "application_no": "2016/01059"},
+        {**_real_cd_dossier_2016_01059(), "application_no": "2016/03000"},
+    ]
+    out = reconcile_metadata(cd_doc=cd)
+    apps = [r["application_no"] for r in out["records"]]
+    assert apps == ["2016/01059", "2016/03000", "2016/05000"]
+
+
+def test_reconcile_metadata_stats_aggregate_correctly():
+    """Stats counters reflect the merged dataset, not the source docs."""
+    cd = _minimal_cd_doc()
+    cd["dossiers"] = [_real_cd_dossier_2016_01059()]  # 1 design, 1 view (cd)
+    pdf = _minimal_pdf_doc()
+    pdf["records"] = [_real_pdf_record_2024_007254()]  # 1 design, 1 view (pdf)
+
+    out = reconcile_metadata(cd_doc=cd, pdf_doc=pdf)
+    s = out["stats"]
+    assert s["records"] == 2
+    assert s["by_source_format"] == {"CD": 1, "PDF": 1, "BOTH": 0}
+    assert s["designs_total"] == 2
+    assert s["views_total"] == 2
+    assert s["views_by_source"] == {"cd": 1, "pdf": 1, "none": 0}
