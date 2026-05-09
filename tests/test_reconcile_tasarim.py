@@ -977,6 +977,30 @@ def test_reconcile_metadata_bulletin_no_mismatch_raises():
         reconcile_metadata(cd_doc=cd, pdf_doc=pdf)
 
 
+def test_reconcile_metadata_bulletin_no_none_on_pdf_side_ok():
+    """pdf_extract_tasarim's footer-regex sometimes misses bulletin_no
+    on legacy PDFs (2016 bulletin format). The caller already chose
+    to put both files in the same TS folder — that's the real pairing
+    signal. Don't reject just because one extractor was less lucky."""
+    cd = _minimal_cd_doc()
+    cd["bulletin_no"] = "240"
+    pdf = _minimal_pdf_doc()
+    pdf["bulletin_no"] = None
+    out = reconcile_metadata(cd_doc=cd, pdf_doc=pdf)
+    assert out["bulletin_no"] == "240"  # CD's value carried through
+
+
+def test_reconcile_metadata_bulletin_no_none_on_cd_side_ok():
+    """Symmetric case: CD's idbulletin.inf NO field could be blank
+    (corrupt archive). PDF's value still establishes the answer."""
+    cd = _minimal_cd_doc()
+    cd["bulletin_no"] = None
+    pdf = _minimal_pdf_doc()
+    pdf["bulletin_no"] = 240
+    out = reconcile_metadata(cd_doc=cd, pdf_doc=pdf)
+    assert out["bulletin_no"] == "240"
+
+
 def test_reconcile_metadata_str_int_bulletin_compare_equal():
     """CD '240' (str) and PDF 240 (int) MUST not raise — they describe
     the same bulletin."""

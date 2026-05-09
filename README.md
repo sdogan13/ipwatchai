@@ -365,6 +365,8 @@ Pipeline modules:
 - `pdf_extract_tasarim_events.py` — events on existing registrations (12 event types: transfer, seizure, renewal, cancellation variants, etc.)
 - `cd_extract_tasarim.py` — HSQLDB CD bundle extractor for legacy issues 230..466. Reads `idbulletin.{script,log,inf}` plus per-application JPEG folders, persists images to `cd_images/{appno_norm}/{d}_{v}.jpg`, emits `cd_metadata.json` with all dossiers, holders, designers, designs, and IDANNOTATION rows. Handles both modern `{N}_CD.rar` and the verbose-named `* cd içeri *.rar` layouts. Hague (`DM/...`) dossiers are emitted with `views: []` (no images on CD)
 - `embeddings_tasarim.py` — DINOv2 + CLIP + HSV per-view embeddings, mean-pooled per design; written back into `metadata.json`
+- `pipeline/reconcile_tasarim.py` — Stage 3 reconciler. Merges per-issue `cd_metadata.json` and `metadata.json` into `merged_metadata.json`. Locked precedence: **CD wins on every overlapping field**, PDF fills gaps. Pairs TR records by `application_no` and Hague by normalised `registration_no`. CD images stay in `cd_images/`; PDF dups at the canonical key are dropped (proactively at extraction time by D.1 + D.2 in pdf_extract_tasarim and cd_extract_tasarim, plus an idempotent `dedupe_images_on_disk` mop-up callable via `--dedupe-images`). Embeddings stay in source `metadata.json`; CD `annotations[]` and PDF `events.json` pass through unchanged
+- `scripts/fix_tasarim_folder_dates.py` — one-shot folder-hygiene script: extracts each `_CD.rar`'s `idbulletin.inf`, finds existing `TS_{N}_*/` folders whose date suffix drifts from the canonical inf DATE (TÜRKPATENT page intermittently reports archive-ingestion dates instead of publication dates), and renames them so subsequent CD output lands in the same folder
 - `pipeline/ingest_designs.py` — DB ingest into `designs`, `design_views`, `design_events` (idempotent)
 
 **Canonical image key**: both `metadata.json` and `cd_metadata.json` use the same string shape for `image_path` — `{appno_norm}/{d}_{v}.jpg`, no leading folder prefix. The folder prefix (`images/` vs `cd_images/`) is provided by the consumer when resolving the key against disk. This lets a future stage-3 reconciler match PDF and CD images by a single string.
@@ -380,6 +382,21 @@ PDF CLI:
 ```powershell
 python pdf_extract_tasarim.py --issue TS_483_2026-04-24             # single issue
 python pdf_extract_tasarim.py --force                               # re-extract; --force wipes images/ for clean slate
+```
+
+Collector CLI:
+```powershell
+python data_collection_tasarim.py                                   # incremental, headless
+python data_collection_tasarim.py --full                            # walk full archive
+python data_collection_tasarim.py --issue 240                       # targeted single-bulletin recovery (implies --full)
+```
+
+Reconciler CLI:
+```powershell
+python -m pipeline.reconcile_tasarim --issue TS_240_2016-03-09      # one folder
+python -m pipeline.reconcile_tasarim --all                          # every TS_*/ folder
+python -m pipeline.reconcile_tasarim --issue ... --force            # overwrite an existing merged_metadata.json
+python -m pipeline.reconcile_tasarim --all --dedupe-images          # also remove pre-existing PDF image dups
 ```
 
 ## Development Rules

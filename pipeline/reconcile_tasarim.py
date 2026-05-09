@@ -882,7 +882,14 @@ def reconcile_metadata(
     pdf_bulletin = _normalise_bulletin_no(pdf_doc.get("bulletin_no")) if pdf_doc else None
 
     if cd_doc is not None and pdf_doc is not None:
-        if cd_bulletin != pdf_bulletin:
+        # Only raise when both sides report a non-None bulletin_no AND they
+        # actually disagree. A None on one side means that extractor
+        # couldn't auto-detect the value (e.g. pdf_extract_tasarim's
+        # footer regex misses the 2016-era bulletin format) — that's not
+        # a "wrong bulletin" signal, just a "didn't know" signal. The
+        # caller already chose to put both files in the same TS folder,
+        # which is the real pairing decision.
+        if cd_bulletin and pdf_bulletin and cd_bulletin != pdf_bulletin:
             raise ValueError(
                 f"bulletin_no mismatch: CD={cd_bulletin!r} PDF={pdf_bulletin!r} "
                 f"(reconcile would silently produce wrong overlap; aborting)"
