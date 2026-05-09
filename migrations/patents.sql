@@ -232,3 +232,81 @@ CREATE INDEX IF NOT EXISTS idx_ppri_patent
     ON patent_priorities (patent_id);
 CREATE INDEX IF NOT EXISTS idx_ppri_country
     ON patent_priorities (country) WHERE country IS NOT NULL;
+
+-- ============================================
+-- 8. patent_figures (per-figure embeddings)
+-- ============================================
+-- Mirrors design_views (per-view embeddings on the design side).
+-- Patent figures come from two sources after the unified-folder
+-- refactor:
+--   * CD: figures/{year}_{appno}.tif (1 per app, archival lossless)
+--   * PDF: figures/{year}_{appno}_p{page}_{idx}.png (0+ per app)
+-- CD-first dedup at extract time means PDF PNGs that duplicate CD
+-- TIFFs are dropped from disk; their figure metadata still records
+-- page/xref/bbox but with image_path=NULL (traceability without a
+-- dead reference).
+CREATE TABLE IF NOT EXISTS patent_figures (
+    id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    patent_id     UUID NOT NULL REFERENCES patents(id) ON DELETE CASCADE,
+    seq           INTEGER NOT NULL,
+    source        VARCHAR(3) NOT NULL CHECK (source IN ('CD', 'PDF')),
+    image_path    TEXT,                          -- relative to bulletin folder; NULL when dedup'd
+    page          INTEGER,                       -- PDF-only
+    image_xref    INTEGER,                       -- PDF-only
+    bbox          NUMERIC[],                     -- PDF-only
+    width         INTEGER,
+    height        INTEGER,
+    -- Embeddings (populated by Stage 6)
+    dinov2_vitl14 halfvec(1024),
+    clip_vitb32   halfvec(512),
+    created_at    TIMESTAMP DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_patent_figure
+    ON patent_figures (patent_id, seq);
+CREATE INDEX IF NOT EXISTS idx_pfig_patent
+    ON patent_figures (patent_id);
+CREATE INDEX IF NOT EXISTS idx_pfig_dinov2_vec
+    ON patent_figures USING hnsw (dinov2_vitl14 halfvec_cosine_ops)
+    WITH (m=16, ef_construction=200) WHERE dinov2_vitl14 IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_pfig_clip_vec
+    ON patent_figures USING hnsw (clip_vitb32 halfvec_cosine_ops)
+    WITH (m=16, ef_construction=200) WHERE clip_vitb32 IS NOT NULL;
+
+-- ============================================
+-- 9. patent_events (reserved for Stage 7)
+-- ============================================
+-- Mirrors design_events. The patent events extractor (Stage 7) is
+-- deferred but the column shape ships now per the locked decision —
+-- avoids a future migration when Stage 7 lands. The bulletin's
+-- "event index" pages (pp 7-114 + 1190-1844 in 2025_08.pdf) are
+-- already tagged as EVENT_INDEX by detect_page_kind; Stage 7 just
+-- adds the per-event parser.
+CREATE TABLE IF NOT EXISTS patent_events (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    patent_id         UUID REFERENCES patents(id) ON DELETE SET NULL,
+    application_no    VARCHAR(50),
+    publication_no    VARCHAR(50),
+    event_type        VARCHAR(50) NOT NULL,
+    event_date        DATE,
+    bulletin_no       VARCHAR(20),
+    bulletin_date     DATE,
+    page              INTEGER,
+    details           JSONB DEFAULT '{}'::jsonb,
+    free_text         TEXT,
+    event_fingerprint VARCHAR(64) NOT NULL,
+    created_at        TIMESTAMP DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_patent_event
+    ON patent_events (event_fingerprint);
+CREATE INDEX IF NOT EXISTS idx_pe_app_no
+    ON patent_events (application_no);
+CREATE INDEX IF NOT EXISTS idx_pe_pub_no
+    ON patent_events (publication_no) WHERE publication_no IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_pe_type
+    ON patent_events (event_type);
+CREATE INDEX IF NOT EXISTS idx_pe_patent
+    ON patent_events (patent_id) WHERE patent_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_pe_bulletin_date
+    ON patent_events (bulletin_date);
