@@ -30,6 +30,7 @@ from cd_extract_tasarim import (
 from cd_extract_tasarim import (
     _all_cd_rars,
     _application_image_folder,
+    _find_existing_issue_folder,
     _layout_to_metadata,
     _locate_cd_layout,
     _parse_sql_values,
@@ -1373,6 +1374,152 @@ def test_main_processes_multiple_rars(monkeypatch, tmp_path):
     assert rc == 0
     assert (tmp_path / "out" / "TS_240_2016-03-09" / CD_METADATA_FILENAME).is_file()
     assert (tmp_path / "out" / "TS_242_2016-04-24" / CD_METADATA_FILENAME).is_file()
+
+
+def test_find_existing_issue_folder_no_match(tmp_path):
+    """No TS_{N}_*/ folder exists -> None (caller creates a fresh one)."""
+    assert _find_existing_issue_folder(tmp_path, "240") is None
+
+
+def test_find_existing_issue_folder_exact_date_match(tmp_path):
+    """Exactly one TS_{N}_{date}/ folder -> return it."""
+    folder = tmp_path / "TS_240_2016-03-09"
+    folder.mkdir()
+    assert _find_existing_issue_folder(tmp_path, "240") == folder
+
+
+def test_find_existing_issue_folder_drifting_date(tmp_path):
+    """The whole point of this helper: a TS_{N}_*/ folder exists with a
+    DIFFERENT date suffix than the CD's inf DATE. The helper still
+    returns it so the CD output lands alongside the PDF instead of
+    creating a second folder.
+
+    Real-world drift case from the 2026-05-09 pairing survey:
+    241_CD.rar's idbulletin.inf says DATE=2016-03-24 but the existing
+    PDF folder is TS_241_2026-04-24/ (broken --full walk stamped today).
+    """
+    drift_folder = tmp_path / "TS_241_2026-04-24"
+    drift_folder.mkdir()
+    (drift_folder / "bulletin.pdf").write_bytes(b"")  # real PDF
+    assert _find_existing_issue_folder(tmp_path, "241") == drift_folder
+
+
+def test_find_existing_issue_folder_multiple_matches_raises(tmp_path):
+    """Two TS_{N}_*/ folders for the same bulletin -> RuntimeError. We
+    refuse to silently pick one. Real case: bulletin 240 currently has
+    both TS_240_2016-03-09 (good CD output) and TS_240_2026-04-24
+    (broken --full walk stub) on disk."""
+    (tmp_path / "TS_240_2016-03-09").mkdir()
+    (tmp_path / "TS_240_2026-04-24").mkdir()
+    with pytest.raises(RuntimeError, match=r"multiple TS_240_\* folders"):
+        _find_existing_issue_folder(tmp_path, "240")
+
+
+def test_find_existing_issue_folder_unrelated_dirs_ignored(tmp_path):
+    """Folders for OTHER bulletins, files (not dirs), and dot-files all
+    get ignored — only TS_{N}_*/ directories count."""
+    (tmp_path / "TS_241_2016-03-24").mkdir()  # different bulletin
+    (tmp_path / "TS_240_2016-03-09").write_text("not a folder")  # file
+    (tmp_path / "random_dir").mkdir()
+    assert _find_existing_issue_folder(tmp_path, "240") is None
+
+
+def test_find_existing_issue_folder_missing_root_returns_none(tmp_path):
+    """out_root that doesn't exist on disk -> None, no error."""
+    assert _find_existing_issue_folder(tmp_path / "nope", "240") is None
+
+
+def test_find_existing_issue_folder_empty_bulletin_no_returns_none(tmp_path):
+    """Empty / None bulletin_no never matches anything."""
+    (tmp_path / "TS_240_2016-03-09").mkdir()
+    assert _find_existing_issue_folder(tmp_path, "") is None
+    assert _find_existing_issue_folder(tmp_path, None) is None
+
+
+def test_main_reuses_existing_folder_with_drifting_date(monkeypatch, tmp_path):
+    """Integration: when an existing TS_{N}_*/ folder has a DIFFERENT date
+    suffix than the CD's inf DATE, _process_one writes its output INTO
+    that folder rather than creating TS_{N}_{inf_DATE}/.
+
+    This is the load-bearing fix from the pairing survey — without it,
+    17 real PDFs would be left orphaned in misnamed folders while CDs
+    spawn fresh siblings.
+    """
+    rar = tmp_path / "241_CD.rar"
+    rar.write_bytes(b"")
+    out_root = tmp_path / "out"
+    drift_folder = out_root / "TS_241_2026-04-24"
+    drift_folder.mkdir(parents=True)
+    (drift_folder / "bulletin.pdf").write_bytes(b"existing-PDF")
+
+    _wire_fake_pipeline(
+        monkeypatch,
+        bulletin_no="241",
+        bulletin_date_iso="2016-03-24",
+        bulletin_date_dmy="24.03.2016",
+    )
+
+    rc = main([
+        "--rar", str(rar),
+        "--out-dir", str(out_root),
+        "--scratch-dir", str(tmp_path / "scratch"),
+    ])
+    assert rc == 0
+    # Output landed in the drifting folder, NOT in a fresh TS_241_2016-03-24/
+    assert (drift_folder / CD_METADATA_FILENAME).is_file()
+    assert (drift_folder / "cd_images" / "_sentinel.txt").is_file()
+    assert not (out_root / "TS_241_2016-03-24").exists()
+    # PDF preserved
+    assert (drift_folder / "bulletin.pdf").read_bytes() == b"existing-PDF"
+
+
+def test_main_creates_fresh_folder_when_no_existing(monkeypatch, tmp_path):
+    """Standalone CD case (no PDF folder for this bulletin yet): a fresh
+    TS_{N}_{inf_DATE}/ gets created. The user explicitly OK'd this — CDs
+    without a PDF pair stay in their own dated folder."""
+    rar = tmp_path / "230_CD.rar"
+    rar.write_bytes(b"")
+    out_root = tmp_path / "out"
+    out_root.mkdir()
+
+    _wire_fake_pipeline(
+        monkeypatch,
+        bulletin_no="230",
+        bulletin_date_iso="2015-12-09",
+        bulletin_date_dmy="09.12.2015",
+    )
+
+    rc = main([
+        "--rar", str(rar),
+        "--out-dir", str(out_root),
+        "--scratch-dir", str(tmp_path / "scratch"),
+    ])
+    assert rc == 0
+    fresh = out_root / "TS_230_2015-12-09"
+    assert (fresh / CD_METADATA_FILENAME).is_file()
+
+
+def test_main_returns_1_when_multiple_existing_folders(monkeypatch, tmp_path):
+    """Two TS_{N}_*/ folders for the same bulletin is a real ambiguity —
+    don't guess. Real case from the survey: TS_240_2016-03-09 (correct
+    CD output) and TS_240_2026-04-24 (broken --full walk stub) both
+    on disk for bulletin 240."""
+    rar = tmp_path / "240_CD.rar"
+    rar.write_bytes(b"")
+    out_root = tmp_path / "out"
+    (out_root / "TS_240_2016-03-09").mkdir(parents=True)
+    (out_root / "TS_240_2026-04-24").mkdir(parents=True)
+
+    _wire_fake_pipeline(monkeypatch, bulletin_no="240")
+
+    rc = main([
+        "--rar", str(rar),
+        "--out-dir", str(out_root),
+        "--scratch-dir", str(tmp_path / "scratch"),
+    ])
+    # _find_existing_issue_folder raised -> _process_one re-raised ->
+    # main caught -> rc=1
+    assert rc == 1
 
 
 def test_main_real_persistence_with_pre_built_layout(monkeypatch, tmp_path):

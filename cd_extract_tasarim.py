@@ -853,6 +853,52 @@ def issue_folder_name(bulletin_no: str, bulletin_date: str) -> str:
     return f"TS_{bulletin_no}_{bulletin_date}"
 
 
+def _find_existing_issue_folder(out_root: Path, bulletin_no: str) -> Optional[Path]:
+    """Find a pre-existing ``TS_{bulletin_no}_*/`` folder under ``out_root``.
+
+    The PDF collector and the CD extractor both compute their folder name
+    from a ``(bulletin_no, bulletin_date)`` pair, but the date strings
+    sometimes drift — e.g. an aborted ``data_collection_tasarim --full``
+    walk stamped folders with the run date instead of the issue's
+    publication date, leaving real PDFs in ``TS_241_2026-04-24/``
+    when the CD's idbulletin.inf says they should be at
+    ``TS_241_2016-03-24/``.
+
+    Empirically (pair_survey 2026-05-09): 17 of 230 archives pair
+    against an existing PDF folder whose date suffix disagrees with
+    the CD's inf DATE. To avoid creating a second folder for the same
+    bulletin, ``_process_one`` calls this helper first and reuses the
+    existing folder when there's exactly one match — regardless of
+    whose date string is "right".
+
+    Returns:
+      - ``Path`` of the matching folder when exactly one ``TS_{N}_*/``
+        directory exists for ``bulletin_no``.
+      - ``None`` when no existing folder matches (caller falls back to
+        creating a fresh ``TS_{N}_{inf_DATE}/``).
+
+    Raises ``RuntimeError`` when more than one ``TS_{N}_*/`` folder
+    matches — that's a real ambiguity (e.g. both ``TS_240_2016-03-09``
+    and ``TS_240_2026-04-24`` from the survey output) and we'd rather
+    fail loud than guess.
+    """
+    if not bulletin_no:
+        return None
+    if not out_root.is_dir():
+        return None
+    matches = sorted(
+        p for p in out_root.glob(f"TS_{bulletin_no}_*") if p.is_dir()
+    )
+    if not matches:
+        return None
+    if len(matches) == 1:
+        return matches[0]
+    raise RuntimeError(
+        f"multiple TS_{bulletin_no}_* folders under {out_root}: "
+        f"{[p.name for p in matches]}; resolve manually before re-running"
+    )
+
+
 def _all_cd_rars(bulletins_dir: Path) -> List[Path]:
     """Return sorted HSQLDB-shape Tasarım CD archives under ``bulletins_dir``.
 
@@ -995,7 +1041,16 @@ def _process_one(
                 f"{bulletin_no!r}, bulletin_date={bulletin_date!r}"
             )
 
-        issue_folder = out_root / issue_folder_name(bulletin_no, bulletin_date)
+        # Prefer an existing TS_{N}_*/ folder if there's exactly one — this
+        # is what lets a CD output land alongside a PDF whose folder name
+        # has a drifting date suffix (see _find_existing_issue_folder for
+        # the empirical case). Multi-match raises; no match falls through
+        # to a freshly-named folder using the inf DATE.
+        existing = _find_existing_issue_folder(out_root, bulletin_no)
+        if existing is not None:
+            issue_folder = existing
+        else:
+            issue_folder = out_root / issue_folder_name(bulletin_no, bulletin_date)
         out_path = issue_folder / CD_METADATA_FILENAME
 
         if out_path.exists() and not force:
