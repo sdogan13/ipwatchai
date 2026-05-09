@@ -28,6 +28,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 from datetime import date
 from pathlib import Path
@@ -503,6 +504,111 @@ def replace_figures(
 
 
 # ---------------------------------------------------------------------------
+# Event ingest (Stage 7 patent_events)
+# ---------------------------------------------------------------------------
+
+
+_BULLETIN_NO_FORMAT_RE = re.compile(r"^\s*(\d{4})[/-](\d{1,2})\s*$")
+
+
+def _normalise_bulletin_no(raw: Optional[str]) -> Optional[str]:
+    """Canonicalise bulletin_no across CD/PDF/events shapes.
+
+    CD writes ``"2025/8"``, PDF writes ``"2025-08"``, events.json
+    inherits from the PDF cover. Both canonicalise to ``"2025/8"``
+    so the patents.bulletin_no column (set during metadata ingest)
+    matches patent_events.bulletin_no (set here).
+
+    Same logic as pipeline.reconcile_patent._normalise_bulletin_no —
+    duplicated rather than imported to avoid circular dependency
+    (reconcile imports nothing from ingest, ingest mustn't depend on
+    reconcile to keep them independent stages).
+    """
+    if not raw:
+        return None
+    match = _BULLETIN_NO_FORMAT_RE.match(raw)
+    if not match:
+        return raw.strip() or None
+    year, month = match.group(1), match.group(2).lstrip("0") or "0"
+    return f"{year}/{month}"
+
+
+def _resolve_patent_id_for_event(cur, application_no: Optional[str]) -> Optional[str]:
+    """Look up a patents.id for an event by its application_no.
+
+    Same application can have multiple publications in a bulletin
+    (B grant + A1 republication), so a 1:1 link isn't always
+    possible. Returns the UUID only when the lookup is unambiguous;
+    NULL otherwise. Stage 5 already has this for figures so reuse
+    the precedent: patent_events.patent_id is also nullable per the
+    Stage 0 schema (ON DELETE SET NULL).
+    """
+    if not application_no:
+        return None
+    cur.execute(
+        "SELECT id FROM patents WHERE application_no = %s LIMIT 2",
+        (application_no,),
+    )
+    rows = cur.fetchall()
+    return rows[0][0] if len(rows) == 1 else None
+
+
+def replace_events(cur, events_doc: Dict[str, Any]) -> int:
+    """Replace this bulletin's patent_events rows from a parsed
+    events.json doc.
+
+    DELETE all rows where bulletin_no = events_doc.bulletin_no,
+    then INSERT every event. Same replace-style pattern as the
+    child-table upserts: handles re-extraction (phrase table
+    extended → some events change event_type → fingerprint changes)
+    without leaving stale rows.
+
+    event_date defaults to bulletin_date when the per-event date is
+    absent (which is always for the index-page events: they have
+    no per-event date, only the bulletin's publication date).
+    """
+    bulletin_no = _normalise_bulletin_no(events_doc.get("bulletin_no"))
+    bulletin_date = parse_date_safe(events_doc.get("bulletin_date"))
+    if not bulletin_no:
+        # Don't DELETE-FROM-WHERE-NULL — that would no-op silently.
+        # If we got here without a bulletin_no, the events.json is
+        # malformed; surface the failure via 0 inserted.
+        return 0
+
+    cur.execute(
+        "DELETE FROM patent_events WHERE bulletin_no = %s",
+        (bulletin_no,),
+    )
+    inserted = 0
+    for ev in events_doc.get("events", []):
+        application_no = ev.get("application_no")
+        patent_id = _resolve_patent_id_for_event(cur, application_no)
+        cur.execute(
+            """
+            INSERT INTO patent_events
+                (patent_id, application_no, event_type, event_date,
+                 bulletin_no, bulletin_date, page, free_text,
+                 event_fingerprint)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (event_fingerprint) DO NOTHING
+            """,
+            (
+                patent_id,
+                application_no,
+                ev.get("event_type", "UNKNOWN"),
+                bulletin_date,                  # event_date inherits from bulletin
+                bulletin_no,
+                bulletin_date,
+                ev.get("page"),
+                ev.get("free_text"),
+                ev.get("fingerprint"),
+            ),
+        )
+        inserted += 1
+    return inserted
+
+
+# ---------------------------------------------------------------------------
 # Per-bulletin orchestration
 # ---------------------------------------------------------------------------
 
@@ -548,6 +654,7 @@ def ingest_bulletin(
         "attorneys_inserted": 0,
         "priorities_inserted": 0,
         "figures_inserted": 0,
+        "events_inserted": 0,
         "skipped": 0,
     }
 
@@ -581,6 +688,17 @@ def ingest_bulletin(
                     cur, patent_id, record.get("figures", []),
                 )
                 stats["records_processed"] += 1
+
+            # Events come from a sibling events.json (Stage 7 output).
+            # Optional — bulletin extracts that haven't run the events
+            # pass yet just skip event ingest with no error. Once
+            # patents are upserted we look up patent_id by app_no
+            # within this same transaction so the FK resolution sees
+            # rows we just inserted in this loop.
+            events_path = bulletin_folder / "events.json"
+            if events_path.is_file():
+                events_doc = json.loads(events_path.read_text(encoding="utf-8"))
+                stats["events_inserted"] = replace_events(cur, events_doc)
         conn.commit()
     except Exception:
         if owns_connection:
@@ -664,11 +782,12 @@ def main(argv=None) -> int:
         if status == "ok":
             logger.info(
                 "[+] %s: %d records (skipped=%d) — "
-                "holders=%d inventors=%d attorneys=%d priorities=%d figures=%d",
+                "holders=%d inventors=%d attorneys=%d priorities=%d "
+                "figures=%d events=%d",
                 result["bulletin"], result["records_processed"], result["skipped"],
                 result["holders_inserted"], result["inventors_inserted"],
                 result["attorneys_inserted"], result["priorities_inserted"],
-                result["figures_inserted"],
+                result["figures_inserted"], result["events_inserted"],
             )
             succeeded.append(folder.name)
         else:

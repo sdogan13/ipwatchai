@@ -14,7 +14,9 @@ import pytest
 
 from pipeline.ingest_patents import (
     PATENT_UPSERT_COLS,
+    _normalise_bulletin_no,
     _patent_row,
+    _resolve_patent_id_for_event,
     figure_source,
     find_bulletin_folders,
     ingest_bulletin,
@@ -22,6 +24,7 @@ from pipeline.ingest_patents import (
     parse_argv,
     parse_date_safe,
     replace_attorneys,
+    replace_events,
     replace_figures,
     replace_holders,
     replace_inventors,
@@ -732,7 +735,7 @@ def test_main_calls_ingest_bulletin_for_each(monkeypatch, tmp_path) -> None:
             "records_processed": 1, "holders_inserted": 0,
             "inventors_inserted": 0, "attorneys_inserted": 0,
             "priorities_inserted": 0, "figures_inserted": 0,
-            "skipped": 0,
+            "events_inserted": 0, "skipped": 0,
         }
 
     import pipeline.ingest_patents as ip
@@ -741,3 +744,181 @@ def test_main_calls_ingest_bulletin_for_each(monkeypatch, tmp_path) -> None:
     rc = main(["--all", "--bulletins-dir", str(tmp_path)])
     assert rc == 0
     assert {p.name for p in called} == {"PT_a", "PT_b"}
+
+
+# ---------------------------------------------------------------------------
+# Event ingest (Stage 7 patent_events)
+# ---------------------------------------------------------------------------
+
+
+def test_normalise_bulletin_no_canonicalises_both_formats() -> None:
+    """Same canonicalisation rule as reconcile_patent — '2025/8' and
+    '2025-08' both produce '2025/8' so patents.bulletin_no matches
+    patent_events.bulletin_no across CD/PDF sources."""
+    assert _normalise_bulletin_no("2025/8") == "2025/8"
+    assert _normalise_bulletin_no("2025-08") == "2025/8"
+    assert _normalise_bulletin_no("2025/12") == "2025/12"
+    assert _normalise_bulletin_no("2025-12") == "2025/12"
+    assert _normalise_bulletin_no(None) is None
+    assert _normalise_bulletin_no("") is None
+
+
+def test_resolve_patent_id_returns_uuid_when_unambiguous() -> None:
+    """Single patents row matching application_no → return its UUID."""
+    cur = _MockCursor(rows=[("p-uuid",)])     # fetchall() returns [(uuid,)]
+
+    # Override fetchone since _resolve uses fetchall
+    class _C(_MockCursor):
+        def fetchall(self):
+            rows = self.rows
+            self.rows = []
+            return rows
+    cur = _C(rows=[("p-uuid",)])
+    assert _resolve_patent_id_for_event(cur, "2017/15048") == "p-uuid"
+
+
+def test_resolve_patent_id_returns_none_when_ambiguous() -> None:
+    """Multiple patents rows for one application_no (e.g. B grant +
+    A1 republication in same bulletin) → NULL FK, event still ingests."""
+    class _C(_MockCursor):
+        def fetchall(self):
+            rows = self.rows
+            self.rows = []
+            return rows
+    cur = _C(rows=[("p-uuid-1",), ("p-uuid-2",)])
+    assert _resolve_patent_id_for_event(cur, "2024/000746") is None
+
+
+def test_resolve_patent_id_returns_none_when_no_match() -> None:
+    """Event for an application not yet in the patents table → NULL.
+    Common when events.json mentions an older app whose bulletin
+    hasn't been ingested yet."""
+    class _C(_MockCursor):
+        def fetchall(self):
+            return []
+    cur = _C()
+    assert _resolve_patent_id_for_event(cur, "9999/99999") is None
+
+
+def test_resolve_patent_id_returns_none_for_blank_app_no() -> None:
+    cur = _MockCursor()
+    assert _resolve_patent_id_for_event(cur, None) is None
+    assert _resolve_patent_id_for_event(cur, "") is None
+    assert len(cur.executed) == 0   # no SQL fired
+
+
+def test_replace_events_deletes_then_inserts_with_canonical_bulletin() -> None:
+    """Replace pattern: DELETE WHERE bulletin_no = canonical, then
+    INSERT each event. event_date inherits from bulletin_date."""
+    class _C(_MockCursor):
+        def fetchall(self):
+            return []
+    cur = _C()
+    events_doc = {
+        "bulletin_no": "2025-08",       # PDF format
+        "bulletin_date": "2025-08-21",
+        "events": [
+            {"application_no": "2024/011609", "event_type": "GRANT_FINALIZED",
+             "page": 50, "free_text": "x", "fingerprint": "abc1234567890def"},
+            {"application_no": "2024/011610", "event_type": "GRANT_ANNOUNCED",
+             "page": 51, "free_text": "y", "fingerprint": "def1234567890abc"},
+        ],
+    }
+    inserted = replace_events(cur, events_doc)
+    assert inserted == 2
+    delete_sql, delete_params = cur.executed[0]
+    assert "DELETE FROM patent_events WHERE bulletin_no" in delete_sql
+    assert delete_params == ("2025/8",)            # canonicalised
+    # Both INSERTs use the canonical bulletin_no + parsed event_date
+    insert_params_list = [p for s, p in cur.executed if "INSERT INTO patent_events" in s]
+    assert len(insert_params_list) == 2
+    p0 = insert_params_list[0]
+    # tuple shape: (patent_id, application_no, event_type, event_date,
+    #               bulletin_no, bulletin_date, page, free_text, fingerprint)
+    assert p0[2] == "GRANT_FINALIZED"
+    assert p0[3] == date(2025, 8, 21)               # event_date inherits
+    assert p0[4] == "2025/8"
+    assert p0[8] == "abc1234567890def"
+
+
+def test_replace_events_skips_when_bulletin_no_missing() -> None:
+    """Defensive: malformed events.json without bulletin_no → return 0,
+    no DELETE-FROM-WHERE-NULL no-op pollution."""
+    class _C(_MockCursor):
+        def fetchall(self):
+            return []
+    cur = _C()
+    inserted = replace_events(cur, {"events": [
+        {"application_no": "X", "event_type": "GRANT_FINALIZED",
+         "page": 1, "free_text": "x", "fingerprint": "fp"},
+    ]})
+    assert inserted == 0
+    # NO sql executes when bulletin_no is missing
+    assert len(cur.executed) == 0
+
+
+def test_ingest_bulletin_loads_events_json_and_inserts(tmp_path) -> None:
+    """End-to-end JSON path: metadata.json + events.json both present
+    → both upsert paths fire in one transaction."""
+    import json
+    parent = tmp_path / "PT_2025_8_2025-08-21"
+    parent.mkdir()
+    (parent / "metadata.json").write_text(json.dumps({
+        "bulletin_no": "2025/8",
+        "bulletin_date": "2025-08-21",
+        "source_archive": "x.rar",
+        "source_pdf": "y.pdf",
+        "records": [{
+            "application_no": "X1", "publication_no": "TR X1 B",
+            "kind_code": "B", "record_type": "GRANTED_PATENT",
+            "title": "T", "abstract": "A", "ipc_classes": [],
+            "holders": [], "inventors": [], "attorneys": [],
+            "priorities": [], "figures": [],
+        }],
+    }), encoding="utf-8")
+    (parent / "events.json").write_text(json.dumps({
+        "bulletin_no": "2025-08",
+        "bulletin_date": "2025-08-21",
+        "events": [
+            {"application_no": "X1", "event_type": "GRANT_FINALIZED",
+             "page": 50, "free_text": "x", "fingerprint": "abc1234567890def"},
+            {"application_no": "X2", "event_type": "GRANT_ANNOUNCED",
+             "page": 51, "free_text": "y", "fingerprint": "def1234567890abc"},
+        ],
+    }), encoding="utf-8")
+
+    class _C(_MockCursor):
+        def fetchall(self):
+            rows = self.rows
+            self.rows = []
+            return rows
+    # Sequence of fetches required:
+    #   1 patents publication_no SELECT (returns None → INSERT path)
+    #   1 patents INSERT RETURNING (returns p-uuid)
+    #   then SELECTs for app_no FK resolution per event (use fetchall)
+    cur = _C(rows=[None, "p-uuid"])
+    conn = _MockConn(cur)
+    out = ingest_bulletin(parent, conn=conn)
+
+    assert out["status"] == "ok"
+    assert out["records_processed"] == 1
+    assert out["events_inserted"] == 2
+    assert conn.committed is True
+
+
+def test_ingest_bulletin_no_events_json_skips_silently(tmp_path) -> None:
+    """metadata.json present, events.json absent → ingest succeeds
+    with events_inserted=0. Stage 7 hasn't run yet for this bulletin."""
+    import json
+    parent = tmp_path / "PT_x"
+    parent.mkdir()
+    (parent / "metadata.json").write_text(json.dumps({
+        "bulletin_no": "2025/8", "bulletin_date": "2025-08-21",
+        "records": [],
+    }), encoding="utf-8")
+
+    cur = _MockCursor()
+    conn = _MockConn(cur)
+    out = ingest_bulletin(parent, conn=conn)
+    assert out["status"] == "empty"   # no records → returns empty
+    assert "events_inserted" not in out or out.get("events_inserted", 0) == 0
