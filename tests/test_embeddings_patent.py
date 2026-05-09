@@ -282,3 +282,178 @@ def test_embed_text_routes_through_text_encoder() -> None:
     assert captured["normalize"] is True
     assert len(out) == TEXT_DIM
     assert all(x == 0.5 for x in out)
+
+
+# ---------------------------------------------------------------------------
+# embed_record (per-record orchestrator)
+# ---------------------------------------------------------------------------
+
+
+def _stub_models(text_vec=None, image_vec=None):
+    """LoadedModels with stubs that return canned vectors so embed_record
+    runs end-to-end without GPU."""
+    from embeddings_patent import LoadedModels
+    text_vec = text_vec if text_vec is not None else [0.1] * TEXT_DIM
+    image_vec_d = image_vec if image_vec is not None else [0.2] * DINOV2_DIM
+    image_vec_c = [0.3] * CLIP_DIM
+
+    class _TxtEnc:
+        def encode(self, prompt, normalize_embeddings=False):
+            class _V:
+                def tolist(self_inner):
+                    return list(text_vec)
+            return _V()
+
+    return LoadedModels(
+        device="cpu", dinov2=None, dinov2_transform=None,
+        clip=None, clip_transform=None, text_encoder=_TxtEnc(),
+    ), image_vec_d, image_vec_c
+
+
+def _stub_embed_image(monkeypatch, dvec, cvec):
+    """Replace embed_image with a stub returning canned vectors."""
+    import embeddings_patent
+    monkeypatch.setattr(
+        embeddings_patent, "embed_image",
+        lambda path, models: {"dinov2_vitl14": list(dvec), "clip_vitb32": list(cvec)},
+    )
+
+
+def test_embed_record_happy_path_text_plus_two_figures(monkeypatch, tmp_path) -> None:
+    """Record with title + abstract + 2 figures: text embedded, both
+    figures embedded, primary_figure_embedding mean-pooled."""
+    from embeddings_patent import embed_record
+    models, dvec, cvec = _stub_models()
+    _stub_embed_image(monkeypatch, dvec, cvec)
+
+    record = {
+        "application_no": "X",
+        "title": "Test title",
+        "abstract": "Test abstract.",
+        "figures": [
+            {"image_path": "figures/X.tif"},
+            {"image_path": "figures/X_p100_2.png"},
+        ],
+    }
+
+    summary = embed_record(record, tmp_path, models)
+
+    assert summary == {
+        "text_embedded": 1, "figures_embedded": 2,
+        "primary_aggregated": 1, "skipped": False,
+    }
+    assert len(record["title_abstract_embedding"]) == TEXT_DIM
+    assert len(record["primary_figure_embedding"]) == DINOV2_DIM
+    # mean-pool of two identical dino vectors == the same vector
+    assert record["primary_figure_embedding"] == list(dvec)
+    for fig in record["figures"]:
+        assert "embeddings" in fig
+        assert len(fig["embeddings"]["dinov2_vitl14"]) == DINOV2_DIM
+        assert len(fig["embeddings"]["clip_vitb32"]) == CLIP_DIM
+
+
+def test_embed_record_text_only_when_no_embeddable_figures(monkeypatch, tmp_path) -> None:
+    """Record whose only figures have null image_path (PDF dedup'd
+    against CD TIFF) gets text embedding only — no primary aggregate."""
+    from embeddings_patent import embed_record
+    models, dvec, cvec = _stub_models()
+    _stub_embed_image(monkeypatch, dvec, cvec)
+
+    record = {
+        "title": "T", "abstract": "A",
+        "figures": [{"page": 1847, "image_path": None}],
+    }
+
+    summary = embed_record(record, tmp_path, models)
+
+    assert summary == {
+        "text_embedded": 1, "figures_embedded": 0,
+        "primary_aggregated": 0, "skipped": False,
+    }
+    assert len(record["title_abstract_embedding"]) == TEXT_DIM
+    assert "primary_figure_embedding" not in record
+    # Original figure dict untouched (no embeddings key added)
+    assert "embeddings" not in record["figures"][0]
+
+
+def test_embed_record_skips_when_already_embedded(monkeypatch, tmp_path) -> None:
+    """Default force=False: a fully-embedded record short-circuits
+    without calling encoders."""
+    from embeddings_patent import embed_record
+    models, _, _ = _stub_models()
+    # If embed_image gets called we've broken idempotency:
+    def _explode(*a, **k):
+        raise AssertionError("embed_image must not run when record is complete")
+    import embeddings_patent
+    monkeypatch.setattr(embeddings_patent, "embed_image", _explode)
+
+    record = {
+        "title": "T", "abstract": "A",
+        "title_abstract_embedding": [0.5] * TEXT_DIM,
+        "primary_figure_embedding": [0.5] * DINOV2_DIM,
+        "figures": [{
+            "image_path": "figures/X.tif",
+            "embeddings": {
+                "dinov2_vitl14": [0.5] * DINOV2_DIM,
+                "clip_vitb32":   [0.5] * CLIP_DIM,
+            },
+        }],
+    }
+
+    summary = embed_record(record, tmp_path, models)
+
+    assert summary["skipped"] is True
+    assert summary["text_embedded"] == 0
+    assert summary["figures_embedded"] == 0
+
+
+def test_embed_record_force_re_embeds_everything(monkeypatch, tmp_path) -> None:
+    """force=True: re-embeds even when record_already_embedded would
+    return True. Useful for switching models or fixing a bad batch."""
+    from embeddings_patent import embed_record
+    models, dvec, cvec = _stub_models(text_vec=[0.9] * TEXT_DIM)
+    _stub_embed_image(monkeypatch, dvec, cvec)
+
+    record = {
+        "title": "T", "abstract": "A",
+        "title_abstract_embedding": [0.5] * TEXT_DIM,        # stale
+        "primary_figure_embedding": [0.5] * DINOV2_DIM,
+        "figures": [{
+            "image_path": "figures/X.tif",
+            "embeddings": {
+                "dinov2_vitl14": [0.5] * DINOV2_DIM,
+                "clip_vitb32":   [0.5] * CLIP_DIM,
+            },
+        }],
+    }
+
+    summary = embed_record(record, tmp_path, models, force=True)
+
+    assert summary["skipped"] is False
+    assert summary["text_embedded"] == 1
+    assert summary["figures_embedded"] == 1
+    assert record["title_abstract_embedding"] == [0.9] * TEXT_DIM   # refreshed
+    assert record["figures"][0]["embeddings"]["dinov2_vitl14"] == list(dvec)
+
+
+def test_embed_record_partial_text_only_does_not_aggregate(monkeypatch, tmp_path) -> None:
+    """When record has text already but figures need embedding, only
+    figures get processed; text stays. Aggregate computed at the end."""
+    from embeddings_patent import embed_record
+    models, dvec, cvec = _stub_models(text_vec=[0.7] * TEXT_DIM)
+    _stub_embed_image(monkeypatch, dvec, cvec)
+
+    record = {
+        "title": "T", "abstract": "A",
+        "title_abstract_embedding": [0.4] * TEXT_DIM,        # already set
+        "figures": [{"image_path": "figures/X.tif"}],
+    }
+
+    summary = embed_record(record, tmp_path, models)
+
+    assert summary["text_embedded"] == 0                     # not re-run
+    assert summary["figures_embedded"] == 1
+    assert summary["primary_aggregated"] == 1
+    # text NOT changed
+    assert record["title_abstract_embedding"] == [0.4] * TEXT_DIM
+    assert record["primary_figure_embedding"] == list(dvec)

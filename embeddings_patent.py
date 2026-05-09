@@ -282,3 +282,78 @@ def embed_text(
         return [0.0] * TEXT_DIM
     vec = models.text_encoder.encode(prompt, normalize_embeddings=True)
     return vec.tolist()
+
+
+# ---------------------------------------------------------------------------
+# Per-record orchestration
+# ---------------------------------------------------------------------------
+
+
+def embed_record(
+    record: Dict[str, Any],
+    bulletin_folder: Path,
+    models: LoadedModels,
+    *,
+    force: bool = False,
+) -> Dict[str, Any]:
+    """Compute and attach all embeddings for one record, in place.
+
+    Mutates the input dict:
+      - sets ``title_abstract_embedding`` (1024-dim)
+      - sets ``embeddings`` on each embeddable figure (dinov2 + clip)
+      - sets ``primary_figure_embedding`` (mean-pool of per-figure
+        DINOv2; only when there's at least one embeddable figure)
+
+    Skips re-embedding fields that already have valid embeddings,
+    unless ``force=True``. ``record_already_embedded`` is the
+    short-circuit check at the top.
+
+    ``bulletin_folder`` is the parent ``PT_*`` directory; figure
+    ``image_path`` values are resolved as ``bulletin_folder /
+    image_path``.
+
+    Returns ``{"text_embedded": 0|1, "figures_embedded": N,
+    "primary_aggregated": 0|1, "skipped": bool}`` for caller stats.
+    """
+    if not force and record_already_embedded(record):
+        return {
+            "text_embedded": 0, "figures_embedded": 0,
+            "primary_aggregated": 0, "skipped": True,
+        }
+
+    text_embedded = 0
+    if force or not (
+        isinstance(record.get("title_abstract_embedding"), list)
+        and record["title_abstract_embedding"]
+    ):
+        record["title_abstract_embedding"] = embed_text(
+            record.get("title"), record.get("abstract"), models,
+        )
+        text_embedded = 1
+
+    figs_embedded = 0
+    embeddable = select_embeddable_figures(record)
+    for fig in embeddable:
+        if not force and figure_already_embedded(fig):
+            continue
+        full_path = bulletin_folder / fig["image_path"]
+        fig["embeddings"] = embed_image(full_path, models)
+        figs_embedded += 1
+
+    primary_aggregated = 0
+    if embeddable:
+        dino_vectors = [
+            fig["embeddings"]["dinov2_vitl14"] for fig in embeddable
+            if isinstance(fig.get("embeddings"), dict)
+            and isinstance(fig["embeddings"].get("dinov2_vitl14"), list)
+        ]
+        if dino_vectors:
+            record["primary_figure_embedding"] = mean_pool(dino_vectors)
+            primary_aggregated = 1
+
+    return {
+        "text_embedded": text_embedded,
+        "figures_embedded": figs_embedded,
+        "primary_aggregated": primary_aggregated,
+        "skipped": False,
+    }
