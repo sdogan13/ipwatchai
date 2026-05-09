@@ -227,33 +227,61 @@ def _parse_design_count(value: Any) -> Optional[int]:
         return None
 
 
-def _normalize_cd_attorney(attorney: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """Drop empty fields from a CD attorney dict; return ``None`` if all
-    four fields are empty (so the dossier isn't decorated with a
-    cosmetic ``"attorney": {"no":"","name":"",…}`` block)."""
+# Field-map style: each map says ``{source_key: canonical_key}``. The
+# canonical shape unifies CD and PDF — most notably, CD holders ship
+# their entity name as ``title`` while PDF applicants ship it as ``name``;
+# both collapse to canonical ``name`` so a downstream consumer doesn't
+# need to know which side each holder came from.
+_CD_HOLDER_FIELD_MAP: Dict[str, str] = {
+    "client_no": "client_no",
+    "title":     "name",            # rename: CD.title -> canonical.name
+    "address":   "address",
+    "city":      "city",
+    "country":   "country",
+}
+
+_CD_DESIGNER_FIELD_MAP: Dict[str, str] = {
+    "no":      "no",
+    "name":    "name",
+    "address": "address",
+    "country": "country",
+}
+
+_CD_ATTORNEY_FIELD_MAP: Dict[str, str] = {
+    "no":      "no",
+    "name":    "name",
+    "title":   "title",
+    "address": "address",
+}
+
+
+def _normalize_party(party: Dict[str, Any], field_map: Dict[str, str]) -> Dict[str, Any]:
+    """Pick + rename fields from a party dict using ``field_map``;
+    drop empties so the merged JSON doesn't carry cosmetic blanks.
+
+    Iteration order follows ``field_map`` insertion order so the
+    output dict's key order is stable and matches the canonical shape.
+    """
+    out: Dict[str, Any] = {}
+    for src_key, dst_key in field_map.items():
+        value = _clean_str(party.get(src_key))
+        if value:
+            out[dst_key] = value
+    return out
+
+
+def _normalize_attorney(
+    attorney: Optional[Dict[str, Any]],
+    field_map: Dict[str, str],
+) -> Optional[Dict[str, Any]]:
+    """``_normalize_party`` for a single attorney object — collapses to
+    ``None`` when every mapped field is empty so empty CD attorney
+    blocks (common on Hague dossiers where IDDOSSIER's attorney columns
+    are blank) don't decorate the merged record."""
     if not isinstance(attorney, dict):
         return None
-    out: Dict[str, Any] = {}
-    for key in ("no", "name", "title", "address"):
-        value = _clean_str(attorney.get(key))
-        if value:
-            out[key] = value
+    out = _normalize_party(attorney, field_map)
     return out or None
-
-
-_CD_HOLDER_KEYS: Tuple[str, ...] = ("client_no", "title", "address", "city", "country")
-_CD_DESIGNER_KEYS: Tuple[str, ...] = ("no", "name", "address", "country")
-
-
-def _normalize_cd_party(party: Dict[str, Any], keys: Tuple[str, ...]) -> Dict[str, Any]:
-    """Drop empty fields from a CD holder / designer dict, preserving
-    order via the explicit ``keys`` tuple."""
-    out: Dict[str, Any] = {}
-    for key in keys:
-        value = _clean_str(party.get(key))
-        if value:
-            out[key] = value
-    return out
 
 
 def _normalize_cd_view(view: Dict[str, Any]) -> CanonicalDesignView:
@@ -304,14 +332,14 @@ def normalize_cd_dossier(dossier: Dict[str, Any]) -> CanonicalDesignRecord:
     """
     holders = [
         h for h in (
-            _normalize_cd_party(item, _CD_HOLDER_KEYS)
+            _normalize_party(item, _CD_HOLDER_FIELD_MAP)
             for item in dossier.get("holders", []) or []
             if isinstance(item, dict)
         ) if h
     ]
     designers = [
         d for d in (
-            _normalize_cd_party(item, _CD_DESIGNER_KEYS)
+            _normalize_party(item, _CD_DESIGNER_FIELD_MAP)
             for item in dossier.get("designers", []) or []
             if isinstance(item, dict)
         ) if d
@@ -330,10 +358,201 @@ def normalize_cd_dossier(dossier: Dict[str, Any]) -> CanonicalDesignRecord:
         design_count=_parse_design_count(dossier.get("design_count")),
         type=_clean_str(dossier.get("type")),
         locarno_codes=list(dossier.get("locarno_codes") or []),
-        attorney=_normalize_cd_attorney(dossier.get("attorney")),
+        attorney=_normalize_attorney(dossier.get("attorney"), _CD_ATTORNEY_FIELD_MAP),
         holders=holders,
         designers=designers,
         priorities=[],
         designs=designs,
         source_format="CD",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Step 3.3 — normalize_pdf_record
+# ---------------------------------------------------------------------------
+
+# PDF applicant.id is the same TPECLIENT id CD ships as client_no — so
+# canonical holders carry it under client_no whichever side the record
+# came from.
+_PDF_APPLICANT_FIELD_MAP: Dict[str, str] = {
+    "name":    "name",
+    "id":      "client_no",   # rename: PDF.id -> canonical.client_no
+    "address": "address",
+    "country": "country",
+}
+
+_PDF_DESIGNER_FIELD_MAP: Dict[str, str] = {
+    "name": "name",
+}
+
+_PDF_ATTORNEY_FIELD_MAP: Dict[str, str] = {
+    "name": "name",
+    "firm": "firm",
+}
+
+
+def _normalize_pdf_view(view: Dict[str, Any]) -> CanonicalDesignView:
+    """Convert a PDF view dict to a CanonicalDesignView.
+
+    Drops PyMuPDF extraction artefacts (``image_xref``, ``bbox``,
+    ``page``) and any inline embeddings vector — none of those belong
+    in the merged JSON. Preserves ``view_index`` (cast to str for
+    canonical shape) plus ``image_path`` and the new ``image_source``
+    provenance tag (D.1) so the consumer can resolve the canonical
+    key under the correct sibling folder.
+    """
+    image_path = _clean_str(view.get("image_path"))
+    raw_source = _clean_str(view.get("image_source"))
+    return CanonicalDesignView(
+        view_no=str(view.get("view_index") or ""),
+        image_path=image_path,
+        image_source=raw_source if image_path else None,
+    )
+
+
+def _normalize_pdf_design(design: Dict[str, Any]) -> CanonicalDesign:
+    """Convert a PDF design dict (design_index / product_name_tr / views)
+    to a CanonicalDesign.
+
+    Field renames:
+      ``design_index``     -> ``no`` (str)
+      ``product_name_tr``  -> ``product_name``
+    """
+    views = [
+        _normalize_pdf_view(v)
+        for v in design.get("views", []) or []
+        if isinstance(v, dict)
+    ]
+    return CanonicalDesign(
+        no=str(design.get("design_index") or ""),
+        product_name=(_clean_str(design.get("product_name_tr")) or ""),
+        views=views,
+    )
+
+
+def _normalize_pdf_priority(priority: Dict[str, Any]) -> Dict[str, Any]:
+    """PDF priority shape ``{date, number, country}`` — clean fields."""
+    out: Dict[str, Any] = {}
+    for key in ("date", "number", "country"):
+        value = _clean_str(priority.get(key))
+        if value:
+            out[key] = value
+    return out
+
+
+def _normalize_pdf_hague_reference(
+    ref: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """PDF Hague-section ``hague_reference`` block:
+    ``{wipo_bulletin, designated_states[], product_name_en}``.
+    Returns ``None`` when the dict has no useful content."""
+    if not isinstance(ref, dict):
+        return None
+    out: Dict[str, Any] = {}
+    wipo = _clean_str(ref.get("wipo_bulletin"))
+    if wipo:
+        out["wipo_bulletin"] = wipo
+    states = ref.get("designated_states")
+    if isinstance(states, list):
+        cleaned = [s for s in states if isinstance(s, str) and s.strip()]
+        if cleaned:
+            out["designated_states"] = [s.strip() for s in cleaned]
+    product = _clean_str(ref.get("product_name_en"))
+    if product:
+        out["product_name_en"] = product
+    return out or None
+
+
+def _normalize_pdf_deferred_publication(
+    dp: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """PDF deferred-publication block: ``{period_months: int}``."""
+    if not isinstance(dp, dict):
+        return None
+    period = dp.get("period_months")
+    if isinstance(period, int):
+        return {"period_months": period}
+    return None
+
+
+def normalize_pdf_record(record: Dict[str, Any]) -> CanonicalDesignRecord:
+    """Convert one PDF ``records[]`` entry into a CanonicalDesignRecord.
+
+    Field mapping:
+      ``filing_date``       -> ``application_date`` (already ISO, just rename)
+      ``registration_date`` -> ``registration_date`` (already ISO)
+      ``locarno_classes``   -> ``locarno_codes``
+      ``applicants``        -> ``holders`` (with PDF.id -> canonical.client_no)
+      ``design_index``      -> ``designs[].no`` (str)
+      ``product_name_tr``   -> ``designs[].product_name``
+      ``view_index``        -> ``designs[].views[].view_no`` (str)
+
+    PDF-only fields preserved on the canonical record:
+      - ``section`` ("tr_native" / "deferred" / "hague" / ...)
+      - ``hague_reference`` (Hague-section records)
+      - ``page_range``
+      - ``deferred_publication``
+      - ``priorities``
+
+    Embedding vectors and PyMuPDF artefacts (image_xref, bbox, page)
+    are intentionally dropped — they belong in the source metadata.json
+    (Q2 locked decision).
+
+    No date normalisation needed: pdf_extract_tasarim already produces
+    ISO dates via ``normalize_tr_date``.
+    """
+    holders = [
+        h for h in (
+            _normalize_party(item, _PDF_APPLICANT_FIELD_MAP)
+            for item in record.get("applicants", []) or []
+            if isinstance(item, dict)
+        ) if h
+    ]
+    designers = [
+        d for d in (
+            _normalize_party(item, _PDF_DESIGNER_FIELD_MAP)
+            for item in record.get("designers", []) or []
+            if isinstance(item, dict)
+        ) if d
+    ]
+    priorities = [
+        p for p in (
+            _normalize_pdf_priority(item)
+            for item in record.get("priorities", []) or []
+            if isinstance(item, dict)
+        ) if p
+    ]
+    designs = [
+        _normalize_pdf_design(d)
+        for d in record.get("designs", []) or []
+        if isinstance(d, dict)
+    ]
+
+    raw_page_range = record.get("page_range")
+    page_range: Optional[List[int]] = None
+    if (isinstance(raw_page_range, list)
+            and len(raw_page_range) == 2
+            and all(isinstance(x, int) for x in raw_page_range)):
+        page_range = list(raw_page_range)
+
+    return CanonicalDesignRecord(
+        application_no=_clean_str(record.get("application_no")),
+        registration_no=_clean_str(record.get("registration_no")),
+        application_date=_clean_str(record.get("filing_date")),
+        registration_date=_clean_str(record.get("registration_date")),
+        design_count=_parse_design_count(record.get("design_count")),
+        type=None,  # PDF has no IDDOSSIER.TYPE equivalent
+        section=_clean_str(record.get("section")),
+        locarno_codes=list(record.get("locarno_classes") or []),
+        attorney=_normalize_attorney(record.get("attorney"), _PDF_ATTORNEY_FIELD_MAP),
+        holders=holders,
+        designers=designers,
+        priorities=priorities,
+        designs=designs,
+        hague_reference=_normalize_pdf_hague_reference(record.get("hague_reference")),
+        page_range=page_range,
+        deferred_publication=_normalize_pdf_deferred_publication(
+            record.get("deferred_publication"),
+        ),
+        source_format="PDF",
     )

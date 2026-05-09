@@ -18,6 +18,7 @@ from pipeline.reconcile_tasarim import (
     load_cd_metadata,
     load_pdf_metadata,
     normalize_cd_dossier,
+    normalize_pdf_record,
 )
 from pipeline.reconcile_tasarim import (
     _clean_str,
@@ -320,10 +321,14 @@ def test_normalize_cd_dossier_real_record_full_shape():
         "address": "MECİDİYEKÖY MAH. ESKİ OSMANLI SOK.",
     }
 
-    # Holders / designers: every present field carried, in declared key order
+    # Holders / designers: every present field carried, in declared key order.
+    # Note: CD's "title" (entity name) collapses to canonical "name" so the
+    # merged shape matches PDF's applicants.
     assert len(rec.holders) == 1
     h = rec.holders[0]
     assert h["client_no"] == "234974"
+    assert h["name"] == "BİRLİK MENFEZ HAV. EKİP. SANAYİ TİCARET LİMİTED ŞİRKETİ"
+    assert "title" not in h  # title -> name rename
     assert h["country"] == "TÜRKİYE"
 
     assert len(rec.designers) == 1
@@ -436,7 +441,8 @@ def test_normalize_cd_dossier_multi_design_multi_view():
 
 
 def test_normalize_cd_dossier_filters_empty_holders():
-    """Holders that are entirely blank don't appear in the merged output."""
+    """Holders that are entirely blank don't appear in the merged output.
+    Note: CD's "title" field collapses to canonical "name"."""
     dossier = {
         "application_no": "2016/00001",
         "application_date": "01.01.2016",
@@ -456,4 +462,228 @@ def test_normalize_cd_dossier_filters_empty_holders():
     }
     rec = normalize_cd_dossier(dossier)
     assert len(rec.holders) == 1
-    assert rec.holders[0]["title"] == "REAL HOLDER"
+    assert rec.holders[0]["name"] == "REAL HOLDER"  # title -> name
+
+
+# ---------------------------------------------------------------------------
+# Step 3.3 — normalize_pdf_record
+# ---------------------------------------------------------------------------
+
+def _real_pdf_record_2024_007254() -> dict:
+    """Real record shape from pdf_extract_tasarim's TS_483 output."""
+    return {
+        "section": "tr_native",
+        "record_index": 1,
+        "application_no": "2024/007254",
+        "registration_no": "2024 007254",
+        "filing_date": "2024-09-06",
+        "registration_date": "2024-09-06",
+        "design_count": 4,
+        "locarno_classes": ["26-05"],
+        "applicants": [{
+            "name": "TİM MİMARLIK DEKORASYON İNŞAAT TURİZM LİMİTED ŞİRKETİ",
+            "id": "7610221",
+            "address": "HARBİYE MAH. ABDİ İPEKÇİ",
+            "country": "TÜRKİYE",
+        }],
+        "designers": [{"name": "ŞEBNEM SULTAN BUHARA GÜLEN"}],
+        "attorney": {
+            "name": "IŞIK ÖZDOĞAN",
+            "firm": "MOROĞLU ARSEVEN DANIŞMANLIK A.Ş.",
+        },
+        "priorities": [],
+        "designs": [{
+            "design_index": 1,
+            "product_name_tr": "Lamba",
+            "views": [{
+                "view_index": 1, "page": 17, "image_xref": 156,
+                "bbox": [66.0, 100.0, 200.0, 280.0],
+                "image_path": "2024_007254/1_1.jpg",
+                "image_source": "pdf",
+                "embeddings": {"dinov2_vitl14": [0.1] * 1024},  # gets DROPPED
+            }],
+        }],
+        "page_range": [17, 17],
+    }
+
+
+def test_normalize_pdf_record_real_full_shape():
+    """End-to-end shape check on a real PDF record."""
+    rec = normalize_pdf_record(_real_pdf_record_2024_007254())
+    assert rec.application_no == "2024/007254"
+    assert rec.registration_no == "2024 007254"
+    assert rec.application_date == "2024-09-06"   # filing_date renamed
+    assert rec.registration_date == "2024-09-06"
+    assert rec.design_count == 4
+    assert rec.type is None  # PDF has no IDDOSSIER.TYPE
+    assert rec.section == "tr_native"
+    assert rec.locarno_codes == ["26-05"]
+    assert rec.priorities == []
+    assert rec.hague_reference is None
+    assert rec.page_range == [17, 17]
+    assert rec.deferred_publication is None
+    assert rec.source_format == "PDF"
+
+    assert rec.attorney == {
+        "name": "IŞIK ÖZDOĞAN",
+        "firm": "MOROĞLU ARSEVEN DANIŞMANLIK A.Ş.",
+    }
+
+    assert len(rec.holders) == 1
+    h = rec.holders[0]
+    # PDF.id collapses to canonical client_no (matches CD's TPECLIENT id field)
+    assert h["client_no"] == "7610221"
+    assert h["name"] == "TİM MİMARLIK DEKORASYON İNŞAAT TURİZM LİMİTED ŞİRKETİ"
+    assert h["country"] == "TÜRKİYE"
+    assert "id" not in h  # rename happened
+
+    assert len(rec.designers) == 1
+    assert rec.designers[0] == {"name": "ŞEBNEM SULTAN BUHARA GÜLEN"}
+
+    # Designs: design_index -> no (str), product_name_tr -> product_name
+    assert len(rec.designs) == 1
+    des = rec.designs[0]
+    assert des.no == "1"
+    assert des.product_name == "Lamba"
+
+    # Views: view_index -> view_no (str); embeddings/bbox/xref/page DROPPED
+    assert len(des.views) == 1
+    v = des.views[0]
+    assert v.view_no == "1"
+    assert v.image_path == "2024_007254/1_1.jpg"
+    assert v.image_source == "pdf"
+
+
+def test_normalize_pdf_record_drops_extraction_artefacts():
+    """Pin the locked decision: bbox / image_xref / page / embeddings
+    must NOT appear in the canonical view dict."""
+    rec = normalize_pdf_record(_real_pdf_record_2024_007254())
+    view_dict = asdict(rec.designs[0].views[0])
+    assert set(view_dict.keys()) == {"view_no", "image_path", "image_source"}
+    assert "bbox" not in view_dict
+    assert "image_xref" not in view_dict
+    assert "page" not in view_dict
+    assert "embeddings" not in view_dict
+
+
+def test_normalize_pdf_record_image_source_carries_through():
+    """View image_source defaults to None when no image_path; otherwise
+    preserves the value pdf_extract_tasarim wrote ("pdf" or "cd")."""
+    record = _real_pdf_record_2024_007254()
+    record["designs"][0]["views"][0]["image_source"] = "cd"
+    rec = normalize_pdf_record(record)
+    assert rec.designs[0].views[0].image_source == "cd"
+
+    # If image_path is missing, image_source collapses to None even if set.
+    record2 = _real_pdf_record_2024_007254()
+    del record2["designs"][0]["views"][0]["image_path"]
+    record2["designs"][0]["views"][0]["image_source"] = "pdf"
+    rec2 = normalize_pdf_record(record2)
+    assert rec2.designs[0].views[0].image_path is None
+    assert rec2.designs[0].views[0].image_source is None
+
+
+def test_normalize_pdf_record_hague_section():
+    """Hague-section PDF record carries hague_reference; designs have no
+    images. registration_no is the DM-style id we'll pair on later."""
+    record = {
+        "section": "hague",
+        "record_index": 250,
+        "registration_no": "DM 244882",
+        "filing_date": "2024-02-15",
+        "registration_date": "2024-02-15",
+        "design_count": 1,
+        "locarno_classes": ["11-01"],
+        "applicants": [{"name": "RAYE ROCKS LLC", "id": "8022625", "country": "US"}],
+        "designers": [{"name": "Erika Rayman"}],
+        "attorney": {"name": "Sullivan Worcester"},
+        "priorities": [],
+        "designs": [{"design_index": 1, "product_name_tr": "Jewelry", "views": []}],
+        "hague_reference": {
+            "wipo_bulletin": "13/2025",
+            "designated_states": ["CH", "DE", "TR", "US"],
+            "product_name_en": "Jewelry for swim wear",
+        },
+        "page_range": [477, 477],
+    }
+    rec = normalize_pdf_record(record)
+    assert rec.section == "hague"
+    assert rec.application_no is None  # PDF Hague records carry no application_no
+    assert rec.registration_no == "DM 244882"
+    assert rec.hague_reference == {
+        "wipo_bulletin": "13/2025",
+        "designated_states": ["CH", "DE", "TR", "US"],
+        "product_name_en": "Jewelry for swim wear",
+    }
+
+
+def test_normalize_pdf_record_deferred_publication():
+    """Deferred-section record carries the deferred_publication block."""
+    record = {
+        "section": "deferred",
+        "application_no": "2026/001807",
+        "filing_date": "2026-01-15",
+        "registration_date": "2026-01-15",
+        "design_count": 2,
+        "locarno_classes": ["06-01"],
+        "applicants": [], "designers": [], "priorities": [],
+        "designs": [],
+        "deferred_publication": {"period_months": 30},
+    }
+    rec = normalize_pdf_record(record)
+    assert rec.section == "deferred"
+    assert rec.deferred_publication == {"period_months": 30}
+
+
+def test_normalize_pdf_record_handles_missing_optional_blocks():
+    """attorney / hague_reference / deferred_publication absent on most
+    records; canonical record carries None for each."""
+    record = {
+        "section": "tr_native",
+        "application_no": "2026/000001",
+        "filing_date": "2026-01-01",
+        "registration_date": "2026-01-01",
+        "design_count": 1,
+        "locarno_classes": [],
+        "applicants": [], "designers": [], "priorities": [],
+        "designs": [],
+    }
+    rec = normalize_pdf_record(record)
+    assert rec.attorney is None
+    assert rec.hague_reference is None
+    assert rec.deferred_publication is None
+    assert rec.page_range is None
+
+
+def test_normalize_pdf_record_invalid_page_range_collapses_to_none():
+    """page_range must be a 2-element int list — anything else -> None."""
+    base = {
+        "section": "tr_native",
+        "application_no": "2026/000002",
+        "filing_date": "2026-01-01",
+        "registration_date": "2026-01-01",
+        "design_count": 1,
+        "locarno_classes": [],
+        "applicants": [], "designers": [], "priorities": [], "designs": [],
+    }
+    for bad in ([17], [17, 18, 19], "17-18", None, [17, "18"]):
+        rec = normalize_pdf_record({**base, "page_range": bad})
+        assert rec.page_range is None
+    rec = normalize_pdf_record({**base, "page_range": [17, 18]})
+    assert rec.page_range == [17, 18]
+
+
+def test_normalize_pdf_record_locarno_classes_renamed_to_codes():
+    """Pin the rename: PDF.locarno_classes -> canonical.locarno_codes
+    so the merged shape uses one name shared with CD."""
+    record = {
+        "section": "tr_native",
+        "application_no": "2026/000003",
+        "filing_date": "2026-01-01",
+        "registration_date": "2026-01-01",
+        "design_count": 1,
+        "locarno_classes": ["12-16", "12-05"],
+        "applicants": [], "designers": [], "priorities": [], "designs": [],
+    }
+    rec = normalize_pdf_record(record)
+    assert rec.locarno_codes == ["12-16", "12-05"]
