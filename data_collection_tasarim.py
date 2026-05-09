@@ -174,6 +174,48 @@ def issue_folder_is_complete(issue_folder: Path) -> bool:
         return False
 
 
+def _find_existing_issue_folder(
+    bulletins_root: Path,
+    card_id: str,
+) -> Optional[Path]:
+    """Find a single ``TS_{card_id}_*/`` folder under ``bulletins_root``.
+
+    Why this helper: the TÜRKPATENT bulletin page sometimes exposes a
+    bulletin's archive-ingestion date instead of its actual publication
+    date — empirically observed for old issues like 240 (page reports
+    ``2026-04-24``, the real publication date is ``2016-03-09``). Without
+    this helper, the collector would write a fresh ``TS_240_2026-04-24/``
+    folder beside the canonical ``TS_240_2016-03-09/`` that already
+    holds the CD-extracted output, splitting one bulletin into two
+    folders.
+
+    Returns:
+      - ``Path`` of the matching folder when exactly one ``TS_{card_id}_*/``
+        directory exists.
+      - ``None`` when no folder matches (caller falls back to creating
+        a fresh folder named from ``card_date``).
+
+    Raises ``RuntimeError`` when more than one ``TS_{card_id}_*/``
+    folder matches — that's a real ambiguity (e.g. an unresolved
+    drift case left around) and we'd rather fail loud than guess.
+    """
+    if not card_id:
+        return None
+    if not bulletins_root.is_dir():
+        return None
+    matches = sorted(
+        p for p in bulletins_root.glob(f"TS_{card_id}_*") if p.is_dir()
+    )
+    if not matches:
+        return None
+    if len(matches) == 1:
+        return matches[0]
+    raise RuntimeError(
+        f"multiple TS_{card_id}_* folders under {bulletins_root}: "
+        f"{[p.name for p in matches]}; resolve manually before re-running"
+    )
+
+
 def check_local_existence(
     category_folder: str | Path,
     card_id: str,
@@ -190,6 +232,18 @@ def check_local_existence(
     for name in candidates:
         if issue_folder_is_complete(root / name):
             return True
+    # Fallback: any TS_{card_id}_*/ folder with bulletin.pdf inside.
+    # Catches drift cases where the page reports a different date than
+    # the existing folder's suffix (the same drift that prompted P.1
+    # in cd_extract_tasarim).
+    try:
+        existing = _find_existing_issue_folder(root, card_id)
+    except RuntimeError:
+        # Multi-match: existence is ambiguous — treat as "not complete"
+        # so process_card surfaces the issue when it tries to download.
+        return False
+    if existing is not None and issue_folder_is_complete(existing):
+        return True
     return False
 
 
@@ -677,7 +731,21 @@ async def process_card(
     card_id: str,
     card_date: Optional[str],
 ) -> CollectionCounters:
-    target_folder = bulletins_root / build_issue_folder_name(card_id, card_date)
+    # Prefer an existing TS_{card_id}_*/ folder if exactly one exists —
+    # mirrors P.1 in cd_extract_tasarim. Falls back to a freshly-named
+    # TS_{card_id}_{card_date}/ when no folder is on disk yet (the
+    # standalone case for newly-published bulletins). Multi-match is
+    # caught and reported as a per-card failure so the rest of the
+    # walk continues unaffected.
+    try:
+        existing = _find_existing_issue_folder(bulletins_root, card_id)
+    except RuntimeError as e:
+        logger.error("[!] %s: %s", card_id, e)
+        return CollectionCounters(failed=1)
+    if existing is not None:
+        target_folder = existing
+    else:
+        target_folder = bulletins_root / build_issue_folder_name(card_id, card_date)
 
     if check_local_existence(bulletins_root, card_id, card_date=card_date):
         logger.info("[=] %s already complete locally, skipping", target_folder.name)
