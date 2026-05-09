@@ -15,6 +15,7 @@ from pipeline.reconcile_tasarim import (
     CanonicalDesign,
     CanonicalDesignRecord,
     CanonicalDesignView,
+    dedupe_images_on_disk,
     load_cd_metadata,
     load_pdf_metadata,
     merge_records,
@@ -1142,3 +1143,84 @@ def test_reconcile_metadata_stats_aggregate_correctly():
     assert s["designs_total"] == 2
     assert s["views_total"] == 2
     assert s["views_by_source"] == {"cd": 1, "pdf": 1, "none": 0}
+
+
+# ---------------------------------------------------------------------------
+# Step 3.6 — dedupe_images_on_disk
+# ---------------------------------------------------------------------------
+
+def test_dedupe_images_no_op_when_either_folder_missing(tmp_path):
+    """No images/ or no cd_images/ -> no work to do."""
+    out = dedupe_images_on_disk(tmp_path)
+    assert out == {"unlinked": 0, "pdf_only_remaining": 0}
+
+    (tmp_path / "cd_images").mkdir()
+    out = dedupe_images_on_disk(tmp_path)
+    assert out == {"unlinked": 0, "pdf_only_remaining": 0}
+
+
+def test_dedupe_images_unlinks_pdf_duplicates(tmp_path):
+    """Same key in both -> PDF copy unlinked, CD copy kept."""
+    cd = tmp_path / "cd_images" / "2016_01059"
+    cd.mkdir(parents=True)
+    (cd / "1_1.jpg").write_bytes(b"CD")
+
+    pdf = tmp_path / "images" / "2016_01059"
+    pdf.mkdir(parents=True)
+    (pdf / "1_1.jpg").write_bytes(b"PDF")
+
+    out = dedupe_images_on_disk(tmp_path)
+    assert out["unlinked"] == 1
+    assert out["pdf_only_remaining"] == 0
+    assert (cd / "1_1.jpg").read_bytes() == b"CD"  # CD survives
+    assert not (pdf / "1_1.jpg").exists()           # PDF gone
+
+
+def test_dedupe_images_keeps_pdf_only_files(tmp_path):
+    """PDF views that aren't in cd_images/ stay where they are."""
+    cd = tmp_path / "cd_images" / "2016_01059"
+    cd.mkdir(parents=True)
+    (cd / "1_1.jpg").write_bytes(b"")
+
+    pdf = tmp_path / "images" / "2016_01059"
+    pdf.mkdir(parents=True)
+    (pdf / "1_1.jpg").write_bytes(b"")  # dup with CD
+    (pdf / "1_2.jpg").write_bytes(b"")  # PDF-only — stays
+
+    out = dedupe_images_on_disk(tmp_path)
+    assert out["unlinked"] == 1
+    assert out["pdf_only_remaining"] == 1
+    assert (pdf / "1_2.jpg").exists()
+
+
+def test_dedupe_images_multi_application(tmp_path):
+    """Dedup walks every {appno}/ subfolder under cd_images/."""
+    for app in ("2016_01059", "2016_01205", "2015_06749"):
+        cd = tmp_path / "cd_images" / app
+        cd.mkdir(parents=True)
+        (cd / "1_1.jpg").write_bytes(b"")
+        pdf = tmp_path / "images" / app
+        pdf.mkdir(parents=True)
+        (pdf / "1_1.jpg").write_bytes(b"")
+
+    out = dedupe_images_on_disk(tmp_path)
+    assert out["unlinked"] == 3
+    assert out["pdf_only_remaining"] == 0
+
+
+def test_dedupe_images_no_unlinks_when_no_overlap(tmp_path):
+    """Different keys on each side -> nothing to unlink, all PDF kept."""
+    (tmp_path / "cd_images" / "2016_01059").mkdir(parents=True)
+    (tmp_path / "cd_images" / "2016_01059" / "1_1.jpg").write_bytes(b"")
+    (tmp_path / "images" / "2024_007254").mkdir(parents=True)
+    (tmp_path / "images" / "2024_007254" / "1_1.jpg").write_bytes(b"")
+
+    out = dedupe_images_on_disk(tmp_path)
+    assert out["unlinked"] == 0
+    assert out["pdf_only_remaining"] == 1
+
+
+def test_dedupe_images_handles_str_path(tmp_path):
+    """Accepts str path as well as Path."""
+    out = dedupe_images_on_disk(str(tmp_path))
+    assert isinstance(out, dict)

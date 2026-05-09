@@ -942,3 +942,63 @@ def reconcile_metadata(
         "records":       [_record_to_dict(r) for r in merged],
         "cd_annotations": cd_annotations,
     }
+
+
+# ---------------------------------------------------------------------------
+# Step 3.6 — dedupe_images_on_disk (mop-up for pre-existing dual folders)
+# ---------------------------------------------------------------------------
+
+
+def dedupe_images_on_disk(ts_folder: str | Path) -> Dict[str, int]:
+    """Remove PDF image duplicates under ``images/`` when the same key
+    already exists under ``cd_images/``.
+
+    D.1 (PDF skip-write-when-CD-exists) and D.2 (CD unlink-PDF-dup-on-write)
+    already prevent new duplicates from being created. This helper is
+    a one-shot cleanup for **pre-existing** dual-source folders that
+    were extracted before D.1 / D.2 shipped — empirically zero today
+    (no Tasarim folder has both PDF and CD output), but the helper is
+    cheap insurance for re-running the reconciler after an arbitrary
+    history of extractions.
+
+    Behaviour:
+      - Walks every file under ``ts_folder/cd_images/``.
+      - For each ``cd_images/X.jpg``, checks if ``images/X.jpg`` also
+        exists. If yes, unlinks the PDF copy. CD wins.
+      - Counts surviving PDF-only files (under ``images/`` but not in
+        ``cd_images/``) for reporting.
+      - No-op when either folder is missing.
+
+    Returns ``{"unlinked": int, "pdf_only_remaining": int}`` — both
+    fields exposed so the CLI can print a one-line summary per folder
+    and the operator can spot anomalies (e.g. a CD that ships fewer
+    images than its PDF counterpart).
+    """
+    ts = Path(ts_folder)
+    cd_images = ts / "cd_images"
+    images = ts / "images"
+
+    if not cd_images.is_dir() or not images.is_dir():
+        return {"unlinked": 0, "pdf_only_remaining": 0}
+
+    unlinked = 0
+    cd_keys: set = set()
+    for cd_file in cd_images.rglob("*"):
+        if not cd_file.is_file():
+            continue
+        rel = cd_file.relative_to(cd_images)
+        cd_keys.add(rel.as_posix())
+        pdf_dup = images / rel
+        if pdf_dup.is_file():
+            pdf_dup.unlink()
+            unlinked += 1
+
+    pdf_only_remaining = 0
+    for pdf_file in images.rglob("*"):
+        if not pdf_file.is_file():
+            continue
+        rel = pdf_file.relative_to(images)
+        if rel.as_posix() not in cd_keys:
+            pdf_only_remaining += 1
+
+    return {"unlinked": unlinked, "pdf_only_remaining": pdf_only_remaining}
