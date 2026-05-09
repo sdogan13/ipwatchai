@@ -320,3 +320,183 @@ def upsert_patent(cur, row: Dict[str, Any]) -> str:
         row,
     )
     return cur.fetchone()[0]
+
+
+# ---------------------------------------------------------------------------
+# Child-table upserts (replace-style: DELETE + INSERT)
+# ---------------------------------------------------------------------------
+#
+# Each child table is keyed on (patent_id, seq). On re-ingest we
+# DELETE all child rows for the patent and re-INSERT from the JSON.
+# Cleaner than per-row UPSERT because it handles changes in row count
+# (e.g., a record gaining a 2nd holder between runs) without leaving
+# stale rows. Costs more INSERTs on re-ingest but the alternative
+# (UPSERT + manual stale-row deletion) is more code and easier to
+# get wrong.
+
+
+def replace_holders(
+    cur,
+    patent_id: str,
+    holders: List[Dict[str, Any]],
+) -> int:
+    """Delete + re-insert this patent's holder rows. Returns count inserted."""
+    cur.execute("DELETE FROM patent_holders WHERE patent_id = %s", (patent_id,))
+    inserted = 0
+    for seq, holder in enumerate(holders or [], start=1):
+        name = (holder.get("name") or "").strip()
+        if not name:
+            continue
+        holder_id = resolve_holder_id(cur, holder)
+        cur.execute(
+            """
+            INSERT INTO patent_holders
+                (patent_id, holder_id, seq, name, address, city, state,
+                 postal_code, country)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                patent_id, holder_id, seq, name,
+                holder.get("address"), holder.get("city"),
+                holder.get("state"), holder.get("postal_code"),
+                holder.get("country"),
+            ),
+        )
+        inserted += 1
+    return inserted
+
+
+def replace_inventors(
+    cur,
+    patent_id: str,
+    inventors: List[Dict[str, Any]],
+) -> int:
+    """Delete + re-insert this patent's inventor rows."""
+    cur.execute("DELETE FROM patent_inventors WHERE patent_id = %s", (patent_id,))
+    inserted = 0
+    for seq, inv in enumerate(inventors or [], start=1):
+        name = (inv.get("name") or "").strip()
+        if not name:
+            continue
+        cur.execute(
+            """
+            INSERT INTO patent_inventors
+                (patent_id, seq, name, address, city, state,
+                 postal_code, country)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                patent_id, seq, name,
+                inv.get("address"), inv.get("city"),
+                inv.get("state"), inv.get("postal_code"),
+                inv.get("country"),
+            ),
+        )
+        inserted += 1
+    return inserted
+
+
+def replace_attorneys(
+    cur,
+    patent_id: str,
+    attorneys: List[Dict[str, Any]],
+) -> int:
+    """Delete + re-insert this patent's attorney rows.
+
+    JSON ships ``no`` (CD-only TPE patent-attorney registry ID); the
+    schema column is ``agent_no`` to avoid the SQL keyword collision.
+    """
+    cur.execute("DELETE FROM patent_attorneys WHERE patent_id = %s", (patent_id,))
+    inserted = 0
+    for seq, att in enumerate(attorneys or [], start=1):
+        name = (att.get("name") or "").strip()
+        if not name:
+            continue
+        cur.execute(
+            """
+            INSERT INTO patent_attorneys
+                (patent_id, seq, agent_no, name, firm, address)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (
+                patent_id, seq,
+                att.get("no"), name, att.get("firm"), att.get("address"),
+            ),
+        )
+        inserted += 1
+    return inserted
+
+
+def replace_priorities(
+    cur,
+    patent_id: str,
+    priorities: List[Dict[str, Any]],
+) -> int:
+    """Delete + re-insert this patent's priority rows."""
+    cur.execute("DELETE FROM patent_priorities WHERE patent_id = %s", (patent_id,))
+    inserted = 0
+    for seq, p in enumerate(priorities or [], start=1):
+        cur.execute(
+            """
+            INSERT INTO patent_priorities
+                (patent_id, seq, priority_no, priority_date, country)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (
+                patent_id, seq,
+                p.get("priority_no"),
+                parse_date_safe(p.get("priority_date")),
+                p.get("country"),
+            ),
+        )
+        inserted += 1
+    return inserted
+
+
+def replace_figures(
+    cur,
+    patent_id: str,
+    figures: List[Dict[str, Any]],
+) -> int:
+    """Delete + re-insert this patent's figure rows.
+
+    Figure dicts come in two shapes after the unified-folder + dedup
+    refactor:
+      - CD TIFF kept: ``{"image_path": "figures/{Y}_{N}.tif",
+        "embeddings": {dinov2_vitl14, clip_vitb32}}``
+      - PDF figure dedup'd against CD: ``{"page": <n>}`` (image_path
+        absent because the PNG was deleted; page/xref preserved for
+        traceability)
+      - PDF figure kept (no CD): full
+        ``{"image_path", "page", "xref", "bbox", "width", "height",
+        "embeddings"}``
+    All three land cleanly in patent_figures with NULL fields where
+    metadata is absent.
+    """
+    cur.execute("DELETE FROM patent_figures WHERE patent_id = %s", (patent_id,))
+    inserted = 0
+    for seq, fig in enumerate(figures or [], start=1):
+        emb = fig.get("embeddings") or {}
+        cur.execute(
+            """
+            INSERT INTO patent_figures
+                (patent_id, seq, source, image_path, page, image_xref,
+                 bbox, width, height, dinov2_vitl14, clip_vitb32)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::halfvec, %s::halfvec)
+            """,
+            (
+                patent_id, seq,
+                figure_source(fig.get("image_path")),
+                fig.get("image_path"),
+                fig.get("page"),
+                # JSON sometimes uses 'xref'; schema column is image_xref.
+                fig.get("xref") or fig.get("image_xref"),
+                fig.get("bbox"),
+                fig.get("width"),
+                fig.get("height"),
+                to_halfvec_literal(emb.get("dinov2_vitl14")),
+                to_halfvec_literal(emb.get("clip_vitb32")),
+            ),
+        )
+        inserted += 1
+    return inserted

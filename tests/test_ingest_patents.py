@@ -17,6 +17,11 @@ from pipeline.ingest_patents import (
     _patent_row,
     figure_source,
     parse_date_safe,
+    replace_attorneys,
+    replace_figures,
+    replace_holders,
+    replace_inventors,
+    replace_priorities,
     resolve_holder_id,
     to_halfvec_literal,
     upsert_patent,
@@ -329,3 +334,149 @@ def test_patent_upsert_cols_match_schema_columns() -> None:
     ).read_text(encoding="utf-8")
     for col in PATENT_UPSERT_COLS:
         assert col in sql, f"PATENT_UPSERT_COLS contains '{col}' but it's not in patents.sql"
+
+
+# ---------------------------------------------------------------------------
+# Child-table upserts (replace-style)
+# ---------------------------------------------------------------------------
+
+
+def test_replace_holders_deletes_then_inserts() -> None:
+    """Re-ingest must DELETE existing rows then INSERT fresh — no
+    stale rows lingering."""
+    # First fetchone: holder name lookup misses → INSERT new holder
+    # Second fetchone: returns the new holder UUID
+    # Third fetchone: second holder name lookup misses
+    # Fourth fetchone: returns second holder UUID
+    cur = _MockCursor(rows=[None, "h1-uuid", None, "h2-uuid"])
+
+    inserted = replace_holders(cur, "p-uuid", [
+        {"name": "ACME", "address": "X", "country": "TR"},
+        {"name": "FOREIGN INC", "country": "US"},
+    ])
+
+    assert inserted == 2
+    # First exec is the DELETE
+    delete_sql, delete_params = cur.executed[0]
+    assert "DELETE FROM patent_holders WHERE patent_id" in delete_sql
+    assert delete_params == ("p-uuid",)
+    # Then alternating SELECT (holder lookup) + INSERT (holders) + INSERT (patent_holders)
+    assert any("INSERT INTO patent_holders" in s for s, _ in cur.executed)
+
+
+def test_replace_holders_skips_blank_name() -> None:
+    """Empty-name holder shouldn't insert a useless row."""
+    cur = _MockCursor()
+    inserted = replace_holders(cur, "p-uuid", [{"name": "", "country": "TR"}])
+    assert inserted == 0
+    # Only the DELETE executes
+    assert len(cur.executed) == 1
+
+
+def test_replace_holders_handles_empty_list() -> None:
+    cur = _MockCursor()
+    inserted = replace_holders(cur, "p-uuid", [])
+    assert inserted == 0
+    # Still does the DELETE so any prior rows are removed
+    assert len(cur.executed) == 1
+    assert "DELETE" in cur.executed[0][0]
+
+
+def test_replace_inventors_inserts_with_seq() -> None:
+    cur = _MockCursor()
+    inserted = replace_inventors(cur, "p-uuid", [
+        {"name": "JANE DOE"},
+        {"name": "JOHN ROE", "address": "Y", "city": "İzmir"},
+    ])
+    assert inserted == 2
+    inv_inserts = [s for s, _ in cur.executed if "patent_inventors" in s and "INSERT" in s]
+    assert len(inv_inserts) == 2
+    # Verify seq increments
+    seqs = [p[1] for s, p in cur.executed if "INSERT INTO patent_inventors" in s]
+    assert seqs == [1, 2]
+
+
+def test_replace_attorneys_uses_agent_no_column() -> None:
+    """JSON ships 'no'; schema column is 'agent_no' (avoids SQL
+    keyword collision)."""
+    cur = _MockCursor()
+    inserted = replace_attorneys(cur, "p-uuid", [
+        {"no": "361", "name": "ERDEM KAYA", "firm": "ERDEM KAYA PATENT VE DAN."},
+    ])
+    assert inserted == 1
+    insert_sql = next(s for s, _ in cur.executed if "INSERT INTO patent_attorneys" in s)
+    assert "agent_no" in insert_sql
+    # Params: (patent_id, seq, agent_no, name, firm, address)
+    insert_params = next(p for s, p in cur.executed if "INSERT INTO patent_attorneys" in s)
+    assert insert_params == ("p-uuid", 1, "361", "ERDEM KAYA",
+                              "ERDEM KAYA PATENT VE DAN.", None)
+
+
+def test_replace_priorities_parses_iso_dates() -> None:
+    cur = _MockCursor()
+    inserted = replace_priorities(cur, "p-uuid", [
+        {"priority_no": "2020/05105", "priority_date": "2020-03-31",
+         "country": "TR"},
+        {"priority_no": "X", "priority_date": "garbage", "country": "JP"},
+    ])
+    assert inserted == 2
+    # First row's priority_date parsed; second's stays None (parse_date_safe
+    # returns None on garbage)
+    p1_params = cur.executed[1][1]
+    assert p1_params == ("p-uuid", 1, "2020/05105", date(2020, 3, 31), "TR")
+    p2_params = cur.executed[2][1]
+    assert p2_params == ("p-uuid", 2, "X", None, "JP")
+
+
+def test_replace_figures_includes_embeddings_with_halfvec_cast() -> None:
+    """patent_figures.dinov2_vitl14 + clip_vitb32 use ::halfvec cast."""
+    cur = _MockCursor()
+    inserted = replace_figures(cur, "p-uuid", [
+        {
+            "image_path": "figures/2017_15048.tif",
+            "embeddings": {
+                "dinov2_vitl14": [0.1] * 1024,
+                "clip_vitb32":   [0.2] * 512,
+            },
+        },
+    ])
+    assert inserted == 1
+    insert_sql = next(s for s, _ in cur.executed if "INSERT INTO patent_figures" in s)
+    assert "::halfvec, %s::halfvec" in insert_sql
+
+    insert_params = next(p for s, p in cur.executed if "INSERT INTO patent_figures" in s)
+    # (patent_id, seq, source, image_path, page, image_xref, bbox,
+    #  width, height, dinov2_vitl14, clip_vitb32)
+    assert insert_params[0] == "p-uuid"
+    assert insert_params[1] == 1
+    assert insert_params[2] == "CD"   # .tif → CD
+    assert insert_params[3] == "figures/2017_15048.tif"
+    assert insert_params[9].startswith("[0.100000,")
+    assert insert_params[10].startswith("[0.200000,")
+
+
+def test_replace_figures_handles_dedup_dropped_metadata_only() -> None:
+    """A figure with only ``page`` (image_path=None after CD-first
+    dedup) lands as a PDF row with halfvec NULLs; bookkeeping intact."""
+    cur = _MockCursor()
+    inserted = replace_figures(cur, "p-uuid", [
+        {"page": 1847},
+    ])
+    assert inserted == 1
+    params = next(p for s, p in cur.executed if "INSERT INTO patent_figures" in s)
+    assert params[2] == "PDF"          # default source
+    assert params[3] is None           # image_path
+    assert params[4] == 1847           # page
+    assert params[9] is None           # dinov2_vitl14
+    assert params[10] is None          # clip_vitb32
+
+
+def test_replace_figures_handles_xref_synonym() -> None:
+    """JSON sometimes ships 'xref' (PyMuPDF native); schema column is
+    image_xref. replace_figures accepts either."""
+    cur = _MockCursor()
+    replace_figures(cur, "p-uuid", [
+        {"image_path": "figures/X_p1_2.png", "page": 1, "xref": 4204},
+    ])
+    params = next(p for s, p in cur.executed if "INSERT INTO patent_figures" in s)
+    assert params[5] == 4204           # image_xref column gets the value
