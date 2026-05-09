@@ -112,6 +112,7 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
         applications: ['monthly_applications', 'monthly_ai_credits', 'can_track_logos'],
         ai_credits: ['monthly_ai_credits', 'name_suggestions_per_session', 'can_track_logos'],
         name_suggestions: ['name_suggestions_per_session', 'monthly_ai_credits', 'can_track_logos'],
+        class_suggestions: ['monthly_ai_credits', 'max_daily_quick_searches', 'can_track_logos'],
         leads: ['daily_lead_views', 'can_export_csv_leads', 'can_download_portfolio'],
         csv_export: ['api_access', 'daily_lead_views', 'can_download_portfolio'],
         auto_scan: ['auto_scan_max_items', 'max_watchlist_items', 'monthly_live_searches'],
@@ -168,6 +169,11 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
             eyebrow: 'upgrade.ai_credits_eyebrow',
             title: 'upgrade.ai_credits_title',
             description: 'upgrade.ai_credits_description'
+        },
+        class_suggestions: {
+            eyebrow: 'upgrade.class_suggestions_eyebrow',
+            title: 'upgrade.class_suggestions_title',
+            description: 'upgrade.class_suggestions_description'
         },
         leads: {
             eyebrow: 'upgrade.leads_eyebrow',
@@ -542,7 +548,7 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
     function shouldHandle(detail, fallbackContext) {
         var normalized = mergeDetail(detail, fallbackContext);
         if (normalized.recommended_plan) return true;
-        return ['upgrade_required', 'limit_exceeded', 'daily_limit_exceeded', 'monthly_limit_exceeded', 'credits_exhausted'].indexOf(normalized.error || '') >= 0;
+        return ['upgrade_required', 'limit_exceeded', 'daily_limit_exceeded', 'monthly_limit_exceeded', 'credits_exhausted', 'anon_limit_reached'].indexOf(normalized.error || '') >= 0;
     }
 
     function maybeHandle(detail, fallbackContext) {

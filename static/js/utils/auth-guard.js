@@ -220,7 +220,13 @@
                 '/api/v1/auth/register',
                 '/api/v1/auth/forgot-password',
                 '/api/v1/auth/reset-password',
-                '/api/v1/auth/refresh'
+                '/api/v1/auth/refresh',
+                // Class-suggester endpoints intentionally return 401 with an
+                // `anon_limit_reached` payload to trigger the upgrade modal.
+                // That 401 is NOT a session expiry — never wipe tokens or
+                // redirect to /login, or the upgrade modal vanishes.
+                '/api/suggest-classes',
+                '/api/v1/tools/suggest-locarno-classes'
             ].indexOf(parsed.pathname) >= 0;
         } catch (e) {
             return false;

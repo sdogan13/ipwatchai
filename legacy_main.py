@@ -131,7 +131,7 @@ _step("register_admin_scoring_routes")
 register_admin_scoring_routes(app)
 
 _step("register_nice_class_routes")
-register_nice_class_routes(app)
+register_nice_class_routes(app, limiter)
 
 _step("register_public_portfolio_routes")
 public_portfolio, public_portfolio_csv = register_public_portfolio_routes(app, limiter, logger)

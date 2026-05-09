@@ -7,7 +7,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32.png?v=20260427">
     <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png?v=20260427">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon.png?v=20260427">
-    <script src="/static/js/utils/auth-guard.js?v=1"></script>
+    <script src="/static/js/utils/auth-guard.js?v=2"></script>
     <title x-data x-text="t('pricing.page_title') || 'Planlar - IPWatchAI'">Planlar - IPWatchAI</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
@@ -170,6 +170,7 @@
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_users', {n: {{ plans.free.max_users }}})">{{ plans.free.max_users }} kullanici</span></li>
                     <li class="flex items-start gap-2">{{ cross|safe }} <span class="text-gray-400" x-text="t('pricing.f_live_search')">Agentik Arama</span></li>
                     <li class="flex items-start gap-2">{{ cross|safe }} <span class="text-gray-400" x-text="t('pricing.f_ai_credits', {n: 0})">AI kredi</span></li>
+                    <li class="flex items-start gap-2">{{ cross|safe }} <span class="text-gray-400" x-text="t('pricing.f_class_suggestions')">AI sinif onerisi</span></li>
                     <li class="flex items-start gap-2">{{ cross|safe }} <span class="text-gray-400" x-text="t('pricing.f_applications', {n: 0})">Marka basvurusu</span></li>
                     <li class="flex items-start gap-2">{{ cross|safe }} <span class="text-gray-400" x-text="t('pricing.f_logo_tracking')">Logo izleme</span></li>
                     <li class="flex items-start gap-2">{{ cross|safe }} <span class="text-gray-400" x-text="t('pricing.f_download_portfolio')">Portfolyo indirme</span></li>
@@ -205,6 +206,7 @@
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_users', {n: {{ plans.starter.max_users }}})">{{ plans.starter.max_users }} kullanici</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_live_monthly', {n: {{ plans.starter.monthly_live_searches }}})">Ayda {{ plans.starter.monthly_live_searches }} Agentik Arama</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_ai_credits', {n: {{ plans.starter.monthly_ai_credits }}})">Ayda {{ plans.starter.monthly_ai_credits }} AI kredi</span></li>
+                    <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_class_suggestions_n', {n: {{ plans.starter.monthly_ai_credits }}})">AI sinif onerisi · ayda {{ plans.starter.monthly_ai_credits }} kullanim</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_applications', {n: {{ plans.starter.monthly_applications }}})">Ayda {{ plans.starter.monthly_applications }} marka basvurusu</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_logo_tracking')">Logo izleme</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_download_portfolio')">Portfolyo indirme</span></li>
@@ -241,6 +243,7 @@
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_users', {n: {{ plans.professional.max_users }}})">{{ plans.professional.max_users }} kullanici</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_live_monthly', {n: {{ plans.professional.monthly_live_searches }}})">Ayda {{ plans.professional.monthly_live_searches }} Agentik Arama</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_ai_credits', {n: {{ plans.professional.monthly_ai_credits }}})">Ayda {{ plans.professional.monthly_ai_credits }} AI kredi</span></li>
+                    <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_class_suggestions_n', {n: {{ plans.professional.monthly_ai_credits }}})">AI sinif onerisi · ayda {{ plans.professional.monthly_ai_credits }} kullanim</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_applications', {n: {{ plans.professional.monthly_applications }}})">Ayda {{ plans.professional.monthly_applications }} marka basvurusu</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_logo_tracking')">Logo izleme</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_download_portfolio')">Portfolyo indirme</span></li>
@@ -276,6 +279,7 @@
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_unlimited_users')">Sinirsiz kullanici</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_unlimited_live')">Sınırsız Agentik Arama</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_ai_credits', {n: {{ plans.enterprise.monthly_ai_credits }}})">Ayda {{ plans.enterprise.monthly_ai_credits }} AI kredi</span></li>
+                    <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_class_suggestions_n', {n: {{ plans.enterprise.monthly_ai_credits }}})">AI sinif onerisi · ayda {{ plans.enterprise.monthly_ai_credits }} kullanim</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_applications', {n: {{ plans.enterprise.monthly_applications }}})">Ayda {{ plans.enterprise.monthly_applications }} marka basvurusu</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_logo_tracking')">Logo izleme</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_download_portfolio')">Portfolyo indirme</span></li>
