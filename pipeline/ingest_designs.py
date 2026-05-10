@@ -22,7 +22,7 @@ import json
 import logging
 import os
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -458,10 +458,65 @@ def upsert_event(cur, event: Dict[str, Any], *, bulletin_no: Optional[str], bull
 # Issue-level orchestration
 # ---------------------------------------------------------------------------
 
-def ingest_issue(conn, issue_folder: Path, *, skip_events: bool = False, run_watchlist_scan: bool = True) -> Dict[str, Any]:
+def _folder_already_ingested(cur, folder_name: str, latest_input_mtime: datetime) -> bool:
+    """Return True iff every existing design row for this folder was
+    ingested after ``latest_input_mtime`` (the most recent mtime among
+    the folder's input files: ``metadata.json`` and ``events.json``).
+
+    Used by ``ingest_issue`` to skip folders whose DB state is already
+    up-to-date — avoids 450K of pointless UPSERTs on idempotent re-runs.
+
+    Returns False when:
+      - no rows exist for the folder yet (must ingest)
+      - any row was last updated before ``latest_input_mtime`` (inputs
+        are newer than DB → re-ingest needed)
+    """
+    cur.execute(
+        "SELECT COUNT(*), MIN(updated_at) FROM designs WHERE source_issue_folder = %s",
+        (folder_name,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return False
+    count, min_updated = row[0], row[1]
+    if not count or min_updated is None:
+        return False
+    # Postgres ``TIMESTAMP`` columns (without TZ) come back as naive
+    # datetimes via psycopg2. ``Path.stat().st_mtime`` yields a tz-aware
+    # UTC datetime. Normalize both sides to tz-aware UTC before comparing
+    # so re-runs don't crash with "offset-naive vs offset-aware".
+    if min_updated.tzinfo is None:
+        min_updated = min_updated.replace(tzinfo=timezone.utc)
+    if latest_input_mtime.tzinfo is None:
+        latest_input_mtime = latest_input_mtime.replace(tzinfo=timezone.utc)
+    return min_updated >= latest_input_mtime
+
+
+def ingest_issue(conn, issue_folder: Path, *, skip_events: bool = False,
+                 run_watchlist_scan: bool = True, force: bool = False) -> Dict[str, Any]:
     metadata_path = issue_folder / "metadata.json"
     if not metadata_path.is_file():
         return {"status": "no_metadata", "issue": issue_folder.name}
+
+    if not force:
+        latest_mtime = datetime.fromtimestamp(
+            metadata_path.stat().st_mtime, tz=timezone.utc,
+        )
+        events_path = issue_folder / "events.json"
+        if events_path.is_file():
+            ev_mtime = datetime.fromtimestamp(
+                events_path.stat().st_mtime, tz=timezone.utc,
+            )
+            if ev_mtime > latest_mtime:
+                latest_mtime = ev_mtime
+        with conn.cursor() as cur:
+            if _folder_already_ingested(cur, issue_folder.name, latest_mtime):
+                logger.info(
+                    "[=] %s: already ingested (inputs unchanged since "
+                    "last ingest), skipping", issue_folder.name,
+                )
+                return {"status": "skipped", "issue": issue_folder.name,
+                        "reason": "db-current"}
 
     payload = json.loads(metadata_path.read_text(encoding="utf-8"))
     designs_inserted = 0
@@ -558,6 +613,10 @@ def parse_argv(argv=None) -> argparse.Namespace:
     p.add_argument("--bulletins-root", type=Path, default=_LOCAL_DEFAULT_BULLETINS_DIR)
     p.add_argument("--skip-events", action="store_true",
                    help="ingest designs+views only, skip events.json")
+    p.add_argument("--force", action="store_true",
+                   help="re-UPSERT all rows even if the folder's DB rows are "
+                        "newer than its metadata.json/events.json (default: "
+                        "skip folders whose DB state is already current)")
     return p.parse_args(argv)
 
 
@@ -573,7 +632,8 @@ def main(argv=None) -> int:
     with _connect() as conn:
         for folder in folders:
             try:
-                ingest_issue(conn, folder, skip_events=args.skip_events)
+                ingest_issue(conn, folder, skip_events=args.skip_events,
+                              force=args.force)
             except Exception as e:
                 logger.exception("issue %s failed: %r", folder.name, e)
                 conn.rollback()

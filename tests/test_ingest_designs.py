@@ -6,7 +6,7 @@ pure helpers: status mapping, opposition window, halfvec serialization,
 date parsing, and row-shaping.
 """
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -14,6 +14,7 @@ from pipeline.ingest_designs import (
     SECTION_STATUS_MAP,
     _design_row,
     _first_applicant,
+    _folder_already_ingested,
     _truncate_500,
     opposition_end_date,
     parse_date_safe,
@@ -297,3 +298,87 @@ def test_design_row_multi_designers():
     rec["designers"] = [{"name": "A"}, {"name": "B"}, {"name": "C"}]
     row = _design_row(rec, rec["designs"][0], holder_id=None, source_folder="TS_483")
     assert row["designers"] == ["A", "B", "C"]
+
+
+# ---------------------------------------------------------------------------
+# _folder_already_ingested — folder-level skip-when-DB-current
+# ---------------------------------------------------------------------------
+
+class _FakeCursor:
+    """Minimal cursor stub that returns a single canned row from fetchone()."""
+    def __init__(self, row):
+        self._row = row
+        self.last_query = None
+        self.last_params = None
+
+    def execute(self, query, params=None):
+        self.last_query = query
+        self.last_params = params
+
+    def fetchone(self):
+        return self._row
+
+
+def test_folder_already_ingested_no_rows_returns_false():
+    """No DB rows yet for this folder → must ingest."""
+    cur = _FakeCursor((0, None))
+    mtime = datetime(2026, 5, 10, tzinfo=timezone.utc)
+    assert _folder_already_ingested(cur, "TS_483_2026-04-24", mtime) is False
+    assert "designs" in cur.last_query
+    assert cur.last_params == ("TS_483_2026-04-24",)
+
+
+def test_folder_already_ingested_all_rows_post_mtime_returns_true():
+    """Every row was updated after the latest input mtime → skip."""
+    mtime = datetime(2026, 5, 10, tzinfo=timezone.utc)
+    min_updated = mtime + timedelta(hours=2)  # all rows newer than file
+    cur = _FakeCursor((905, min_updated))
+    assert _folder_already_ingested(cur, "TS_482_2026-04-09", mtime) is True
+
+
+def test_folder_already_ingested_oldest_row_pre_mtime_returns_false():
+    """At least one row predates the latest input mtime → must re-ingest
+    so the stale row gets refreshed."""
+    mtime = datetime(2026, 5, 10, tzinfo=timezone.utc)
+    min_updated = mtime - timedelta(hours=2)  # stale row exists
+    cur = _FakeCursor((905, min_updated))
+    assert _folder_already_ingested(cur, "TS_482_2026-04-09", mtime) is False
+
+
+def test_folder_already_ingested_exact_mtime_match_returns_true():
+    """Edge case: row's updated_at == input mtime. The comparison is
+    inclusive (>=) so this counts as 'current' — running ingest again
+    would just rewrite the same data."""
+    mtime = datetime(2026, 5, 10, 12, 0, 0, tzinfo=timezone.utc)
+    cur = _FakeCursor((1, mtime))
+    assert _folder_already_ingested(cur, "TS_482_2026-04-09", mtime) is True
+
+
+def test_folder_already_ingested_null_min_updated_returns_false():
+    """Defensive: SELECT returning (count>0, NULL) shouldn't happen, but
+    if it does, treat it as 'unknown state' and re-ingest."""
+    cur = _FakeCursor((5, None))
+    mtime = datetime(2026, 5, 10, tzinfo=timezone.utc)
+    assert _folder_already_ingested(cur, "TS_482_2026-04-09", mtime) is False
+
+
+def test_folder_already_ingested_handles_naive_db_timestamp():
+    """Postgres TIMESTAMP (without TZ) columns return naive datetimes
+    via psycopg2; file mtime is tz-aware UTC. Comparing them directly
+    raises 'offset-naive vs offset-aware'. The helper must normalize
+    both sides so re-runs don't crash. Caught in live smoke against
+    TS_246 — without this fix every ingest re-run blows up."""
+    mtime = datetime(2026, 5, 10, 12, 0, 0, tzinfo=timezone.utc)
+    naive_db_min = mtime.replace(tzinfo=None) + timedelta(hours=1)  # newer, naive
+    cur = _FakeCursor((905, naive_db_min))
+    # Must not raise — and must return True since DB is newer.
+    assert _folder_already_ingested(cur, "TS_246_2026-04-24", mtime) is True
+
+
+def test_folder_already_ingested_handles_naive_input_mtime():
+    """Symmetric case: the helper also accepts a naive ``latest_input_mtime``
+    (e.g. if a future caller passes datetime.now() without tz)."""
+    naive_mtime = datetime(2026, 5, 10, 12, 0, 0)  # no tz
+    db_min = datetime(2026, 5, 10, 14, 0, 0, tzinfo=timezone.utc)
+    cur = _FakeCursor((1, db_min))
+    assert _folder_already_ingested(cur, "TS_246_2026-04-24", naive_mtime) is True

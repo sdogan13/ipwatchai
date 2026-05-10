@@ -314,6 +314,14 @@ def test_parse_argv_defaults():
     assert args.limit is None
     assert args.headless is True
     assert args.bulletins_root.name == "Tasarim"
+    assert args.force is False
+
+
+def test_parse_argv_force_flag():
+    """``--force`` makes process_card re-download a bulletin's PDF even
+    when the target folder is already complete on disk."""
+    args = parse_argv(["--force"])
+    assert args.force is True
 
 
 def test_parse_argv_full_and_limit_and_headless_off():

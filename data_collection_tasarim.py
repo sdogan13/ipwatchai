@@ -298,6 +298,7 @@ class CLIArgs:
     headless: bool
     bulletins_root: Path
     issue: Optional[str] = None
+    force: bool = False
 
 
 def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
@@ -325,6 +326,12 @@ def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
         default=_LOCAL_DEFAULT_BULLETINS_DIR,
         help=f"output root (default: {_LOCAL_DEFAULT_BULLETINS_DIR})",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="re-download a bulletin's PDF even if it already exists "
+             "locally (default: skip cards whose target folder is complete)",
+    )
     ns = parser.parse_args(argv)
     # --issue implies --full: the incremental tracker would otherwise stop
     # walking the archive before reaching old bulletins.
@@ -335,6 +342,7 @@ def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
         headless=ns.headless,
         bulletins_root=ns.bulletins_root,
         issue=ns.issue.strip() if ns.issue else None,
+        force=ns.force,
     )
 
 
@@ -730,6 +738,8 @@ async def process_card(
     bulletins_root: Path,
     card_id: str,
     card_date: Optional[str],
+    *,
+    force: bool = False,
 ) -> CollectionCounters:
     # Prefer an existing TS_{card_id}_*/ folder if exactly one exists —
     # mirrors P.1 in cd_extract_tasarim. Falls back to a freshly-named
@@ -747,7 +757,7 @@ async def process_card(
     else:
         target_folder = bulletins_root / build_issue_folder_name(card_id, card_date)
 
-    if check_local_existence(bulletins_root, card_id, card_date=card_date):
+    if not force and check_local_existence(bulletins_root, card_id, card_date=card_date):
         logger.info("[=] %s already complete locally, skipping", target_folder.name)
         return CollectionCounters(skipped=1)
 
@@ -824,7 +834,7 @@ async def run_collection(args: CLIArgs) -> CollectionCounters:
                                 card_id, card_date or "?",
                             )
                             continue
-                        if check_local_existence(args.bulletins_root, card_id, card_date=card_date):
+                        if not args.force and check_local_existence(args.bulletins_root, card_id, card_date=card_date):
                             seen.add(card_id)
                             counters.skipped += 1
                             logger.info("[=] %s [%s] already complete locally, skipping",
@@ -834,7 +844,7 @@ async def run_collection(args: CLIArgs) -> CollectionCounters:
                     # --issue NNN: skip the download if this bulletin is
                     # already complete on disk (idempotent re-run friendly),
                     # then stop after we've handled the targeted card.
-                    if args.issue is not None and check_local_existence(
+                    if args.issue is not None and not args.force and check_local_existence(
                         args.bulletins_root, card_id, card_date=card_date,
                     ):
                         seen.add(card_id)
@@ -847,6 +857,7 @@ async def run_collection(args: CLIArgs) -> CollectionCounters:
 
                     issue_counters = await process_card(
                         page, context, clickable, args.bulletins_root, card_id, card_date,
+                        force=args.force,
                     )
                     counters.downloaded += issue_counters.downloaded
                     counters.failed += issue_counters.failed

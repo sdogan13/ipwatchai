@@ -30,6 +30,7 @@ from pipeline.merge_into_metadata import (
     _cd_view_to_pdf_view,
     _coerce_bulletin_no,
     _index_existing_embeddings,
+    _is_merge_current,
     _merge_design_views,
     _merge_designs,
     _process_folder,
@@ -808,6 +809,138 @@ def test_parse_argv_flag_negations(tmp_path):
     assert args.backup is False
     assert args.drop_merged_metadata is False
     assert args.preserve_embeddings is False
+    assert args.force is False  # default
+
+
+def test_parse_argv_force_flag(tmp_path):
+    """--force flips CLIArgs.force so _process_folder bypasses the
+    skip-when-current short-circuit."""
+    _seed_folder(tmp_path)
+    args = parse_argv([
+        "--issue", "TS_240_2016-03-09",
+        "--bulletins-root", str(tmp_path),
+        "--force",
+    ])
+    assert args.force is True
+
+
+# ---------------------------------------------------------------------------
+# _is_merge_current — skip-when-current detection
+# ---------------------------------------------------------------------------
+
+def _write_merged_metadata(folder: Path, *, merged_at: str = "2026-05-10T00:00:00Z",
+                            extracted_at: str = "2026-05-09T00:00:00Z",
+                            merge_source: str = "both") -> Path:
+    """Write a metadata.json that simulates the output of a prior merge."""
+    folder.mkdir(parents=True, exist_ok=True)
+    doc = _minimal_pdf_doc()
+    doc.update({
+        "merge_source": merge_source,
+        "merged_at":    merged_at,
+        "extracted_at": extracted_at,
+    })
+    path = folder / METADATA_FILENAME
+    path.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def test_is_merge_current_no_metadata_returns_false(tmp_path):
+    """No metadata.json — there's nothing to skip; merge must run."""
+    folder = tmp_path / "TS_240_2016-03-09"
+    folder.mkdir()
+    assert _is_merge_current(folder) is False
+
+
+def test_is_merge_current_no_merge_source_returns_false(tmp_path):
+    """A raw pdf_extract metadata.json (no merge_source tag) means merge
+    has not run yet for this folder."""
+    folder = tmp_path / "TS_240_2016-03-09"
+    folder.mkdir()
+    raw = _minimal_pdf_doc()  # no merge_source field
+    (folder / METADATA_FILENAME).write_text(
+        json.dumps(raw, ensure_ascii=False), encoding="utf-8",
+    )
+    assert _is_merge_current(folder) is False
+
+
+def test_is_merge_current_freshly_merged_returns_true(tmp_path):
+    """metadata.json carries merge_source AND merged_at >= extracted_at;
+    no cd_metadata.json present (cd_only or pdf_only case). Skip."""
+    folder = tmp_path / "TS_240_2016-03-09"
+    _write_merged_metadata(folder)
+    assert _is_merge_current(folder) is True
+
+
+def test_is_merge_current_cd_newer_than_metadata_returns_false(tmp_path):
+    """A fresher cd_metadata.json landed after the last merge — re-merge
+    is required."""
+    import os
+    folder = tmp_path / "TS_240_2016-03-09"
+    md = _write_merged_metadata(folder)
+    cd = folder / CD_METADATA_FILENAME
+    cd.write_text(json.dumps(_minimal_cd_doc(), ensure_ascii=False),
+                   encoding="utf-8")
+    # Force md mtime older than cd mtime
+    old = md.stat().st_mtime - 3600
+    os.utime(md, (old, old))
+    assert _is_merge_current(folder) is False
+
+
+def test_is_merge_current_pdf_re_extracted_after_merge_returns_false(tmp_path):
+    """metadata.json's extracted_at > merged_at means pdf_extract_tasarim
+    ran after the last merge — re-merge is required even though
+    merge_source is still set."""
+    folder = tmp_path / "TS_240_2016-03-09"
+    _write_merged_metadata(
+        folder,
+        merged_at="2026-05-10T00:00:00Z",
+        extracted_at="2026-05-11T00:00:00Z",  # newer than merged_at
+    )
+    assert _is_merge_current(folder) is False
+
+
+def test_is_merge_current_corrupt_metadata_returns_false(tmp_path):
+    """A bad-JSON metadata.json shouldn't crash the skip check — it should
+    return False so the merge attempts a fresh write that surfaces the
+    real parse error."""
+    folder = tmp_path / "TS_240_2016-03-09"
+    folder.mkdir()
+    (folder / METADATA_FILENAME).write_text("not json {", encoding="utf-8")
+    assert _is_merge_current(folder) is False
+
+
+def test_process_folder_skips_when_merge_current(tmp_path):
+    """Folder is already merged + up-to-date → _process_folder returns
+    skipped=True with reason='merge-current' and does not rewrite the
+    file."""
+    folder = tmp_path / "TS_240_2016-03-09"
+    md = _write_merged_metadata(folder)
+    original_bytes = md.read_bytes()
+
+    result = _process_folder(folder, backup=False,
+                              drop_merged_metadata=False,
+                              preserve_embeddings=True)
+    assert result["skipped"] is True
+    assert result.get("reason") == "merge-current"
+    # File untouched
+    assert md.read_bytes() == original_bytes
+    # No backup written
+    backup = folder / METADATA_FILENAME.replace(".json", "" + BACKUP_SUFFIX)
+    assert not backup.exists()
+
+
+def test_process_folder_force_overrides_merge_current_skip(tmp_path):
+    """force=True re-runs the merge even when _is_merge_current is True."""
+    folder = tmp_path / "TS_240_2016-03-09"
+    _write_merged_metadata(folder)
+
+    result = _process_folder(folder, backup=False,
+                              drop_merged_metadata=False,
+                              preserve_embeddings=True,
+                              force=True)
+    assert result["skipped"] is False
+    # The merge ran — merge_source is whatever the inputs produced
+    assert "merge_source" in result
 
 
 # ---------------------------------------------------------------------------
@@ -840,6 +973,25 @@ def test_process_folder_writes_backup(tmp_path):
     backup = folder / METADATA_FILENAME.replace(".json", "" + BACKUP_SUFFIX)
     assert backup.is_file()
     assert backup.read_text(encoding="utf-8") == original_content
+
+
+def test_process_folder_force_overwrites_pre_existing_backup(tmp_path):
+    """``--force`` re-runs the merge even when metadata.json is current.
+    A ``metadata_pre_merge.json.bak`` from the prior run already exists,
+    and Windows' ``Path.rename`` raises ``FileExistsError`` on overwrite.
+    Regression for the live smoke against TS_246. Use ``Path.replace`` so
+    the new backup atomically overwrites the old one."""
+    folder = _seed_folder(tmp_path)
+    backup_path = folder / METADATA_FILENAME.replace(".json", "" + BACKUP_SUFFIX)
+    backup_path.write_text("stale backup from prior run", encoding="utf-8")
+
+    # First run with force — must not raise FileExistsError
+    result = _process_folder(folder, backup=True, drop_merged_metadata=False,
+                              preserve_embeddings=True, force=True)
+    assert result["skipped"] is False
+    assert backup_path.is_file()
+    # The "stale backup" content was overwritten by the prior metadata.json
+    assert backup_path.read_text(encoding="utf-8") != "stale backup from prior run"
 
 
 def test_process_folder_no_backup_skips_bak(tmp_path):

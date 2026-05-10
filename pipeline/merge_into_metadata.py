@@ -628,6 +628,7 @@ class CLIArgs:
     backup: bool
     drop_merged_metadata: bool
     preserve_embeddings: bool
+    force: bool
 
 
 def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
@@ -677,6 +678,14 @@ def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
              "preserve them by image_path lookup so stage 5 only embeds "
              "newly-added views).",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-merge even if metadata.json already carries a current "
+             "merge_source tag (default: skip folders whose merge is "
+             "already up-to-date with their cd_metadata.json + PDF "
+             "extract).",
+    )
     ns = parser.parse_args(argv)
 
     if ns.all and ns.issue:
@@ -695,6 +704,7 @@ def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
             backup=not ns.no_backup,
             drop_merged_metadata=not ns.keep_merged_metadata,
             preserve_embeddings=not ns.no_preserve_embeddings,
+            force=ns.force,
         )
 
     if ns.issue:
@@ -706,6 +716,7 @@ def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
             backup=not ns.no_backup,
             drop_merged_metadata=not ns.keep_merged_metadata,
             preserve_embeddings=not ns.no_preserve_embeddings,
+            force=ns.force,
         )
 
     parser.error("provide --issue or --all")
@@ -723,19 +734,97 @@ def _load_json_or_none(path: Path) -> Optional[Dict[str, Any]]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+_MERGE_SOURCE_RE  = re.compile(rb'"merge_source"\s*:\s*"([^"]*)"')
+_MERGED_AT_RE    = re.compile(rb'"merged_at"\s*:\s*"([^"]*)"')
+_EXTRACTED_AT_RE = re.compile(rb'"extracted_at"\s*:\s*"([^"]*)"')
+
+# Real metadata.json files are 100+ MB (embeddings inline). Parsing the
+# whole file just to read 3 top-level fields would take ~5s per folder ×
+# 247 folders = ~20 min for an "idempotent re-run" check. A bounded
+# head+tail byte scan finds the same fields in <1ms regardless of file
+# size. The fields sit at the end of the doc (after ``records``) but we
+# also scan the head as a safety net in case the writer order changes.
+_METADATA_HEAD_BYTES = 4096
+_METADATA_TAIL_BYTES = 16384
+
+
+def _read_head_and_tail(path: Path, head_n: int, tail_n: int) -> bytes:
+    """Return up to ``head_n`` bytes from the start + ``tail_n`` from the
+    end of ``path``, joined with a newline. Files smaller than the sum
+    are read whole."""
+    size = path.stat().st_size
+    if size <= head_n + tail_n:
+        return path.read_bytes()
+    with path.open("rb") as f:
+        head = f.read(head_n)
+        f.seek(size - tail_n)
+        tail = f.read(tail_n)
+    return head + b"\n" + tail
+
+
+def _is_merge_current(folder: Path) -> bool:
+    """Return True iff metadata.json already reflects an up-to-date merge
+    with the folder's source files.
+
+    Used by ``_process_folder`` to skip folders on idempotent ``--all``
+    re-runs without ``--force``.
+
+    All conditions must hold:
+      - metadata.json exists and a byte scan finds a non-empty
+        ``merge_source`` field (proves the file is a post-merge output,
+        not a raw pdf_extract output)
+      - cd_metadata.json mtime <= metadata.json mtime (no fresher CD
+        bundle has landed since the merge), OR cd_metadata.json absent
+      - the doc's ``extracted_at`` <= ``merged_at`` if both present (so
+        a later ``pdf_extract_tasarim --force`` invalidates the merge)
+
+    Scans only the first 4 KB + last 16 KB of metadata.json to avoid
+    parsing a 100+ MB file with inlined embeddings on every re-run.
+    """
+    md = folder / METADATA_FILENAME
+    if not md.is_file():
+        return False
+    try:
+        scan = _read_head_and_tail(md, _METADATA_HEAD_BYTES, _METADATA_TAIL_BYTES)
+    except Exception:
+        return False
+
+    m_src = _MERGE_SOURCE_RE.search(scan)
+    if not m_src or not m_src.group(1):
+        return False
+
+    cd = folder / CD_METADATA_FILENAME
+    if cd.is_file() and cd.stat().st_mtime > md.stat().st_mtime:
+        return False
+
+    m_merged = _MERGED_AT_RE.search(scan)
+    m_ext    = _EXTRACTED_AT_RE.search(scan)
+    if m_merged and m_ext and m_ext.group(1) > m_merged.group(1):
+        return False
+
+    return True
+
+
 def _process_folder(
     folder: Path,
     *,
     backup: bool,
     drop_merged_metadata: bool,
     preserve_embeddings: bool,
+    force: bool = False,
 ) -> Dict[str, Any]:
     """Merge cd_metadata.json + metadata.json -> metadata.json (PDF-shape).
 
     Returns ``{"folder", "merge_source", "embeddings_attached",
-    "skipped"}``. ``skipped=True`` only when the folder has neither
-    source file (nothing to merge).
+    "skipped"}``. ``skipped=True`` when:
+      - the folder has neither source file (nothing to merge), or
+      - the merge is already current (``_is_merge_current`` True) and
+        ``force`` is False — in that case ``reason='merge-current'``.
     """
+    if not force and _is_merge_current(folder):
+        logger.info("[=] %s: merge already current, skipping", folder.name)
+        return {"folder": folder.name, "skipped": True, "reason": "merge-current"}
+
     pdf_path     = folder / METADATA_FILENAME
     cd_path      = folder / CD_METADATA_FILENAME
     merged_path  = folder / MERGED_METADATA_FILENAME
@@ -759,9 +848,10 @@ def _process_folder(
 
     if backup and pdf_path.is_file():
         backup_path = pdf_path.with_name(METADATA_FILENAME.replace(".json", "") + BACKUP_SUFFIX)
-        # Atomic replace via rename — pdf_path becomes the .bak; we'll write
-        # the merged content to a fresh metadata.json below.
-        pdf_path.rename(backup_path)
+        # ``Path.replace`` atomically overwrites the destination — required
+        # because Windows ``rename`` raises FileExistsError on second
+        # ``--force`` runs (the .bak from the prior run is still there).
+        pdf_path.replace(backup_path)
 
     pdf_path.write_text(
         json.dumps(merged, ensure_ascii=False, indent=2),
@@ -802,6 +892,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 backup=args.backup,
                 drop_merged_metadata=args.drop_merged_metadata,
                 preserve_embeddings=args.preserve_embeddings,
+                force=args.force,
             )
         except Exception as e:
             failed.append((folder.name, repr(e)))
