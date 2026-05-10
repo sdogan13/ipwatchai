@@ -557,6 +557,151 @@ View details at: {settings.app_name}/alerts/{alert['id']}
         
         return self.send_email(to_email, subject, html_body)
 
+    def send_patent_digest(
+        self,
+        to_email: str,
+        user_name: str,
+        alerts: List[Dict],
+        period: str = "daily",
+        lang: str = "tr",
+    ) -> bool:
+        """Send daily/weekly digest of patent alerts.
+
+        Sister to send_daily_digest (which is trademark-specific). Renders
+        a patent-shaped alerts table with publication_no, title, holder,
+        severity, score, and watch label. Re-uses the same SMTP plumbing.
+        """
+        if not alerts:
+            return True
+
+        critical = sum(1 for a in alerts if a.get("severity") == "critical")
+        high = sum(1 for a in alerts if a.get("severity") == "high")
+
+        # Localized subject + headings
+        is_tr = lang == "tr"
+        subject_word = "Patent Bildirim Özeti" if is_tr else "Patent Alert Digest"
+        new_word = "yeni uyarı" if is_tr else "new alert(s)"
+        critical_word = "Kritik" if is_tr else "Critical"
+        period_phrase = (
+            ("son gün" if period == "daily" else "son hafta") if is_tr
+            else ("the past day" if period == "daily" else "the past week")
+        )
+        col_watch = "Takip" if is_tr else "Watchlist"
+        col_conflict = "Çakışan Patent" if is_tr else "Conflict"
+        col_holder = "Hak Sahibi" if is_tr else "Holder"
+        col_score = "Skor" if is_tr else "Score"
+        col_severity = "Önem" if is_tr else "Severity"
+        cta_text = "Tüm Uyarıları Gör" if is_tr else "View All Alerts"
+
+        subject = f"📄 {subject_word}: {len(alerts)} {new_word}"
+        if critical:
+            subject = f"🔴 {critical} {critical_word} - {subject}"
+
+        rows = ""
+        for a in alerts[:20]:
+            sev = a.get("severity", "low")
+            color = {
+                "critical": "#dc3545", "high": "#fd7e14",
+                "medium": "#ffc107", "low": "#28a745",
+            }.get(sev, "#6c757d")
+            score = a.get("overall_similarity_score") or 0
+            try:
+                score_pct = f"{float(score) * 100:.0f}%"
+            except (TypeError, ValueError):
+                score_pct = "—"
+            pub = a.get("conflicting_publication_no") or a.get("conflicting_application_no") or ""
+            title = a.get("conflicting_title") or "—"
+            holder = a.get("conflicting_holder_name") or "—"
+            watch_label = a.get("watchlist_label") or a.get("watchlist_item_label") or "—"
+            rows += f"""
+            <tr>
+                <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: 500;">
+                    {watch_label}
+                </td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">
+                    <div style="font-weight: 500;">{title[:80]}</div>
+                    <div style="font-family: monospace; font-size: 11px; color: #6c757d;">{pub}</div>
+                </td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee; font-size: 12px;">
+                    {holder[:40]}
+                </td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee; font-family: monospace;">
+                    {score_pct}
+                </td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">
+                    <span style="background: {color}; color: white;
+                                 padding: 2px 8px; border-radius: 4px; font-size: 12px;">
+                        {sev.upper()}
+                    </span>
+                </td>
+            </tr>
+            """
+
+        truncated_note = ""
+        if len(alerts) > 20:
+            truncated_note = (
+                f'<p style="color: #666;">İlk 20 uyarı gösteriliyor (toplam {len(alerts)}).</p>'
+                if is_tr
+                else f'<p style="color: #666;">Showing first 20 of {len(alerts)} alerts.</p>'
+            )
+
+        period_title = ("Günlük" if period == "daily" else "Haftalık") if is_tr \
+            else period.title()
+        hi = "Merhaba" if is_tr else "Hi"
+        intro = (
+            f"Geçtiğimiz {period_phrase} oluşan patent uyarılarınızın özeti:"
+            if is_tr
+            else f"Here's a summary of patent alerts from {period_phrase}:"
+        )
+
+        html_body = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto;">
+            <div style="background: #f8f9fa; padding: 20px; border-radius: 8px;">
+                <h2 style="color: #333;">{period_title} {subject_word}</h2>
+                <p>{hi} {user_name},</p>
+                <p>{intro}</p>
+
+                <div style="background: white; padding: 15px; border-radius: 4px; margin: 20px 0;">
+                    <p>
+                        <strong>{'Toplam' if is_tr else 'Total'}:</strong> {len(alerts)}<br>
+                        <strong>{critical_word}:</strong> {critical}<br>
+                        <strong>{'Yüksek' if is_tr else 'High'}:</strong> {high}
+                    </p>
+                </div>
+
+                <table style="width: 100%; border-collapse: collapse; background: white;">
+                    <thead>
+                        <tr style="background: #f1f1f1;">
+                            <th style="padding: 10px; text-align: left;">{col_watch}</th>
+                            <th style="padding: 10px; text-align: left;">{col_conflict}</th>
+                            <th style="padding: 10px; text-align: left;">{col_holder}</th>
+                            <th style="padding: 10px; text-align: left;">{col_score}</th>
+                            <th style="padding: 10px; text-align: left;">{col_severity}</th>
+                        </tr>
+                    </thead>
+                    <tbody>{rows}</tbody>
+                </table>
+
+                {truncated_note}
+
+                <p style="margin-top: 20px;">
+                    <a href="https://ipwatchai.com/dashboard?tab=watchlist"
+                       style="background: #007bff; color: white; padding: 10px 20px;
+                              text-decoration: none; border-radius: 4px;">
+                        {cta_text}
+                    </a>
+                </p>
+
+                <p style="font-size: 11px; color: #6c757d; margin-top: 24px;">
+                    &copy; 2026 IP Watch AI &mdash; ipwatchai.com
+                </p>
+            </div>
+        </body>
+        </html>
+        """
+        return self.send_email(to_email, subject, html_body)
+
 
 class WebhookService:
     """Webhook notification service"""
@@ -763,22 +908,130 @@ class NotificationWorker:
         
         logger.info("Weekly digest processing complete")
     
+    # ---------------------------------------------------------------
+    # Patent digests — sister to the trademark digests above.
+    # Joins patent_alerts_mt with patent_watchlist_mt + users, groups
+    # by user, sends a patent-shaped digest, and marks email_sent.
+    # ---------------------------------------------------------------
+
+    def _patent_digest_query(self, *, frequency: str, since_interval: str) -> str:
+        """SQL for a digest run. Selects (user, organization, alert_ids,
+        alert_payload) rows for users who have unsent patent alerts of
+        the given frequency in the given window.
+
+        Pulls the alert payload denormalized into a single SELECT so we
+        don't N+1 by alert_id (the patent_alerts_mt table already has
+        every field the email needs)."""
+        return f"""
+            SELECT
+                u.id           AS user_id,
+                u.email        AS email,
+                u.first_name   AS first_name,
+                u.preferred_language AS lang,
+                w.organization_id AS organization_id,
+                w.label        AS watchlist_label,
+                a.id           AS alert_id,
+                a.severity, a.overall_similarity_score,
+                a.conflicting_publication_no, a.conflicting_application_no,
+                a.conflicting_title, a.conflicting_holder_name,
+                a.conflicting_kind_code, a.conflicting_bulletin_no,
+                a.conflicting_bulletin_date,
+                a.created_at
+            FROM patent_alerts_mt a
+            JOIN patent_watchlist_mt w ON a.watchlist_item_id = w.id
+            JOIN users u ON w.user_id = u.id
+            WHERE a.created_at > NOW() - INTERVAL '{since_interval}'
+              AND a.email_sent = FALSE
+              AND w.alert_email = TRUE
+              AND w.alert_frequency = %s
+            ORDER BY u.id, a.severity DESC, a.overall_similarity_score DESC NULLS LAST, a.created_at DESC
+        """
+
+    def _process_patent_digest(self, *, frequency: str, since_interval: str, period_label: str):
+        """Shared digest implementation for daily/weekly patent runs."""
+        logger.info("Processing patent %s digest...", period_label)
+
+        cur = self.db.cursor()
+        cur.execute(self._patent_digest_query(
+            frequency=frequency, since_interval=since_interval,
+        ), (frequency,))
+        rows = cur.fetchall()
+        if not rows:
+            logger.info("Patent %s digest: nothing to send", period_label)
+            return
+
+        # Group by user
+        from collections import defaultdict
+        by_user: dict = defaultdict(list)
+        for row in rows:
+            by_user[row["user_id"]].append(row)
+
+        sent_count = 0
+        failed_count = 0
+        marked_count = 0
+        for user_id, user_alerts in by_user.items():
+            row0 = user_alerts[0]
+            email = row0["email"]
+            name = row0["first_name"] or "User"
+            lang = (row0.get("lang") or "tr") if isinstance(row0, dict) else "tr"
+            try:
+                ok = self.email_service.send_patent_digest(
+                    to_email=email,
+                    user_name=name,
+                    alerts=[dict(r) for r in user_alerts],
+                    period=period_label,
+                    lang=lang if lang in ("tr", "en") else "tr",
+                )
+                if ok:
+                    sent_count += 1
+                    # Mark each alert as email_sent
+                    cur.execute(
+                        "UPDATE patent_alerts_mt SET email_sent = TRUE, email_sent_at = NOW() "
+                        "WHERE id = ANY(%s::uuid[])",
+                        ([str(a["alert_id"]) for a in user_alerts],),
+                    )
+                    marked_count += len(user_alerts)
+                else:
+                    failed_count += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Patent %s digest failed for %s: %r",
+                                 period_label, email, exc)
+                failed_count += 1
+        self.db.commit()
+
+        logger.info(
+            "Patent %s digest: sent=%d failed=%d marked_alerts=%d",
+            period_label, sent_count, failed_count, marked_count,
+        )
+
+    def process_patent_daily_digest(self):
+        self._process_patent_digest(
+            frequency="daily", since_interval="24 hours", period_label="daily",
+        )
+
+    def process_patent_weekly_digest(self):
+        self._process_patent_digest(
+            frequency="weekly", since_interval="7 days", period_label="weekly",
+        )
+
     def run(self):
         """Run notification worker (called by scheduler)"""
         import schedule
         import time
-        
+
         # Immediate notifications every minute
         schedule.every(1).minutes.do(self.process_immediate_notifications)
-        
-        # Daily digest at 9 AM
+
+        # Daily digest at 9 AM (trademark + patent)
         schedule.every().day.at("09:00").do(self.process_daily_digest)
-        
-        # Weekly digest on Monday at 9 AM
+        schedule.every().day.at("09:05").do(self.process_patent_daily_digest)
+
+        # Weekly digest on Monday at 9 AM (trademark + patent)
         schedule.every().monday.at("09:00").do(self.process_weekly_digest)
-        
+        schedule.every().monday.at("09:05").do(self.process_patent_weekly_digest)
+
         logger.info("Notification worker started")
-        
+
         while True:
             schedule.run_pending()
             time.sleep(30)
@@ -795,5 +1048,15 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "worker":
         worker = NotificationWorker()
         worker.run()
+    elif len(sys.argv) > 1 and sys.argv[1] == "patent-daily-digest":
+        # One-shot run for cron / manual testing.
+        worker = NotificationWorker()
+        worker.process_patent_daily_digest()
+    elif len(sys.argv) > 1 and sys.argv[1] == "patent-weekly-digest":
+        worker = NotificationWorker()
+        worker.process_patent_weekly_digest()
     else:
-        print("Usage: python -m notifications.service worker")
+        print(
+            "Usage: python -m notifications.service "
+            "[worker | patent-daily-digest | patent-weekly-digest]"
+        )
