@@ -53,6 +53,7 @@ from app_enhanced_search_routes import (
 from app_design_search_routes import register_design_search_routes
 from app_patent_search_routes import register_patent_search_routes
 from app_patent_watchlist_routes import register_patent_watchlist_routes
+from app_patent_alert_routes import register_patent_alert_routes
 from app_registry_search_routes import register_registry_search_routes
 from app_design_watchlist_routes import register_design_watchlist_routes
 from app_design_alert_routes import register_design_alert_routes
@@ -199,6 +200,7 @@ register_patent_search_routes(app, limiter)
 # Patent watchlist (CRUD) — sister to design watchlist. Scanner + alerts
 # routes register separately later in the patent watchlist series.
 register_patent_watchlist_routes(app, limiter)
+register_patent_alert_routes(app, limiter)
 
 # Cross-registry unified search — discovery surface across both registries.
 register_registry_search_routes(app, limiter)
