@@ -622,6 +622,60 @@ def test_merge_to_pdf_shape_unmatched_pdf_records_kept():
     assert apps == ["2016/01059", "2024/007254"]
 
 
+def test_merge_to_pdf_shape_both_cd_wins_top_level_bulletin_no():
+    """Real-data finding: PDF's FOOTER_BULLETIN_RE sometimes can't parse
+    older bulletin formats and ships bulletin_no=None; CD's
+    idbulletin.inf is authoritative. CD wins for top-level bulletin
+    metadata in the BOTH branch."""
+    pdf = _minimal_pdf_doc()
+    pdf["bulletin_no"] = None
+    pdf["bulletin_date"] = None
+    pdf["records"] = [_real_pdf_record_2016_01059()]
+    cd = _minimal_cd_doc()
+    cd["bulletin_no"] = "240"
+    cd["bulletin_date"] = "2016-03-09"
+    cd["dossiers"] = [_real_cd_dossier_2016_01059()]
+
+    out = merge_to_pdf_shape(pdf_doc=pdf, cd_doc=cd)
+    assert out["bulletin_no"] == 240        # CD wins, str -> int via _coerce
+    assert out["bulletin_date"] == "2016-03-09"
+
+
+def test_merge_to_pdf_shape_both_cd_wins_when_pdf_also_set():
+    """CD-wins precedence is consistent — even when PDF has its own
+    bulletin_no, CD's authoritative value still wins. Avoids ambiguity
+    on the rare cases where PDF's footer parse and CD's inf disagree."""
+    pdf = _minimal_pdf_doc()
+    pdf["bulletin_no"] = 999    # PDF's value (could be a misparse)
+    pdf["bulletin_date"] = "2099-01-01"
+    pdf["records"] = [_real_pdf_record_2016_01059()]
+    cd = _minimal_cd_doc()
+    cd["bulletin_no"] = "240"
+    cd["bulletin_date"] = "2016-03-09"
+    cd["dossiers"] = [_real_cd_dossier_2016_01059()]
+
+    out = merge_to_pdf_shape(pdf_doc=pdf, cd_doc=cd)
+    assert out["bulletin_no"] == 240
+    assert out["bulletin_date"] == "2016-03-09"
+
+
+def test_merge_to_pdf_shape_both_cd_none_falls_back_to_pdf():
+    """Edge case: CD doesn't have bulletin_no/date (corrupt inf) ->
+    PDF's value is preserved."""
+    pdf = _minimal_pdf_doc()
+    pdf["bulletin_no"] = 240
+    pdf["bulletin_date"] = "2016-03-09"
+    pdf["records"] = [_real_pdf_record_2016_01059()]
+    cd = _minimal_cd_doc()
+    cd["bulletin_no"] = None
+    cd["bulletin_date"] = None
+    cd["dossiers"] = [_real_cd_dossier_2016_01059()]
+
+    out = merge_to_pdf_shape(pdf_doc=pdf, cd_doc=cd)
+    assert out["bulletin_no"] == 240
+    assert out["bulletin_date"] == "2016-03-09"
+
+
 # ---------------------------------------------------------------------------
 # Embedding preservation across merge
 # ---------------------------------------------------------------------------

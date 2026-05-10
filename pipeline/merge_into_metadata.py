@@ -526,6 +526,19 @@ def merge_to_pdf_shape(
         next_idx += 1
 
     out = dict(pdf_doc)
+    # Top-level CD-wins on bulletin metadata: idbulletin.inf is the
+    # authoritative source. PDF's FOOTER_BULLETIN_RE sometimes can't
+    # parse old (pre-2018) bulletin formats and ships bulletin_no=None;
+    # without this override the merged metadata.json's top-level field
+    # stays None and ~50 folders' worth of rows ingest with
+    # bulletin_no=NULL even after the doc-level-fallback fix in
+    # ingest_designs landed.
+    cd_bn = _coerce_bulletin_no(cd_doc.get("bulletin_no"))
+    if cd_bn is not None:
+        out["bulletin_no"] = cd_bn
+    cd_bd = cd_doc.get("bulletin_date")
+    if cd_bd:
+        out["bulletin_date"] = cd_bd
     out["records"]       = out_records
     out["record_count"]  = len(out_records)
     out["merge_source"]  = "both"
