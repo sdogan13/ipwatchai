@@ -208,6 +208,14 @@ def patent_ipc_autocomplete(prefix: str, limit: int = 20) -> dict:
 
     with Database() as db:
         cur = db.cursor()
+        # Ordering rules (in priority):
+        #   1. Codes with descriptions in ipc_classes_lookup come first
+        #      (canonical codes — what the user actually wants).
+        #   2. Then by code length (shorter = higher in the IPC tree
+        #      = more useful as a filter).
+        #   3. Finally alphabetical.
+        # This pushes the dirty corpus codes (e.g. "H04B  1/005" with
+        # double spaces) below canonical entries like "H04N".
         cur.execute(
             """
             SELECT sub.code,
@@ -221,7 +229,9 @@ def patent_ipc_autocomplete(prefix: str, limit: int = 20) -> dict:
             ) sub
             LEFT JOIN ipc_classes_lookup l ON UPPER(l.code) = sub.code
             WHERE sub.code LIKE %(p)s
-            ORDER BY sub.code
+            ORDER BY (l.description_en IS NULL),
+                     length(sub.code),
+                     sub.code
             LIMIT %(n)s
             """,
             {"p": p + "%", "n": n},
