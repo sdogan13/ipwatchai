@@ -1832,9 +1832,12 @@
     "score_embedding": "Semantic",
     "score_figure": "Figure",
     "image_drop_label": "Drop a patent figure here or click to upload",
+    "image_optional": "(optional)",
     "image_hint": "DINOv2 figure similarity · ~34% corpus coverage · line drawings can produce noisy matches",
     "image_attached": "Image attached",
     "image_remove": "Remove image",
+    "filters_toggle": "Filters",
+    "stats_db_records": "patents analyzed in live database",
     "show_more": "Show more",
     "show_less": "Show less"
   },

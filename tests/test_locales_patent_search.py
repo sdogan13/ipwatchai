@@ -31,8 +31,10 @@ EXPECTED_PATENT_SEARCH_KEYS = (
     "inventors_label", "attorney_label", "bulletin_label",
     "score_text", "score_embedding",
     "show_more", "show_less",
-    "image_drop_label", "image_hint", "image_attached", "image_remove",
+    "image_drop_label", "image_optional", "image_hint",
+    "image_attached", "image_remove",
     "score_figure",
+    "filters_toggle", "stats_db_records",
 )
 
 

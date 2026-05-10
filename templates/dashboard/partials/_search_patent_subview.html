@@ -1,29 +1,65 @@
 {# ============================================================
    PATENT / FAYDALI MODEL SEARCH — sub-view inside the unified
    Search tab (peer to Marka + Tasarım sub-views via the searchView
-   toggle in _search_panel.html). Identical content to the former
-   standalone _patent_search_panel.html minus the outer
-   <div id="tab-content-patent-search"> wrapper.
+   toggle in _search_panel.html).
+
+   Visual structure mirrors _search_panel.html design subview
+   (lines 985–1527): nested rounded-xl cards, the same image
+   drag-drop zone styling, a collapsible Filters section that
+   mirrors the Locarno class-finder, submit button with icon
+   spinner swap, idle/loading hints, live DB count, and a
+   detached results card.
 ============================================================ #}
 <div class="rounded-xl shadow-sm border p-5"
      style="background:var(--color-bg-card);border-color:var(--color-border)">
+<div x-data="{ patentDragOver: false, patentImageName: '', patentImagePreview: '',
+               patentSetFile(file){
+                 if(!file) return;
+                 this.patentImageName = file.name;
+                 const r = new FileReader();
+                 r.onload = e => { this.patentImagePreview = e.target.result; };
+                 r.readAsDataURL(file);
+               },
+               patentClearImage(){
+                 this.patentImageName = ''; this.patentImagePreview = '';
+                 const inp = document.getElementById('patent-search-image');
+                 if(inp){ inp.value = ''; inp.dispatchEvent(new Event('change', {bubbles:true})); }
+               },
+               patentHandleDrop(e){
+                 this.patentDragOver = false;
+                 const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+                 if(!f) return;
+                 try { const dt = new DataTransfer(); dt.items.add(f);
+                       document.getElementById('patent-search-image').files = dt.files; } catch(_){}
+                 this.patentSetFile(f);
+               },
+               patentHandleSelect(e){
+                 const f = e.target.files && e.target.files[0];
+                 this.patentSetFile(f);
+               } }">
 
-    {# ---------- Text input ---------- #}
-    <div class="max-w-full mx-auto mb-3 relative">
+  {# ===== Search form card ===== #}
+  <div class="rounded-xl shadow-sm border p-5"
+       style="background:var(--color-bg-card);border-color:var(--color-border)">
+
+    {# ---------- Text query (with clear-× and history dropdown) ---------- #}
+    <div class="mb-3 relative">
       <div class="flex items-center rounded-xl overflow-hidden"
            style="background:var(--color-bg-card);border:2px solid var(--color-border)">
-        <svg class="w-5 h-5 ml-4 shrink-0" style="color:var(--color-text-muted)"
-             fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-5 h-5 ml-4 shrink-0" style="color:var(--color-text-muted)" fill="none"
+             stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M21 21l-4.35-4.35M11 19a8 8 0 110-16 8 8 0 010 16z"/>
         </svg>
         <input type="text" id="patent-search-input"
                :placeholder="t('patent_search.query_placeholder')"
-               class="flex-1 px-4 py-3 text-base outline-none min-w-0"
+               class="flex-1 px-4 py-4 text-base outline-none min-w-0"
                style="background:transparent;color:var(--color-text-primary)"
-               autocomplete="off" maxlength="200"/>
+               autocomplete="off" maxlength="200" />
         <button type="button" id="patent-search-input-clear"
-                class="pr-4 hidden" style="color:var(--color-text-faint)">
+                class="hidden mr-2 p-1.5 rounded hover:opacity-80 transition-opacity"
+                style="color:var(--color-text-muted)"
+                :title="t('search.clear')">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                   d="M6 18L18 6M6 6l12 12"/>
@@ -48,213 +84,265 @@
       </div>
     </div>
 
-    {# ---------- Figure upload (drag-drop + file input) ----------
-       Patent-level DINOv2 cosine on patents.primary_figure_embedding.
-       Coverage caveat (~34% of corpus has figure embeddings) is shown
-       in the hint line under the dropzone. #}
-    <div class="mb-3"
-         x-data="{ patentDragOver: false, patentImageName: '', patentImagePreview: '',
-                   patentSetFile(file) {
-                     if (!file) return;
-                     this.patentImageName = file.name;
-                     const r = new FileReader();
-                     r.onload = e => { this.patentImagePreview = e.target.result; };
-                     r.readAsDataURL(file);
-                   },
-                   patentClearImage() {
-                     this.patentImageName = ''; this.patentImagePreview = '';
-                     const inp = document.getElementById('patent-search-image');
-                     if (inp) { inp.value = ''; inp.dispatchEvent(new Event('change', {bubbles:true})); }
-                   },
-                   patentHandleDrop(e) {
-                     this.patentDragOver = false;
-                     const f = e.dataTransfer.files && e.dataTransfer.files[0];
-                     if (!f) return;
-                     this.patentSetFile(f);
-                     try {
-                       const dt = new DataTransfer();
-                       dt.items.add(f);
-                       document.getElementById('patent-search-image').files = dt.files;
-                     } catch(_) {}
-                   } }">
+    {# ---------- Figure upload (drag-drop + preview) ---------- #}
+    <div class="mb-3">
       <div class="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-all"
-           :class="patentDragOver ? 'border-indigo-400 bg-indigo-50' : ''"
-           style="background:var(--color-bg-card);border:2px dashed var(--color-border)"
+           :class="patentDragOver ? 'ring-2 ring-indigo-400' : ''"
+           :style="'background:' + (patentDragOver ? 'var(--color-primary-light)' : 'var(--color-bg-muted)') + ';border:1px dashed var(--color-border)'"
            @click="document.getElementById('patent-search-image').click()"
            @dragover.prevent="patentDragOver = true"
-           @dragleave.prevent="patentDragOver = false"
+           @dragleave="patentDragOver = false"
            @drop.prevent="patentHandleDrop($event)">
+
+        {# No image: upload prompt #}
         <template x-if="!patentImagePreview">
-          <div class="flex-1 flex items-center gap-3">
-            <svg class="w-6 h-6 shrink-0" style="color:var(--color-text-faint)"
-                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
-            </svg>
-            <div>
-              <p class="text-sm font-medium" style="color:var(--color-text-primary)"
-                 x-text="t('patent_search.image_drop_label')">Drop a patent figure here or click to upload</p>
-              <p class="text-xs" style="color:var(--color-text-faint)"
+          <div class="flex items-center gap-3 w-full">
+            <div class="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
+                 style="background:var(--color-primary-light)">
+              <svg class="w-5 h-5" style="color:var(--color-primary)" fill="none" stroke="currentColor"
+                   viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                      d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+              </svg>
+            </div>
+            <div class="flex-1 min-w-0">
+              <span class="text-sm font-medium" style="color:var(--color-text-secondary)"
+                    x-text="t('patent_search.image_drop_label')">Drop a patent figure here or click to upload</span>
+              <span class="text-xs ml-1" style="color:var(--color-text-faint)"
+                    x-text="t('patent_search.image_optional')">(optional)</span>
+              <p class="text-xs mt-0.5" style="color:var(--color-text-faint)"
                  x-text="t('patent_search.image_hint')">DINOv2 figure similarity · ~34% corpus coverage · line drawings can produce noisy matches</p>
             </div>
+            <svg class="w-5 h-5 flex-shrink-0" style="color:var(--color-text-faint)" fill="none"
+                 stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                    d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+            </svg>
           </div>
         </template>
+
+        {# Has image: preview #}
         <template x-if="patentImagePreview">
-          <div class="flex-1 flex items-center gap-3">
-            <img :src="patentImagePreview" alt="Selected figure"
-                 class="w-12 h-12 object-contain rounded"
-                 style="background:var(--color-bg-muted)">
-            <div class="min-w-0 flex-1">
-              <p class="text-xs truncate" style="color:var(--color-text-primary)"
+          <div class="flex items-center gap-3 w-full">
+            <div class="relative flex-shrink-0">
+              <img :src="patentImagePreview" class="h-12 w-12 object-contain rounded-lg border"
+                   style="border-color:var(--color-border);background:var(--color-bg-card)" alt="Patent figure">
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium truncate" style="color:var(--color-text-primary)"
                  x-text="patentImageName"></p>
-              <p class="text-[10px]" style="color:var(--color-text-faint)"
+              <p class="text-xs" style="color:var(--color-text-muted)"
                  x-text="t('patent_search.image_attached')">Figure attached</p>
             </div>
-            <button type="button" id="patent-search-image-clear"
-                    @click.stop="patentClearImage()"
-                    class="shrink-0 p-1 rounded hover:opacity-70"
-                    style="color:var(--color-text-faint)"
-                    :title="t('patent_search.image_remove')">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                      d="M6 18L18 6M6 6l12 12"/>
-              </svg>
-            </button>
+            <button type="button" id="patent-search-image-clear" @click.stop="patentClearImage()"
+                    class="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-sm"
+                    style="background:var(--color-bg-muted);color:var(--color-text-secondary)"
+                    :title="t('patent_search.image_remove')">&times;</button>
           </div>
         </template>
       </div>
       <input type="file" id="patent-search-image"
              accept="image/png,image/jpeg,image/webp,image/tiff" class="hidden"
-             @change="patentSetFile($event.target.files && $event.target.files[0])"/>
+             @change="patentHandleSelect($event)"/>
     </div>
 
-    {# ---------- Filters row ---------- #}
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
-      {# IPC autocomplete combobox #}
-      <div class="relative">
-        <label class="block text-xs font-medium mb-1"
-               style="color:var(--color-text-faint)"
-               x-text="t('patent_search.ipc_label')">IPC class</label>
-        <input type="text" id="patent-search-ipc"
-               :placeholder="t('patent_search.ipc_placeholder')"
-               class="w-full px-3 py-2 rounded-lg border text-sm outline-none"
-               style="background:transparent;color:var(--color-text-primary);border-color:var(--color-border)"
-               autocomplete="off" maxlength="20"/>
-        <div id="patent-search-ipc-dropdown"
-             class="hidden absolute left-0 right-0 mt-1 rounded-lg shadow-lg border overflow-hidden"
-             style="background:var(--color-bg-card);border-color:var(--color-border);z-index:40;max-height:240px;overflow-y:auto">
+    {# ---------- Filters (collapsible — mirror of Locarno class finder) ---------- #}
+    <div class="mb-3"
+         x-data="{
+           patentFiltersOpen: false,
+           get patentActiveFilterCount() {
+             let n = 0;
+             if (document.getElementById('patent-search-ipc-chips')
+                 && document.getElementById('patent-search-ipc-chips').children.length > 0) n++;
+             const fields = ['patent-search-holder','patent-search-date-from','patent-search-date-to','patent-search-kind-code'];
+             fields.forEach(id => {
+               const el = document.getElementById(id);
+               if (el && (el.value || '').trim()) n++;
+             });
+             return n;
+           }
+         }">
+
+      {# Toggle header bar #}
+      <button @click="patentFiltersOpen = !patentFiltersOpen" type="button"
+              class="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all"
+              :style="'background:' + (patentFiltersOpen || patentActiveFilterCount > 0 ? 'var(--color-primary-light)' : 'var(--color-bg-muted)') + ';border:1px solid ' + (patentFiltersOpen ? 'var(--color-primary)' : 'var(--color-border)') + ';color:' + (patentFiltersOpen || patentActiveFilterCount > 0 ? 'var(--color-primary)' : 'var(--color-text-secondary)')">
+        <div class="flex items-center gap-2 min-w-0 flex-1">
+          <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/>
+          </svg>
+          <span x-show="patentActiveFilterCount === 0"
+                x-text="t('patent_search.filters_toggle')">Filters</span>
+          <span x-show="patentActiveFilterCount > 0" x-cloak
+                class="inline-flex items-center gap-1.5">
+            <span x-text="t('patent_search.filters_toggle')">Filters</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold text-white"
+                  style="background:var(--color-primary)"
+                  x-text="patentActiveFilterCount"></span>
+          </span>
         </div>
-        <div id="patent-search-ipc-chips" class="flex flex-wrap gap-1 mt-2"></div>
-      </div>
+        <svg class="w-4 h-4 shrink-0 transition-transform" :class="patentFiltersOpen ? 'rotate-180' : ''"
+             fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
 
-      {# Holder name #}
-      <div>
-        <label class="block text-xs font-medium mb-1"
-               style="color:var(--color-text-faint)"
-               x-text="t('patent_search.holder_label')">Holder</label>
-        <input type="text" id="patent-search-holder"
-               :placeholder="t('patent_search.holder_placeholder')"
-               class="w-full px-3 py-2 rounded-lg border text-sm outline-none"
-               style="background:transparent;color:var(--color-text-primary);border-color:var(--color-border)"
-               autocomplete="off" maxlength="100"/>
-      </div>
+      {# Expandable body #}
+      <div x-show="patentFiltersOpen" x-cloak x-collapse class="mt-2 rounded-xl overflow-hidden"
+           style="border:1px solid var(--color-border);background:var(--color-bg-card)">
+        <div class="p-4 space-y-3">
 
-      {# Date range — from #}
-      <div>
-        <label class="block text-xs font-medium mb-1"
-               style="color:var(--color-text-faint)"
-               x-text="t('patent_search.date_from_label')">Filed from</label>
-        <input type="date" id="patent-search-date-from"
-               class="w-full px-3 py-2 rounded-lg border text-sm outline-none"
-               style="background:transparent;color:var(--color-text-primary);border-color:var(--color-border)"/>
-      </div>
+          {# IPC autocomplete #}
+          <div class="relative">
+            <label class="block text-xs font-medium mb-1"
+                   style="color:var(--color-text-faint)"
+                   x-text="t('patent_search.ipc_label')">IPC class</label>
+            <input type="text" id="patent-search-ipc"
+                   :placeholder="t('patent_search.ipc_placeholder')"
+                   class="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                   style="border:1px solid var(--color-border);color:var(--color-text-primary);background:var(--color-bg-input,var(--color-bg-card))"
+                   autocomplete="off" maxlength="20"/>
+            <div id="patent-search-ipc-dropdown"
+                 class="hidden absolute left-0 right-0 mt-1 rounded-lg shadow-lg border overflow-hidden"
+                 style="background:var(--color-bg-card);border-color:var(--color-border);z-index:40;max-height:240px;overflow-y:auto">
+            </div>
+            <div id="patent-search-ipc-chips" class="flex flex-wrap gap-1 mt-2"></div>
+          </div>
 
-      {# Date range — to #}
-      <div>
-        <label class="block text-xs font-medium mb-1"
-               style="color:var(--color-text-faint)"
-               x-text="t('patent_search.date_to_label')">Filed to</label>
-        <input type="date" id="patent-search-date-to"
-               class="w-full px-3 py-2 rounded-lg border text-sm outline-none"
-               style="background:transparent;color:var(--color-text-primary);border-color:var(--color-border)"/>
+          {# Holder + Kind row #}
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium mb-1"
+                     style="color:var(--color-text-faint)"
+                     x-text="t('patent_search.holder_label')">Holder</label>
+              <input type="text" id="patent-search-holder"
+                     :placeholder="t('patent_search.holder_placeholder')"
+                     class="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                     style="border:1px solid var(--color-border);color:var(--color-text-primary);background:var(--color-bg-input,var(--color-bg-card))"
+                     autocomplete="off" maxlength="100"/>
+            </div>
+            <div>
+              <label class="block text-xs font-medium mb-1"
+                     style="color:var(--color-text-faint)"
+                     x-text="t('patent_search.kind_code_label')">Kind</label>
+              <select id="patent-search-kind-code"
+                      class="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                      style="border:1px solid var(--color-border);color:var(--color-text-primary);background:var(--color-bg-input,var(--color-bg-card))">
+                <option value="" x-text="t('patent_search.kind_any')">Any</option>
+                <option value="B" x-text="'B — ' + t('patent_search.kind_b')">B</option>
+                <option value="A1" x-text="'A1 — ' + t('patent_search.kind_a1')">A1</option>
+                <option value="U3" x-text="'U3 — ' + t('patent_search.kind_u3')">U3</option>
+                <option value="U1" x-text="'U1 — ' + t('patent_search.kind_u1')">U1</option>
+                <option value="T4" x-text="'T4 — ' + t('patent_search.kind_t4')">T4</option>
+              </select>
+            </div>
+          </div>
+
+          {# Date range #}
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium mb-1"
+                     style="color:var(--color-text-faint)"
+                     x-text="t('patent_search.date_from_label')">Filed from</label>
+              <input type="date" id="patent-search-date-from"
+                     class="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                     style="border:1px solid var(--color-border);color:var(--color-text-primary);background:var(--color-bg-input,var(--color-bg-card))"/>
+            </div>
+            <div>
+              <label class="block text-xs font-medium mb-1"
+                     style="color:var(--color-text-faint)"
+                     x-text="t('patent_search.date_to_label')">Filed to</label>
+              <input type="date" id="patent-search-date-to"
+                     class="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                     style="border:1px solid var(--color-border);color:var(--color-text-primary);background:var(--color-bg-input,var(--color-bg-card))"/>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
-    {# Kind code (optional, narrow row) #}
-    <div class="mb-4 max-w-xs">
-      <label class="block text-xs font-medium mb-1"
-             style="color:var(--color-text-faint)"
-             x-text="t('patent_search.kind_code_label')">Kind</label>
-      <select id="patent-search-kind-code"
-              class="w-full px-3 py-2 rounded-lg border text-sm outline-none"
-              style="background:transparent;color:var(--color-text-primary);border-color:var(--color-border)">
-        <option value="" x-text="t('patent_search.kind_any')">Any</option>
-        <option value="B" x-text="'B — ' + t('patent_search.kind_b')">B</option>
-        <option value="A1" x-text="'A1 — ' + t('patent_search.kind_a1')">A1</option>
-        <option value="U3" x-text="'U3 — ' + t('patent_search.kind_u3')">U3</option>
-        <option value="U1" x-text="'U1 — ' + t('patent_search.kind_u1')">U1</option>
-        <option value="T4" x-text="'T4 — ' + t('patent_search.kind_t4')">T4</option>
-      </select>
+    {# ---------- Submit (with icon spinner swap) ---------- #}
+    <div class="flex flex-col sm:flex-row gap-3">
+      <button type="button" id="patent-search-submit"
+              class="flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-semibold text-sm bg-indigo-600 text-white hover:bg-indigo-700 transition-all shadow-sm disabled:opacity-50">
+        <svg data-patent-submit-icon="search" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+        </svg>
+        <svg data-patent-submit-icon="spinner" class="w-5 h-5 animate-spin hidden" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+        </svg>
+        <span x-text="t('patent_search.submit')">Search</span>
+      </button>
     </div>
 
-    {# ---------- Submit ---------- #}
-    <button type="button" id="patent-search-submit"
-            class="w-full py-3 rounded-xl text-base font-medium transition-all flex items-center justify-center gap-2"
-            style="background:var(--color-primary);color:white">
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-              d="M21 21l-4.35-4.35M11 19a8 8 0 110-16 8 8 0 010 16z"/>
-      </svg>
-      <span x-text="t('patent_search.submit')">Search</span>
-    </button>
-
+    {# Idle hint / loading hint #}
     <p id="patent-search-hint" class="mt-2 text-center text-sm px-1"
        style="color:var(--color-text-muted)"
        x-text="t('patent_search.analysis_hint')">Title • Abstract • IPC • Holder</p>
+    <div id="patent-search-hint-loading" class="hidden mt-2 flex items-center justify-center gap-2 text-sm font-medium"
+         style="color:var(--color-primary)">
+      <span class="animate-pulse">&#9203;</span>
+      <span x-text="t('landing.ai_analysis_started')">AI analizi başlatıldı...</span>
+    </div>
 
+    {# Live patent DB count #}
+    <div x-show="patentCount > 0" x-cloak
+         class="flex items-center justify-center gap-2 mt-4 text-sm"
+         style="color:var(--color-text-muted)">
+      <span class="inline-block w-2 h-2 rounded-full animate-pulse" style="background:#22c55e"></span>
+      <span x-text="patentCount.toLocaleString() + ' ' + t('patent_search.stats_db_records')"></span>
+    </div>
+
+    {# Status (errors / empty-query messages from JS) #}
     <p id="patent-search-status" class="text-xs mt-2 text-center"
        style="color:var(--color-text-muted)"></p>
-</div>
+  </div>
 
-{# ---------- Results card ---------- #}
-<div id="patent-search-results-card"
-     class="hidden mt-4 rounded-xl shadow-sm border p-5"
-     style="background:var(--color-bg-card);border-color:var(--color-border)">
-    <div class="flex items-center justify-between mb-4">
-      <div class="flex items-center gap-2">
-        <h3 class="text-lg font-semibold" style="color:var(--color-text-primary)">
-          <span x-text="t('patent_search.results_title')">Results</span>
-          <span id="patent-search-total-badge"
-                class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
-                style="background:var(--color-bg-muted);color:var(--color-text-muted)">0</span>
-        </h3>
-      </div>
+  {# ===== Results card ===== #}
+  <div id="patent-search-results-card" class="hidden mt-4 rounded-xl shadow-sm border p-5"
+       style="background:var(--color-bg-card);border-color:var(--color-border)">
+
+    {# Header #}
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="text-sm font-semibold" style="color:var(--color-text-primary)">
+        <span x-text="t('patent_search.results_title')">Results</span>
+        <span id="patent-search-total-badge"
+              class="ml-2 text-xs px-2 py-0.5 rounded-full"
+              style="background:var(--color-bg-muted);color:var(--color-text-secondary)">0</span>
+      </h3>
       <span id="patent-search-duration" class="text-xs"
             style="color:var(--color-text-faint)"></span>
     </div>
 
+    {# Loading state #}
     <div id="patent-search-loading" class="hidden py-12 text-center">
-      <div class="inline-block w-8 h-8 border-4 rounded-full animate-spin"
-           style="border-color:var(--color-border);border-top-color:var(--color-primary)"></div>
-      <p class="mt-2 text-sm" style="color:var(--color-text-muted)"
+      <div class="inline-block animate-spin rounded-full h-8 w-8 border-2 border-indigo-600 border-t-transparent"></div>
+      <p class="text-sm mt-3" style="color:var(--color-text-muted)"
          x-text="t('patent_search.loading')">Searching…</p>
     </div>
 
+    {# Empty state #}
     <div id="patent-search-empty" class="hidden py-12 text-center">
-      <svg class="mx-auto w-12 h-12 mb-2" style="color:var(--color-text-faint)"
+      <svg class="w-12 h-12 mx-auto mb-2" style="color:var(--color-text-faint)"
            fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-              d="M21 21l-4.35-4.35M11 19a8 8 0 110-16 8 8 0 010 16z"/>
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+              d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
       </svg>
-      <p class="text-sm font-medium" style="color:var(--color-text-primary)"
+      <p class="text-sm font-medium" style="color:var(--color-text-secondary)"
          x-text="t('patent_search.empty_title')">No results</p>
-      <p class="text-xs mt-1" style="color:var(--color-text-muted)"
+      <p class="text-xs mt-1" style="color:var(--color-text-faint)"
          x-text="t('patent_search.empty_body')">Try a different query or relax filters.</p>
     </div>
 
+    {# Error state #}
     <div id="patent-search-error" class="hidden p-4 rounded-lg text-sm"
          style="background:var(--color-bg-error,#fee2e2);color:var(--color-text-error,#991b1b)"></div>
 
-    <div id="patent-search-grid"
-         class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
-</div>
+    {# Results grid #}
+    <div id="patent-search-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+  </div>
+</div><!-- /patent alpine x-data wrap -->
+</div><!-- /patent rounded-xl card -->

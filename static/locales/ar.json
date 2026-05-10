@@ -1834,9 +1834,12 @@
     "score_embedding": "دلالي",
     "score_figure": "الرسم",
     "image_drop_label": "أفلت رسم البراءة هنا أو اضغط للتحميل",
+    "image_optional": "(اختياري)",
     "image_hint": "تشابه الرسم بـ DINOv2 · تغطية المجموعة ~٣٤٪ · قد تنتج الرسوم الخطية تطابقات مشوّشة",
     "image_attached": "تم إرفاق الصورة",
     "image_remove": "إزالة الصورة",
+    "filters_toggle": "المرشحات",
+    "stats_db_records": "براءة يتم تحليلها في قاعدة البيانات المباشرة",
     "show_more": "عرض المزيد",
     "show_less": "عرض أقل"
   },

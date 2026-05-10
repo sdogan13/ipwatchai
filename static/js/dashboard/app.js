@@ -87,6 +87,7 @@ function dashboard() {
         // ===== Search state =====
         dbCount: 0,
         designCount: 0,
+        patentCount: 0,
         searchQuery: '',
         searchResults: [],
         searchLoading: false,
@@ -1547,6 +1548,7 @@ function dashboard() {
                     var sysStats = statusData.statistics || {};
                     this.dbCount = sysStats.total_trademarks || 0;
                     this.designCount = sysStats.total_designs || 0;
+                    this.patentCount = sysStats.total_patents || 0;
                     var tmEl = document.getElementById('sys-total-trademarks');
                     if (tmEl) tmEl.textContent = this.dbCount.toLocaleString();
                     var bulletinEl = document.getElementById('sys-last-bulletin');

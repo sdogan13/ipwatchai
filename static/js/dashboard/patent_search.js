@@ -389,6 +389,7 @@
     if (!card || !grid) return;
     show(card);
     hide($("patent-search-loading"));
+    setSubmitLoading(false);
     clearError();
     var items = (data && data.results) || [];
     totalBadge && (totalBadge.textContent = String(items.length));
@@ -402,6 +403,21 @@
     }
     hide(empty);
     grid.innerHTML = items.map(renderResultCard).join("");
+  }
+
+  function setSubmitLoading(loading) {
+    var btn = $("patent-search-submit");
+    if (btn) {
+      btn.disabled = !!loading;
+      var searchIcon = btn.querySelector('[data-patent-submit-icon="search"]');
+      var spinIcon = btn.querySelector('[data-patent-submit-icon="spinner"]');
+      if (searchIcon) searchIcon.classList.toggle("hidden", !!loading);
+      if (spinIcon) spinIcon.classList.toggle("hidden", !loading);
+    }
+    var idleHint = $("patent-search-hint");
+    var loadHint = $("patent-search-hint-loading");
+    if (idleHint) idleHint.classList.toggle("hidden", !!loading);
+    if (loadHint) loadHint.classList.toggle("hidden", !loading);
   }
 
   // ---------------------------------------------------------------
@@ -446,6 +462,7 @@
     hide($("patent-search-empty"));
     clearError();
     setStatus("");
+    setSubmitLoading(true);
 
     var headers = {};
     var token = getAuthToken();
@@ -460,6 +477,7 @@
           return r.json().then(function (d) {
             showError(t("patent_search.quota_exceeded", "Daily search quota exceeded"));
             hide(loading);
+            setSubmitLoading(false);
             throw new Error("quota");
           });
         }
@@ -469,6 +487,7 @@
       .then(function (data) { renderResults(data); })
       .catch(function (err) {
         hide(loading);
+        setSubmitLoading(false);
         if (err && err.message === "quota") return; // already shown
         showError(t("patent_search.error_generic", "Search failed"));
       });
