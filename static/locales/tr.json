@@ -1926,6 +1926,8 @@
     "upgrade_required": "Bu özellik için yükseltme gerekli.",
     "bulletin_date": "Bülten",
     "total_found": "fırsat",
+    "export_csv": "CSV",
+    "export_csv_title": "Mevcut görünümü CSV olarak indir",
     "event_grant_fee_lapse": "Patent ücreti ödenmedi (düştü)",
     "event_application_fee_lapse": "Başvuru ücreti ödenmedi (düştü)",
     "event_application_lapsed_or_rejected": "Başvuru düştü / reddedildi",
@@ -1999,7 +2001,10 @@
     "error_label_required": "Etiket zorunludur",
     "error_holder_required": "Hak sahibi adı zorunludur",
     "error_reference_required": "Referans sorgu zorunludur",
-    "error_generic": "Ekleme başarısız"
+    "error_generic": "Ekleme başarısız",
+    "export_csv": "CSV",
+    "export_csv_title": "Uyarıları CSV olarak indir",
+    "export_failed": "İndirme başarısız"
   },
   "design_watchlist": {
     "panel_title": "Tasarım Takibi",

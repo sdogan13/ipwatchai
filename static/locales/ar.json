@@ -1923,6 +1923,8 @@
     "upgrade_required": "تحتاج إلى ترقية لهذه الميزة.",
     "bulletin_date": "النشرة",
     "total_found": "فرصة",
+    "export_csv": "CSV",
+    "export_csv_title": "تنزيل العرض الحالي كملف CSV",
     "event_grant_fee_lapse": "سقطت رسوم البراءة",
     "event_application_fee_lapse": "سقطت رسوم الطلب",
     "event_application_lapsed_or_rejected": "سقط/رُفض الطلب",
@@ -1996,7 +1998,10 @@
     "error_label_required": "الاسم مطلوب",
     "error_holder_required": "اسم المالك مطلوب",
     "error_reference_required": "نص المرجع مطلوب",
-    "error_generic": "فشل الإضافة"
+    "error_generic": "فشل الإضافة",
+    "export_csv": "CSV",
+    "export_csv_title": "تنزيل التنبيهات كملف CSV",
+    "export_failed": "فشل التنزيل"
   },
   "design_watchlist": {
     "panel_title": "متابعة التصاميم",
