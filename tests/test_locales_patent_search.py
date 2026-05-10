@@ -64,8 +64,12 @@ def test_patent_search_values_non_empty(lang):
 
 
 @pytest.mark.parametrize("lang", SUPPORTED_LANGUAGES)
-def test_tabs_patent_search_present(lang):
+def test_search_view_keys_present(lang):
+    """Toggle labels for the 3-way Marka↔Tasarım↔Patent sub-view in
+    the unified Search tab. (Replaces tabs.patent_search which was
+    removed when the standalone Patent navbar entry was retired.)"""
     data = _load_locale(lang)
-    tabs = data.get("tabs", {})
-    assert "patent_search" in tabs, f"{lang}.json tabs missing patent_search label"
-    assert (tabs.get("patent_search") or "").strip(), f"{lang}.json tabs.patent_search empty"
+    search = data.get("search", {})
+    for key in ("view_trademark", "view_design", "view_patent"):
+        assert key in search, f"{lang}.json search.{key} missing"
+        assert (search.get(key) or "").strip(), f"{lang}.json search.{key} empty"

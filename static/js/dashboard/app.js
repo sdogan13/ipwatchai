@@ -2315,7 +2315,7 @@ function showDashboardTab(tabId) {
     }
 
     // Hide ALL tab content panels
-    var panels = ['overview', 'watchlist', 'search', 'patent-search', 'opposition-radar', 'ai-studio', 'reports', 'applications'];
+    var panels = ['overview', 'watchlist', 'search', 'opposition-radar', 'ai-studio', 'reports', 'applications'];
     panels.forEach(function (id) {
         var el = document.getElementById('tab-content-' + id);
         if (el) el.classList.add('hidden');
@@ -2346,14 +2346,13 @@ function showDashboardTab(tabId) {
     if (typeof updateBottomTabActive === 'function') updateBottomTabActive(tabId);
 
     // Update page title
-    var tabTitles = { 'overview': 'Dashboard', 'watchlist': 'Watchlist', 'search': 'Search', 'patent-search': 'Patent Search', 'opposition-radar': 'Opposition Radar', 'ai-studio': 'AI Studio', 'reports': 'Reports', 'applications': 'Applications' };
+    var tabTitles = { 'overview': 'Dashboard', 'watchlist': 'Watchlist', 'search': 'Search', 'opposition-radar': 'Opposition Radar', 'ai-studio': 'AI Studio', 'reports': 'Reports', 'applications': 'Applications' };
     document.title = 'IPWatchAI' + (tabTitles[tabId] ? ' \u2014 ' + tabTitles[tabId] : '');
 
-    // Only clear search results when leaving the search tab.
-    // (Patent search has its own panel + state — leaving the trademark/design
-    // search tab shouldn't blow away patent results, so we keep the existing
-    // tab-id check tight to the legacy 'search' panel.)
-    if (tabId !== 'search' && tabId !== 'patent-search') {
+    // Only clear search results when leaving the search tab. Patent
+    // search now lives inside the unified Search tab as a sub-view, so
+    // the same check covers it.
+    if (tabId !== 'search') {
         clearSearchResults();
     }
 

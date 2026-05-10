@@ -1,13 +1,12 @@
 {# ============================================================
-   PATENT / FAYDALI MODEL SEARCH TAB
-   Sister to the Tasarım/Marka search panels. Text-first hybrid:
-   trigram + e5 embedding cosine, IPC + holder + date filters,
-   exact-ID shortcut on application_no/publication_no.
-   No image upload (figures are technical drawings; deferred).
+   PATENT / FAYDALI MODEL SEARCH — sub-view inside the unified
+   Search tab (peer to Marka + Tasarım sub-views via the searchView
+   toggle in _search_panel.html). Identical content to the former
+   standalone _patent_search_panel.html minus the outer
+   <div id="tab-content-patent-search"> wrapper.
 ============================================================ #}
-<div id="tab-content-patent-search" class="hidden max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-4">
-  <div class="rounded-xl shadow-sm border p-5"
-       style="background:var(--color-bg-card);border-color:var(--color-border)">
+<div class="rounded-xl shadow-sm border p-5"
+     style="background:var(--color-bg-card);border-color:var(--color-border)">
 
     {# ---------- Text input ---------- #}
     <div class="max-w-full mx-auto mb-3 relative">
@@ -90,7 +89,7 @@
                style="background:transparent;color:var(--color-text-primary);border-color:var(--color-border)"/>
       </div>
 
-      {# Date range — to + kind code stacked #}
+      {# Date range — to #}
       <div>
         <label class="block text-xs font-medium mb-1"
                style="color:var(--color-text-faint)"
@@ -135,12 +134,12 @@
 
     <p id="patent-search-status" class="text-xs mt-2 text-center"
        style="color:var(--color-text-muted)"></p>
-  </div>
+</div>
 
-  {# ---------- Results card ---------- #}
-  <div id="patent-search-results-card"
-       class="hidden mt-4 rounded-xl shadow-sm border p-5"
-       style="background:var(--color-bg-card);border-color:var(--color-border)">
+{# ---------- Results card ---------- #}
+<div id="patent-search-results-card"
+     class="hidden mt-4 rounded-xl shadow-sm border p-5"
+     style="background:var(--color-bg-card);border-color:var(--color-border)">
     <div class="flex items-center justify-between mb-4">
       <div class="flex items-center gap-2">
         <h3 class="text-lg font-semibold" style="color:var(--color-text-primary)">
@@ -178,5 +177,4 @@
 
     <div id="patent-search-grid"
          class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
-  </div>
 </div>

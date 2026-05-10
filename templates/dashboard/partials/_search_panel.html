@@ -1,7 +1,44 @@
 <!-- ============================================ -->
 <!-- SEARCH TAB (Alpine.js reactive)             -->
+<!-- 3-way sub-view: Marka | Tasarım | Patent     -->
 <!-- ============================================ -->
-<div id="tab-content-search" class="hidden max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-4">
+<div id="tab-content-search"
+     x-data="{ searchView: (function () {
+         try {
+             var v = localStorage.getItem('searchView');
+             if (v === 'design' || v === 'patent') return v;
+         } catch (_) {}
+         return 'trademark';
+     })() }"
+     x-init="$watch('searchView', v => { try { localStorage.setItem('searchView', v); } catch(_){} })"
+     class="hidden max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-4">
+
+    <!-- Sub-view toggle: Marka ↔ Tasarım ↔ Patent. Same pattern as the
+         Watchlist tab. Selection persists via localStorage so the user
+         lands on their last-used registry on reload. -->
+    <div class="mb-5 inline-flex rounded-xl p-1"
+         style="background:var(--color-bg-muted);border:1px solid var(--color-border)">
+        <button type="button" @click="searchView = 'trademark'"
+                class="px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                :class="searchView === 'trademark' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
+                :style="searchView === 'trademark' ? '' : 'color:var(--color-text-muted)'"
+                x-text="t('search.view_trademark')">Marka</button>
+        <button type="button" @click="searchView = 'design'"
+                class="px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                :class="searchView === 'design' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
+                :style="searchView === 'design' ? '' : 'color:var(--color-text-muted)'"
+                x-text="t('search.view_design')">Tasarım</button>
+        <button type="button" @click="searchView = 'patent'"
+                class="px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                :class="searchView === 'patent' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
+                :style="searchView === 'patent' ? '' : 'color:var(--color-text-muted)'"
+                x-text="t('search.view_patent')">Patent</button>
+    </div>
+
+    <!-- ===========================================
+         TRADEMARK SUB-VIEW
+         =========================================== -->
+    <div x-show="searchView === 'trademark'">
     <div class="rounded-xl shadow-sm border p-5"
         style="background:var(--color-bg-card);border-color:var(--color-border)">
 
@@ -936,13 +973,19 @@
         </div>
     </div>
 
-    <!-- ============================================ -->
-    <!-- DESIGN SEARCH SECTION (Tasarım Arama)         -->
-    <!-- Stacked under the Marka search; independent  -->
-    <!-- form, submit, and results pane.              -->
-    <!-- ============================================ -->
-    <div class="mt-8 pt-6 border-t" style="border-color:var(--color-border)"
-         x-data="{ designDragOver: false, designImageName: '', designImagePreview: '',
+    {# Trademark content's existing closing divs already close the
+       rounded-xl card opened at line 42 (the natural end of the
+       trademark search structure). Only the x-show wrap needs an
+       explicit close here. #}
+    </div><!-- /trademark x-show wrap -->
+
+    <!-- ===========================================
+         DESIGN (TASARIM) SUB-VIEW
+         =========================================== -->
+    <div x-show="searchView === 'design'" x-cloak>
+    <div class="rounded-xl shadow-sm border p-5"
+        style="background:var(--color-bg-card);border-color:var(--color-border)">
+    <div x-data="{ designDragOver: false, designImageName: '', designImagePreview: '',
                    designSetFile(file){
                      if(!file) return;
                      this.designImageName = file.name;
@@ -1481,8 +1524,16 @@
         <!-- Results grid -->
         <div id="design-search-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
       </div>
+    </div><!-- /design rounded-xl card -->
+    </div><!-- /design alpine x-data wrap -->
+    </div><!-- /design x-show wrap -->
+
+    <!-- ===========================================
+         PATENT SUB-VIEW
+         =========================================== -->
+    <div x-show="searchView === 'patent'" x-cloak>
+        {% include 'dashboard/partials/_search_patent_subview.html' %}
     </div>
-</div>
 
 <!-- Image Lightbox -->
 <div x-show="lightboxImage" x-cloak x-transition.opacity
@@ -1608,4 +1659,5 @@
         </div>
     </div>
 
-</div>
+</div><!-- /portfolio modal -->
+</div><!-- /tab-content-search -->
