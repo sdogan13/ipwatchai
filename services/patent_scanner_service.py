@@ -85,6 +85,7 @@ def _common_filter_clauses(
     ipc_classes: Optional[Sequence[str]],
     kind_codes: Optional[Sequence[str]],
     customer_application_no: Optional[str],
+    candidate_patent_ids: Optional[Sequence[str]] = None,
     table_alias: str = "p",
 ) -> tuple[str, Dict[str, Any]]:
     parts: List[str] = []
@@ -100,6 +101,9 @@ def _common_filter_clauses(
     if customer_application_no:
         parts.append(f" AND {table_alias}.application_no <> %(_self)s")
         params["_self"] = customer_application_no
+    if candidate_patent_ids:
+        parts.append(f" AND {table_alias}.id::text = ANY(%(_candidates)s::text[])")
+        params["_candidates"] = list(candidate_patent_ids)
     return "".join(parts), params
 
 
@@ -107,7 +111,7 @@ def _common_filter_clauses(
 # Holder scan
 # ---------------------------------------------------------------------------
 
-def _scan_holder(cur, item: Dict[str, Any]) -> List[ScanMatch]:
+def _scan_holder(cur, item: Dict[str, Any], *, candidate_patent_ids=None) -> List[ScanMatch]:
     """Find patents whose patent_holders row matches the watched holder.
 
     Match priority: holder_id (FK) > tpe_client_id > name trigram. We
@@ -123,6 +127,7 @@ def _scan_holder(cur, item: Dict[str, Any]) -> List[ScanMatch]:
         ipc_classes=item.get("ipc_classes"),
         kind_codes=item.get("kind_codes"),
         customer_application_no=item.get("customer_application_no"),
+        candidate_patent_ids=candidate_patent_ids,
         table_alias="p",
     )
 
@@ -168,7 +173,7 @@ def _scan_holder(cur, item: Dict[str, Any]) -> List[ScanMatch]:
 # Reference scan (text + embedding hybrid)
 # ---------------------------------------------------------------------------
 
-def _scan_reference(cur, item: Dict[str, Any]) -> List[ScanMatch]:
+def _scan_reference(cur, item: Dict[str, Any], *, candidate_patent_ids=None) -> List[ScanMatch]:
     """Find patents whose title_abstract_embedding is similar to the
     watched reference. When ``reference_query`` is also set, combine
     trigram on title with embedding cosine."""
@@ -181,6 +186,7 @@ def _scan_reference(cur, item: Dict[str, Any]) -> List[ScanMatch]:
         ipc_classes=item.get("ipc_classes"),
         kind_codes=item.get("kind_codes"),
         customer_application_no=item.get("customer_application_no"),
+        candidate_patent_ids=candidate_patent_ids,
         table_alias="p",
     )
 
@@ -238,14 +244,21 @@ def _scan_reference(cur, item: Dict[str, Any]) -> List[ScanMatch]:
 # Top-level scanner entry
 # ---------------------------------------------------------------------------
 
-def scan_watchlist_item(db, item: Dict[str, Any]) -> List[ScanMatch]:
-    """Run the appropriate scan for a single watchlist item."""
+def scan_watchlist_item(
+    db, item: Dict[str, Any], *, candidate_patent_ids=None,
+) -> List[ScanMatch]:
+    """Run the appropriate scan for a single watchlist item.
+
+    ``candidate_patent_ids`` (optional) restricts the corpus scan to a
+    specific subset — used by the post-ingest hook to scan only newly
+    landed patents instead of re-scanning the full ~280K-row corpus.
+    """
     cur = db.cursor()
     watch_type = (item.get("watch_type") or "").strip().lower()
     if watch_type == "holder":
-        return _scan_holder(cur, item)
+        return _scan_holder(cur, item, candidate_patent_ids=candidate_patent_ids)
     elif watch_type == "reference":
-        return _scan_reference(cur, item)
+        return _scan_reference(cur, item, candidate_patent_ids=candidate_patent_ids)
     else:
         logger.warning("scan_watchlist_item: unknown watch_type %r for item %s",
                        watch_type, item.get("id"))
@@ -384,10 +397,16 @@ def store_alerts_for_item(
     return inserted
 
 
-def scan_and_store(db, item: Dict[str, Any]) -> Dict[str, Any]:
-    """One-shot: scan + store. Updates last_scan_at on the watchlist item."""
+def scan_and_store(
+    db, item: Dict[str, Any], *, candidate_patent_ids=None,
+) -> Dict[str, Any]:
+    """One-shot: scan + store. Updates last_scan_at on the watchlist item.
+
+    Pass ``candidate_patent_ids`` to scope the scan to a subset of the
+    corpus (post-ingest hook usage).
+    """
     started = time.time()
-    matches = scan_watchlist_item(db, item)
+    matches = scan_watchlist_item(db, item, candidate_patent_ids=candidate_patent_ids)
     new_alerts = store_alerts_for_item(db, item, matches)
 
     cur = db.cursor()
@@ -404,6 +423,50 @@ def scan_and_store(db, item: Dict[str, Any]) -> Dict[str, Any]:
         "alerts_created": new_alerts,
         "duration_ms": int((time.time() - started) * 1000),
     }
+
+
+def trigger_patent_watchlist_scan(
+    patent_ids: Sequence[str],
+    *,
+    source_type: str = "bulletin",
+    source_reference: Optional[str] = None,
+) -> int:
+    """Post-ingest hook: scan all active watchlists against newly landed patents.
+
+    Called by ``pipeline/ingest_patents.py`` after a bulletin completes.
+    Scans every active watchlist row but scopes each scan to the new
+    patent IDs (not the full corpus) so cost is O(watchlist_count * new_ids)
+    rather than O(watchlist_count * corpus_size).
+
+    Returns the total number of new alerts generated across all watchlists.
+    Failures on individual items are logged but never propagate — a busted
+    watchlist row should not poison a successful ingest run.
+    """
+    from database.crud import Database
+    from services.patent_watchlist_service import get_active_patent_watchlist_items
+
+    if not patent_ids:
+        return 0
+
+    total_new_alerts = 0
+    with Database() as db:
+        items = get_active_patent_watchlist_items(db=db)
+        for item in items:
+            try:
+                result = scan_and_store(
+                    db, item, candidate_patent_ids=list(patent_ids),
+                )
+                total_new_alerts += int(result.get("alerts_created") or 0)
+            except Exception:
+                logger.exception(
+                    "trigger_patent_watchlist_scan: scan failed for item %s",
+                    item.get("id"),
+                )
+    logger.info(
+        "trigger_patent_watchlist_scan: source=%s ref=%s patents=%d alerts=%d",
+        source_type, source_reference, len(patent_ids), total_new_alerts,
+    )
+    return total_new_alerts
 
 
 def scan_all_active_items(db) -> Dict[str, Any]:

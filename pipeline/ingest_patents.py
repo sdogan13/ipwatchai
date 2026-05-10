@@ -675,7 +675,9 @@ def ingest_bulletin(
         "figures_inserted": 0,
         "events_inserted": 0,
         "skipped": 0,
+        "watchlist_alerts": 0,
     }
+    upserted_patent_ids: List[str] = []
 
     try:
         with conn.cursor() as cur:
@@ -691,6 +693,8 @@ def ingest_bulletin(
                     continue
 
                 patent_id = upsert_patent(cur, row)
+                if patent_id:
+                    upserted_patent_ids.append(str(patent_id))
                 stats["holders_inserted"] += replace_holders(
                     cur, patent_id, record.get("holders", []),
                 )
@@ -728,6 +732,24 @@ def ingest_bulletin(
     finally:
         if owns_connection:
             conn.close()
+
+    # Post-ingest watchlist scan. Runs against active patent watchlists,
+    # scoped to the IDs we just upserted so cost is O(watchlists * new_ids)
+    # rather than O(watchlists * full_corpus). Wrapped in try/except so a
+    # failed scan never poisons a successful ingest.
+    if upserted_patent_ids:
+        try:
+            from services.patent_scanner_service import trigger_patent_watchlist_scan
+            stats["watchlist_alerts"] = trigger_patent_watchlist_scan(
+                upserted_patent_ids,
+                source_type="bulletin",
+                source_reference=bulletin_folder.name,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[!] %s: patent-watchlist scan failed: %r",
+                bulletin_folder.name, exc,
+            )
 
     stats["status"] = "ok"
     return stats
