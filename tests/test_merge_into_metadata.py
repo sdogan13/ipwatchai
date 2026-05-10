@@ -5,15 +5,24 @@ Built one helper at a time. Each step adds its own test block.
 
 from __future__ import annotations
 
+import pytest
+
 from pipeline.merge_into_metadata import (
+    merge_pdf_record_with_cd_dossier,
+    merge_to_pdf_shape,
     synthesize_cd_record_in_pdf_shape,
 )
 from pipeline.merge_into_metadata import (
+    _attach_existing_embeddings,
     _cd_attorney_to_pdf_attorney,
     _cd_design_to_pdf_design,
     _cd_designer_to_pdf_designer,
     _cd_holder_to_pdf_applicant,
     _cd_view_to_pdf_view,
+    _coerce_bulletin_no,
+    _index_existing_embeddings,
+    _merge_design_views,
+    _merge_designs,
 )
 
 
@@ -328,3 +337,333 @@ def test_synthesize_cd_record_record_index_preserved():
     for idx in (1, 100, 9999):
         rec = synthesize_cd_record_in_pdf_shape(cd, record_index=idx)
         assert rec["record_index"] == idx
+
+
+# ---------------------------------------------------------------------------
+# _coerce_bulletin_no
+# ---------------------------------------------------------------------------
+
+def test_coerce_bulletin_no_str_to_int():
+    """CD ships bulletin_no as str ('240'); PDF as int (240). Coerce
+    digit-string to int so the merged top-level field is consistent."""
+    assert _coerce_bulletin_no("240") == 240
+    assert _coerce_bulletin_no("  240  ") == 240
+    assert _coerce_bulletin_no(240) == 240
+
+
+def test_coerce_bulletin_no_passes_unparseable_through():
+    """Non-digit values pass through (e.g. 'NULL' or weird formats)."""
+    assert _coerce_bulletin_no("2025/8") == "2025/8"
+    assert _coerce_bulletin_no(None) is None
+
+
+# ---------------------------------------------------------------------------
+# _merge_design_views
+# ---------------------------------------------------------------------------
+
+def test_merge_design_views_cd_wins_on_duplicate_view_index():
+    pdf = [{"view_index": 1, "page": 17, "image_path": "x/1_1.jpg",
+            "image_source": "pdf"}]
+    cd = [{"view_no": "1", "image_path": "x/1_1.jpg"}]
+    out = _merge_design_views(pdf, cd)
+    assert len(out) == 1
+    assert out[0]["image_source"] == "cd"
+    assert out[0]["page"] is None  # CD-shape clears page
+
+
+def test_merge_design_views_pdf_only_kept():
+    pdf = [{"view_index": 2, "image_path": "x/1_2.jpg", "image_source": "pdf"}]
+    cd = [{"view_no": "1", "image_path": "x/1_1.jpg"}]
+    out = _merge_design_views(pdf, cd)
+    indices = sorted(v["view_index"] for v in out)
+    assert indices == [1, 2]
+
+
+def test_merge_design_views_sorted_numerically():
+    pdf = [{"view_index": 10, "image_path": "x"}]
+    cd = [{"view_no": "1", "image_path": "y"}, {"view_no": "9", "image_path": "z"}]
+    out = _merge_design_views(pdf, cd)
+    assert [v["view_index"] for v in out] == [1, 9, 10]
+
+
+# ---------------------------------------------------------------------------
+# _merge_designs
+# ---------------------------------------------------------------------------
+
+def test_merge_designs_cd_product_name_wins():
+    """CD's IDDESIGN.PRODUCTNAME is the authoritative HSQLDB value;
+    overrides PDF's regex parse on shared design_index."""
+    pdf = [{"design_index": 1, "product_name_tr": "Lamba (PDF noisy)",
+            "views": [{"view_index": 1, "image_path": "x/1_1.jpg",
+                       "image_source": "pdf"}]}]
+    cd = [{"no": "1", "product_name": "Lamba",
+            "views": [{"view_no": "1", "image_path": "x/1_1.jpg"}]}]
+    out = _merge_designs(pdf, cd)
+    assert out[0]["product_name_tr"] == "Lamba"
+    assert out[0]["views"][0]["image_source"] == "cd"
+
+
+def test_merge_designs_cd_only_design_translated_and_appended():
+    pdf = [{"design_index": 1, "product_name_tr": "A", "views": []}]
+    cd = [{"no": "2", "product_name": "B", "views": []}]
+    out = _merge_designs(pdf, cd)
+    assert [d["design_index"] for d in out] == [1, 2]
+    assert out[1]["product_name_tr"] == "B"
+
+
+def test_merge_designs_pdf_only_design_kept():
+    pdf = [{"design_index": 1, "product_name_tr": "PDF-only",
+            "views": [{"view_index": 1, "image_path": "x"}]}]
+    cd = []
+    out = _merge_designs(pdf, cd)
+    assert len(out) == 1
+    assert out[0]["product_name_tr"] == "PDF-only"
+
+
+# ---------------------------------------------------------------------------
+# merge_pdf_record_with_cd_dossier
+# ---------------------------------------------------------------------------
+
+def _real_pdf_record_2016_01059() -> dict:
+    """A PDF-shape record matching the CD dossier test fixture."""
+    return {
+        "section": "tr_native",
+        "record_index": 1,
+        "application_no": "2016/01059",
+        "registration_no": "PDF guess",
+        "filing_date": "2016-02-09",
+        "registration_date": "2016-02-09",
+        "design_count": 1,
+        "locarno_classes": ["25-99"],   # PDF noisy parse
+        "applicants": [{"name": "PDF noisy", "id": "234974"}],
+        "designers": [{"name": "PDF noisy"}],
+        "attorney": {"name": "PDF NAME", "firm": "MOROĞLU ARSEVEN"},
+        "priorities": [{"date": "2016-01-01", "number": "X", "country": "TR"}],
+        "designs": [{
+            "design_index": 1,
+            "product_name_tr": "Profil (PDF noisy)",
+            "views": [{
+                "view_index": 1, "page": 17, "image_xref": 156,
+                "bbox": [1.0, 2.0, 3.0, 4.0],
+                "image_path": "2016_01059/1_1.jpg",
+                "image_source": "pdf",
+            }],
+        }],
+        "page_range": [17, 17],
+    }
+
+
+def test_merge_pdf_record_cd_wins_overlapping_scalars():
+    pdf = _real_pdf_record_2016_01059()
+    cd = _real_cd_dossier_2016_01059()
+    merged = merge_pdf_record_with_cd_dossier(pdf, cd)
+    # CD wins: registration_no, filing_date, design_count, locarno
+    assert merged["registration_no"] == "2016 01059"   # CD
+    assert merged["filing_date"] == "2016-02-10"        # CD (was 09 in PDF)
+    assert merged["registration_date"] == "2016-02-10"
+    assert merged["design_count"] == 1
+    assert merged["locarno_classes"] == ["25-02"]       # CD's clean
+    # CD wins: applicants, designers
+    assert merged["applicants"][0]["name"].startswith("BİRLİK")
+    assert merged["designers"][0]["name"] == "VEDAT ÇELİK"
+
+
+def test_merge_pdf_record_attorney_combines_cd_name_and_pdf_firm():
+    """CD's clean name + PDF's pre-split firm. Best of both worlds."""
+    pdf = _real_pdf_record_2016_01059()
+    cd = _real_cd_dossier_2016_01059()
+    merged = merge_pdf_record_with_cd_dossier(pdf, cd)
+    a = merged["attorney"]
+    assert a["name"].startswith("RABİA ÇETİN")  # CD wins on name
+    assert a["firm"] == "MOROĞLU ARSEVEN"        # PDF's firm preserved
+
+
+def test_merge_pdf_record_keeps_pdf_only_fields():
+    """PDF-only fields (page_range, priorities, section, record_index)
+    are preserved verbatim — CD has no equivalent for these."""
+    pdf = _real_pdf_record_2016_01059()
+    cd = _real_cd_dossier_2016_01059()
+    merged = merge_pdf_record_with_cd_dossier(pdf, cd)
+    assert merged["section"] == "tr_native"
+    assert merged["record_index"] == 1
+    assert merged["page_range"] == [17, 17]
+    assert merged["priorities"] == [{"date": "2016-01-01", "number": "X", "country": "TR"}]
+
+
+def test_merge_pdf_record_view_image_source_flips_to_cd():
+    """When CD has the view, the merged view carries image_source='cd'
+    so embeddings_tasarim resolves under cd_images/."""
+    pdf = _real_pdf_record_2016_01059()
+    cd = _real_cd_dossier_2016_01059()
+    merged = merge_pdf_record_with_cd_dossier(pdf, cd)
+    v = merged["designs"][0]["views"][0]
+    assert v["image_source"] == "cd"
+    assert v["image_path"] == "2016_01059/1_1.jpg"
+
+
+def test_merge_pdf_record_no_cd_fields_keeps_pdf():
+    """Empty CD dossier overlays nothing — PDF survives unchanged."""
+    pdf = _real_pdf_record_2016_01059()
+    empty_cd = {"application_no": "2016/01059", "register_no": "",
+                 "application_date": "", "register_date": "", "design_count": "",
+                 "locarno_codes": [], "holders": [], "designers": [],
+                 "attorney": None, "designs": []}
+    merged = merge_pdf_record_with_cd_dossier(pdf, empty_cd)
+    assert merged["registration_no"] == "PDF guess"
+    assert merged["locarno_classes"] == ["25-99"]
+    assert merged["applicants"][0]["name"] == "PDF noisy"
+
+
+# ---------------------------------------------------------------------------
+# merge_to_pdf_shape
+# ---------------------------------------------------------------------------
+
+def _minimal_pdf_doc() -> dict:
+    return {
+        "bulletin_no": 240,
+        "bulletin_date": "2016-03-09",
+        "source": "bulletin.pdf",
+        "page_count": 100,
+        "record_count": 0,
+        "records": [],
+    }
+
+
+def _minimal_cd_doc() -> dict:
+    return {
+        "bulletin_no": "240",
+        "bulletin_date": "2016-03-09",
+        "source_archive": "240_CD.rar",
+        "stats": {"dossiers": 0},
+        "dossiers": [],
+        "annotations": [],
+    }
+
+
+def test_merge_to_pdf_shape_requires_at_least_one():
+    with pytest.raises(ValueError, match="requires at least one"):
+        merge_to_pdf_shape()
+
+
+def test_merge_to_pdf_shape_pdf_only_passthrough():
+    pdf = _minimal_pdf_doc()
+    pdf["records"] = [_real_pdf_record_2016_01059()]
+    out = merge_to_pdf_shape(pdf_doc=pdf)
+    assert out["merge_source"] == "pdf_only"
+    assert "merged_at" in out
+    assert len(out["records"]) == 1
+    assert out["records"][0]["application_no"] == "2016/01059"
+
+
+def test_merge_to_pdf_shape_cd_only_synthesizes_records():
+    """CD-only folder case: synthesize PDF-shape records from CD dossiers."""
+    cd = _minimal_cd_doc()
+    cd["dossiers"] = [_real_cd_dossier_2016_01059()]
+    out = merge_to_pdf_shape(cd_doc=cd)
+    assert out["merge_source"] == "cd_only"
+    assert out["bulletin_no"] == 240               # str -> int coerced
+    assert out["source"] == "240_CD.rar"
+    assert out["page_count"] == 0
+    assert len(out["records"]) == 1
+    assert out["records"][0]["application_no"] == "2016/01059"
+    assert out["records"][0]["section"] == "tr_native"
+
+
+def test_merge_to_pdf_shape_both_pairs_by_application_no():
+    """PDF and CD with same application_no -> merged record (CD wins)."""
+    pdf = _minimal_pdf_doc()
+    pdf["records"] = [_real_pdf_record_2016_01059()]
+    cd = _minimal_cd_doc()
+    cd["dossiers"] = [_real_cd_dossier_2016_01059()]
+    out = merge_to_pdf_shape(pdf_doc=pdf, cd_doc=cd)
+    assert out["merge_source"] == "both"
+    assert len(out["records"]) == 1
+    # CD wins on registration_no
+    assert out["records"][0]["registration_no"] == "2016 01059"
+
+
+def test_merge_to_pdf_shape_unmatched_cd_dossiers_appended():
+    """CD has a dossier the PDF doesn't ship -> appended as synthesized
+    record with its own record_index."""
+    pdf = _minimal_pdf_doc()
+    pdf["records"] = [_real_pdf_record_2016_01059()]
+    cd = _minimal_cd_doc()
+    cd["dossiers"] = [
+        _real_cd_dossier_2016_01059(),
+        {**_real_cd_dossier_2016_01059(), "application_no": "2016/99999"},
+    ]
+    out = merge_to_pdf_shape(pdf_doc=pdf, cd_doc=cd)
+    apps = sorted(r["application_no"] for r in out["records"])
+    assert apps == ["2016/01059", "2016/99999"]
+    new_record = next(r for r in out["records"] if r["application_no"] == "2016/99999")
+    assert new_record["record_index"] == 2  # next after PDF's 1
+
+
+def test_merge_to_pdf_shape_unmatched_pdf_records_kept():
+    """PDF has a record the CD doesn't ship -> kept verbatim."""
+    pdf = _minimal_pdf_doc()
+    pdf_record_orphan = {**_real_pdf_record_2016_01059(),
+                          "application_no": "2024/007254"}
+    pdf["records"] = [pdf_record_orphan]
+    cd = _minimal_cd_doc()
+    cd["dossiers"] = [_real_cd_dossier_2016_01059()]
+    out = merge_to_pdf_shape(pdf_doc=pdf, cd_doc=cd)
+    apps = sorted(r["application_no"] for r in out["records"])
+    assert apps == ["2016/01059", "2024/007254"]
+
+
+# ---------------------------------------------------------------------------
+# Embedding preservation across merge
+# ---------------------------------------------------------------------------
+
+def test_index_existing_embeddings_keys_on_image_path():
+    pdf = {"records": [{
+        "designs": [{
+            "design_index": 1,
+            "views": [
+                {"view_index": 1, "image_path": "x/1_1.jpg",
+                  "embeddings": {"dinov2_vitl14": [0.1] * 1024}},
+                {"view_index": 2, "image_path": "x/1_2.jpg"},  # no embeddings
+            ],
+        }],
+    }]}
+    idx = _index_existing_embeddings(pdf)
+    assert "x/1_1.jpg" in idx
+    assert "x/1_2.jpg" not in idx
+    assert len(idx["x/1_1.jpg"]["dinov2_vitl14"]) == 1024
+
+
+def test_index_existing_embeddings_skips_empty_inputs():
+    assert _index_existing_embeddings(None) == {}
+    assert _index_existing_embeddings({}) == {}
+    assert _index_existing_embeddings({"records": []}) == {}
+
+
+def test_attach_existing_embeddings_re_attaches_by_image_path():
+    """Image_path is the canonical bridge across the merge — survives even
+    when application_no / design_index / view_index might shift between
+    pre-merge and post-merge."""
+    merged = {"records": [{
+        "designs": [{
+            "design_index": 1,
+            "views": [
+                {"view_index": 1, "image_path": "x/1_1.jpg", "image_source": "cd"},
+                {"view_index": 2, "image_path": "x/1_2.jpg", "image_source": "cd"},
+            ],
+        }],
+    }]}
+    existing = {
+        "x/1_1.jpg": {"dinov2_vitl14": [0.1] * 1024},
+        "y/9_9.jpg": {"dinov2_vitl14": [0.2] * 1024},  # no longer in merged
+    }
+    attached = _attach_existing_embeddings(merged, existing)
+    assert attached == 1
+    assert "embeddings" in merged["records"][0]["designs"][0]["views"][0]
+    assert "embeddings" not in merged["records"][0]["designs"][0]["views"][1]
+
+
+def test_attach_existing_embeddings_no_op_on_empty_index():
+    merged = {"records": [{"designs": [{"views": [{"image_path": "x"}]}]}]}
+    assert _attach_existing_embeddings(merged, {}) == 0
+    # Original dict unchanged
+    assert "embeddings" not in merged["records"][0]["designs"][0]["views"][0]

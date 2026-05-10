@@ -45,6 +45,7 @@ from pipeline.reconcile_tasarim import (  # noqa: E402
     _dmy_to_iso,
     _normalise_registration_no,
     _parse_design_count,
+    _utcnow_iso,
 )
 
 
@@ -236,3 +237,358 @@ def synthesize_cd_record_in_pdf_shape(
         "page_range": [],
     }
     return out
+
+
+# ---------------------------------------------------------------------------
+# Top-level merge: paired (PDF, CD) records and the BOTH-folder orchestrator
+# ---------------------------------------------------------------------------
+
+def _merge_design_views(
+    pdf_views: List[Dict[str, Any]],
+    cd_views: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Merge two view lists for the same design. CD wins on duplicate
+    ``view_index``; PDF-only views are kept; output sorted numerically.
+
+    CD views are translated to PDF shape on insertion so the consumer
+    sees a uniform view dict regardless of source.
+    """
+    by_idx: Dict[int, Dict[str, Any]] = {}
+    for v in pdf_views or []:
+        if not isinstance(v, dict):
+            continue
+        idx = v.get("view_index")
+        if isinstance(idx, int):
+            by_idx[idx] = v
+    for v in cd_views or []:
+        if not isinstance(v, dict):
+            continue
+        try:
+            cd_idx = int(v.get("view_no") or 0)
+        except (ValueError, TypeError):
+            continue
+        if cd_idx > 0:
+            by_idx[cd_idx] = _cd_view_to_pdf_view(v)  # CD wins on overlap
+    return [by_idx[k] for k in sorted(by_idx)]
+
+
+def _merge_designs(
+    pdf_designs: List[Dict[str, Any]],
+    cd_designs: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Merge per-design lists by ``design_index``.
+
+    Per-design rules:
+      - Both sides present: keep PDF's design dict, override product_name_tr
+        with CD's product_name when CD's is non-empty (CD's IDDESIGN.PRODUCTNAME
+        is the authoritative HSQLDB value), and union views via _merge_design_views.
+      - PDF only: kept verbatim.
+      - CD only: translated via _cd_design_to_pdf_design.
+
+    Output sorted by design_index.
+    """
+    pdf_by_idx: Dict[int, Dict[str, Any]] = {}
+    for d in pdf_designs or []:
+        if not isinstance(d, dict):
+            continue
+        idx = d.get("design_index")
+        if isinstance(idx, int):
+            pdf_by_idx[idx] = d
+
+    cd_by_idx: Dict[int, Dict[str, Any]] = {}
+    for d in cd_designs or []:
+        if not isinstance(d, dict):
+            continue
+        try:
+            cd_idx = int(d.get("no") or 0)
+        except (ValueError, TypeError):
+            continue
+        if cd_idx > 0:
+            cd_by_idx[cd_idx] = d
+
+    out: List[Dict[str, Any]] = []
+    for idx in sorted(set(pdf_by_idx) | set(cd_by_idx)):
+        pdf_d = pdf_by_idx.get(idx)
+        cd_d = cd_by_idx.get(idx)
+        if pdf_d and cd_d:
+            cd_name = _clean_str(cd_d.get("product_name"))
+            merged = dict(pdf_d)
+            if cd_name:
+                merged["product_name_tr"] = cd_name
+            merged["views"] = _merge_design_views(
+                pdf_d.get("views") or [], cd_d.get("views") or [],
+            )
+            out.append(merged)
+        elif pdf_d:
+            out.append(pdf_d)
+        else:
+            out.append(_cd_design_to_pdf_design(cd_d))  # type: ignore[arg-type]
+    return out
+
+
+def merge_pdf_record_with_cd_dossier(
+    pdf_record: Dict[str, Any],
+    cd_dossier: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Apply CD-wins precedence to a paired (PDF, CD) record.
+
+    Output is PDF-shape (so ingest_designs keeps reading without a
+    code change). Caller must guarantee the inputs describe the same
+    application — pair detection happens in ``merge_to_pdf_shape``.
+
+    Precedence rules (CD wins where present and non-empty; PDF retained
+    otherwise):
+      - registration_no, filing_date, registration_date, design_count
+      - locarno_classes (CD's clean list overrides PDF's regex parse)
+      - applicants (CD's HSQLDB rows are cleaner than PDF's regex parse)
+      - designers (same reason)
+      - attorney: CD's name + PDF's firm. CD's name is the cleaner
+        IDDOSSIER.ATTORNEYNAME; PDF's firm comes from the bulletin's
+        pre-split parens form, which CD doesn't preserve, so we keep it.
+      - designs (per-design merge via _merge_designs; CD wins on shared
+        product_name and on shared view_index)
+
+    PDF-only fields preserved from pdf_record verbatim:
+      - section, record_index, page_range, hague_reference,
+        deferred_publication, priorities
+    """
+    out = dict(pdf_record)
+
+    cd_reg = _clean_str(cd_dossier.get("register_no"))
+    if cd_reg:
+        out["registration_no"] = cd_reg
+
+    cd_filing = _dmy_to_iso(cd_dossier.get("application_date"))
+    if cd_filing:
+        out["filing_date"] = cd_filing
+
+    cd_reg_date = _dmy_to_iso(cd_dossier.get("register_date"))
+    if cd_reg_date:
+        out["registration_date"] = cd_reg_date
+
+    cd_count = _parse_design_count(cd_dossier.get("design_count"))
+    if cd_count is not None:
+        out["design_count"] = cd_count
+
+    cd_locarno = list(cd_dossier.get("locarno_codes") or [])
+    if cd_locarno:
+        out["locarno_classes"] = cd_locarno
+
+    cd_applicants = [
+        a for a in (
+            _cd_holder_to_pdf_applicant(h)
+            for h in (cd_dossier.get("holders") or [])
+            if isinstance(h, dict)
+        ) if a.get("name") or a.get("id")
+    ]
+    if cd_applicants:
+        out["applicants"] = cd_applicants
+
+    cd_designers = [
+        d for d in (
+            _cd_designer_to_pdf_designer(item)
+            for item in (cd_dossier.get("designers") or [])
+            if isinstance(item, dict)
+        ) if d.get("name")
+    ]
+    if cd_designers:
+        out["designers"] = cd_designers
+
+    cd_attorney = cd_dossier.get("attorney") or {}
+    cd_atty_name = _clean_str(cd_attorney.get("name")) if isinstance(cd_attorney, dict) else None
+    if cd_atty_name:
+        pdf_attorney = pdf_record.get("attorney") or {}
+        pdf_firm = pdf_attorney.get("firm") if isinstance(pdf_attorney, dict) else None
+        out["attorney"] = {"name": cd_atty_name, "firm": pdf_firm}
+
+    out["designs"] = _merge_designs(
+        pdf_record.get("designs") or [],
+        cd_dossier.get("designs") or [],
+    )
+    return out
+
+
+def _coerce_bulletin_no(value: Any) -> Any:
+    """CD ships bulletin_no as ``"240"`` (str); PDF as ``240`` (int).
+    For consistency in the merged top-level field, coerce digit-strings
+    to int but pass anything else through untouched."""
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return value
+
+
+def merge_to_pdf_shape(
+    pdf_doc: Optional[Dict[str, Any]] = None,
+    cd_doc: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Merge a per-issue (PDF, CD) doc pair into one PDF-shape document.
+
+    Either input may be ``None`` for single-side merge:
+      - ``pdf_doc=None``: synthesize records from CD dossiers (CD-only folder)
+      - ``cd_doc=None``:  pass PDF through unchanged but tag merge_source
+
+    Pairing key inside an issue:
+      - TR records: ``application_no``
+      - Hague:      normalised ``registration_no`` (whitespace/case insensitive)
+
+    The output adds three top-level fields beyond the PDF shape:
+      - ``merge_source``: ``"pdf_only"`` | ``"cd_only"`` | ``"both"``
+      - ``merged_at``:    ISO timestamp the merge was performed
+
+    Raises ``ValueError`` when both inputs are ``None``.
+    """
+    if pdf_doc is None and cd_doc is None:
+        raise ValueError(
+            "merge_to_pdf_shape requires at least one of pdf_doc / cd_doc"
+        )
+
+    merged_at = _utcnow_iso()
+
+    if pdf_doc is None:
+        cd_doc = cd_doc or {}
+        records = [
+            synthesize_cd_record_in_pdf_shape(d, record_index=i + 1)
+            for i, d in enumerate(cd_doc.get("dossiers") or [])
+            if isinstance(d, dict)
+        ]
+        return {
+            "bulletin_no":   _coerce_bulletin_no(cd_doc.get("bulletin_no")),
+            "bulletin_date": cd_doc.get("bulletin_date"),
+            "source":        cd_doc.get("source_archive"),
+            "page_count":    0,
+            "record_count":  len(records),
+            "records":       records,
+            "merge_source":  "cd_only",
+            "merged_at":     merged_at,
+        }
+
+    if cd_doc is None:
+        out = dict(pdf_doc)
+        out["merge_source"] = "pdf_only"
+        out["merged_at"]    = merged_at
+        return out
+
+    # BOTH case — pair by app_no (TR) or normalised registration_no (Hague)
+    cd_by_key: Dict[str, Dict[str, Any]] = {}
+    for d in (cd_doc.get("dossiers") or []):
+        if not isinstance(d, dict):
+            continue
+        appno = (d.get("application_no") or "").strip()
+        is_hague = appno.upper().startswith("DM/")
+        key = (
+            _normalise_registration_no(d.get("register_no"))
+            if is_hague
+            else appno
+        )
+        if key:
+            cd_by_key[key] = d
+
+    matched_keys: set = set()
+    out_records: List[Dict[str, Any]] = []
+
+    for pdf_rec in (pdf_doc.get("records") or []):
+        if not isinstance(pdf_rec, dict):
+            continue
+        if pdf_rec.get("section") == "hague":
+            key = _normalise_registration_no(pdf_rec.get("registration_no"))
+        else:
+            key = pdf_rec.get("application_no")
+        cd_match = cd_by_key.get(key) if key else None
+        if cd_match is not None:
+            out_records.append(merge_pdf_record_with_cd_dossier(pdf_rec, cd_match))
+            matched_keys.add(key)
+        else:
+            out_records.append(pdf_rec)
+
+    next_idx = max(
+        (r.get("record_index", 0) for r in out_records if isinstance(r, dict)),
+        default=0,
+    ) + 1
+    for cd_d in (cd_doc.get("dossiers") or []):
+        if not isinstance(cd_d, dict):
+            continue
+        appno = (cd_d.get("application_no") or "").strip()
+        is_hague = appno.upper().startswith("DM/")
+        key = (
+            _normalise_registration_no(cd_d.get("register_no"))
+            if is_hague
+            else appno
+        )
+        if key in matched_keys:
+            continue
+        out_records.append(synthesize_cd_record_in_pdf_shape(cd_d, record_index=next_idx))
+        next_idx += 1
+
+    out = dict(pdf_doc)
+    out["records"]       = out_records
+    out["record_count"]  = len(out_records)
+    out["merge_source"]  = "both"
+    out["merged_at"]     = merged_at
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Embedding preservation across merge
+# ---------------------------------------------------------------------------
+
+def _index_existing_embeddings(pdf_doc: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Build an ``image_path -> embeddings`` index from an existing
+    metadata.json so the merge can preserve previously-computed
+    embeddings without forcing a full re-embed.
+
+    The canonical ``image_path`` shape ``{appno_norm}/{d}_{v}.{ext}`` is
+    unique per issue and survives the merge unchanged (CD and PDF agree
+    on this key by design), so it's a reliable bridge between the
+    pre-merge view and its post-merge counterpart even when
+    ``application_no`` / ``design_index`` / ``view_index`` change shape
+    (e.g. PDF Hague records have null ``application_no``).
+    """
+    out: Dict[str, Dict[str, Any]] = {}
+    if not isinstance(pdf_doc, dict):
+        return out
+    for r in pdf_doc.get("records") or []:
+        if not isinstance(r, dict):
+            continue
+        for d in r.get("designs") or []:
+            if not isinstance(d, dict):
+                continue
+            for v in d.get("views") or []:
+                if not isinstance(v, dict):
+                    continue
+                ip = v.get("image_path")
+                emb = v.get("embeddings")
+                if ip and isinstance(emb, dict) and emb:
+                    out[ip] = emb
+    return out
+
+
+def _attach_existing_embeddings(
+    merged_doc: Dict[str, Any],
+    embeddings_by_image_path: Dict[str, Dict[str, Any]],
+) -> int:
+    """Re-attach embeddings to merged-doc views by ``image_path`` lookup.
+
+    Mutates ``merged_doc`` in place. Returns the number of views that
+    received an embedding (useful for the CLI report so the operator
+    can see how many embeddings carried through unchanged vs how many
+    will need fresh computation in stage 5).
+    """
+    if not embeddings_by_image_path:
+        return 0
+    attached = 0
+    for r in merged_doc.get("records") or []:
+        if not isinstance(r, dict):
+            continue
+        for d in r.get("designs") or []:
+            if not isinstance(d, dict):
+                continue
+            for v in d.get("views") or []:
+                if not isinstance(v, dict):
+                    continue
+                ip = v.get("image_path")
+                if ip and ip in embeddings_by_image_path:
+                    v["embeddings"] = embeddings_by_image_path[ip]
+                    attached += 1
+    return attached
