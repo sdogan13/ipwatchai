@@ -132,3 +132,42 @@ def register_patent_watchlist_routes(app, limiter):
         return delete_patent_watchlist_item(
             item_id=item_id, current_user=current_user,
         )
+
+    @app.post("/api/v1/patent-watchlist/{item_id}/scan", tags=["Patent Watchlist"])
+    @limiter.limit("10/minute")
+    async def scan_patent_watchlist(
+        request: Request,
+        item_id: UUID,
+        current_user=Depends(get_current_user),
+    ):
+        """Manually trigger a scan for one watchlist item. Background-style:
+        synchronous in-request for v1 since scans are fast (sub-second to a
+        few seconds). Returns the scan summary with alerts_created count."""
+        if current_user is None:
+            raise HTTPException(status_code=401, detail="Authentication required")
+
+        # Hydrate the item (with org-scoping check) and pull the embedding
+        # as text so cosine SQL can cast it.
+        from database.crud import Database
+        from services.patent_scanner_service import scan_and_store
+
+        with Database() as db:
+            cur = db.cursor()
+            cur.execute(
+                """
+                SELECT id, organization_id, user_id, watch_type, label,
+                       holder_name, holder_id, holder_tpe_client_id,
+                       reference_patent_id, reference_query,
+                       reference_embedding::text AS reference_embedding,
+                       ipc_classes, kind_codes, customer_application_no,
+                       similarity_threshold
+                FROM patent_watchlist_mt
+                WHERE id = %s AND organization_id = %s
+                """,
+                (str(item_id), str(current_user.organization_id)),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Watchlist item not found")
+            item = dict(row)
+            return scan_and_store(db, item)
