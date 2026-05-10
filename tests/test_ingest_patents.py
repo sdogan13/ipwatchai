@@ -54,6 +54,35 @@ def test_to_halfvec_literal_handles_iterables() -> None:
     assert to_halfvec_literal((1.0, 2.0)) == "[1.000000,2.000000]"
 
 
+def test_scrub_nul_removes_nulls_from_strings() -> None:
+    """PostgreSQL TEXT rejects NUL bytes. PyMuPDF occasionally surfaces
+    a NUL when a glyph fails to map (saw it on bulletin 2025/2 in a
+    record's abstract field). _scrub_nul walks the parsed payload and
+    strips NULs so every downstream row builder sees clean strings."""
+    from pipeline.ingest_patents import _scrub_nul
+    payload = {
+        "bulletin_no": "2025/2",
+        "records": [
+            {
+                "application_no": "2025/000880",
+                "abstract": "yangına dayanıklı\x00 sistemleri",
+                "title": "fine title",
+                "ipc_classes": ["A47\x00B"],
+            },
+        ],
+    }
+    cleaned = _scrub_nul(payload)
+    assert cleaned["records"][0]["abstract"] == "yangına dayanıklı sistemleri"
+    assert cleaned["records"][0]["title"] == "fine title"
+    assert cleaned["records"][0]["ipc_classes"] == ["A47B"]
+    # Non-string values pass through untouched.
+    assert cleaned["bulletin_no"] == "2025/2"
+    # Empty / non-NUL strings unchanged (no allocation).
+    assert _scrub_nul("plain") == "plain"
+    assert _scrub_nul(None) is None
+    assert _scrub_nul(42) == 42
+
+
 # ---------------------------------------------------------------------------
 # parse_date_safe
 # ---------------------------------------------------------------------------

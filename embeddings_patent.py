@@ -155,7 +155,14 @@ def load_models(device: str) -> LoadedModels:
     from torchvision import transforms
 
     logger.info("Loading DINOv2 ViT-L/14 (1024-dim) on %s...", device)
-    dinov2 = torch.hub.load("facebookresearch/dinov2", "dinov2_vitl14", trust_repo=True)
+    # skip_validation=True: don't ping GitHub for ref freshness on every
+    # invocation. The repo source + weights are cached locally after the
+    # first download, and a transient GitHub 502 used to kill long --all
+    # runs even though the cache was healthy.
+    dinov2 = torch.hub.load(
+        "facebookresearch/dinov2", "dinov2_vitl14",
+        trust_repo=True, skip_validation=True,
+    )
     dinov2 = dinov2.to(device).eval()
     dinov2_transform = transforms.Compose([
         transforms.Resize(256, interpolation=transforms.InterpolationMode.BICUBIC),

@@ -85,6 +85,25 @@ def _connect():
 # ---------------------------------------------------------------------------
 
 
+def _scrub_nul(value: Any) -> Any:
+    """Recursively strip NUL (U+0000) characters from string values in
+    a JSON-loaded structure. PostgreSQL TEXT columns reject NUL bytes
+    and the upsert raises ``ValueError('A string literal cannot contain
+    NUL (0x00) characters.')``. PyMuPDF occasionally surfaces a NUL
+    when an OCR'd glyph fails to map (saw it on bulletin 2025/2 in the
+    abstract field of one record). Apply this to ``payload`` and the
+    events doc right after ``json.loads`` so every downstream row
+    builder sees clean strings without per-builder fix-up.
+    """
+    if isinstance(value, str):
+        return value.replace("\x00", "") if "\x00" in value else value
+    if isinstance(value, list):
+        return [_scrub_nul(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _scrub_nul(v) for k, v in value.items()}
+    return value
+
+
 def to_halfvec_literal(values: Optional[Iterable[float]]) -> Optional[str]:
     """``List[float]`` → ``'[v1,v2,...]'`` literal for casting to halfvec(N)
     in SQL. Returns ``None`` for empty/None input so the caller can pass
@@ -637,7 +656,7 @@ def ingest_bulletin(
     if not metadata_path.is_file():
         return {"status": "no_metadata", "bulletin": bulletin_folder.name}
 
-    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    payload = _scrub_nul(json.loads(metadata_path.read_text(encoding="utf-8")))
     records = payload.get("records", [])
     if not records:
         return {"status": "empty", "bulletin": bulletin_folder.name}
@@ -697,7 +716,9 @@ def ingest_bulletin(
             # rows we just inserted in this loop.
             events_path = bulletin_folder / "events.json"
             if events_path.is_file():
-                events_doc = json.loads(events_path.read_text(encoding="utf-8"))
+                events_doc = _scrub_nul(
+                    json.loads(events_path.read_text(encoding="utf-8"))
+                )
                 stats["events_inserted"] = replace_events(cur, events_doc)
         conn.commit()
     except Exception:
