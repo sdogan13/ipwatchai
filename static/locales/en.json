@@ -52,7 +52,6 @@
     "overview": "Overview",
     "watchlist": "Watchlist",
     "search": "Search",
-    "patent_search": "Patent",
     "opposition_radar": "Opposition Radar",
     "ai_studio": "AI Studio",
     "reports": "Reports",
@@ -62,6 +61,9 @@
     "design_watchlist": "Design Watchlist"
   },
   "search": {
+    "view_trademark": "Trademark",
+    "view_design": "Design",
+    "view_patent": "Patent",
     "placeholder": "Enter a trademark name... (e.g. Nike, Apple, Samsung)",
     "button": "Search",
     "live_search": "Agentic Search",
