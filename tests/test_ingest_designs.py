@@ -14,6 +14,7 @@ from pipeline.ingest_designs import (
     SECTION_STATUS_MAP,
     _design_row,
     _first_applicant,
+    _truncate_500,
     opposition_end_date,
     parse_date_safe,
     status_for_section,
@@ -91,6 +92,37 @@ def test_to_halfvec_literal_handles_iterable():
 def test_to_halfvec_literal_empty_or_none():
     assert to_halfvec_literal(None) is None
     assert to_halfvec_literal([]) is None
+
+
+# ---------------------------------------------------------------------------
+# _truncate_500 — fits product_name_* into VARCHAR(500)
+# ---------------------------------------------------------------------------
+
+def test_truncate_500_short_string_passthrough():
+    assert _truncate_500("Lamba") == "Lamba"
+    assert _truncate_500("a" * 500) == "a" * 500
+
+
+def test_truncate_500_strips_whitespace():
+    assert _truncate_500("  Lamba  ") == "Lamba"
+
+
+def test_truncate_500_clips_at_500_chars():
+    """Real-world Phase-1 finding: 13 Hague designs ship product_name_en
+    over 500 chars (longest 1373) describing multi-part designs as
+    comma-joined lists. Truncate so the row fits VARCHAR(500)."""
+    s = "Hood for vehicle, " * 100   # ~1800 chars
+    out = _truncate_500(s)
+    assert out is not None
+    assert len(out) == 500
+    assert out.startswith("Hood for vehicle,")
+
+
+def test_truncate_500_handles_none_and_empty():
+    assert _truncate_500(None) is None
+    assert _truncate_500("") is None
+    assert _truncate_500("   ") is None
+    assert _truncate_500(42) is None  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------

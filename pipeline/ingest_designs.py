@@ -181,6 +181,26 @@ def resolve_holder_id(cur, applicant: Optional[Dict[str, Any]]) -> Optional[str]
 # Design upsert
 # ---------------------------------------------------------------------------
 
+_PRODUCT_NAME_MAX_LEN = 500
+
+
+def _truncate_500(value: Optional[str]) -> Optional[str]:
+    """Trim a product_name string to fit the VARCHAR(500) column.
+
+    Hague designs sometimes ship comma-joined multi-part descriptions
+    (e.g. "Hood for vehicle, Radiator grille for vehicle, Front bumper
+    for vehicle, ...") that easily exceed 500 chars. Returns None for
+    None/empty input. Truncation preserves the leading prefix; the full
+    string is still kept in merged_metadata.json for downstream export.
+    """
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    return stripped[:_PRODUCT_NAME_MAX_LEN]
+
+
 DESIGN_UPSERT_COLS = (
     "registry_type",
     "application_no", "design_index", "registration_no",
@@ -222,8 +242,15 @@ def _design_row(
         "bulletin_no": str(record.get("bulletin_no")) if record.get("bulletin_no") else None,
         "bulletin_date": parse_date_safe(bulletin_date),
         "opposition_end": opp_end,
-        "product_name_tr": design.get("product_name_tr"),
-        "product_name_en": (record.get("hague_reference") or {}).get("product_name_en"),
+        # Both product_name_* columns are VARCHAR(500). Hague records whose
+        # WIPO entry describes a multi-part design ship a comma-joined list
+        # that can run to 1300+ chars (e.g. "Hood, Radiator grille, Bumper,
+        # …"). Truncate so the row is insertable; the merged_metadata.json
+        # still preserves the full string for later display/export.
+        "product_name_tr": _truncate_500(design.get("product_name_tr")),
+        "product_name_en": _truncate_500(
+            (record.get("hague_reference") or {}).get("product_name_en")
+        ),
         "locarno_classes": list(record.get("locarno_classes") or []),
         "design_count": int(record.get("design_count") or 1),
         "holder_id": holder_id,
