@@ -770,7 +770,84 @@ class WebhookService:
                 }
             }
         }
-        
+
+        return WebhookService.send_webhook(url, payload)
+
+    @staticmethod
+    def send_patent_alert_webhook(
+        url: str,
+        alert: Dict,
+        watchlist_item: Dict,
+    ) -> bool:
+        """Send a patent alert via webhook.
+
+        Payload shape mirrors send_alert_webhook (trademark) but uses
+        patent-specific fields. ``alert`` is a row from patent_alerts_mt
+        (joined with patent_watchlist_mt for the watch context);
+        ``watchlist_item`` carries the watch_type + identity (holder
+        name/id/tpe OR reference).
+        """
+        watch_type = watchlist_item.get("watch_type") or "holder"
+        watched: Dict = {
+            "watch_type": watch_type,
+            "label": watchlist_item.get("label"),
+        }
+        if watch_type == "holder":
+            watched["holder"] = {
+                "name": watchlist_item.get("holder_name"),
+                "id": str(watchlist_item["holder_id"]) if watchlist_item.get("holder_id") else None,
+                "tpe_client_id": watchlist_item.get("holder_tpe_client_id"),
+            }
+        else:
+            watched["reference"] = {
+                "patent_id": (
+                    str(watchlist_item["reference_patent_id"])
+                    if watchlist_item.get("reference_patent_id") else None
+                ),
+                "query": watchlist_item.get("reference_query"),
+            }
+        if watchlist_item.get("ipc_classes"):
+            watched["ipc_classes"] = list(watchlist_item["ipc_classes"])
+
+        bd = alert.get("bulletin_date")
+        bd_iso = bd.isoformat() if hasattr(bd, "isoformat") else (bd if bd else None)
+
+        payload = {
+            "event": "patent.alert.new",
+            "timestamp": datetime.utcnow().isoformat(),
+            "data": {
+                "alert_id": str(alert["id"]),
+                "severity": alert.get("severity"),
+                "status": alert.get("status"),
+                "similarity_score": float(alert.get("overall_similarity_score") or 0.0),
+                "match_type": alert.get("match_type"),
+                "watched": watched,
+                "conflicting_patent": {
+                    "patent_id": (
+                        str(alert["conflicting_patent_id"])
+                        if alert.get("conflicting_patent_id") else None
+                    ),
+                    "application_no": alert.get("conflicting_application_no"),
+                    "publication_no": alert.get("conflicting_publication_no"),
+                    "kind_code": alert.get("conflicting_kind_code"),
+                    "title": alert.get("conflicting_title"),
+                    "ipc_classes": list(alert.get("conflicting_ipc_classes") or []),
+                    "holder": {
+                        "name": alert.get("conflicting_holder_name"),
+                        "country": alert.get("conflicting_holder_country"),
+                    },
+                    "bulletin": {
+                        "no": alert.get("conflicting_bulletin_no"),
+                        "date": bd_iso,
+                    },
+                },
+                "scores": {
+                    "text_similarity": alert.get("text_similarity_score"),
+                    "embedding_similarity": alert.get("embedding_similarity_score"),
+                },
+                "overlapping_ipc_classes": list(alert.get("overlapping_ipc_classes") or []),
+            },
+        }
         return WebhookService.send_webhook(url, payload)
 
 
@@ -1004,6 +1081,96 @@ class NotificationWorker:
             period_label, sent_count, failed_count, marked_count,
         )
 
+    def process_patent_immediate_webhooks(self, *, max_per_run: int = 200):
+        """Send pending patent alert webhooks.
+
+        Selects unsent alerts whose watchlist has alert_webhook=TRUE +
+        webhook_url set, fires one HTTPS POST per alert via
+        WebhookService.send_patent_alert_webhook, marks webhook_sent=
+        TRUE on success. Failures are logged but never break the loop;
+        the alert stays unsent so the next run retries.
+
+        ``max_per_run`` caps the batch so a misconfigured user with a
+        flood of alerts can't monopolize the worker.
+        """
+        logger.info("Processing patent webhooks...")
+
+        cur = self.db.cursor()
+        cur.execute("""
+            SELECT
+                a.id, a.severity, a.status, a.overall_similarity_score,
+                a.text_similarity_score, a.embedding_similarity_score,
+                a.match_type,
+                a.conflicting_patent_id, a.conflicting_application_no,
+                a.conflicting_publication_no, a.conflicting_kind_code,
+                a.conflicting_title, a.conflicting_ipc_classes,
+                a.conflicting_holder_name, a.conflicting_holder_country,
+                a.conflicting_bulletin_no, a.bulletin_date_alias,
+                a.overlapping_ipc_classes,
+                w.id AS watchlist_item_id, w.watch_type, w.label,
+                w.holder_name, w.holder_id, w.holder_tpe_client_id,
+                w.reference_patent_id, w.reference_query, w.ipc_classes,
+                w.webhook_url
+            FROM (
+                SELECT
+                    a.*,
+                    a.conflicting_bulletin_date AS bulletin_date_alias
+                FROM patent_alerts_mt a
+                WHERE a.webhook_sent = FALSE
+            ) a
+            JOIN patent_watchlist_mt w ON a.watchlist_item_id = w.id
+            WHERE w.is_active = TRUE
+              AND w.alert_webhook = TRUE
+              AND w.webhook_url IS NOT NULL
+              AND w.webhook_url <> ''
+            ORDER BY a.severity DESC, a.overall_similarity_score DESC NULLS LAST,
+                     a.created_at ASC
+            LIMIT %s
+        """, (max_per_run,))
+
+        rows = cur.fetchall()
+        if not rows:
+            logger.info("Patent webhooks: nothing to send")
+            return
+
+        sent = 0
+        failed = 0
+        for row in rows:
+            row_d = dict(row)
+            url = row_d.get("webhook_url")
+            if not url:
+                continue
+            # Reshape: alert and watchlist halves for the payload builder
+            alert_d = dict(row_d)
+            alert_d["bulletin_date"] = row_d.get("bulletin_date_alias")
+            wl_d = {
+                "watch_type": row_d.get("watch_type"),
+                "label": row_d.get("label"),
+                "holder_name": row_d.get("holder_name"),
+                "holder_id": row_d.get("holder_id"),
+                "holder_tpe_client_id": row_d.get("holder_tpe_client_id"),
+                "reference_patent_id": row_d.get("reference_patent_id"),
+                "reference_query": row_d.get("reference_query"),
+                "ipc_classes": row_d.get("ipc_classes"),
+            }
+            try:
+                ok = WebhookService.send_patent_alert_webhook(url, alert_d, wl_d)
+            except Exception:
+                logger.exception("Webhook send raised for alert %s", row_d.get("id"))
+                ok = False
+            if ok:
+                cur.execute(
+                    "UPDATE patent_alerts_mt SET webhook_sent = TRUE, webhook_sent_at = NOW() "
+                    "WHERE id = %s",
+                    (str(row_d["id"]),),
+                )
+                sent += 1
+            else:
+                failed += 1
+        self.db.commit()
+        logger.info("Patent webhooks: sent=%d failed=%d (will retry next run)",
+                    sent, failed)
+
     def process_patent_daily_digest(self):
         self._process_patent_digest(
             frequency="daily", since_interval="24 hours", period_label="daily",
@@ -1019,8 +1186,11 @@ class NotificationWorker:
         import schedule
         import time
 
-        # Immediate notifications every minute
+        # Immediate notifications every minute (trademark email path
+        # + patent webhook path; the patent email goes through the
+        # daily/weekly digest below, not the immediate channel).
         schedule.every(1).minutes.do(self.process_immediate_notifications)
+        schedule.every(1).minutes.do(self.process_patent_immediate_webhooks)
 
         # Daily digest at 9 AM (trademark + patent)
         schedule.every().day.at("09:00").do(self.process_daily_digest)
@@ -1055,8 +1225,11 @@ if __name__ == "__main__":
     elif len(sys.argv) > 1 and sys.argv[1] == "patent-weekly-digest":
         worker = NotificationWorker()
         worker.process_patent_weekly_digest()
+    elif len(sys.argv) > 1 and sys.argv[1] == "patent-webhooks":
+        worker = NotificationWorker()
+        worker.process_patent_immediate_webhooks()
     else:
         print(
             "Usage: python -m notifications.service "
-            "[worker | patent-daily-digest | patent-weekly-digest]"
+            "[worker | patent-daily-digest | patent-weekly-digest | patent-webhooks]"
         )
