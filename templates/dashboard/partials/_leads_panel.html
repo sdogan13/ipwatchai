@@ -30,6 +30,11 @@
                 style="color:var(--color-text-secondary)">
             <span x-text="t('leads.mode_bankruptcies')">Iflas Firsatlari</span>
         </button>
+        <button id="radar-mode-patent" onclick="switchRadarMode('patent')"
+                class="px-4 py-2 rounded-md text-sm font-medium transition-all"
+                style="color:var(--color-text-secondary)">
+            <span x-text="t('patent_leads.mode_patent')">Patent Fırsatları</span>
+        </button>
     </div>
 
     <!-- Header with Stats -->
@@ -623,6 +628,90 @@
             </div>
         </div>
     </div> <!-- end radar-bankruptcies-section -->
+
+    <!-- ============================================ -->
+    <!-- Mode: Patent leads (lapse / transfer / license / rejected) -->
+    <!-- Backed by /api/v1/patent-leads — derived from patent_events -->
+    <!-- ============================================ -->
+    <div id="radar-patent-section" class="hidden">
+        <div class="mb-6">
+            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
+                <div>
+                    <h2 class="text-2xl font-bold flex items-center gap-3" style="color:var(--color-text-primary)">
+                        <span x-text="t('patent_leads.title')">Patent Fırsatları</span>
+                    </h2>
+                    <p class="mt-1" style="color:var(--color-text-muted)"
+                       x-text="t('patent_leads.subtitle')">Lapsus / devir / lisans / red — patent_events üzerinden türetilmiş fırsatlar.</p>
+                </div>
+            </div>
+        </div>
+
+        {# Category + watchlist scope toggle #}
+        <div class="rounded-xl shadow-sm p-3 sm:p-4 mb-6"
+             style="background:var(--color-bg-card);border:1px solid var(--color-border)">
+            <div class="flex flex-wrap items-center gap-2 sm:gap-3">
+                <label class="text-xs font-medium" style="color:var(--color-text-muted)"
+                       x-text="t('patent_leads.category_label')">Kategori</label>
+                <select id="patent-leads-category"
+                        class="rounded-lg px-2 sm:px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 min-h-[38px] flex-1 min-w-[140px] sm:flex-none"
+                        style="border:1px solid var(--color-border-input);color:var(--color-text-secondary);background:var(--color-bg-input)">
+                    <option value="lapse"    x-text="t('patent_leads.cat_lapse')">Düşmüş Patentler</option>
+                    <option value="transfer" x-text="t('patent_leads.cat_transfer')">Devir / Atama</option>
+                    <option value="license"  x-text="t('patent_leads.cat_license')">Lisans Teklifi</option>
+                    <option value="rejected" x-text="t('patent_leads.cat_rejected')">Reddedilen / Lapsus Başvurular</option>
+                </select>
+                <label class="flex items-center gap-1.5 text-xs"
+                       style="color:var(--color-text-secondary)">
+                    <input id="patent-leads-watchlist-scope" type="checkbox" class="accent-indigo-600">
+                    <span x-text="t('patent_leads.scope_watchlist')">Sadece takip ettiğim hak sahipleri</span>
+                </label>
+                <input id="patent-leads-holder" type="text" maxlength="100"
+                       :placeholder="t('patent_leads.holder_placeholder')"
+                       class="rounded-lg px-2 sm:px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 min-h-[38px] flex-1 min-w-[160px]"
+                       style="border:1px solid var(--color-border-input);color:var(--color-text-secondary);background:var(--color-bg-input)"/>
+                <button id="patent-leads-refresh"
+                        class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium btn-press min-h-[38px]"
+                        x-text="t('patent_leads.refresh')">Yenile</button>
+            </div>
+        </div>
+
+        {# Stats summary chips #}
+        <div id="patent-leads-stats" class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4"></div>
+
+        {# Feed container #}
+        <div id="patent-leads-container">
+            <div id="patent-leads-loading" class="text-center py-16">
+                <div class="space-y-1 max-w-4xl mx-auto mb-6">
+                    <div class="skeleton h-8 rounded"></div>
+                    <div class="skeleton h-8 rounded"></div>
+                    <div class="skeleton h-8 rounded"></div>
+                </div>
+                <p style="color:var(--color-text-faint)" x-text="t('patent_leads.loading')">Yükleniyor...</p>
+            </div>
+            <div id="patent-leads-empty" class="hidden text-center py-16">
+                <p style="color:var(--color-text-faint)" x-text="t('patent_leads.empty')">Bu kategoride fırsat bulunamadı.</p>
+            </div>
+            <div id="patent-leads-cards" class="hidden space-y-2"></div>
+        </div>
+
+        {# Pagination #}
+        <div id="patent-leads-pagination" class="hidden flex items-center justify-between mt-4">
+            <span id="patent-leads-total-info" class="text-xs" style="color:var(--color-text-faint)"></span>
+            <div class="flex items-center gap-3">
+                <button id="patent-leads-prev"
+                        class="px-3 py-1.5 rounded-lg disabled:opacity-50 text-sm btn-press min-h-[36px]"
+                        style="background:var(--color-bg-card);border:1px solid var(--color-border);color:var(--color-text-secondary)">
+                    <span x-text="t('pagination.prev')">&larr; Önceki</span>
+                </button>
+                <span id="patent-leads-page-info" class="text-sm" style="color:var(--color-text-muted)">1</span>
+                <button id="patent-leads-next"
+                        class="px-3 py-1.5 rounded-lg disabled:opacity-50 text-sm btn-press min-h-[36px]"
+                        style="background:var(--color-bg-card);border:1px solid var(--color-border);color:var(--color-text-secondary)">
+                    <span x-text="t('pagination.next')">Sonraki &rarr;</span>
+                </button>
+            </div>
+        </div>
+    </div> <!-- end radar-patent-section -->
 
     <!-- Upgrade Prompt (for non-Pro users) -->
     <div id="lead-upgrade-prompt" class="hidden text-center py-16">
