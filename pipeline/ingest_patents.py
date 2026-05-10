@@ -632,10 +632,49 @@ def replace_events(cur, events_doc: Dict[str, Any]) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _is_bulletin_fresh(cur, bulletin_folder: Path) -> bool:
+    """True when the DB already holds rows for this bulletin whose
+    most recent ``updated_at`` is at least as new as the latest
+    source file (``metadata.json`` and, if present, ``events.json``).
+
+    Skip-if-fresh check for ``--all`` re-runs. Comparing ``MAX(updated_at)``
+    against source mtimes lets us avoid re-upserting hundreds of
+    thousands of identical rows on a no-op pass; ``--force`` overrides.
+
+    The transaction-wrapped ingest commits all-or-nothing per bulletin,
+    so a partially-ingested bulletin leaves no rows behind and the DB
+    side of the check returns NULL → not fresh → ingest runs.
+    """
+    metadata_path = bulletin_folder / "metadata.json"
+    if not metadata_path.is_file():
+        return False
+    sources_mtime = metadata_path.stat().st_mtime
+    events_path = bulletin_folder / "events.json"
+    if events_path.is_file():
+        try:
+            sources_mtime = max(sources_mtime, events_path.stat().st_mtime)
+        except OSError:
+            pass
+
+    cur.execute(
+        """
+        SELECT EXTRACT(EPOCH FROM MAX(updated_at))
+        FROM patents
+        WHERE bulletin_folder = %s
+        """,
+        (bulletin_folder.name,),
+    )
+    row = cur.fetchone()
+    if not row or row[0] is None:
+        return False
+    return float(row[0]) >= sources_mtime
+
+
 def ingest_bulletin(
     bulletin_folder: Path,
     *,
     conn=None,
+    force: bool = False,
 ) -> Dict[str, Any]:
     """Ingest one ``PT_*/metadata.json`` into the patent tables.
 
@@ -644,6 +683,11 @@ def ingest_bulletin(
     the same folder is a no-op for unchanged records (UPDATE on
     matching publication_no) and safely refreshes children via
     DELETE+INSERT.
+
+    ``force=False`` (default) skips the bulletin entirely when the DB
+    already holds rows whose ``MAX(updated_at)`` is at least as new as
+    ``metadata.json`` / ``events.json`` mtimes. Pass ``force=True`` to
+    re-upsert unconditionally.
 
     ``conn`` is optional; if absent, opens a fresh connection. Tests
     pass an in-memory mock or pre-opened conn for fixture reuse.
@@ -681,6 +725,13 @@ def ingest_bulletin(
 
     try:
         with conn.cursor() as cur:
+            if not force and _is_bulletin_fresh(cur, bulletin_folder):
+                if owns_connection:
+                    conn.close()
+                return {
+                    "status": "fresh_skip",
+                    "bulletin": bulletin_folder.name,
+                }
             for record in records:
                 row = _patent_row(
                     record, payload, bulletin_folder=bulletin_folder.name,
@@ -792,6 +843,11 @@ def parse_argv(argv=None) -> argparse.Namespace:
         "--all", action="store_true", dest="all_mode",
         help="Process every PT_*/metadata.json under --bulletins-dir.",
     )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="Re-upsert even when the DB already holds rows whose "
+             "MAX(updated_at) is newer than the source metadata files.",
+    )
     ns = parser.parse_args(argv)
     if ns.all_mode and ns.bulletin:
         parser.error("--all is mutually exclusive with --bulletin")
@@ -811,11 +867,12 @@ def main(argv=None) -> int:
         return 1
 
     succeeded: List[str] = []
+    skipped: List[str] = []
     failed: List[str] = []
 
     for folder in folders:
         try:
-            result = ingest_bulletin(folder)
+            result = ingest_bulletin(folder, force=args.force)
         except Exception as exc:
             logger.error("[!] %s: %r", folder.name, exc)
             failed.append(folder.name)
@@ -833,11 +890,18 @@ def main(argv=None) -> int:
                 result["figures_inserted"], result["events_inserted"],
             )
             succeeded.append(folder.name)
+        elif status == "fresh_skip":
+            logger.info(
+                "[=] %s is fresh, skipping (use --force to override)",
+                folder.name,
+            )
+            skipped.append(folder.name)
         else:
             logger.warning("[~] %s: %s", folder.name, status)
 
     logger.info(
-        "Done: %d succeeded, %d failed", len(succeeded), len(failed),
+        "Done: %d succeeded, %d skipped, %d failed",
+        len(succeeded), len(skipped), len(failed),
     )
     return 0 if not failed else 1
 

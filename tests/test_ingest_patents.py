@@ -618,7 +618,7 @@ def test_ingest_bulletin_processes_records_and_commits(tmp_path) -> None:
     ])
     conn = _MockConn(cur)
 
-    out = ingest_bulletin(parent, conn=conn)
+    out = ingest_bulletin(parent, conn=conn, force=True)
 
     assert out["status"] == "ok"
     assert out["records_processed"] == 1
@@ -652,7 +652,7 @@ def test_ingest_bulletin_skips_records_with_no_keys(tmp_path) -> None:
 
     cur = _MockCursor(rows=[None, "p-uuid"])
     conn = _MockConn(cur)
-    out = ingest_bulletin(parent, conn=conn)
+    out = ingest_bulletin(parent, conn=conn, force=True)
     assert out["records_processed"] == 1
     assert out["skipped"] == 1
 
@@ -757,7 +757,7 @@ def test_main_calls_ingest_bulletin_for_each(monkeypatch, tmp_path) -> None:
 
     called: List[Path] = []
 
-    def _fake_ingest(folder, *, conn=None):
+    def _fake_ingest(folder, *, conn=None, force=False):
         called.append(folder)
         return {
             "status": "ok", "bulletin": folder.name,
@@ -927,7 +927,7 @@ def test_ingest_bulletin_loads_events_json_and_inserts(tmp_path) -> None:
     #   then SELECTs for app_no FK resolution per event (use fetchall)
     cur = _C(rows=[None, "p-uuid"])
     conn = _MockConn(cur)
-    out = ingest_bulletin(parent, conn=conn)
+    out = ingest_bulletin(parent, conn=conn, force=True)
 
     assert out["status"] == "ok"
     assert out["records_processed"] == 1
@@ -948,6 +948,91 @@ def test_ingest_bulletin_no_events_json_skips_silently(tmp_path) -> None:
 
     cur = _MockCursor()
     conn = _MockConn(cur)
-    out = ingest_bulletin(parent, conn=conn)
+    out = ingest_bulletin(parent, conn=conn, force=True)
     assert out["status"] == "empty"   # no records → returns empty
     assert "events_inserted" not in out or out.get("events_inserted", 0) == 0
+
+
+def test_ingest_bulletin_skips_when_db_max_updated_at_newer(tmp_path) -> None:
+    """When ``MAX(updated_at)`` for the bulletin is newer than the source
+    metadata.json mtime, ingest is a no-op. Avoids re-upserting hundreds
+    of thousands of identical rows on a no-op --all sweep."""
+    import json
+    import time as _time
+    parent = tmp_path / "PT_2025_8_2025-08-21"
+    parent.mkdir()
+    (parent / "metadata.json").write_text(json.dumps({
+        "bulletin_no": "2025/8", "bulletin_date": "2025-08-21",
+        "records": [{
+            "application_no": "X1", "publication_no": "TR 2025 000123 B",
+            "kind_code": "B", "record_type": "GRANTED_PATENT",
+            "page_range": [1, 1],
+            "holders": [], "inventors": [], "attorneys": [],
+            "priorities": [], "figures": [],
+        }],
+    }), encoding="utf-8")
+    metadata_mtime = (parent / "metadata.json").stat().st_mtime
+    # DB MAX(updated_at) is 5 seconds in the future of the file.
+    db_epoch = metadata_mtime + 5
+
+    cur = _MockCursor(rows=[(db_epoch,)])
+    conn = _MockConn(cur)
+    out = ingest_bulletin(parent, conn=conn)
+    assert out["status"] == "fresh_skip"
+    # No upsert SQL was issued — the freshness query is the only execute.
+    assert any("MAX(updated_at)" in sql for sql, _ in cur.executed)
+    assert not any("INSERT INTO patents" in sql for sql, _ in cur.executed)
+
+
+def test_ingest_bulletin_runs_when_db_max_updated_at_older(tmp_path) -> None:
+    """If MAX(updated_at) is older than the metadata.json mtime, the
+    source has changed since last ingest → re-upsert without --force."""
+    import json
+    parent = tmp_path / "PT_2025_8_2025-08-21"
+    parent.mkdir()
+    (parent / "metadata.json").write_text(json.dumps({
+        "bulletin_no": "2025/8", "bulletin_date": "2025-08-21",
+        "records": [{
+            "application_no": "X1", "publication_no": "TR 2025 000123 B",
+            "kind_code": "B", "record_type": "GRANTED_PATENT",
+            "page_range": [1, 1],
+            "holders": [], "inventors": [], "attorneys": [],
+            "priorities": [], "figures": [],
+        }],
+    }), encoding="utf-8")
+    metadata_mtime = (parent / "metadata.json").stat().st_mtime
+    # DB MAX is older than the file → source changed.
+    db_epoch = metadata_mtime - 10
+
+    # Freshness query result first; then upsert path:
+    #   patents publication_no SELECT (no row) → INSERT RETURNING (uuid)
+    cur = _MockCursor(rows=[(db_epoch,), None, "p-uuid"])
+    conn = _MockConn(cur)
+    out = ingest_bulletin(parent, conn=conn)
+    assert out["status"] == "ok"
+    assert out["records_processed"] == 1
+
+
+def test_ingest_bulletin_force_skips_freshness_check(tmp_path) -> None:
+    """force=True bypasses the freshness probe and always upserts."""
+    import json
+    parent = tmp_path / "PT_2025_8_2025-08-21"
+    parent.mkdir()
+    (parent / "metadata.json").write_text(json.dumps({
+        "bulletin_no": "2025/8", "bulletin_date": "2025-08-21",
+        "records": [{
+            "application_no": "X1", "publication_no": "TR 2025 000123 B",
+            "kind_code": "B", "record_type": "GRANTED_PATENT",
+            "page_range": [1, 1],
+            "holders": [], "inventors": [], "attorneys": [],
+            "priorities": [], "figures": [],
+        }],
+    }), encoding="utf-8")
+
+    # No freshness row needed because force=True; jump straight to upsert.
+    cur = _MockCursor(rows=[None, "p-uuid"])
+    conn = _MockConn(cur)
+    out = ingest_bulletin(parent, conn=conn, force=True)
+    assert out["status"] == "ok"
+    # The MAX(updated_at) probe was NOT run.
+    assert not any("MAX(updated_at)" in sql for sql, _ in cur.executed)
