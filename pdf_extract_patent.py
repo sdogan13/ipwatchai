@@ -1348,6 +1348,75 @@ def parse_argv(argv: Optional[Sequence[str]] = None) -> CLIArgs:
 
 
 _PDF_PNG_PREFIX_RE = re.compile(r"^(\d{4}_\d+)_p\d+_\d+$")
+_PDF_FILENAME_BULLETIN_RE = re.compile(r"^(\d{4})_(\d{1,2})$")
+
+
+def _resolve_cover_collision(
+    cover_parent: Path,
+    pdf: Path,
+    out_dir: Path,
+    cover_no: str,
+    cover_date: str,
+) -> Tuple[Path, str, str]:
+    """Decide where to write pdf_metadata.json + the bulletin_no/date
+    that should be recorded inside it. Cover-derived path is primary;
+    falls back to a filename-derived ``PT_{Y}_{M}_*`` folder when the
+    cover-derived folder already has a pdf_metadata.json from a
+    different source PDF.
+
+    Returns ``(folder, bulletin_no, bulletin_date)``. On the no-collision
+    path these are the cover-derived values unchanged. On the fallback
+    path the bulletin_no/date come from the resolved folder's
+    cd_metadata.json (the canonical source) so reconcile won't reject
+    the merge for a CD/PDF mismatch.
+
+    The fallback only fires for the rare case of a truly mislabeled
+    cover page (saw it on 2024_04 where the cover claimed "Sayı
+    2024-01"); correct PDFs keep the cover-page route untouched.
+    """
+    existing = cover_parent / PDF_METADATA_FILENAME
+    if not existing.is_file():
+        return cover_parent, cover_no, cover_date
+    try:
+        prior = json.loads(existing.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return cover_parent, cover_no, cover_date
+    prior_src = prior.get("source_pdf")
+    if not prior_src or prior_src == pdf.name:
+        return cover_parent, cover_no, cover_date
+
+    m = _PDF_FILENAME_BULLETIN_RE.match(pdf.stem)
+    if not m:
+        return cover_parent, cover_no, cover_date
+    year, month = m.group(1), m.group(2).lstrip("0") or "0"
+    matches = sorted(out_dir.glob(f"PT_{year}_{month}_*"))
+    if not matches:
+        _cli_logger.warning(
+            "[!] %s: cover-page bulletin conflicts with %s in %s, but no "
+            "PT_%s_%s_* fallback folder exists; keeping cover route",
+            pdf.name, prior_src, cover_parent.name, year, month,
+        )
+        return cover_parent, cover_no, cover_date
+    fallback = matches[0]
+    # Pull the canonical bulletin_no/date from the CD metadata in the
+    # fallback folder; that's what reconcile will compare against.
+    cd_path = fallback / "cd_metadata.json"
+    new_no, new_date = cover_no, cover_date
+    if cd_path.is_file():
+        try:
+            cd_doc = json.loads(cd_path.read_text(encoding="utf-8"))
+            if cd_doc.get("bulletin_no"):
+                new_no = cd_doc["bulletin_no"]
+            if cd_doc.get("bulletin_date"):
+                new_date = cd_doc["bulletin_date"]
+        except (OSError, ValueError):
+            pass
+    _cli_logger.warning(
+        "[!] %s: cover-page bulletin %r conflicts with %s already in %s; "
+        "using filename-derived %s with bulletin_no=%r instead",
+        pdf.name, cover_no, prior_src, cover_parent.name, fallback.name, new_no,
+    )
+    return fallback, new_no, new_date
 
 
 def _dedup_pdf_pngs_against_cd_tifs(
@@ -1429,6 +1498,19 @@ def _process_one(
                 "error": "missing bulletin metadata on cover page"}
 
     parent = bulletin_folder_path(out_dir, bulletin_no, bulletin_date)
+
+    # Defensive fallback: if the cover-derived folder already has a
+    # pdf_metadata.json from a *different* source PDF, the cover page is
+    # mislabeled (saw it on 2024_04.pdf — its cover claims "Sayı 2024-01"
+    # but the file is byte-distinct from 2024_01.pdf). Route to a folder
+    # derived from the *filename* instead, reusing the matching PT_*/
+    # folder created by Stage 2 if available so we don't strand the data
+    # in a date-less placeholder. ``bulletin_no`` and ``bulletin_date``
+    # are also corrected to the CD-canonical values so reconcile doesn't
+    # reject the merge as a CD/PDF mismatch.
+    parent, bulletin_no, bulletin_date = _resolve_cover_collision(
+        parent, pdf, out_dir, bulletin_no, bulletin_date
+    )
     json_path = parent / PDF_METADATA_FILENAME
 
     if not force and _metadata_is_fresh(pdf, json_path):
@@ -1446,6 +1528,13 @@ def _process_one(
     started = time.time()
     payload = parse_pdf(pdf, figures_dir=figures_dir, save_images=save_images)
     payload["extract_duration_seconds"] = round(time.time() - started, 1)
+    # Override the cover-derived bulletin_no/date in the payload when the
+    # collision fallback corrected them. ``parse_pdf`` doesn't know about
+    # the resolution; it sets these from the (mislabeled) cover. Without
+    # this override the JSON would say one thing and the folder name
+    # another, and Stage 4 reconcile would reject the CD/PDF mismatch.
+    payload["bulletin_no"] = bulletin_no
+    payload["bulletin_date"] = bulletin_date
 
     # CD-first dedup, PDF-side. Symmetric to cd_extract_patent's
     # carry-time dedup: when PDF writes PNGs into a folder where a CD

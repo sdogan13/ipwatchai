@@ -158,6 +158,25 @@ def test_classify_empty_input() -> None:
     assert classify_event_phrase("   ") == EVENT_TYPE_UNKNOWN
 
 
+def test_detect_section_event_type_legacy_551_banners() -> None:
+    """Pre-2017 bulletins use 551 KHK Article 57/59 banners on
+    search-report sections instead of 6769 SMK Article 96. Without
+    these mapped, every title+holder row on those section pages
+    leaked as UNKNOWN. Verified on 2017_5 p1439, p1471."""
+    from pdf_extract_patent_events import detect_section_event_type
+    page1439 = (
+        "551 SAYILI KHK'NİN 57 NCİ MADDE HÜKMÜ UYARINCA ARAŞTIRMA RAPORU\n"
+        "Başvuru No   Buluş Başlığı   Sahibi\n"
+    )
+    assert detect_section_event_type(page1439) == "SEARCH_REPORT_ARTICLE_57_LEGACY_551"
+
+    page1471 = (
+        "551 SAYILI KHK'NİN 59 uncu MADDE HÜKMÜ UYARINCA İNCELEMESİZ PATENT\n"
+        "...listing rows follow...\n"
+    )
+    assert detect_section_event_type(page1471) == "SEARCH_REPORT_ARTICLE_59_NONEXAM_LEGACY_551"
+
+
 def test_classify_pre_2017_legacy_551_phrases() -> None:
     """Pre-2017 (551 KHK era) bulletins use a different vocabulary —
     two-track exam/non-exam system, simpler search-report wording, no

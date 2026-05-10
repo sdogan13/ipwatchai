@@ -64,6 +64,7 @@ from pdf_extract_patent import (  # noqa: E402
     PageKind,
     _get_fitz,
     detect_page_kind,
+    _resolve_cover_collision,
     extract_bulletin_metadata,
 )
 
@@ -339,6 +340,20 @@ _SECTION_HEADERS_TO_EVENT_TYPE: List[Tuple[str, str]] = [
      "MERGER_RECORDED"),
     ("Bölünme İşlemi Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)",
      "DIVISION_RECORDED"),
+
+    # ── Pre-2017 (551 KHK era) page-banner sections ───────────────
+    # The same wording shape as the modern Article 96 header, but the
+    # legacy regime cited Articles 57 / 59 of 551 KHK. Each section runs
+    # for dozens of pages with rows like "KAVURMA MAKİNASI" (patent
+    # title) — without these entries every such row leaked as UNKNOWN
+    # through the per-row classifier. Verified on 2017_5 (p1439, p1471).
+    ("551 SAYILI KHK'NİN 57 NCİ MADDE HÜKMÜ UYARINCA ARAŞTIRMA RAPORU",
+     "SEARCH_REPORT_ARTICLE_57_LEGACY_551"),
+    ("551 SAYILI KHK'NİN 59 uncu MADDE HÜKMÜ UYARINCA İNCELEMESİZ PATENT",
+     "SEARCH_REPORT_ARTICLE_59_NONEXAM_LEGACY_551"),
+    # Section listing apps whose description (tarifname) was amended.
+    ("TARİFNAMESİNDE DEĞİŞİKLİK YAPILAN PATENT/FAYDALI MODEL BAŞVURULARI",
+     "DESCRIPTION_AMENDED_LEGACY_551"),
 ]
 
 
@@ -709,6 +724,13 @@ def _process_one(pdf: Path, out_dir: Path, *, force: bool) -> Dict[str, Any]:
                 "error": "missing bulletin metadata"}
 
     parent = bulletin_folder_path(out_dir, bulletin_no, bulletin_date)
+    # Same cover-page collision fallback as Stage 3 — when a previous
+    # PDF already populated this folder under a different source_pdf,
+    # route to the filename-derived folder so events.json doesn't
+    # overwrite the prior PDF's events with this one's.
+    parent, bulletin_no, bulletin_date = _resolve_cover_collision(
+        parent, pdf, out_dir, bulletin_no, bulletin_date
+    )
     events_path = parent / EVENTS_FILENAME
 
     if not force and _events_filename_is_fresh(pdf, events_path):
@@ -719,6 +741,12 @@ def _process_one(pdf: Path, out_dir: Path, *, force: bool) -> Dict[str, Any]:
 
     parent.mkdir(parents=True, exist_ok=True)
     payload = parse_pdf_events(pdf)
+    # Override cover-derived bulletin_no/date in the payload — see
+    # the matching override in pdf_extract_patent._process_one. When
+    # the collision fallback corrected these we want the JSON to
+    # match the resolved folder, not the (mislabeled) cover.
+    payload["bulletin_no"] = bulletin_no
+    payload["bulletin_date"] = bulletin_date
     events_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",

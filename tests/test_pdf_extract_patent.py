@@ -1736,6 +1736,98 @@ def test_dedup_pdf_pngs_drops_duplicates_and_removes_payload_entries(tmp_path):
     assert figs1[0]["image_path"] == "figures/2099_99999_p1_1.png"
 
 
+def test_resolve_cover_collision_routes_to_filename_folder_on_conflict(tmp_path):
+    """When cover-derived folder already holds pdf_metadata.json from a
+    *different* source PDF, route to the filename-derived PT_ folder
+    AND swap bulletin_no/date to the CD-canonical values from the
+    fallback's cd_metadata.json (so Stage 4 reconcile won't reject the
+    merge as a CD/PDF mismatch). Surfaced by 2024_04.pdf whose cover
+    claims "Sayı 2024-01" but is byte-distinct from 2024_01.pdf."""
+    import json as _json
+    from pdf_extract_patent import _resolve_cover_collision
+
+    out_dir = tmp_path
+    cover_parent = out_dir / "PT_2024_1_2024-01-22"
+    cover_parent.mkdir()
+    (cover_parent / "pdf_metadata.json").write_text(
+        _json.dumps({"source_pdf": "2024_01.pdf", "records": []}),
+        encoding="utf-8",
+    )
+    fallback_parent = out_dir / "PT_2024_4_2024-04-22"
+    fallback_parent.mkdir()
+    (fallback_parent / "cd_metadata.json").write_text(
+        _json.dumps({"bulletin_no": "2024/4", "bulletin_date": "2024-04-22"}),
+        encoding="utf-8",
+    )
+
+    fake_pdf = out_dir / "2024_04.pdf"
+    fake_pdf.write_bytes(b"")
+    folder, no, date = _resolve_cover_collision(
+        cover_parent, fake_pdf, out_dir, "2024-01", "2024-01-22",
+    )
+    assert folder == fallback_parent
+    assert no == "2024/4"
+    assert date == "2024-04-22"
+
+
+def test_resolve_cover_collision_keeps_cover_when_no_conflict(tmp_path):
+    """No prior pdf_metadata.json → return the cover-derived parent
+    and the original bulletin_no/date untouched."""
+    from pdf_extract_patent import _resolve_cover_collision
+    cover_parent = tmp_path / "PT_2025_8_2025-08-21"
+    cover_parent.mkdir()
+    fake_pdf = tmp_path / "2025_08.pdf"
+    fake_pdf.write_bytes(b"")
+    folder, no, date = _resolve_cover_collision(
+        cover_parent, fake_pdf, tmp_path, "2025-08", "2025-08-21",
+    )
+    assert folder == cover_parent
+    assert no == "2025-08"
+    assert date == "2025-08-21"
+
+
+def test_resolve_cover_collision_keeps_cover_when_same_source_pdf(tmp_path):
+    """A re-run on the same PDF (force=True path) should keep the
+    cover-derived folder; not treated as a collision."""
+    import json as _json
+    from pdf_extract_patent import _resolve_cover_collision
+    cover_parent = tmp_path / "PT_2025_8_2025-08-21"
+    cover_parent.mkdir()
+    (cover_parent / "pdf_metadata.json").write_text(
+        _json.dumps({"source_pdf": "2025_08.pdf", "records": []}),
+        encoding="utf-8",
+    )
+    fake_pdf = tmp_path / "2025_08.pdf"
+    fake_pdf.write_bytes(b"")
+    folder, no, date = _resolve_cover_collision(
+        cover_parent, fake_pdf, tmp_path, "2025-08", "2025-08-21",
+    )
+    assert folder == cover_parent
+    assert (no, date) == ("2025-08", "2025-08-21")
+
+
+def test_resolve_cover_collision_keeps_cover_when_no_fallback_folder(tmp_path):
+    """If cover collides but the filename-derived PT_{Y}_{M}_* folder
+    doesn't exist (no Stage 2 run for that bulletin), keep the cover
+    route — better to overwrite than to strand data in a date-less
+    placeholder."""
+    import json as _json
+    from pdf_extract_patent import _resolve_cover_collision
+    cover_parent = tmp_path / "PT_2024_1_2024-01-22"
+    cover_parent.mkdir()
+    (cover_parent / "pdf_metadata.json").write_text(
+        _json.dumps({"source_pdf": "2024_01.pdf", "records": []}),
+        encoding="utf-8",
+    )
+    fake_pdf = tmp_path / "2024_04.pdf"
+    fake_pdf.write_bytes(b"")
+    folder, no, date = _resolve_cover_collision(
+        cover_parent, fake_pdf, tmp_path, "2024-01", "2024-01-22",
+    )
+    assert folder == cover_parent
+    assert (no, date) == ("2024-01", "2024-01-22")
+
+
 def test_dedup_pdf_pngs_returns_zero_when_no_cd_tifs(tmp_path):
     """No CD TIFFs in the dir → no work, nothing dropped."""
     figures = tmp_path / "figures"
