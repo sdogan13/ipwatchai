@@ -1,0 +1,253 @@
+{# ==========================================================
+   Patent watchlist sub-view (Patent Takibi)
+   Mirrors design subview structure but adapted to:
+   - Two watch types (holder / reference) via tabs in the add modal
+   - No image upload (no figure search in v1)
+   - Inline alerts list below the watchlist items
+   IDs prefixed `patent-watchlist-` / `pwl-` so patent_watchlist.js
+   selectors don't collide with marka/tasarım.
+   ========================================================== #}
+<div class="pt-2 pb-4">
+
+  {# Header + toolbar #}
+  <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-3">
+    <div>
+      <h2 class="text-xl font-bold" style="color:var(--color-text-primary)"
+          x-text="t('patent_watchlist.panel_title')">Patent Takibi</h2>
+      <p class="text-sm mt-1" style="color:var(--color-text-muted)"
+         x-text="t('patent_watchlist.panel_description')">Track competitor patents and reference patents.</p>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      <button id="pwl-btn-scan-all"
+              class="px-3 py-2 text-sm font-medium rounded-lg transition-colors flex items-center border disabled:opacity-50"
+              style="color:var(--color-primary);border-color:var(--color-primary);background:transparent"
+              :title="t('patent_watchlist.scan_all_title')">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+      </button>
+      <button id="pwl-btn-add"
+              class="px-3 py-2 text-sm font-medium rounded-lg transition-colors flex items-center bg-indigo-600 text-white hover:bg-indigo-700"
+              :title="t('patent_watchlist.add_button')">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  {# Stats bar — total, holder, reference, new alerts #}
+  <div id="pwl-stats-bar" class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+    <div class="rounded-xl border p-3 flex items-center gap-3"
+         style="background:var(--color-bg-card);border-color:var(--color-border)">
+      <div class="w-9 h-9 rounded-lg flex items-center justify-center bg-blue-100">
+        <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+        </svg>
+      </div>
+      <div>
+        <div id="pwl-stat-total" class="text-lg font-bold" style="color:var(--color-text-primary)">-</div>
+        <div class="text-xs" style="color:var(--color-text-muted)"
+             x-text="t('patent_watchlist.stat_total')">Total</div>
+      </div>
+    </div>
+    <div class="rounded-xl border p-3 flex items-center gap-3"
+         style="background:var(--color-bg-card);border-color:var(--color-border)">
+      <div class="w-9 h-9 rounded-lg flex items-center justify-center bg-purple-100">
+        <svg class="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a3 3 0 015.356-1.857M17 8a3 3 0 11-6 0 3 3 0 016 0zM7 8a3 3 0 11-6 0 3 3 0 016 0z"/>
+        </svg>
+      </div>
+      <div>
+        <div id="pwl-stat-holder" class="text-lg font-bold" style="color:var(--color-text-primary)">-</div>
+        <div class="text-xs" style="color:var(--color-text-muted)"
+             x-text="t('patent_watchlist.stat_holder')">Holder watches</div>
+      </div>
+    </div>
+    <div class="rounded-xl border p-3 flex items-center gap-3"
+         style="background:var(--color-bg-card);border-color:var(--color-border)">
+      <div class="w-9 h-9 rounded-lg flex items-center justify-center bg-amber-100">
+        <svg class="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+        </svg>
+      </div>
+      <div>
+        <div id="pwl-stat-reference" class="text-lg font-bold" style="color:var(--color-text-primary)">-</div>
+        <div class="text-xs" style="color:var(--color-text-muted)"
+             x-text="t('patent_watchlist.stat_reference')">Reference watches</div>
+      </div>
+    </div>
+    <div class="rounded-xl border p-3 flex items-center gap-3"
+         style="background:var(--color-bg-card);border-color:var(--color-border)">
+      <div class="w-9 h-9 rounded-lg flex items-center justify-center bg-red-100">
+        <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+        </svg>
+      </div>
+      <div>
+        <div id="pwl-stat-new-alerts" class="text-lg font-bold" style="color:var(--color-text-primary)">-</div>
+        <div class="text-xs" style="color:var(--color-text-muted)"
+             x-text="t('patent_watchlist.stat_new_alerts')">New alerts</div>
+      </div>
+    </div>
+  </div>
+
+  {# Watchlist items list #}
+  <div class="rounded-xl shadow-sm border p-5 mb-5"
+       style="background:var(--color-bg-card);border-color:var(--color-border)">
+    <h3 class="text-sm font-semibold mb-3" style="color:var(--color-text-primary)"
+        x-text="t('patent_watchlist.section_items')">Watchlist items</h3>
+    <div id="pwl-list" class="space-y-2"></div>
+    <div id="pwl-empty" class="hidden py-8 text-center">
+      <p class="text-sm" style="color:var(--color-text-muted)"
+         x-text="t('patent_watchlist.empty_body')">No watchlist items yet. Add a holder or reference patent to start tracking.</p>
+    </div>
+  </div>
+
+  {# Inline alerts list #}
+  <div class="rounded-xl shadow-sm border p-5"
+       style="background:var(--color-bg-card);border-color:var(--color-border)">
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="text-sm font-semibold" style="color:var(--color-text-primary)"
+          x-text="t('patent_watchlist.section_alerts')">Recent alerts</h3>
+      <select id="pwl-alert-status-filter" class="text-xs px-2 py-1 rounded"
+              style="border:1px solid var(--color-border-input);background:var(--color-bg-input);color:var(--color-text-primary)">
+        <option value="" x-text="t('patent_watchlist.alert_filter_all')">All</option>
+        <option value="new" selected x-text="t('patent_watchlist.alert_filter_new')">New</option>
+        <option value="seen" x-text="t('patent_watchlist.alert_filter_seen')">Seen</option>
+        <option value="acknowledged" x-text="t('patent_watchlist.alert_filter_ack')">Acknowledged</option>
+        <option value="resolved" x-text="t('patent_watchlist.alert_filter_resolved')">Resolved</option>
+      </select>
+    </div>
+    <div id="pwl-alerts-list" class="space-y-2"></div>
+    <div id="pwl-alerts-empty" class="hidden py-6 text-center">
+      <p class="text-sm" style="color:var(--color-text-muted)"
+         x-text="t('patent_watchlist.alerts_empty')">No alerts at this filter.</p>
+    </div>
+  </div>
+
+  {# Add-watchlist modal #}
+  <div id="pwl-add-modal"
+       class="hidden fixed inset-0 z-50 flex items-center justify-center p-4"
+       style="background:rgba(0,0,0,0.5)">
+    <div class="rounded-xl shadow-xl border max-w-lg w-full max-h-[90vh] overflow-y-auto"
+         style="background:var(--color-bg-card);border-color:var(--color-border)">
+      <div class="flex items-center justify-between px-5 py-4"
+           style="border-bottom:1px solid var(--color-border)">
+        <h3 class="text-lg font-semibold" style="color:var(--color-text-primary)"
+            x-text="t('patent_watchlist.add_modal_title')">Add patent watch</h3>
+        <button id="pwl-add-close" type="button" style="color:var(--color-text-faint)">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div class="p-5 space-y-4">
+        {# watch_type radio #}
+        <div>
+          <label class="block text-xs font-medium mb-2" style="color:var(--color-text-faint)"
+                 x-text="t('patent_watchlist.watch_type_label')">Watch type</label>
+          <div class="grid grid-cols-2 gap-2">
+            <label class="flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer"
+                   style="border-color:var(--color-border)">
+              <input type="radio" name="pwl-watch-type" value="holder" checked class="accent-indigo-600">
+              <div>
+                <div class="text-sm font-medium" style="color:var(--color-text-primary)"
+                     x-text="t('patent_watchlist.watch_type_holder')">Holder</div>
+                <div class="text-[10px]" style="color:var(--color-text-muted)"
+                     x-text="t('patent_watchlist.watch_type_holder_hint')">Track a competitor's filings</div>
+              </div>
+            </label>
+            <label class="flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer"
+                   style="border-color:var(--color-border)">
+              <input type="radio" name="pwl-watch-type" value="reference" class="accent-indigo-600">
+              <div>
+                <div class="text-sm font-medium" style="color:var(--color-text-primary)"
+                     x-text="t('patent_watchlist.watch_type_reference')">Reference</div>
+                <div class="text-[10px]" style="color:var(--color-text-muted)"
+                     x-text="t('patent_watchlist.watch_type_reference_hint')">Match similar patents</div>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        {# Label (always required) #}
+        <div>
+          <label class="block text-xs font-medium mb-1" style="color:var(--color-text-faint)"
+                 x-text="t('patent_watchlist.label_field')">Label</label>
+          <input type="text" id="pwl-add-label" maxlength="500"
+                 :placeholder="t('patent_watchlist.label_placeholder')"
+                 class="w-full px-3 py-2 rounded-lg border text-sm outline-none"
+                 style="background:transparent;color:var(--color-text-primary);border-color:var(--color-border)"/>
+        </div>
+
+        {# Holder fields (visible when watch_type=holder) #}
+        <div id="pwl-holder-fields">
+          <label class="block text-xs font-medium mb-1" style="color:var(--color-text-faint)"
+                 x-text="t('patent_watchlist.holder_name_field')">Holder name (exact)</label>
+          <input type="text" id="pwl-add-holder-name" maxlength="500"
+                 :placeholder="t('patent_watchlist.holder_name_placeholder')"
+                 class="w-full px-3 py-2 rounded-lg border text-sm outline-none"
+                 style="background:transparent;color:var(--color-text-primary);border-color:var(--color-border)"/>
+          <p class="text-[10px] mt-1" style="color:var(--color-text-faint)"
+             x-text="t('patent_watchlist.holder_name_hint')">Exact case-insensitive match against patent_holders.name.</p>
+        </div>
+
+        {# Reference fields (visible when watch_type=reference) #}
+        <div id="pwl-reference-fields" class="hidden">
+          <label class="block text-xs font-medium mb-1" style="color:var(--color-text-faint)"
+                 x-text="t('patent_watchlist.reference_query_field')">Reference query</label>
+          <textarea id="pwl-add-reference-query" rows="3"
+                    :placeholder="t('patent_watchlist.reference_query_placeholder')"
+                    class="w-full px-3 py-2 rounded-lg border text-sm outline-none"
+                    style="background:transparent;color:var(--color-text-primary);border-color:var(--color-border)"></textarea>
+          <p class="text-[10px] mt-1" style="color:var(--color-text-faint)"
+             x-text="t('patent_watchlist.reference_query_hint')">Free-text or paste an abstract; embedded into the same vector space the corpus uses.</p>
+        </div>
+
+        {# Optional IPC narrowing #}
+        <div>
+          <label class="block text-xs font-medium mb-1" style="color:var(--color-text-faint)"
+                 x-text="t('patent_watchlist.ipc_field')">IPC classes (optional, comma-separated)</label>
+          <input type="text" id="pwl-add-ipc" maxlength="200"
+                 :placeholder="t('patent_watchlist.ipc_placeholder')"
+                 class="w-full px-3 py-2 rounded-lg border text-sm outline-none"
+                 style="background:transparent;color:var(--color-text-primary);border-color:var(--color-border)"/>
+        </div>
+
+        {# Threshold (reference only) #}
+        <div id="pwl-threshold-row" class="hidden">
+          <label class="block text-xs font-medium mb-1" style="color:var(--color-text-faint)"
+                 x-text="t('patent_watchlist.threshold_field')">Similarity threshold</label>
+          <select id="pwl-add-threshold" class="w-full px-3 py-2 rounded-lg border text-sm outline-none"
+                  style="background:transparent;color:var(--color-text-primary);border-color:var(--color-border)">
+            <option value="0.50" selected>50%</option>
+            <option value="0.60">60%</option>
+            <option value="0.70">70%</option>
+            <option value="0.80">80%</option>
+            <option value="0.90">90%</option>
+          </select>
+        </div>
+
+        <p id="pwl-add-error" class="hidden text-xs px-3 py-2 rounded"
+           style="background:var(--color-bg-error,#fee2e2);color:var(--color-text-error,#991b1b)"></p>
+
+        <div class="flex items-center justify-end gap-2 pt-2"
+             style="border-top:1px solid var(--color-border)">
+          <button id="pwl-add-cancel" type="button"
+                  class="px-3 py-2 text-sm rounded-lg"
+                  style="color:var(--color-text-secondary);border:1px solid var(--color-border)"
+                  x-text="t('patent_watchlist.cancel')">Cancel</button>
+          <button id="pwl-add-submit" type="button"
+                  class="px-3 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"
+                  x-text="t('patent_watchlist.add_submit')">Add</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

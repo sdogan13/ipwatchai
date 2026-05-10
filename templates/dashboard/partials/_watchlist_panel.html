@@ -25,6 +25,13 @@
                 :class="watchlistView === 'design' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
                 :style="watchlistView === 'design' ? '' : 'color:var(--color-text-muted)'"
                 x-text="t('watchlist.view_design')">Tasarım</button>
+        <button type="button"
+                @click="watchlistView = 'patent';
+                        if (typeof window.initPatentWatchlistTab === 'function') window.initPatentWatchlistTab();"
+                class="px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                :class="watchlistView === 'patent' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
+                :style="watchlistView === 'patent' ? '' : 'color:var(--color-text-muted)'"
+                x-text="t('watchlist.view_patent')">Patent</button>
     </div>
 
     <!-- ============================================
@@ -192,6 +199,13 @@
          ============================================ -->
     <div x-show="watchlistView === 'design'" x-cloak>
         {% include 'dashboard/partials/_watchlist_design_subview.html' %}
+    </div>
+
+    <!-- ============================================
+         PATENT SUB-VIEW
+         ============================================ -->
+    <div x-show="watchlistView === 'patent'" x-cloak>
+        {% include 'dashboard/partials/_watchlist_patent_subview.html' %}
     </div>
 </main>
 
