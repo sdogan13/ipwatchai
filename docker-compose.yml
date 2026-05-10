@@ -120,6 +120,7 @@ services:
       - ./app_design_alert_routes.py:/app/app_design_alert_routes.py:ro
       - ./app_design_search_routes.py:/app/app_design_search_routes.py:ro
       - ./app_design_watchlist_routes.py:/app/app_design_watchlist_routes.py:ro
+      - ./app_patent_search_routes.py:/app/app_patent_search_routes.py:ro
       - ./app_enhanced_search_routes.py:/app/app_enhanced_search_routes.py:ro
       - ./app_errors.py:/app/app_errors.py:ro
       - ./app_factory.py:/app/app_factory.py:ro

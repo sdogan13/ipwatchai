@@ -1,0 +1,485 @@
+/**
+ * Patent / Faydalı Model search tab driver.
+ *
+ * Mirrors design_search.js patterns (vanilla JS, document-level event
+ * delegation, localStorage history, AppI18n + AppAuth integration) but
+ * tailored for the patent search shape:
+ *
+ *   - No image upload (figures aren't part of v1 search UX)
+ *   - IPC autocomplete combobox over /api/v1/patent-search/ipc-autocomplete
+ *   - Holder + date range + kind code filters
+ *   - Different result-card shape: title, IPC chips, holder, dates,
+ *     publication_no, kind code
+ */
+(function () {
+  "use strict";
+
+  var API_QUICK = "/api/v1/patent-search/quick";
+  var API_IPC_AUTOCOMPLETE = "/api/v1/patent-search/ipc-autocomplete";
+  var HISTORY_KEY = "patent_search_history";
+  var HISTORY_MAX = 20;
+  var HISTORY_SUGGEST = 10;
+
+  var ipcSelected = []; // current IPC chip values
+  var ipcDebounceTimer = null;
+
+  function $(id) { return document.getElementById(id); }
+  function show(el) { if (el) el.classList.remove("hidden"); }
+  function hide(el) { if (el) el.classList.add("hidden"); }
+
+  function t(key, fallback) {
+    if (window.AppI18n && typeof window.AppI18n.t === "function") {
+      var v = window.AppI18n.t(key);
+      if (v && v !== key) return v;
+    }
+    return fallback || key;
+  }
+
+  function getAuthToken() {
+    if (window.AppAuth && typeof window.AppAuth.getAuthToken === "function") {
+      return window.AppAuth.getAuthToken() || "";
+    }
+    return (
+      (window.localStorage && (
+        localStorage.getItem("auth_token") ||
+        localStorage.getItem("access_token") ||
+        localStorage.getItem("token"))) ||
+      ""
+    );
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+
+  function setStatus(text, kind) {
+    var el = $("patent-search-status");
+    if (!el) return;
+    el.textContent = text || "";
+    el.style.color =
+      kind === "error" ? "var(--color-text-error,#dc2626)" :
+      kind === "ok"    ? "var(--color-success,#059669)"   :
+                          "var(--color-text-muted)";
+  }
+
+  function clearError() {
+    var err = $("patent-search-error");
+    if (err) { err.textContent = ""; hide(err); }
+  }
+
+  function showError(text) {
+    var err = $("patent-search-error");
+    if (!err) return;
+    err.textContent = text || t("patent_search.error_generic", "Search failed");
+    show(err);
+  }
+
+  function hasQuery() {
+    var q = ($("patent-search-input") || {}).value || "";
+    return q.trim().length > 0;
+  }
+
+  function hasFilters() {
+    return (
+      ipcSelected.length > 0 ||
+      (($("patent-search-holder") || {}).value || "").trim().length > 0 ||
+      (($("patent-search-date-from") || {}).value || "") !== "" ||
+      (($("patent-search-date-to") || {}).value || "") !== "" ||
+      (($("patent-search-kind-code") || {}).value || "") !== ""
+    );
+  }
+
+  // ---------------------------------------------------------------
+  // History (localStorage)
+  // ---------------------------------------------------------------
+
+  function loadHistory() {
+    try {
+      var raw = localStorage.getItem(HISTORY_KEY);
+      var arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch (e) { return []; }
+  }
+  function saveHistory(arr) {
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(arr || [])); } catch (e) {}
+  }
+  function pushHistory(query) {
+    if (!query) return;
+    var q = String(query).trim();
+    if (!q) return;
+    var arr = loadHistory().filter(function (h) { return h.toLowerCase() !== q.toLowerCase(); });
+    arr.unshift(q);
+    if (arr.length > HISTORY_MAX) arr = arr.slice(0, HISTORY_MAX);
+    saveHistory(arr);
+  }
+  function removeFromHistory(query) {
+    saveHistory(loadHistory().filter(function (h) { return h !== query; }));
+  }
+  function clearAllHistory() {
+    try { localStorage.removeItem(HISTORY_KEY); } catch (e) {}
+  }
+  function filteredHistory() {
+    var q = (($("patent-search-input") || {}).value || "").trim().toLowerCase();
+    var arr = loadHistory();
+    if (!q) return arr.slice(0, HISTORY_SUGGEST);
+    return arr.filter(function (h) { return h.toLowerCase().indexOf(q) !== -1; })
+              .slice(0, HISTORY_SUGGEST);
+  }
+
+  function renderHistoryDropdown() {
+    var dropdown = $("patent-search-history");
+    var listEl = $("patent-search-history-list");
+    if (!dropdown || !listEl) return;
+    var items = filteredHistory();
+    if (items.length === 0) {
+      hide(dropdown);
+      listEl.innerHTML = "";
+      return;
+    }
+    var html = items.map(function (item) {
+      var safe = escapeHtml(item);
+      return (
+        '<div data-patent-history-item ' +
+        'class="flex items-center justify-between px-4 py-2.5 text-left text-sm cursor-pointer transition-colors" ' +
+        'style="color:var(--color-text-primary)" data-history-value="' + safe + '" ' +
+        'onmouseover="this.style.background=\'var(--color-bg-muted)\'" ' +
+        'onmouseout="this.style.background=\'\'">' +
+          '<span class="flex items-center gap-2 min-w-0">' +
+            '<svg class="w-4 h-4 shrink-0" style="color:var(--color-text-faint)" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+              '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>' +
+            '</svg>' +
+            '<span class="truncate">' + safe + '</span>' +
+          '</span>' +
+          '<span data-patent-history-remove class="shrink-0 p-1 rounded hover:opacity-70" ' +
+          'style="color:var(--color-text-faint)" data-history-value="' + safe + '">' +
+            '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+              '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>' +
+            '</svg>' +
+          '</span>' +
+        '</div>'
+      );
+    }).join("");
+    listEl.innerHTML = html;
+    show(dropdown);
+  }
+  function hideHistory() { hide($("patent-search-history")); }
+
+  // ---------------------------------------------------------------
+  // IPC autocomplete
+  // ---------------------------------------------------------------
+
+  function renderIpcChips() {
+    var box = $("patent-search-ipc-chips");
+    if (!box) return;
+    if (ipcSelected.length === 0) { box.innerHTML = ""; return; }
+    box.innerHTML = ipcSelected.map(function (code) {
+      var safe = escapeHtml(code);
+      return (
+        '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs" ' +
+        'style="background:var(--color-bg-muted);color:var(--color-text-primary)">' +
+          safe +
+          '<button type="button" data-ipc-remove="' + safe + '" ' +
+          'class="hover:opacity-70" style="color:var(--color-text-faint)">×</button>' +
+        '</span>'
+      );
+    }).join("");
+  }
+
+  function addIpc(code) {
+    var c = String(code || "").trim().toUpperCase();
+    if (!c) return;
+    if (ipcSelected.indexOf(c) === -1) ipcSelected.push(c);
+    renderIpcChips();
+  }
+  function removeIpc(code) {
+    ipcSelected = ipcSelected.filter(function (c) { return c !== code; });
+    renderIpcChips();
+  }
+
+  function renderIpcDropdown(items) {
+    var dd = $("patent-search-ipc-dropdown");
+    if (!dd) return;
+    if (!items || items.length === 0) {
+      dd.innerHTML = "";
+      hide(dd);
+      return;
+    }
+    var lang = (window.AppI18n && window.AppI18n.lang) ? window.AppI18n.lang : "en";
+    dd.innerHTML = items.map(function (item) {
+      var code = escapeHtml(item.code || "");
+      var desc = "";
+      if (lang === "tr" && item.description_tr) desc = escapeHtml(item.description_tr);
+      else if (item.description_en) desc = escapeHtml(item.description_en);
+      return (
+        '<div data-ipc-pick="' + code + '" ' +
+        'class="px-3 py-2 cursor-pointer text-sm transition-colors" ' +
+        'style="color:var(--color-text-primary)" ' +
+        'onmouseover="this.style.background=\'var(--color-bg-muted)\'" ' +
+        'onmouseout="this.style.background=\'\'">' +
+          '<span class="font-mono font-medium">' + code + '</span>' +
+          (desc ? ('<span class="ml-2 text-xs" style="color:var(--color-text-muted)">' + desc + '</span>') : '') +
+        '</div>'
+      );
+    }).join("");
+    show(dd);
+  }
+
+  function fetchIpcAutocomplete(prefix) {
+    var url = API_IPC_AUTOCOMPLETE + "?q=" + encodeURIComponent(prefix);
+    var headers = {};
+    var token = getAuthToken();
+    if (token) headers["Authorization"] = "Bearer " + token;
+    fetch(url, { headers: headers })
+      .then(function (r) { return r.ok ? r.json() : { items: [] }; })
+      .then(function (data) { renderIpcDropdown((data && data.items) || []); })
+      .catch(function () { renderIpcDropdown([]); });
+  }
+
+  function onIpcInput() {
+    var v = (($("patent-search-ipc") || {}).value || "").trim();
+    if (ipcDebounceTimer) clearTimeout(ipcDebounceTimer);
+    if (v.length < 1) {
+      renderIpcDropdown([]);
+      return;
+    }
+    ipcDebounceTimer = setTimeout(function () { fetchIpcAutocomplete(v); }, 180);
+  }
+
+  // ---------------------------------------------------------------
+  // Result rendering
+  // ---------------------------------------------------------------
+
+  function renderResultCard(item) {
+    var title = escapeHtml(item.title || t("patent_search.untitled", "Untitled"));
+    var pubNo = escapeHtml(item.publication_no || item.application_no || "");
+    var kind = escapeHtml(item.kind_code || "");
+    var holderName = item.holder ? escapeHtml(item.holder.name || "") : "";
+    var holderCountry = item.holder ? escapeHtml(item.holder.country || "") : "";
+    var appDate = escapeHtml(item.application_date || "");
+    var pubDate = escapeHtml(item.publication_date || "");
+    var ipcChips = (item.ipc_classes || []).slice(0, 4).map(function (c) {
+      return '<span class="inline-block px-2 py-0.5 rounded text-xs font-mono" ' +
+             'style="background:var(--color-bg-muted);color:var(--color-text-muted)">' +
+             escapeHtml(c) + '</span>';
+    }).join("");
+    var sim = item.similarity != null ? Number(item.similarity).toFixed(0) : "";
+
+    return (
+      '<div class="rounded-lg border p-4 transition-all hover:shadow-md" ' +
+      'style="background:var(--color-bg-card);border-color:var(--color-border)">' +
+        '<div class="flex items-start justify-between gap-2 mb-2">' +
+          '<h4 class="text-sm font-semibold leading-snug" style="color:var(--color-text-primary)">' +
+            title +
+          '</h4>' +
+          (sim ? ('<span class="shrink-0 text-xs font-medium px-2 py-0.5 rounded-full" ' +
+                  'style="background:var(--color-primary);color:white">' + sim + '%</span>') : '') +
+        '</div>' +
+        (pubNo ? ('<p class="text-xs font-mono mb-1" style="color:var(--color-text-muted)">' +
+                  pubNo + (kind ? (' <span class="ml-1">' + kind + '</span>') : '') + '</p>') : '') +
+        (holderName ? ('<p class="text-xs mb-2" style="color:var(--color-text-primary)">' +
+                       holderName + (holderCountry ? (' <span style="color:var(--color-text-faint)">(' + holderCountry + ')</span>') : '') +
+                       '</p>') : '') +
+        (ipcChips ? ('<div class="flex flex-wrap gap-1 mb-2">' + ipcChips + '</div>') : '') +
+        '<div class="flex items-center gap-3 text-xs" style="color:var(--color-text-faint)">' +
+          (appDate ? ('<span>' + t("patent_search.filed", "Filed") + ': ' + appDate + '</span>') : '') +
+          (pubDate ? ('<span>' + t("patent_search.published", "Pub") + ': ' + pubDate + '</span>') : '') +
+        '</div>' +
+      '</div>'
+    );
+  }
+
+  function renderResults(data) {
+    var card = $("patent-search-results-card");
+    var grid = $("patent-search-grid");
+    var empty = $("patent-search-empty");
+    var totalBadge = $("patent-search-total-badge");
+    var dur = $("patent-search-duration");
+    if (!card || !grid) return;
+    show(card);
+    hide($("patent-search-loading"));
+    clearError();
+    var items = (data && data.results) || [];
+    totalBadge && (totalBadge.textContent = String(items.length));
+    if (dur && data && data.duration_ms != null) {
+      dur.textContent = data.duration_ms + " ms";
+    }
+    if (items.length === 0) {
+      grid.innerHTML = "";
+      show(empty);
+      return;
+    }
+    hide(empty);
+    grid.innerHTML = items.map(renderResultCard).join("");
+  }
+
+  // ---------------------------------------------------------------
+  // Submit
+  // ---------------------------------------------------------------
+
+  function buildFormData() {
+    var fd = new FormData();
+    var q = (($("patent-search-input") || {}).value || "").trim();
+    var holder = (($("patent-search-holder") || {}).value || "").trim();
+    var dfrom = (($("patent-search-date-from") || {}).value || "").trim();
+    var dto = (($("patent-search-date-to") || {}).value || "").trim();
+    var kind = (($("patent-search-kind-code") || {}).value || "").trim();
+    if (q) fd.append("query", q);
+    if (ipcSelected.length) fd.append("ipc", ipcSelected.join(","));
+    if (holder) fd.append("holder", holder);
+    if (dfrom) fd.append("date_from", dfrom);
+    if (dto) fd.append("date_to", dto);
+    if (kind) fd.append("kind_code", kind);
+    fd.append("limit", "20");
+    return fd;
+  }
+
+  function doSearch() {
+    if (!hasQuery() && !hasFilters()) {
+      setStatus(t("patent_search.empty_query_status", "Enter a query or filter"), "error");
+      return;
+    }
+    var card = $("patent-search-results-card");
+    var loading = $("patent-search-loading");
+    show(card);
+    show(loading);
+    hide($("patent-search-empty"));
+    clearError();
+    setStatus("");
+
+    var headers = {};
+    var token = getAuthToken();
+    if (token) headers["Authorization"] = "Bearer " + token;
+
+    var q = (($("patent-search-input") || {}).value || "").trim();
+    if (q) pushHistory(q);
+
+    fetch(API_QUICK, { method: "POST", headers: headers, body: buildFormData() })
+      .then(function (r) {
+        if (r.status === 429) {
+          return r.json().then(function (d) {
+            showError(t("patent_search.quota_exceeded", "Daily search quota exceeded"));
+            hide(loading);
+            throw new Error("quota");
+          });
+        }
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
+      .then(function (data) { renderResults(data); })
+      .catch(function (err) {
+        hide(loading);
+        if (err && err.message === "quota") return; // already shown
+        showError(t("patent_search.error_generic", "Search failed"));
+      });
+  }
+
+  // ---------------------------------------------------------------
+  // Wire-up (document-level delegation)
+  // ---------------------------------------------------------------
+
+  function wire() {
+    document.addEventListener("click", function (ev) {
+      var t = ev.target;
+      if (!t) return;
+      // Submit button
+      if (t.closest && t.closest("#patent-search-submit")) {
+        ev.preventDefault();
+        hideHistory();
+        doSearch();
+        return;
+      }
+      // Clear button on text input
+      if (t.closest && t.closest("#patent-search-input-clear")) {
+        var inp = $("patent-search-input");
+        if (inp) inp.value = "";
+        $("patent-search-input-clear").classList.add("hidden");
+        hideHistory();
+        return;
+      }
+      // History items
+      var histItem = t.closest && t.closest("[data-patent-history-item]");
+      if (histItem) {
+        var removeBtn = t.closest("[data-patent-history-remove]");
+        if (removeBtn) {
+          removeFromHistory(removeBtn.getAttribute("data-history-value") || "");
+          renderHistoryDropdown();
+          return;
+        }
+        var val = histItem.getAttribute("data-history-value") || "";
+        var inp2 = $("patent-search-input");
+        if (inp2) inp2.value = val;
+        hideHistory();
+        doSearch();
+        return;
+      }
+      if (t.closest && t.closest("#patent-search-history-clear-all")) {
+        clearAllHistory();
+        renderHistoryDropdown();
+        return;
+      }
+      // IPC dropdown picks
+      var pick = t.closest && t.closest("[data-ipc-pick]");
+      if (pick) {
+        addIpc(pick.getAttribute("data-ipc-pick") || "");
+        var ipcInp = $("patent-search-ipc");
+        if (ipcInp) ipcInp.value = "";
+        hide($("patent-search-ipc-dropdown"));
+        return;
+      }
+      // IPC chip remove
+      if (t.matches && t.matches("[data-ipc-remove]")) {
+        removeIpc(t.getAttribute("data-ipc-remove") || "");
+        return;
+      }
+      // Click outside IPC -> hide dropdown
+      if (!t.closest("#patent-search-ipc") &&
+          !t.closest("#patent-search-ipc-dropdown")) {
+        hide($("patent-search-ipc-dropdown"));
+      }
+      // Click outside history -> hide
+      if (!t.closest("#patent-search-input") &&
+          !t.closest("#patent-search-history")) {
+        hideHistory();
+      }
+    });
+
+    document.addEventListener("input", function (ev) {
+      if (!ev.target) return;
+      if (ev.target.id === "patent-search-input") {
+        var hasV = (ev.target.value || "").length > 0;
+        var clearBtn = $("patent-search-input-clear");
+        if (clearBtn) clearBtn.classList.toggle("hidden", !hasV);
+        renderHistoryDropdown();
+      } else if (ev.target.id === "patent-search-ipc") {
+        onIpcInput();
+      }
+    });
+
+    document.addEventListener("focusin", function (ev) {
+      if (!ev.target) return;
+      if (ev.target.id === "patent-search-input") {
+        renderHistoryDropdown();
+      }
+    });
+
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key !== "Enter") return;
+      if (ev.target && (ev.target.id === "patent-search-input" ||
+                        ev.target.id === "patent-search-holder" ||
+                        ev.target.id === "patent-search-date-from" ||
+                        ev.target.id === "patent-search-date-to")) {
+        ev.preventDefault();
+        hideHistory();
+        doSearch();
+      }
+    });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", wire);
+  } else {
+    wire();
+  }
+})();

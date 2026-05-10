@@ -2297,16 +2297,25 @@ function buyCredits(amount) {
 // ============================================
 function showDashboardTab(tabId) {
     // Backwards-compat: 'design-watchlist' is now a sub-view of the unified
-    // Watchlist tab. Redirect callers (deep-links, recent post-add navigation
-    // in design_search.js) to the merged tab and remember the sub-view so
-    // the panel renders Tasarım on activation.
+    // Watchlist tab. Redirect callers (deep-links, post-add navigation in
+    // design_search.js) to the merged tab and select the Tasarım sub-view
+    // via two cooperating mechanisms:
+    //   * cold-load / deep-link path — set localStorage so Alpine consumes
+    //     it on init (cleared after read in _watchlist_panel.html x-data),
+    //   * same-page navigation path — Alpine is already inited, so flip
+    //     watchlistView on the live state directly. Either path lands on
+    //     Tasarım without persisting the choice for the next app open.
     if (tabId === 'design-watchlist') {
         try { localStorage.setItem('watchlistView', 'design'); } catch (_) {}
         tabId = 'watchlist';
+        var wlEl = document.getElementById('tab-content-watchlist');
+        if (wlEl && wlEl._x_dataStack && wlEl._x_dataStack[0]) {
+            try { wlEl._x_dataStack[0].watchlistView = 'design'; } catch (_) {}
+        }
     }
 
     // Hide ALL tab content panels
-    var panels = ['overview', 'watchlist', 'search', 'opposition-radar', 'ai-studio', 'reports', 'applications'];
+    var panels = ['overview', 'watchlist', 'search', 'patent-search', 'opposition-radar', 'ai-studio', 'reports', 'applications'];
     panels.forEach(function (id) {
         var el = document.getElementById('tab-content-' + id);
         if (el) el.classList.add('hidden');
@@ -2337,11 +2346,14 @@ function showDashboardTab(tabId) {
     if (typeof updateBottomTabActive === 'function') updateBottomTabActive(tabId);
 
     // Update page title
-    var tabTitles = { 'overview': 'Dashboard', 'watchlist': 'Watchlist', 'search': 'Search', 'opposition-radar': 'Opposition Radar', 'ai-studio': 'AI Studio', 'reports': 'Reports', 'applications': 'Applications' };
+    var tabTitles = { 'overview': 'Dashboard', 'watchlist': 'Watchlist', 'search': 'Search', 'patent-search': 'Patent Search', 'opposition-radar': 'Opposition Radar', 'ai-studio': 'AI Studio', 'reports': 'Reports', 'applications': 'Applications' };
     document.title = 'IPWatchAI' + (tabTitles[tabId] ? ' \u2014 ' + tabTitles[tabId] : '');
 
-    // Only clear search results when leaving the search tab
-    if (tabId !== 'search') {
+    // Only clear search results when leaving the search tab.
+    // (Patent search has its own panel + state — leaving the trademark/design
+    // search tab shouldn't blow away patent results, so we keep the existing
+    // tab-id check tight to the legacy 'search' panel.)
+    if (tabId !== 'search' && tabId !== 'patent-search') {
         clearSearchResults();
     }
 
@@ -2356,12 +2368,15 @@ function showDashboardTab(tabId) {
     }
     if (tabId === 'watchlist') {
         initWatchlistTab();
-        // The Watchlist tab hosts both Marka and Tasarım sub-views. When the
-        // user is restoring (or being routed to) the design sub-view we also
-        // need to lazy-init the design list. Idempotent; safe to call twice.
-        var savedView = '';
-        try { savedView = localStorage.getItem('watchlistView') || ''; } catch (_) {}
-        if (savedView === 'design' && typeof window.initDesignWatchlistTab === 'function') {
+        // Lazy-init the Tasarım list when the Watchlist tab opens with the
+        // design sub-view active. Read from the live Alpine state — that's
+        // the source of truth (the redirect above + x-data init both write
+        // to it).
+        var wlEl2 = document.getElementById('tab-content-watchlist');
+        var liveView = wlEl2 && wlEl2._x_dataStack && wlEl2._x_dataStack[0]
+            ? wlEl2._x_dataStack[0].watchlistView
+            : '';
+        if (liveView === 'design' && typeof window.initDesignWatchlistTab === 'function') {
             window.initDesignWatchlistTab();
         }
     }

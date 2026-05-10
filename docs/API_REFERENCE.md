@@ -63,6 +63,8 @@ System:
 Public search and portfolio:
 - `GET /api/v1/search/public`
 - `POST /api/v1/search/public`
+- `GET /api/v1/patent-search/public`
+- `POST /api/v1/patent-search/public`
 - `GET /api/v1/portfolio/public`
 - `GET /api/v1/portfolio/public/csv`
 
@@ -142,6 +144,12 @@ Portfolio and monitoring:
 - `/api/v1/education/moderation` (admin and superadmin only)
 
 Watchlist similarity alerts exclude same-holder conflicts when the watched mark's `customer_application_no` can be resolved to a trademark holder identifier and the candidate trademark has the same `holder_tpe_client_id` or `holder_id`. Event alerts for the watched trademark remain visible.
+
+Patent search:
+- `POST /api/v1/patent-search/quick` is authenticated and runs a text-first hybrid retrieval (trigram on `patents.title` plus cosine on `title_abstract_embedding` produced by `intfloat/multilingual-e5-large`); accepts `query`, `ipc` (comma-separated IPC class filter), `holder` (free-text trigram on `patent_holders.name`), `date_from`/`date_to` (filing-date window), `kind_code` (e.g. `B`, `A1`, `U3`, `T4`), and `limit` (default 20, max 100); shares the daily `max_daily_quick_searches` quota with trademark and design quick searches; returns 429 with the upgrade-hint payload over quota
+- queries that look like an application/publication number (`2017/15048`, `TR 2017 15048 U3`, etc.) short-circuit to a direct row lookup and skip embedding/trigram retrieval
+- `GET /api/v1/patent-search/public` and `POST /api/v1/patent-search/public` are anonymous text-only variants capped at 10 results, rate-limited at 10/min per IP; only `query` and `ipc` filters are honored
+- `GET /api/v1/patent-search/ipc-autocomplete?q=` returns IPC classes that actually appear in the corpus (`patents.ipc_classes`) prefix-matching the query, joined to `ipc_classes_lookup` for descriptions when available; rate-limited at 60/min
 
 Design watchlist + alerts:
 - `POST /api/v1/design-watchlist` creates a tracked design (text + Locarno classes, optional `customer_application_no`, optional `reference_design_id` to clone embeddings from an existing design row); subject to the combined trademark+design watchlist quota (`subscription_plans.max_watchlist_items`)

@@ -51,6 +51,7 @@ from app_enhanced_search_routes import (
     register_enhanced_search_routes,
 )
 from app_design_search_routes import register_design_search_routes
+from app_patent_search_routes import register_patent_search_routes
 from app_registry_search_routes import register_registry_search_routes
 from app_design_watchlist_routes import register_design_watchlist_routes
 from app_design_alert_routes import register_design_alert_routes
@@ -190,6 +191,9 @@ public_search, public_search_post, _do_public_search = register_public_search_ro
 
 # Design (Tasarım) search routes — sister to the trademark search above.
 register_design_search_routes(app, limiter)
+
+# Patent / Faydalı Model search routes — sister to design + trademark search.
+register_patent_search_routes(app, limiter)
 
 # Cross-registry unified search — discovery surface across both registries.
 register_registry_search_routes(app, limiter)

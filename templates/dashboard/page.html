@@ -211,6 +211,8 @@
 
     {% include 'dashboard/partials/_search_panel.html' %}
 
+    {% include 'dashboard/partials/_patent_search_panel.html' %}
+
     {% include 'dashboard/partials/_results_panel.html' %}
 
     {# Watchlist tab now hosts both Marka and Tasarım sub-views via an
@@ -254,6 +256,7 @@
     <!-- App init last -->
     <script src="/static/js/dashboard/app.js?v=95"></script>
     <script src="/static/js/dashboard/design_search.js?v=10"></script>
+    <script src="/static/js/dashboard/patent_search.js?v=1"></script>
     <script src="/static/js/dashboard/design_watchlist.js?v=6"></script>
 
     <!-- Handle deep-link from landing page (e.g. ?tab=ai-studio&studio_mode=name&studio_query=nike) -->
