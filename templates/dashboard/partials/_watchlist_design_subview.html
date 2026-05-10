@@ -33,28 +33,26 @@
                 </select>
             </div>
 
-            <!-- Scan All -->
+            <!-- Scan All — icon-only, mirrors Sil styling -->
             <button id="dwl-btn-scan-all"
-                    class="px-3 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5 border disabled:opacity-50"
+                    class="px-3 py-2 text-sm font-medium rounded-lg transition-colors flex items-center border disabled:opacity-50"
                     style="color:var(--color-primary);border-color:var(--color-primary);background:transparent"
                     :title="t('design_watchlist.scan_all_title')">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                           d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
                 </svg>
-                <span class="hidden sm:inline" x-text="t('design_watchlist.scan_all')">Tara</span>
             </button>
 
-            <!-- Bulk Upload (Phase 3 — disabled with tooltip) -->
-            <button id="dwl-btn-bulk-upload" disabled
-                    class="px-3 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5 border opacity-50 cursor-not-allowed"
+            <!-- Bulk Upload — icon-only -->
+            <button id="dwl-btn-bulk-upload"
+                    class="px-3 py-2 text-sm font-medium rounded-lg transition-colors flex items-center border"
                     style="color:var(--color-text-secondary);border-color:var(--color-border)"
-                    :title="t('common.coming_soon')">
+                    :title="t('design_watchlist.bulk_upload')">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                           d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
                 </svg>
-                <span class="hidden sm:inline" x-text="t('design_watchlist.bulk_upload')">Yükle</span>
             </button>
 
             <!-- Delete All -->

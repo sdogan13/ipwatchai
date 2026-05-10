@@ -882,13 +882,9 @@
     var deleteAllBtn = $("dwl-btn-delete-all");
     if (deleteAllBtn) deleteAllBtn.addEventListener("click", deleteAll);
 
-    // Phase 3: enable the Yükle button to open the bulk-upload modal.
+    // Wire the bulk-upload button to open the 3-step modal.
     var bulkUploadBtn = $("dwl-btn-bulk-upload");
-    if (bulkUploadBtn) {
-      bulkUploadBtn.disabled = false;
-      bulkUploadBtn.classList.remove("opacity-50", "cursor-not-allowed");
-      bulkUploadBtn.addEventListener("click", openDesignBulkUploadModal);
-    }
+    if (bulkUploadBtn) bulkUploadBtn.addEventListener("click", openDesignBulkUploadModal);
   }
 
   // ---------------------------------------------------------------

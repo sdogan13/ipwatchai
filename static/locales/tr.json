@@ -1835,16 +1835,16 @@
     "bulletin_label": "Bülten",
     "score_text": "Metin",
     "score_embedding": "Anlam",
-    "score_figure": "Şekil",
+    "show_more": "Devamını göster",
+    "show_less": "Daha az göster",
     "image_drop_label": "Patent şeklini buraya bırakın veya yüklemek için tıklayın",
     "image_optional": "(opsiyonel)",
-    "image_hint": "DINOv2 şekil benzerliği · ~%34 külliyat kapsamı · çizgi çizimler gürültülü eşleşmeler üretebilir",
-    "image_attached": "Görsel eklendi",
-    "image_remove": "Görseli kaldır",
+    "image_hint": "DINOv2 şekil benzerliği · ~%34 korpus kapsamı · çizgi çizimlerde sonuçlar gürültülü olabilir",
+    "image_attached": "Şekil eklendi",
+    "image_remove": "Şekli kaldır",
+    "score_figure": "Şekil",
     "filters_toggle": "Filtreler",
-    "stats_db_records": "patent canlı veritabanında analiz ediliyor",
-    "show_more": "Devamını göster",
-    "show_less": "Daha az göster"
+    "stats_db_records": "patent canlı veritabanında analiz ediliyor"
   },
   "design_search": {
     "panel_title": "Tasarım Arama",
