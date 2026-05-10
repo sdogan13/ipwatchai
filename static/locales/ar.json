@@ -1832,6 +1832,11 @@
     "bulletin_label": "النشرة",
     "score_text": "النص",
     "score_embedding": "دلالي",
+    "score_figure": "الرسم",
+    "image_drop_label": "أفلت رسم البراءة هنا أو اضغط للتحميل",
+    "image_hint": "تشابه الرسم بـ DINOv2 · تغطية المجموعة ~٣٤٪ · قد تنتج الرسوم الخطية تطابقات مشوّشة",
+    "image_attached": "تم إرفاق الصورة",
+    "image_remove": "إزالة الصورة",
     "show_more": "عرض المزيد",
     "show_less": "عرض أقل"
   },

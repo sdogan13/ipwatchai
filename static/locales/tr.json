@@ -1835,6 +1835,11 @@
     "bulletin_label": "Bülten",
     "score_text": "Metin",
     "score_embedding": "Anlam",
+    "score_figure": "Şekil",
+    "image_drop_label": "Patent şeklini buraya bırakın veya yüklemek için tıklayın",
+    "image_hint": "DINOv2 şekil benzerliği · ~%34 külliyat kapsamı · çizgi çizimler gürültülü eşleşmeler üretebilir",
+    "image_attached": "Görsel eklendi",
+    "image_remove": "Görseli kaldır",
     "show_more": "Devamını göster",
     "show_less": "Daha az göster"
   },

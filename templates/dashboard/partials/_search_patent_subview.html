@@ -48,6 +48,86 @@
       </div>
     </div>
 
+    {# ---------- Figure upload (drag-drop + file input) ----------
+       Patent-level DINOv2 cosine on patents.primary_figure_embedding.
+       Coverage caveat (~34% of corpus has figure embeddings) is shown
+       in the hint line under the dropzone. #}
+    <div class="mb-3"
+         x-data="{ patentDragOver: false, patentImageName: '', patentImagePreview: '',
+                   patentSetFile(file) {
+                     if (!file) return;
+                     this.patentImageName = file.name;
+                     const r = new FileReader();
+                     r.onload = e => { this.patentImagePreview = e.target.result; };
+                     r.readAsDataURL(file);
+                   },
+                   patentClearImage() {
+                     this.patentImageName = ''; this.patentImagePreview = '';
+                     const inp = document.getElementById('patent-search-image');
+                     if (inp) { inp.value = ''; inp.dispatchEvent(new Event('change', {bubbles:true})); }
+                   },
+                   patentHandleDrop(e) {
+                     this.patentDragOver = false;
+                     const f = e.dataTransfer.files && e.dataTransfer.files[0];
+                     if (!f) return;
+                     this.patentSetFile(f);
+                     try {
+                       const dt = new DataTransfer();
+                       dt.items.add(f);
+                       document.getElementById('patent-search-image').files = dt.files;
+                     } catch(_) {}
+                   } }">
+      <div class="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-all"
+           :class="patentDragOver ? 'border-indigo-400 bg-indigo-50' : ''"
+           style="background:var(--color-bg-card);border:2px dashed var(--color-border)"
+           @click="document.getElementById('patent-search-image').click()"
+           @dragover.prevent="patentDragOver = true"
+           @dragleave.prevent="patentDragOver = false"
+           @drop.prevent="patentHandleDrop($event)">
+        <template x-if="!patentImagePreview">
+          <div class="flex-1 flex items-center gap-3">
+            <svg class="w-6 h-6 shrink-0" style="color:var(--color-text-faint)"
+                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+            </svg>
+            <div>
+              <p class="text-sm font-medium" style="color:var(--color-text-primary)"
+                 x-text="t('patent_search.image_drop_label')">Drop a patent figure here or click to upload</p>
+              <p class="text-xs" style="color:var(--color-text-faint)"
+                 x-text="t('patent_search.image_hint')">DINOv2 figure similarity · ~34% corpus coverage · line drawings can produce noisy matches</p>
+            </div>
+          </div>
+        </template>
+        <template x-if="patentImagePreview">
+          <div class="flex-1 flex items-center gap-3">
+            <img :src="patentImagePreview" alt="Selected figure"
+                 class="w-12 h-12 object-contain rounded"
+                 style="background:var(--color-bg-muted)">
+            <div class="min-w-0 flex-1">
+              <p class="text-xs truncate" style="color:var(--color-text-primary)"
+                 x-text="patentImageName"></p>
+              <p class="text-[10px]" style="color:var(--color-text-faint)"
+                 x-text="t('patent_search.image_attached')">Figure attached</p>
+            </div>
+            <button type="button" id="patent-search-image-clear"
+                    @click.stop="patentClearImage()"
+                    class="shrink-0 p-1 rounded hover:opacity-70"
+                    style="color:var(--color-text-faint)"
+                    :title="t('patent_search.image_remove')">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M6 18L18 6M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+        </template>
+      </div>
+      <input type="file" id="patent-search-image"
+             accept="image/png,image/jpeg,image/webp,image/tiff" class="hidden"
+             @change="patentSetFile($event.target.files && $event.target.files[0])"/>
+    </div>
+
     {# ---------- Filters row ---------- #}
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
       {# IPC autocomplete combobox #}

@@ -4,8 +4,11 @@ Sister to ``services/design_search_service.py`` (Tasarım) and
 ``services/search_service.py`` (Marka). Patent-tuned implementation:
 
   * Text-first hybrid: trigram on title + cosine on
-    ``title_abstract_embedding``. No image/figure path in v1 — figure
-    embeddings are captured at ingest but not part of v1 search UX.
+    ``title_abstract_embedding``.
+  * Figure (image) signal: cosine on ``patents.primary_figure_embedding``
+    (mean-pooled DINOv2 vector built at ingest time). Coverage is
+    partial — ~34% of the corpus has a figure embedding — so figure
+    similarity is ranked alongside text, not as the sole signal.
   * Exact-ID shortcut: queries that look like a publication_no or
     application_no short-circuit to a direct row lookup.
   * Filters: IPC class array, holder name (trigram), date range
@@ -27,8 +30,15 @@ from typing import Any, Dict, List, Optional, Sequence
 
 logger = logging.getLogger("turkpatent.patent_search")
 
-# v1 weights — text dominates; embedding adds semantic recall on abstracts.
-WEIGHTS = {"text": 0.4, "embedding": 0.6}
+# Score weights — picked per query mode so the dominant signal wins:
+#   * Text only         (default)      : text 0.4, embedding 0.6
+#   * Text + image      (hybrid)       : text 0.25, embedding 0.35, figure 0.40
+#   * Image only        (visual lookup): figure 1.0
+WEIGHTS_TEXT_ONLY = {"text": 0.4, "embedding": 0.6, "figure": 0.0}
+WEIGHTS_HYBRID    = {"text": 0.25, "embedding": 0.35, "figure": 0.40}
+WEIGHTS_IMAGE_ONLY = {"text": 0.0, "embedding": 0.0, "figure": 1.0}
+# Backwards-compat alias for the existing tests on text-only mode.
+WEIGHTS = WEIGHTS_TEXT_ONLY
 
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
@@ -87,11 +97,27 @@ def to_halfvec_literal(values: Optional[Sequence[float]]) -> Optional[str]:
     return "[" + ",".join(f"{float(v):.6f}" for v in materialized) + "]"
 
 
-def combine_scores(*, text: float = 0.0, embedding: float = 0.0) -> float:
-    """Combine per-signal similarities into an overall 0..1 score."""
+def combine_scores(
+    *, text: float = 0.0, embedding: float = 0.0, figure: float = 0.0,
+    has_image: bool = False, has_text_query: bool = True,
+) -> float:
+    """Combine per-signal similarities into an overall 0..1 score.
+
+    Weights pick by query mode:
+      - has_image=False               -> WEIGHTS_TEXT_ONLY (text + embedding)
+      - has_image=True, has_text_query=True  -> WEIGHTS_HYBRID
+      - has_image=True, has_text_query=False -> WEIGHTS_IMAGE_ONLY
+    """
+    if has_image and not has_text_query:
+        weights = WEIGHTS_IMAGE_ONLY
+    elif has_image:
+        weights = WEIGHTS_HYBRID
+    else:
+        weights = WEIGHTS_TEXT_ONLY
     score = (
-        WEIGHTS["text"] * max(0.0, text)
-        + WEIGHTS["embedding"] * max(0.0, embedding)
+        weights["text"] * max(0.0, text)
+        + weights["embedding"] * max(0.0, embedding)
+        + weights["figure"] * max(0.0, figure)
     )
     return min(1.0, score)
 
@@ -132,6 +158,7 @@ class PatentCandidate:
     patent_id: str
     text_sim: float = 0.0
     embedding_sim: float = 0.0
+    figure_sim: float = 0.0
 
 
 def _filter_clauses(
@@ -236,6 +263,47 @@ def _retrieve_embedding_candidates(
     }
     cur.execute(sql, params)
     return [PatentCandidate(patent_id=row[0], embedding_sim=float(row[1] or 0.0))
+            for row in cur.fetchall()]
+
+
+def _retrieve_figure_candidates(
+    cur,
+    vec_literal: str,
+    *,
+    ipc: Optional[List[str]],
+    date_from: Optional[str],
+    date_to: Optional[str],
+    kind_code: Optional[str],
+    limit: int,
+) -> List[PatentCandidate]:
+    """Cosine retrieval against patents.primary_figure_embedding.
+
+    Coverage caveat: only ~34% of the corpus has a figure embedding
+    (Stage 6 ran on records that had at least one resolvable figure
+    image). Patents without one are simply excluded from this signal.
+    """
+    filter_sql, filter_params = _filter_clauses(
+        ipc=ipc, date_from=date_from, date_to=date_to,
+        kind_code=kind_code, table_alias="p",
+    )
+    sql = f"""
+        SELECT p.id::text AS patent_id,
+               1 - (p.primary_figure_embedding <=> %(vec)s::halfvec) AS sim
+        FROM patents p
+        WHERE p.record_type NOT IN %(excluded)s
+          AND p.primary_figure_embedding IS NOT NULL
+          {filter_sql}
+        ORDER BY p.primary_figure_embedding <=> %(vec)s::halfvec
+        LIMIT %(limit)s
+    """
+    params = {
+        "vec": vec_literal,
+        "excluded": EXCLUDED_RECORD_TYPES,
+        "limit": limit,
+        **filter_params,
+    }
+    cur.execute(sql, params)
+    return [PatentCandidate(patent_id=row[0], figure_sim=float(row[1] or 0.0))
             for row in cur.fetchall()]
 
 
@@ -425,6 +493,7 @@ def search_patents(
     *,
     query: Optional[str] = None,
     text_embedding: Optional[Sequence[float]] = None,
+    figure_embedding: Optional[Sequence[float]] = None,
     ipc_classes: Optional[Sequence[str]] = None,
     holder: Optional[str] = None,
     date_from: Optional[str] = None,
@@ -435,18 +504,21 @@ def search_patents(
 ) -> Dict[str, Any]:
     """Run a patent search and return a serializable response dict.
 
-    ``text_embedding`` (when provided) should be a 1024-dim plain list
-    representing the query in the same model space as
-    ``patents.title_abstract_embedding``. The route layer is responsible
-    for computing it via the same embedder Stage 6 used.
+    ``text_embedding`` (when provided) is a 1024-dim plain list in the
+    same e5-large model space as ``patents.title_abstract_embedding``.
+    ``figure_embedding`` (when provided) is a 1024-dim plain list in
+    the same DINOv2 ViT-L/14 space as ``patents.primary_figure_embedding``.
+    The route layer computes both at request time via the embedders
+    Stage 6 used.
     """
     started = time.time()
     ipc = normalize_ipc_filter(ipc_classes)
     limit = cap_limit(limit, public=public)
     has_query = bool(query and len(query.strip()) >= 2)
     has_embedding = bool(text_embedding) and not public  # public path is text-only
+    has_image = bool(figure_embedding) and not public    # public path is text-only too
     has_filters = bool(ipc or holder or date_from or date_to or kind_code)
-    if not has_query and not has_embedding and not has_filters:
+    if not has_query and not has_embedding and not has_image and not has_filters:
         return {"results": [], "total": 0, "duration_ms": 0,
                 "error": "patent_search.empty_query"}
 
@@ -459,6 +531,7 @@ def search_patents(
             return
         existing.text_sim = max(existing.text_sim, c.text_sim)
         existing.embedding_sim = max(existing.embedding_sim, c.embedding_sim)
+        existing.figure_sim = max(existing.figure_sim, c.figure_sim)
 
     with conn.cursor() as cur:
         # 1. Exact-ID shortcut: if the query parses as an application_no,
@@ -508,7 +581,16 @@ def search_patents(
                         kind_code=kind_code, limit=CANDIDATE_POOL,
                     ):
                         merge(c)
-            if not has_query and not has_embedding and has_filters:
+            if has_image:
+                fig_lit = to_halfvec_literal(figure_embedding)
+                if fig_lit:
+                    for c in _retrieve_figure_candidates(
+                        cur, fig_lit,
+                        ipc=ipc, date_from=date_from, date_to=date_to,
+                        kind_code=kind_code, limit=CANDIDATE_POOL,
+                    ):
+                        merge(c)
+            if not has_query and not has_embedding and not has_image and has_filters:
                 for c in _retrieve_filter_only_candidates(
                     cur,
                     ipc=ipc, date_from=date_from, date_to=date_to,
@@ -523,7 +605,10 @@ def search_patents(
         # 5. Score + rank
         ranked = sorted(
             candidates.values(),
-            key=lambda c: combine_scores(text=c.text_sim, embedding=c.embedding_sim),
+            key=lambda c: combine_scores(
+                text=c.text_sim, embedding=c.embedding_sim, figure=c.figure_sim,
+                has_image=has_image, has_text_query=has_query,
+            ),
             reverse=True,
         )[:limit]
 
@@ -534,8 +619,13 @@ def search_patents(
         record = hydrated.get(c.patent_id)
         if not record:
             continue
-        score = combine_scores(text=c.text_sim, embedding=c.embedding_sim)
-        breakdown = {"text": c.text_sim, "embedding": c.embedding_sim}
+        score = combine_scores(
+            text=c.text_sim, embedding=c.embedding_sim, figure=c.figure_sim,
+            has_image=has_image, has_text_query=has_query,
+        )
+        breakdown = {
+            "text": c.text_sim, "embedding": c.embedding_sim, "figure": c.figure_sim,
+        }
         results.append(_result_row(record, similarity=score, breakdown=breakdown))
 
     return {
@@ -549,6 +639,7 @@ def search_patents(
             "date_to": date_to,
             "kind_code": kind_code,
             "has_query": has_query,
+            "has_image": has_image,
             "id_lookup": bool(id_match),
             "public": public,
         },

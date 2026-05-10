@@ -13,13 +13,21 @@ trigram + ILIKE over titles, no embedding cost.
 """
 from __future__ import annotations
 
+import io
 import logging
+import os
+import tempfile
+from pathlib import Path
 from typing import List, Optional
 
-from fastapi import Depends, Form, HTTPException, Query, Request
+from fastapi import Depends, File, Form, HTTPException, Query, Request, UploadFile
+from PIL import Image
 
 
 logger = logging.getLogger("turkpatent.patent_search_routes")
+
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/jpg", "image/png", "image/webp", "image/tiff"}
+MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
 # ---------------------------------------------------------------------------
@@ -69,12 +77,65 @@ def _parse_csv_param(raw: Optional[str]) -> Optional[List[str]]:
 
 
 # ---------------------------------------------------------------------------
+# Query image embedding (lazy-shared models with the embedding pipeline)
+# ---------------------------------------------------------------------------
+
+_FIGURE_MODELS = None  # cached LoadedModels from embeddings_patent
+
+
+def _embed_query_image(temp_path: str) -> Optional[List[float]]:
+    """Encode an uploaded image with the same DINOv2 ViT-L/14 the corpus
+    was indexed with, returning a 1024-dim vector for cosine retrieval
+    against patents.primary_figure_embedding.
+
+    Patents.primary_figure_embedding is the mean-pooled DINOv2 vector
+    across all the patent's figures, so a single uploaded query image
+    embedded with the same backbone is the right comparison vector.
+    """
+    global _FIGURE_MODELS
+    try:
+        from embeddings_patent import detect_device, embed_image, load_models
+    except Exception:
+        logger.exception("Failed to import patent figure embedder")
+        return None
+    if _FIGURE_MODELS is None:
+        try:
+            _FIGURE_MODELS = load_models(detect_device())
+        except Exception:
+            logger.exception("Failed to load patent figure embedder")
+            return None
+    try:
+        result = embed_image(Path(temp_path), _FIGURE_MODELS)
+        return result.get("dinov2_vitl14")
+    except Exception:
+        logger.exception("Failed to encode query image")
+        return None
+
+
+def _save_upload_to_temp(content: bytes) -> str:
+    """Write the uploaded bytes to a temp file after a sanity check.
+    PIL's verify() catches truncated/corrupt files before they reach the
+    GPU model loader."""
+    if len(content) > MAX_IMAGE_SIZE_BYTES:
+        raise HTTPException(status_code=413, detail="Image too large (max 10MB)")
+    try:
+        Image.open(io.BytesIO(content)).verify()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Corrupted image file")
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".img")
+    tmp.write(content)
+    tmp.close()
+    return tmp.name
+
+
+# ---------------------------------------------------------------------------
 # Search route handlers
 # ---------------------------------------------------------------------------
 
 async def _do_patent_search(
     *,
     query: Optional[str],
+    image_temp_path: Optional[str],
     ipc_classes: Optional[List[str]],
     holder: Optional[str],
     date_from: Optional[str],
@@ -94,11 +155,16 @@ async def _do_patent_search(
         if not parse_id_query(query):
             text_embedding = _embed_query_text(query)
 
+    figure_embedding = None
+    if not public and image_temp_path:
+        figure_embedding = _embed_query_image(image_temp_path)
+
     with Database() as db:
         return search_patents(
             db.conn,
             query=query,
             text_embedding=text_embedding,
+            figure_embedding=figure_embedding,
             ipc_classes=ipc_classes,
             holder=holder,
             date_from=date_from,
@@ -112,6 +178,7 @@ async def _do_patent_search(
 async def patent_search_quick(
     *,
     query: Optional[str],
+    image: Optional[UploadFile],
     ipc: Optional[str],
     holder: Optional[str],
     date_from: Optional[str],
@@ -128,7 +195,9 @@ async def patent_search_quick(
     Increment happens AFTER a successful retrieval so failed searches
     don't burn quota.
     """
-    if not query or len(query.strip()) < 2:
+    has_image = image is not None and image.filename
+    has_query = bool(query and query.strip())
+    if not has_query and not has_image:
         # Filter-only mode is allowed (e.g. "all 2024 patents in IPC A61")
         # but we require at least one filter to be set so we don't
         # accidentally serve the whole corpus.
@@ -136,7 +205,7 @@ async def patent_search_quick(
         if not any_filter:
             raise HTTPException(
                 status_code=422,
-                detail="Provide a query (min 2 chars) or at least one filter",
+                detail="Provide a query (min 2 chars), an image, or at least one filter",
             )
 
     if user_id:
@@ -147,16 +216,30 @@ async def patent_search_quick(
             if not can_search:
                 raise HTTPException(status_code=429, detail=details)
 
-    result = await _do_patent_search(
-        query=query.strip() if query else None,
-        ipc_classes=_parse_csv_param(ipc),
-        holder=holder.strip() if holder else None,
-        date_from=date_from or None,
-        date_to=date_to or None,
-        kind_code=kind_code.strip().upper() if kind_code else None,
-        limit=limit,
-        public=False,
-    )
+    temp_path: Optional[str] = None
+    if has_image:
+        if image.content_type not in ALLOWED_IMAGE_TYPES:
+            raise HTTPException(status_code=400, detail="Invalid image type")
+        content = await image.read()
+        temp_path = _save_upload_to_temp(content)
+    try:
+        result = await _do_patent_search(
+            query=query.strip() if query else None,
+            image_temp_path=temp_path,
+            ipc_classes=_parse_csv_param(ipc),
+            holder=holder.strip() if holder else None,
+            date_from=date_from or None,
+            date_to=date_to or None,
+            kind_code=kind_code.strip().upper() if kind_code else None,
+            limit=limit,
+            public=False,
+        )
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
 
     if user_id:
         from database.crud import Database
@@ -172,11 +255,13 @@ async def patent_search_public(
     query: Optional[str],
     ipc: Optional[str],
 ) -> dict:
-    """Public anonymous text-only patent search. Capped at 10 results."""
+    """Public anonymous text-only patent search. Capped at 10 results.
+    No image upload — public path stays cheap."""
     if not query or len(query.strip()) < 2:
         raise HTTPException(status_code=422, detail="Provide a query (min 2 chars)")
     return await _do_patent_search(
         query=query.strip(),
+        image_temp_path=None,
         ipc_classes=_parse_csv_param(ipc),
         holder=None,
         date_from=None,
@@ -286,6 +371,7 @@ def register_patent_search_routes(app, limiter):
     async def quick_patent_search(
         request: Request,
         query: Optional[str] = Form(None),
+        image: Optional[UploadFile] = File(None),
         ipc: Optional[str] = Form(None),
         holder: Optional[str] = Form(None),
         date_from: Optional[str] = Form(None),
@@ -302,7 +388,7 @@ def register_patent_search_routes(app, limiter):
             oid = getattr(current_user, "organization_id", None)
             org_id = str(oid) if oid is not None else None
         return await patent_search_quick(
-            query=query, ipc=ipc, holder=holder,
+            query=query, image=image, ipc=ipc, holder=holder,
             date_from=date_from, date_to=date_to, kind_code=kind_code,
             limit=limit,
             user_id=user_id, organization_id=org_id,

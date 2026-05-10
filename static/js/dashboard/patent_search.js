@@ -408,6 +408,11 @@
   // Submit
   // ---------------------------------------------------------------
 
+  function hasImage() {
+    var inp = $("patent-search-image");
+    return !!(inp && inp.files && inp.files.length > 0);
+  }
+
   function buildFormData() {
     var fd = new FormData();
     var q = (($("patent-search-input") || {}).value || "").trim();
@@ -421,13 +426,17 @@
     if (dfrom) fd.append("date_from", dfrom);
     if (dto) fd.append("date_to", dto);
     if (kind) fd.append("kind_code", kind);
+    var imgInp = $("patent-search-image");
+    if (imgInp && imgInp.files && imgInp.files.length > 0) {
+      fd.append("image", imgInp.files[0]);
+    }
     fd.append("limit", "20");
     return fd;
   }
 
   function doSearch() {
-    if (!hasQuery() && !hasFilters()) {
-      setStatus(t("patent_search.empty_query_status", "Enter a query or filter"), "error");
+    if (!hasQuery() && !hasFilters() && !hasImage()) {
+      setStatus(t("patent_search.empty_query_status", "Enter a query, filter, or upload a figure"), "error");
       return;
     }
     var card = $("patent-search-results-card");
