@@ -222,8 +222,18 @@ def _design_row(
     *,
     holder_id: Optional[str],
     source_folder: str,
+    doc_bulletin_no: Any = None,
+    doc_bulletin_date: Any = None,
 ) -> Dict[str, Any]:
-    bulletin_date = record.get("bulletin_date")
+    # bulletin_no / bulletin_date live at the doc level in pdf_extract_tasarim's
+    # output (payload["bulletin_no"], payload["bulletin_date"]) — the per-record
+    # dicts don't carry them. Without falling back to the doc level, every
+    # design row in the DB ends up with NULL bulletin_no/_date, which makes
+    # SQL queries by bulletin impossible and forces string-matching on
+    # source_issue_folder. Real-data finding from the Phase-1 end-to-end
+    # ingest: 410K rows shipped with NULL bulletin_no.
+    bulletin_no = record.get("bulletin_no") or doc_bulletin_no
+    bulletin_date = record.get("bulletin_date") or doc_bulletin_date
     opp_end = opposition_end_date(bulletin_date)
     page_range = record.get("page_range") or [None, None]
     designers = [d.get("name") for d in (record.get("designers") or []) if d.get("name")]
@@ -239,7 +249,7 @@ def _design_row(
         "application_date": parse_date_safe(record.get("filing_date")),
         "filing_date": parse_date_safe(record.get("filing_date")),
         "registration_date": parse_date_safe(record.get("registration_date")),
-        "bulletin_no": str(record.get("bulletin_no")) if record.get("bulletin_no") else None,
+        "bulletin_no": str(bulletin_no) if bulletin_no else None,
         "bulletin_date": parse_date_safe(bulletin_date),
         "opposition_end": opp_end,
         # Both product_name_* columns are VARCHAR(500). Hague records whose
@@ -479,7 +489,13 @@ def ingest_issue(conn, issue_folder: Path, *, skip_events: bool = False, run_wat
                     "design_aggregates": {},
                 }]
             for design in designs_in_record:
-                row = _design_row(record, design, holder_id=holder, source_folder=issue_folder.name)
+                row = _design_row(
+                    record, design,
+                    holder_id=holder,
+                    source_folder=issue_folder.name,
+                    doc_bulletin_no=payload.get("bulletin_no"),
+                    doc_bulletin_date=payload.get("bulletin_date"),
+                )
                 design_id = upsert_design(cur, row)
                 designs_inserted += 1
                 inserted_design_ids.append(str(design_id))

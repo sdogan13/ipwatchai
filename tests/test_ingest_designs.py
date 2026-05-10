@@ -205,6 +205,57 @@ def test_design_row_basic_fields():
     assert row["clip_vitb32_mean"].startswith("[") and row["clip_vitb32_mean"].endswith("]")
 
 
+def test_design_row_pulls_bulletin_from_doc_level_fallback():
+    """Real-world PDF metadata.json carries bulletin_no/bulletin_date at
+    the DOC level (payload["bulletin_no"]), NOT inside each record. Phase 1
+    found 410K design rows shipped with NULL bulletin_no because the
+    ingest only looked at record level. The fix: callers pass payload's
+    doc-level values as kwargs; _design_row falls back to them when the
+    record doesn't carry its own."""
+    rec = _sample_record_with_one_design()
+    # Strip the record-level bulletin fields to simulate real PDF data shape.
+    rec.pop("bulletin_no", None)
+    rec.pop("bulletin_date", None)
+    row = _design_row(
+        rec, rec["designs"][0],
+        holder_id=None, source_folder="TS_483_2026-04-24",
+        doc_bulletin_no=483,
+        doc_bulletin_date="2026-04-24",
+    )
+    assert row["bulletin_no"] == "483"
+    assert row["bulletin_date"] == date(2026, 4, 24)
+    assert row["opposition_end"] == date(2026, 7, 23)
+
+
+def test_design_row_record_level_bulletin_wins_over_doc_level():
+    """If a record happens to carry its own bulletin_no (e.g. a future
+    pipeline that tags records), prefer it over the doc-level fallback."""
+    rec = _sample_record_with_one_design()
+    rec["bulletin_no"] = 999          # record's own value
+    rec["bulletin_date"] = "2099-01-01"
+    row = _design_row(
+        rec, rec["designs"][0],
+        holder_id=None, source_folder="TS_483",
+        doc_bulletin_no=483, doc_bulletin_date="2026-04-24",
+    )
+    assert row["bulletin_no"] == "999"
+    assert row["bulletin_date"] == date(2099, 1, 1)
+
+
+def test_design_row_no_bulletin_anywhere_yields_null():
+    """When neither side has bulletin_no, the row carries None — same
+    behavior as before the fix; no spurious 'False'/'0' coercion."""
+    rec = _sample_record_with_one_design()
+    rec.pop("bulletin_no", None)
+    rec.pop("bulletin_date", None)
+    row = _design_row(
+        rec, rec["designs"][0],
+        holder_id=None, source_folder="TS_483",
+    )
+    assert row["bulletin_no"] is None
+    assert row["bulletin_date"] is None
+
+
 def test_design_row_deferred_section_maps_to_deferred_status():
     rec = _sample_record_with_one_design()
     rec["section"] = "deferred"
