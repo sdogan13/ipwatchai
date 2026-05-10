@@ -251,7 +251,45 @@
   // Result rendering
   // ---------------------------------------------------------------
 
+  // Per-signal similarity bar for the card breakdown row
+  function _signalBar(label, value) {
+    var v = Math.max(0, Math.min(1, Number(value) || 0));
+    var pct = Math.round(v * 100);
+    return (
+      '<div class="flex items-center gap-2 text-[10px]">' +
+        '<span class="w-14 shrink-0" style="color:var(--color-text-faint)">' + label + '</span>' +
+        '<div class="flex-1 h-1 rounded-full overflow-hidden" style="background:var(--color-bg-muted)">' +
+          '<div class="h-full rounded-full" style="width:' + pct + '%;background:var(--color-primary)"></div>' +
+        '</div>' +
+        '<span class="w-8 text-right shrink-0 font-mono" style="color:var(--color-text-secondary)">' + pct + '%</span>' +
+      '</div>'
+    );
+  }
+
+  function _abstractBlock(rawAbstract, cardId) {
+    if (!rawAbstract) return "";
+    var safe = escapeHtml(rawAbstract);
+    // Short abstracts: just inline. Long ones: line-clamp + toggle.
+    var COLLAPSE_AT = 280;
+    if (safe.length <= COLLAPSE_AT) {
+      return '<p class="text-xs leading-relaxed mt-2" style="color:var(--color-text-secondary)">' +
+             safe + '</p>';
+    }
+    var preview = safe.slice(0, COLLAPSE_AT) + '…';
+    return (
+      '<div class="text-xs leading-relaxed mt-2" style="color:var(--color-text-secondary)">' +
+        '<span data-abstract-preview="' + cardId + '">' + preview + '</span>' +
+        '<span data-abstract-full="' + cardId + '" class="hidden">' + safe + '</span>' +
+        ' <button type="button" data-abstract-toggle="' + cardId + '" ' +
+        'class="ml-1 text-xs font-medium hover:underline" style="color:var(--color-primary)">' +
+        escapeHtml(t("patent_search.show_more", "Show more")) +
+        '</button>' +
+      '</div>'
+    );
+  }
+
   function renderResultCard(item) {
+    var cardId = "ps-" + (item.id || Math.random().toString(36).slice(2, 9));
     var title = escapeHtml(item.title || t("patent_search.untitled", "Untitled"));
     var pubNo = escapeHtml(item.publication_no || item.application_no || "");
     var kind = escapeHtml(item.kind_code || "");
@@ -259,15 +297,61 @@
     var holderCountry = item.holder ? escapeHtml(item.holder.country || "") : "";
     var appDate = escapeHtml(item.application_date || "");
     var pubDate = escapeHtml(item.publication_date || "");
-    var ipcChips = (item.ipc_classes || []).slice(0, 4).map(function (c) {
+    var bulletinNo = escapeHtml(item.bulletin_no || "");
+    var bulletinDate = escapeHtml(item.bulletin_date || "");
+    var inventors = item.inventors || [];
+    var attorney = item.attorney || null;
+    var bd = item.similarity_breakdown || {};
+    var sim = item.similarity != null ? Number(item.similarity).toFixed(0) : "";
+
+    // ALL IPC classes — no truncation. Patent users frequently care about
+    // the full classification spread.
+    var ipcChips = (item.ipc_classes || []).map(function (c) {
       return '<span class="inline-block px-2 py-0.5 rounded text-xs font-mono" ' +
              'style="background:var(--color-bg-muted);color:var(--color-text-muted)">' +
              escapeHtml(c) + '</span>';
     }).join("");
-    var sim = item.similarity != null ? Number(item.similarity).toFixed(0) : "";
+
+    var inventorsHtml = "";
+    if (inventors.length > 0) {
+      var visible = inventors.slice(0, 3).map(escapeHtml).join(", ");
+      var extra = inventors.length > 3 ? ' <span style="color:var(--color-text-faint)">+' +
+                  (inventors.length - 3) + '</span>' : '';
+      inventorsHtml = '<div class="text-xs mt-1.5"><span style="color:var(--color-text-faint)">' +
+        escapeHtml(t("patent_search.inventors_label", "Inventors")) + ':</span> ' +
+        '<span style="color:var(--color-text-secondary)">' + visible + extra + '</span></div>';
+    }
+
+    var attorneyHtml = "";
+    if (attorney && (attorney.name || attorney.firm)) {
+      var aName = escapeHtml(attorney.name || "");
+      var aFirm = escapeHtml(attorney.firm || "");
+      var aText = aName + (aName && aFirm ? " · " : "") + aFirm;
+      attorneyHtml = '<div class="text-xs mt-1"><span style="color:var(--color-text-faint)">' +
+        escapeHtml(t("patent_search.attorney_label", "Attorney")) + ':</span> ' +
+        '<span style="color:var(--color-text-secondary)">' + aText + '</span></div>';
+    }
+
+    var bulletinHtml = "";
+    if (bulletinNo) {
+      bulletinHtml = '<span class="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded" ' +
+        'style="background:var(--color-bg-muted);color:var(--color-text-faint)">' +
+        escapeHtml(t("patent_search.bulletin_label", "Bulletin")) + ' ' + bulletinNo +
+        (bulletinDate ? ' · ' + bulletinDate : '') + '</span>';
+    }
+
+    var bdHtml = "";
+    if (bd && (bd.text || bd.embedding)) {
+      bdHtml =
+        '<div class="mt-2 space-y-1 pt-2" style="border-top:1px solid var(--color-border)">' +
+          (bd.text != null ? _signalBar(t("patent_search.score_text", "Text"), bd.text) : "") +
+          (bd.embedding != null ? _signalBar(t("patent_search.score_embedding", "Semantic"), bd.embedding) : "") +
+        '</div>';
+    }
 
     return (
       '<div class="rounded-lg border p-4 transition-all hover:shadow-md" ' +
+      'data-patent-card-id="' + cardId + '" ' +
       'style="background:var(--color-bg-card);border-color:var(--color-border)">' +
         '<div class="flex items-start justify-between gap-2 mb-2">' +
           '<h4 class="text-sm font-semibold leading-snug" style="color:var(--color-text-primary)">' +
@@ -282,10 +366,15 @@
                        holderName + (holderCountry ? (' <span style="color:var(--color-text-faint)">(' + holderCountry + ')</span>') : '') +
                        '</p>') : '') +
         (ipcChips ? ('<div class="flex flex-wrap gap-1 mb-2">' + ipcChips + '</div>') : '') +
-        '<div class="flex items-center gap-3 text-xs" style="color:var(--color-text-faint)">' +
-          (appDate ? ('<span>' + t("patent_search.filed", "Filed") + ': ' + appDate + '</span>') : '') +
-          (pubDate ? ('<span>' + t("patent_search.published", "Pub") + ': ' + pubDate + '</span>') : '') +
+        _abstractBlock(item.abstract, cardId) +
+        inventorsHtml +
+        attorneyHtml +
+        '<div class="flex flex-wrap items-center gap-2 mt-2 text-xs" style="color:var(--color-text-faint)">' +
+          (appDate ? ('<span>' + escapeHtml(t("patent_search.filed", "Filed")) + ': ' + appDate + '</span>') : '') +
+          (pubDate ? ('<span>' + escapeHtml(t("patent_search.published", "Pub")) + ': ' + pubDate + '</span>') : '') +
+          bulletinHtml +
         '</div>' +
+        bdHtml +
       '</div>'
     );
   }
@@ -431,6 +520,26 @@
       // IPC chip remove
       if (t.matches && t.matches("[data-ipc-remove]")) {
         removeIpc(t.getAttribute("data-ipc-remove") || "");
+        return;
+      }
+      // Abstract show-more / show-less toggle
+      var absToggle = t.closest && t.closest("[data-abstract-toggle]");
+      if (absToggle) {
+        var cardId = absToggle.getAttribute("data-abstract-toggle");
+        var prev = document.querySelector('[data-abstract-preview="' + cardId + '"]');
+        var full = document.querySelector('[data-abstract-full="' + cardId + '"]');
+        if (prev && full) {
+          var showingFull = !full.classList.contains("hidden");
+          if (showingFull) {
+            full.classList.add("hidden");
+            prev.classList.remove("hidden");
+            absToggle.textContent = t("patent_search.show_more", "Show more");
+          } else {
+            full.classList.remove("hidden");
+            prev.classList.add("hidden");
+            absToggle.textContent = t("patent_search.show_less", "Show less");
+          }
+        }
         return;
       }
       // Click outside IPC -> hide dropdown

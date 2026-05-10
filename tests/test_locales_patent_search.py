@@ -28,6 +28,9 @@ EXPECTED_PATENT_SEARCH_KEYS = (
     "analysis_hint",
     "recent_searches", "clear_history",
     "untitled", "filed", "published",
+    "inventors_label", "attorney_label", "bulletin_label",
+    "score_text", "score_embedding",
+    "show_more", "show_less",
 )
 
 

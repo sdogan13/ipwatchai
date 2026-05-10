@@ -1821,7 +1821,14 @@
     "clear_history": "Clear",
     "untitled": "Untitled",
     "filed": "Filed",
-    "published": "Published"
+    "published": "Published",
+    "inventors_label": "Inventors",
+    "attorney_label": "Attorney",
+    "bulletin_label": "Bulletin",
+    "score_text": "Text",
+    "score_embedding": "Semantic",
+    "show_more": "Show more",
+    "show_less": "Show less"
   },
   "design_search": {
     "panel_title": "Design Search",

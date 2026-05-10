@@ -1826,7 +1826,14 @@
     "clear_history": "Temizle",
     "untitled": "Başlıksız",
     "filed": "Başvuru",
-    "published": "Yayın"
+    "published": "Yayın",
+    "inventors_label": "Buluş sahipleri",
+    "attorney_label": "Vekil",
+    "bulletin_label": "Bülten",
+    "score_text": "Metin",
+    "score_embedding": "Anlam",
+    "show_more": "Devamını göster",
+    "show_less": "Daha az göster"
   },
   "design_search": {
     "panel_title": "Tasarım Arama",

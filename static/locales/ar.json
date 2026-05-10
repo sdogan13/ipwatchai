@@ -1823,7 +1823,14 @@
     "clear_history": "مسح",
     "untitled": "بدون عنوان",
     "filed": "تاريخ الإيداع",
-    "published": "تاريخ النشر"
+    "published": "تاريخ النشر",
+    "inventors_label": "المخترعون",
+    "attorney_label": "الوكيل",
+    "bulletin_label": "النشرة",
+    "score_text": "النص",
+    "score_embedding": "دلالي",
+    "show_more": "عرض المزيد",
+    "show_less": "عرض أقل"
   },
   "design_search": {
     "panel_title": "بحث التصاميم",
