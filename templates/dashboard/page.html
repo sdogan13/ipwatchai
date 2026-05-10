@@ -230,6 +230,8 @@
 
     {% include 'dashboard/partials/_modals.html' %}
 
+    {% include 'dashboard/partials/_patent_detail_modal.html' %}
+
     <script>
         window.SERVER_PLANS = {{ plans | default({}, true) | tojson }};
     </script>
@@ -260,6 +262,7 @@
     <script src="/static/js/dashboard/design_watchlist.js?v=6"></script>
     <script src="/static/js/dashboard/patent_watchlist.js?v=1"></script>
     <script src="/static/js/dashboard/patent_leads.js?v=1"></script>
+    <script src="/static/js/dashboard/patent_detail.js?v=1"></script>
 
     <!-- Handle deep-link from landing page (e.g. ?tab=ai-studio&studio_mode=name&studio_query=nike) -->
     <script>

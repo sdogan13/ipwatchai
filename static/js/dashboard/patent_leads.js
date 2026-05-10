@@ -126,8 +126,11 @@
              escapeHtml(c) + '</span>';
     }).join(" ");
 
+    var openAttr = item.patent_id
+      ? ' data-pd-open="' + escapeHtml(item.patent_id) + '" class="rounded-lg border p-3 cursor-pointer hover:shadow-md transition-all"'
+      : ' class="rounded-lg border p-3"';
     return (
-      '<div class="rounded-lg border p-3" ' +
+      '<div' + openAttr + ' ' +
       'style="background:var(--color-bg-card);border-color:var(--color-border)">' +
         '<div class="flex items-start justify-between gap-3 mb-1">' +
           '<div class="min-w-0 flex-1">' +

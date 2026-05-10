@@ -208,8 +208,11 @@
           escapeHtml(t("patent_watchlist.action_dismiss", "Dismiss")) + '</button>';
     }
 
+    var openAttr = a.conflicting_patent_id
+      ? ' data-pd-open="' + escapeHtml(a.conflicting_patent_id) + '" class="rounded-lg border p-3 cursor-pointer"'
+      : ' class="rounded-lg border p-3"';
     return (
-      '<div class="rounded-lg border p-3" style="background:var(--color-bg-page);border-color:var(--color-border)">' +
+      '<div' + openAttr + ' style="background:var(--color-bg-page);border-color:var(--color-border)">' +
         '<div class="flex items-start justify-between gap-2">' +
           '<div class="min-w-0 flex-1">' +
             '<div class="flex items-center gap-2 mb-1">' +

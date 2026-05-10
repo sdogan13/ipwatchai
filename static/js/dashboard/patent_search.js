@@ -350,8 +350,9 @@
     }
 
     return (
-      '<div class="rounded-lg border p-4 transition-all hover:shadow-md" ' +
+      '<div class="rounded-lg border p-4 transition-all hover:shadow-md cursor-pointer" ' +
       'data-patent-card-id="' + cardId + '" ' +
+      'data-pd-open="' + escapeHtml(item.id || "") + '" ' +
       'style="background:var(--color-bg-card);border-color:var(--color-border)">' +
         '<div class="flex items-start justify-between gap-2 mb-2">' +
           '<h4 class="text-sm font-semibold leading-snug" style="color:var(--color-text-primary)">' +
