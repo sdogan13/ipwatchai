@@ -154,6 +154,7 @@ services:
       - ./pdf_extract_tasarim.py:/app/pdf_extract_tasarim.py:ro
       - ./pdf_extract_tasarim_events.py:/app/pdf_extract_tasarim_events.py:ro
       - ./embeddings_tasarim.py:/app/embeddings_tasarim.py:ro
+      - ./embeddings_patent.py:/app/embeddings_patent.py:ro
       # Mount API and database modules for development
       - ./api:/app/api:ro
       - ./database:/app/database:ro

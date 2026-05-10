@@ -239,6 +239,38 @@ def _retrieve_embedding_candidates(
             for row in cur.fetchall()]
 
 
+def _retrieve_filter_only_candidates(
+    cur,
+    *,
+    ipc: Optional[List[str]],
+    date_from: Optional[str],
+    date_to: Optional[str],
+    kind_code: Optional[str],
+    limit: int,
+) -> List[PatentCandidate]:
+    """Filter-only browse: no query, just structured filters.
+
+    Returns rows matching the filters ordered by application_date DESC
+    (newest first). Score is left at 0 since there's no relevance signal —
+    the route layer surfaces the recency ordering as the implicit ranking.
+    """
+    filter_sql, filter_params = _filter_clauses(
+        ipc=ipc, date_from=date_from, date_to=date_to,
+        kind_code=kind_code, table_alias="p",
+    )
+    sql = f"""
+        SELECT p.id::text AS patent_id
+        FROM patents p
+        WHERE p.record_type NOT IN %(excluded)s
+          {filter_sql}
+        ORDER BY p.application_date DESC NULLS LAST
+        LIMIT %(limit)s
+    """
+    params = {"excluded": EXCLUDED_RECORD_TYPES, "limit": limit, **filter_params}
+    cur.execute(sql, params)
+    return [PatentCandidate(patent_id=row[0]) for row in cur.fetchall()]
+
+
 def _retrieve_holder_filtered_ids(
     cur, holder_query: str,
 ) -> Optional[List[str]]:
@@ -413,7 +445,8 @@ def search_patents(
     limit = cap_limit(limit, public=public)
     has_query = bool(query and len(query.strip()) >= 2)
     has_embedding = bool(text_embedding) and not public  # public path is text-only
-    if not has_query and not has_embedding:
+    has_filters = bool(ipc or holder or date_from or date_to or kind_code)
+    if not has_query and not has_embedding and not has_filters:
         return {"results": [], "total": 0, "duration_ms": 0,
                 "error": "patent_search.empty_query"}
 
@@ -455,7 +488,9 @@ def search_patents(
                     },
                 }
 
-        # 3. Regular text + embedding retrieval (skipped when ID shortcut hit)
+        # 3. Regular text + embedding retrieval (skipped when ID shortcut hit).
+        #    Filter-only mode (no query, only filters) takes a separate path
+        #    that browses recent rows matching the filter set.
         if not id_match:
             if has_query:
                 for c in _retrieve_text_candidates(
@@ -473,6 +508,13 @@ def search_patents(
                         kind_code=kind_code, limit=CANDIDATE_POOL,
                     ):
                         merge(c)
+            if not has_query and not has_embedding and has_filters:
+                for c in _retrieve_filter_only_candidates(
+                    cur,
+                    ipc=ipc, date_from=date_from, date_to=date_to,
+                    kind_code=kind_code, limit=CANDIDATE_POOL,
+                ):
+                    merge(c)
 
         # 4. Apply holder filter post-retrieval
         if holder_allowed is not None:
