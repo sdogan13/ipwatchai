@@ -55,6 +55,7 @@ from app_patent_search_routes import register_patent_search_routes
 from app_patent_watchlist_routes import register_patent_watchlist_routes
 from app_patent_alert_routes import register_patent_alert_routes
 from app_patent_lead_routes import register_patent_lead_routes
+from app_patent_detail_routes import register_patent_detail_routes
 from app_registry_search_routes import register_registry_search_routes
 from app_design_watchlist_routes import register_design_watchlist_routes
 from app_design_alert_routes import register_design_alert_routes
@@ -205,6 +206,9 @@ register_patent_alert_routes(app, limiter)
 
 # Patent leads — derived from patent_events on-the-fly. No new schema.
 register_patent_lead_routes(app, limiter)
+
+# Patent detail — full hydrated record for the detail modal.
+register_patent_detail_routes(app, limiter)
 
 # Cross-registry unified search — discovery surface across both registries.
 register_registry_search_routes(app, limiter)
