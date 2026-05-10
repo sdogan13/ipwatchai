@@ -1201,10 +1201,11 @@ def test_process_one_writes_metadata_json_into_pt_folder(tmp_path: Path) -> None
     assert payload["stats"]["by_source_format"]["BOTH"] == 1
 
 
-def test_process_one_refuses_to_overwrite_without_force(tmp_path: Path) -> None:
-    """An existing metadata.json inside the bulletin folder requires
-    --force to overwrite. Guards against accidental rewrites of an
-    already-reconciled bulletin."""
+def test_process_one_skips_when_unified_fresh(tmp_path: Path) -> None:
+    """When unified metadata.json already exists and is at least as
+    recent as every cd_/pdf_metadata.json sibling, the run is a no-op
+    (idempotent). No more FileExistsError without --force — the gate is
+    freshness, not existence."""
     pdf_path = _write_json(tmp_path, "in_pdf.json", {
         "bulletin_no": "2025-08",
         "bulletin_date": "2025-08-21",
@@ -1216,11 +1217,39 @@ def test_process_one_refuses_to_overwrite_without_force(tmp_path: Path) -> None:
     target = parent / "metadata.json"
     target.write_text("{}", encoding="utf-8")
 
-    with pytest.raises(FileExistsError, match="--force"):
-        _process_one(None, pdf_path, tmp_path, force=False)
+    result = _process_one(None, pdf_path, tmp_path, force=False)
+    assert result["status"] == "skipped"
+    # File untouched.
+    assert target.read_text(encoding="utf-8") == "{}"
+
+
+def test_process_one_overwrites_when_inputs_newer(tmp_path: Path) -> None:
+    """If a cd_metadata.json sibling is newer than the existing unified
+    metadata.json, the source has changed since the last reconcile and
+    the run regenerates without needing --force."""
+    import time as _time
+    pdf_path = _write_json(tmp_path, "in_pdf.json", {
+        "bulletin_no": "2025-08",
+        "bulletin_date": "2025-08-21",
+        "records": [],
+        "stats": {},
+    })
+    parent = tmp_path / "PT_2025_8_2025-08-21"
+    parent.mkdir()
+    target = parent / "metadata.json"
+    target.write_text("STALE", encoding="utf-8")
+    # Make a sibling cd_metadata.json that's newer than the unified.
+    _time.sleep(0.05)
+    (parent / "cd_metadata.json").write_text("{}", encoding="utf-8")
+
+    result = _process_one(None, pdf_path, tmp_path, force=False)
+    assert result["status"] == "ok"
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert payload["bulletin_no"] == "2025/8"
 
 
 def test_process_one_overwrites_with_force(tmp_path: Path) -> None:
+    """--force overrides the freshness check and always rewrites."""
     pdf_path = _write_json(tmp_path, "in_pdf.json", {
         "bulletin_no": "2025-08",
         "bulletin_date": "2025-08-21",
@@ -1232,7 +1261,8 @@ def test_process_one_overwrites_with_force(tmp_path: Path) -> None:
     target = parent / "metadata.json"
     target.write_text("STALE", encoding="utf-8")
 
-    _process_one(None, pdf_path, tmp_path, force=True)
+    result = _process_one(None, pdf_path, tmp_path, force=True)
+    assert result["status"] == "ok"
     payload = json.loads(target.read_text(encoding="utf-8"))
     assert payload["bulletin_no"] == "2025/8"
 

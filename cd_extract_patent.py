@@ -702,6 +702,7 @@ class CLIArgs:
     scratch_dir: Path
     seven_zip: Optional[Path]
     keep_scratch: bool
+    force: bool = False
 
 
 # Each bulletin's CD-side artifacts live in a parent folder named for
@@ -767,6 +768,12 @@ def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
         action="store_true",
         help="Don't delete the per-CD scratch folder after extraction.",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-extract every CD even when the cd_metadata.json on disk "
+             "is at least as recent as the source .rar.",
+    )
     ns = parser.parse_args(argv)
 
     if ns.all and ns.rar:
@@ -789,6 +796,7 @@ def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
         scratch_dir=ns.scratch_dir,
         seven_zip=ns.seven_zip,
         keep_scratch=ns.keep_scratch,
+        force=ns.force,
     )
 
 
@@ -829,6 +837,15 @@ def _process_one(
         # (CD-first dedup — visually verified the title-page TIFF and
         # PDF first figure are the same drawing on app 2023/018085).
         carry = _carry_cd_images(doc, cd_root, parent)
+
+        # Track the source RAR's filename + mtime in cd_metadata.json so
+        # the --all loop can skip-if-fresh on re-runs without doing a
+        # full HSQLDB extract just to learn the bulletin_no.
+        try:
+            doc["source_filename"] = rar.name
+            doc["source_mtime"] = rar.stat().st_mtime
+        except OSError:
+            pass
 
         (parent / CD_METADATA_FILENAME).write_text(
             json.dumps(doc, ensure_ascii=False, indent=2),
@@ -943,6 +960,33 @@ def _carry_cd_images(
     return {"moved": moved, "pdf_dups_dropped": len(dropped_pngs)}
 
 
+def _build_freshness_index(out_dir: Path) -> Dict[str, float]:
+    """Walk every existing ``PT_*/cd_metadata.json`` and build a map of
+    ``source_filename → source_mtime``. Used by the --all loop to skip
+    a CD whose .rar mtime is no newer than the recorded mtime; lets us
+    avoid a full HSQLDB re-extract just to learn the bulletin_no.
+    """
+    index: Dict[str, float] = {}
+    if not out_dir.is_dir():
+        return index
+    for fp in out_dir.glob("PT_*/cd_metadata.json"):
+        try:
+            doc = json.loads(fp.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        src = doc.get("source_filename")
+        mt = doc.get("source_mtime")
+        if not src or mt is None:
+            continue
+        # Multiple .rars may map to the same bulletin (duplicate
+        # downloads with different filenames — saw 14 such pairs in
+        # the user's archive). Keep whichever record is most recent.
+        prev = index.get(src)
+        if prev is None or mt > prev:
+            index[src] = float(mt)
+    return index
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_argv(argv)
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -950,13 +994,34 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     started = time.time()
     succeeded: List[str] = []
+    skipped: List[str] = []
     failed: List[tuple[str, str]] = []
+
+    fresh_index = {} if args.force else _build_freshness_index(args.out_dir)
 
     for rar in args.rar_paths:
         if not rar.is_file():
             logger.warning("[skip] %s: not found", rar)
             failed.append((rar.name, "not found"))
             continue
+
+        if not args.force:
+            recorded_mtime = fresh_index.get(rar.name)
+            try:
+                rar_mtime = rar.stat().st_mtime
+            except OSError:
+                rar_mtime = None
+            if (
+                recorded_mtime is not None
+                and rar_mtime is not None
+                and recorded_mtime >= rar_mtime
+            ):
+                skipped.append(rar.name)
+                logger.info(
+                    "[=] %s is fresh, skipping (use --force to override)",
+                    rar.name,
+                )
+                continue
 
         logger.info("[*] %s -> PT_<bulletin>/%s", rar.name, CD_METADATA_FILENAME)
         try:
@@ -976,8 +1041,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     duration = time.time() - started
     logger.info(
-        "Done in %.1fs: %d succeeded, %d failed",
-        duration, len(succeeded), len(failed),
+        "Done in %.1fs: %d succeeded, %d skipped, %d failed",
+        duration, len(succeeded), len(skipped), len(failed),
     )
     return 0 if not failed else 1
 

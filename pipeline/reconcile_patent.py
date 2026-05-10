@@ -793,6 +793,103 @@ def _group_by_bulletin(
     return groups
 
 
+_EMBEDDING_RECORD_FIELDS = (
+    "title_abstract_embedding",
+    "primary_figure_embedding",
+)
+
+
+def _carry_forward_embeddings(unified: Dict[str, Any], out_path: Path) -> int:
+    """Copy embedding fields from a prior unified metadata.json into the
+    fresh ``unified`` doc, matching by ``publication_no`` for records
+    and by ``image_path`` for figures.
+
+    Stage 6 writes embeddings (DINOv2 / CLIP / E5) into metadata.json
+    after reconcile finishes. If reconcile re-runs because an upstream
+    cd_metadata.json mtime bumped, we'd otherwise wipe Stage 6's work
+    on every cycle. This carry-forward keeps embeddings stable as long
+    as the records / figures they describe are still present and
+    matched. When a record's title or abstract changes the embedding
+    is preserved verbatim — that's a small staleness risk but vastly
+    cheaper than re-embedding 280k records on every reconcile sweep;
+    Stage 6 will recompute when called explicitly with --force.
+
+    Returns the number of records that received any carry-forward.
+    """
+    if not out_path.is_file():
+        return 0
+    try:
+        prior = json.loads(out_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    prior_records = prior.get("records") or []
+    if not prior_records:
+        return 0
+
+    by_pub: Dict[str, Dict[str, Any]] = {}
+    for r in prior_records:
+        pub = r.get("publication_no")
+        if pub:
+            by_pub[pub] = r
+
+    carried = 0
+    for new_rec in unified.get("records", []):
+        pub = new_rec.get("publication_no")
+        if not pub:
+            continue
+        prior_rec = by_pub.get(pub)
+        if prior_rec is None:
+            continue
+        touched = False
+        for field in _EMBEDDING_RECORD_FIELDS:
+            if field not in new_rec and field in prior_rec:
+                new_rec[field] = prior_rec[field]
+                touched = True
+        # Per-figure embeddings (DINOv2 / CLIP). Match by image_path —
+        # stable across reconciles unless the source CD TIFF / PDF PNG
+        # changed.
+        prior_figs = {
+            f.get("image_path"): f for f in (prior_rec.get("figures") or [])
+            if f.get("image_path")
+        }
+        for new_fig in new_rec.get("figures") or []:
+            ip = new_fig.get("image_path")
+            if not ip:
+                continue
+            prior_fig = prior_figs.get(ip)
+            if prior_fig is None:
+                continue
+            if "embeddings" not in new_fig and "embeddings" in prior_fig:
+                new_fig["embeddings"] = prior_fig["embeddings"]
+                touched = True
+        if touched:
+            carried += 1
+    return carried
+
+
+def _is_unified_fresh(out_path: Path, parent: Path) -> bool:
+    """True when ``out_path`` (the unified metadata.json) is at least as
+    recent as every cd_metadata.json / pdf_metadata.json sibling in the
+    same parent folder. Used by ``_process_pair`` to skip a bulletin
+    whose inputs haven't changed since the last reconcile, so ``--all``
+    re-runs are idempotent without needing ``--force``.
+    """
+    try:
+        out_mtime = out_path.stat().st_mtime
+    except OSError:
+        return False
+    for src_name in ("cd_metadata.json", "pdf_metadata.json"):
+        src = parent / src_name
+        if not src.is_file():
+            continue
+        try:
+            if src.stat().st_mtime > out_mtime:
+                return False
+        except OSError:
+            return False
+    return True
+
+
 def _process_pair(
     cd_doc: Optional[Dict[str, Any]],
     pdf_doc: Optional[Dict[str, Any]],
@@ -803,8 +900,9 @@ def _process_pair(
 
     Writes ``out_dir/PT_{Y}_{M}_{date}/metadata.json``. The parent
     folder is created if needed; existing CD / PDF metadata in the same
-    folder is left untouched. ``--force`` is required to overwrite an
-    existing unified file.
+    folder is left untouched. Returns ``{"status": "skipped", ...}``
+    when the unified output is at least as recent as both source JSONs
+    (no work needed); ``--force`` re-runs even when fresh.
 
     At least one of ``cd_doc`` / ``pdf_doc`` must be set. Returns a
     summary dict so ``main`` can report aggregate progress.
@@ -817,10 +915,20 @@ def _process_pair(
         out_dir, unified["bulletin_no"], unified["bulletin_date"],
     )
     out_path = parent / UNIFIED_METADATA_FILENAME
-    if out_path.exists() and not force:
-        raise FileExistsError(
-            f"{out_path} already exists; pass --force to overwrite"
-        )
+
+    if not force and _is_unified_fresh(out_path, parent):
+        return {
+            "status": "skipped",
+            "out": f"{parent.name}/{out_path.name}",
+            "bulletin_no": unified["bulletin_no"],
+            "stats": unified["stats"],
+        }
+
+    # Carry forward Stage 6 embedding fields from the prior unified
+    # metadata.json, if any — see _carry_forward_embeddings docstring.
+    carried = _carry_forward_embeddings(unified, out_path)
+    if carried:
+        unified.setdefault("stats", {})["embeddings_carried_forward"] = carried
 
     parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(
@@ -828,6 +936,7 @@ def _process_pair(
         encoding="utf-8",
     )
     return {
+        "status": "ok",
         "out": f"{parent.name}/{out_path.name}",
         "bulletin_no": unified["bulletin_no"],
         "stats": unified["stats"],
@@ -890,7 +999,23 @@ def main(argv: Optional[List[str]] = None) -> int:
     args.out_dir.mkdir(parents=True, exist_ok=True)
     started = time.time()
     succeeded: List[str] = []
+    skipped: List[str] = []
     failed: List[Tuple[str, str]] = []
+
+    def _record(label: str, result: Dict[str, Any]) -> None:
+        if result.get("status") == "skipped":
+            skipped.append(label)
+            logger.info(
+                "[=] %s -> %s is fresh, skipping (use --force to override)",
+                label, result["out"],
+            )
+        else:
+            succeeded.append(label)
+            logger.info(
+                "[+] %s -> %s (%d records: %s)",
+                label, result["out"], result["stats"]["records"],
+                result["stats"]["by_source_format"],
+            )
 
     if args.all_mode:
         groups = _group_by_bulletin(args.bulletins_dir)
@@ -904,12 +1029,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     docs.get("cd"), docs.get("pdf"),
                     args.out_dir, args.force,
                 )
-                succeeded.append(label)
-                logger.info(
-                    "[+] %s -> %s (%d records: %s)",
-                    label, result["out"], result["stats"]["records"],
-                    result["stats"]["by_source_format"],
-                )
+                _record(label, result)
             except Exception as exc:
                 failed.append((label, str(exc)))
                 logger.error("[!] %s: %r", label, exc)
@@ -917,20 +1037,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         label = f"{args.cd_json or '(no CD)'} + {args.pdf_json or '(no PDF)'}"
         try:
             result = _process_one(args.cd_json, args.pdf_json, args.out_dir, args.force)
-            succeeded.append(label)
-            logger.info(
-                "[+] %s -> %s (%d records: %s)",
-                label, result["out"], result["stats"]["records"],
-                result["stats"]["by_source_format"],
-            )
+            _record(label, result)
         except Exception as exc:
             failed.append((label, str(exc)))
             logger.error("[!] %s: %r", label, exc)
 
     duration = time.time() - started
     logger.info(
-        "Done in %.1fs: %d succeeded, %d failed", duration,
-        len(succeeded), len(failed),
+        "Done in %.1fs: %d succeeded, %d skipped, %d failed", duration,
+        len(succeeded), len(skipped), len(failed),
     )
     return 0 if not failed else 1
 
