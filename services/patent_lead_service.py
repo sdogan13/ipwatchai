@@ -123,6 +123,12 @@ def list_patent_leads(
 ) -> Dict[str, Any]:
     """Paginated patent leads for a category.
 
+    Plan-gated: shares the same ``daily_lead_views`` quota with trademark
+    leads. Free-plan users hit 403 'upgrade_required'; Pro/Enterprise
+    pass through. The list itself doesn't burn the daily counter — that
+    counter increments on individual lead-detail views (which patent
+    leads don't expose yet).
+
     ``watchlist_scoped=True`` restricts results to events on patents whose
     holder matches one of the user's active 'holder' patent watchlist
     rows. Useful for "leads on competitors I'm tracking".
@@ -182,6 +188,13 @@ def list_patent_leads(
     params["offset"] = offset
 
     with db_factory() as db:
+        # Plan gate: shares daily_lead_views with trademark leads. Raises
+        # 403 (upgrade_required) on free plan, 429 (daily_limit_exceeded)
+        # if the user has burned their daily counter via trademark-lead
+        # detail views.
+        from services.lead_service import _require_lead_access
+        _require_lead_access(db, str(current_user.id))
+
         cur = db.cursor()
         cur.execute(
             f"""
@@ -229,7 +242,11 @@ def get_patent_lead_summary(
     db_factory=Database,
 ) -> Dict[str, Any]:
     """Returns counts per category, optionally scoped to the user's
-    active holder watchlist for "leads I care about" metrics."""
+    active holder watchlist for "leads I care about" metrics.
+
+    Plan-gated identically to ``list_patent_leads`` — free-plan users
+    hit 403 so dashboard badges don't leak counts.
+    """
     out: Dict[str, int] = {cat: 0 for cat in LEAD_CATEGORIES}
     out["total"] = 0
 
@@ -237,6 +254,9 @@ def get_patent_lead_summary(
         raise HTTPException(status_code=401, detail="Authentication required")
 
     with db_factory() as db:
+        from services.lead_service import _require_lead_access
+        _require_lead_access(db, str(current_user.id))
+
         cur = db.cursor()
         for cat, types in LEAD_CATEGORIES.items():
             params: Dict[str, Any] = {"types": list(types)}
