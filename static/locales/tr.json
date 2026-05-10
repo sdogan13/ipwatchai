@@ -52,7 +52,6 @@
     "overview": "Genel Bakış",
     "watchlist": "Takip Listesi",
     "search": "Arama",
-    "patent_search": "Patent",
     "opposition_radar": "Opposition Radar",
     "ai_studio": "AI Studio",
     "reports": "Raporlar",
@@ -62,6 +61,9 @@
     "design_watchlist": "Tasarım Takibi"
   },
   "search": {
+    "view_trademark": "Marka",
+    "view_design": "Tasarım",
+    "view_patent": "Patent",
     "placeholder": "Marka adı girin... (ör: Nike, Apple, Samsung)",
     "button": "Ara",
     "live_search": "Agentik Arama",

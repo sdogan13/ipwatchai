@@ -52,7 +52,6 @@
     "overview": "نظرة عامة",
     "watchlist": "قائمة المراقبة",
     "search": "بحث",
-    "patent_search": "براءة",
     "opposition_radar": "Opposition Radar",
     "ai_studio": "AI Studio",
     "reports": "التقارير",
@@ -62,6 +61,9 @@
     "design_watchlist": "متابعة التصاميم"
   },
   "search": {
+    "view_trademark": "العلامة التجارية",
+    "view_design": "التصميم",
+    "view_patent": "براءة",
     "placeholder": "أدخل اسم العلامة التجارية... (مثل: Nike, Apple, Samsung)",
     "button": "بحث",
     "live_search": "البحث القائم على الوكيل",
