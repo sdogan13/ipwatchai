@@ -87,21 +87,15 @@ def _row_to_dict(row) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def _combined_watchlist_count(cur, organization_id: UUID) -> int:
-    cur.execute(
-        """
-        SELECT
-            (SELECT COUNT(*) FROM watchlist_mt
-             WHERE organization_id = %(org)s AND is_active = TRUE)
-          + (SELECT COUNT(*) FROM design_watchlist_mt
-             WHERE organization_id = %(org)s AND is_active = TRUE)
-            AS total
-        """,
-        {"org": str(organization_id)},
-    )
-    row = cur.fetchone()
-    if row is None:
-        return 0
-    return int(row.get("total") if isinstance(row, dict) else row[0])
+    """Active watchlist item count across trademarks + designs + patents.
+
+    Delegates to ``services.patent_watchlist_service.combined_watchlist_count``
+    so all three registry watchlists share one canonical count function and
+    the ``max_watchlist_items`` plan bucket stays consistent regardless of
+    which surface created the row.
+    """
+    from services.patent_watchlist_service import combined_watchlist_count
+    return combined_watchlist_count(cur, organization_id)
 
 
 def _check_watchlist_quota(db, current_user) -> None:
