@@ -21,13 +21,21 @@ quota; the underlying patent_events corpus is shared across tenants
 """
 from __future__ import annotations
 
+import csv
+import io
 import logging
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence
 from uuid import UUID
 
 from fastapi import HTTPException, status
+from fastapi.responses import StreamingResponse
 
 from database.crud import Database
+
+
+# Cap for CSV exports — keeps response size bounded for power users.
+MAX_EXPORT_LEADS = 5000
 
 
 logger = logging.getLogger("turkpatent.patent_leads")
@@ -297,3 +305,160 @@ def get_patent_lead_summary(
 
     return {"by_category": {k: v for k, v in out.items() if k != "total"},
             "total": out["total"], "watchlist_scoped": watchlist_scoped}
+
+
+# ---------------------------------------------------------------------------
+# CSV export
+# ---------------------------------------------------------------------------
+
+CSV_HEADERS_TR = [
+    "Kategori", "Olay Tipi", "Bülten No", "Bülten Tarihi",
+    "Başvuru No", "Yayın No", "Tür Kodu",
+    "Başlık", "Hak Sahibi", "Ülke", "TPE Müşteri No",
+    "IPC Sınıfları", "Başvuru Tarihi", "Yayın Tarihi", "Tescil Tarihi",
+]
+
+
+def export_patent_leads_csv(
+    *,
+    current_user,
+    category: str,
+    holder: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    watchlist_scoped: bool = False,
+    db_factory=Database,
+) -> StreamingResponse:
+    """Export patent leads as CSV. Same filters as list_patent_leads;
+    no pagination; capped at MAX_EXPORT_LEADS rows.
+
+    Gated:
+      1. Same lead access as list (free plan -> 403 upgrade_required)
+      2. Plan must have ``can_export_csv_leads = True`` (Pro/Enterprise)
+    """
+    if category not in LEAD_CATEGORIES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown lead category. Valid: {sorted(LEAD_CATEGORIES.keys())}",
+        )
+
+    event_types = list(LEAD_CATEGORIES[category])
+    where = ["e.event_type = ANY(%(types)s::text[])"]
+    params: Dict[str, Any] = {"types": event_types}
+
+    if date_from:
+        where.append("e.bulletin_date >= %(date_from)s")
+        params["date_from"] = date_from
+    if date_to:
+        where.append("e.bulletin_date <= %(date_to)s")
+        params["date_to"] = date_to
+    if holder and len(holder.strip()) >= 2:
+        where.append(
+            "EXISTS (SELECT 1 FROM patent_holders ph "
+            " WHERE ph.patent_id = p.id "
+            " AND LOWER(ph.name) LIKE LOWER(%(holder_like)s))"
+        )
+        params["holder_like"] = f"%{holder.strip()}%"
+
+    if watchlist_scoped:
+        where.append(
+            "EXISTS ("
+            "  SELECT 1 FROM patent_watchlist_mt w"
+            "  JOIN patent_holders ph ON ph.patent_id = p.id"
+            "  WHERE w.organization_id = %(org)s"
+            "    AND w.is_active = TRUE"
+            "    AND w.watch_type = 'holder'"
+            "    AND ("
+            "      (w.holder_id IS NOT NULL AND w.holder_id = ph.holder_id)"
+            "      OR (w.holder_tpe_client_id IS NOT NULL"
+            "          AND EXISTS (SELECT 1 FROM holders h"
+            "                      WHERE h.id = ph.holder_id"
+            "                        AND h.tpe_client_id = w.holder_tpe_client_id))"
+            "      OR (w.holder_name IS NOT NULL"
+            "          AND LOWER(ph.name) = LOWER(w.holder_name))"
+            "    )"
+            ")"
+        )
+        params["org"] = str(current_user.organization_id)
+
+    where_sql = " AND ".join(where)
+    params["limit"] = MAX_EXPORT_LEADS
+
+    with db_factory() as db:
+        # Plan gate (same as list) + CSV-specific plan flag.
+        # NOTE: deliberately NOT calling _log_lead_access — that table
+        # has FK lead_access_log.conflict_id -> universal_conflicts(id),
+        # which is trademark-specific. Patent leads are not in
+        # universal_conflicts so a placeholder UUID violates the FK.
+        # Audit for patents lives in patent_alerts_mt lifecycle states
+        # (acknowledged_at / resolved_at) and the worker logs.
+        from services.lead_service import _require_lead_access
+        from utils.subscription import get_plan_limit
+
+        access = _require_lead_access(db, str(current_user.id))
+        if not get_plan_limit(access["plan"], "can_export_csv_leads"):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "upgrade_required",
+                    "message": "CSV export ücretli planlarda mevcuttur.",
+                    "current_plan": access["plan"],
+                    "upgrade_context": "csv_export",
+                },
+            )
+
+        cur = db.cursor()
+        cur.execute(
+            f"""
+            SELECT {HYDRATE_COLS}
+            FROM patent_events e
+            LEFT JOIN patents p ON p.id = e.patent_id
+            WHERE {where_sql}
+              AND p.id IS NOT NULL
+            ORDER BY e.bulletin_date DESC NULLS LAST, e.id DESC
+            LIMIT %(limit)s
+            """,
+            params,
+        )
+        rows = cur.fetchall()
+
+    # Build CSV — UTF-8 BOM so Excel opens Turkish characters correctly
+    output = io.StringIO()
+    output.write("﻿")
+    writer = csv.writer(output)
+    writer.writerow(CSV_HEADERS_TR)
+
+    for r in rows:
+        rd = dict(r)
+        record_type = rd.get("record_type")
+        if hasattr(record_type, "value"):
+            record_type = record_type.value
+
+        def _iso(d):
+            return d.isoformat() if d else ""
+
+        writer.writerow([
+            category,
+            rd.get("event_type") or "",
+            rd.get("bulletin_no") or "",
+            _iso(rd.get("bulletin_date")),
+            rd.get("application_no") or "",
+            rd.get("publication_no") or "",
+            rd.get("kind_code") or "",
+            (rd.get("title") or "").replace("\n", " ").replace("\r", " "),
+            rd.get("holder_name") or "",
+            rd.get("holder_country") or "",
+            rd.get("holder_tpe_client_id") or "",
+            ", ".join(rd.get("ipc_classes") or []),
+            _iso(rd.get("application_date")),
+            _iso(rd.get("publication_date")),
+            _iso(rd.get("grant_date")),
+        ])
+
+    output.seek(0)
+    filename = f"patent_leads_{category}_{datetime.now().strftime('%Y%m%d')}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )

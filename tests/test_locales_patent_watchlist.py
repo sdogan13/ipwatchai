@@ -33,6 +33,7 @@ EXPECTED_KEYS = (
     "confirm_delete", "confirm_scan_all",
     "error_label_required", "error_holder_required", "error_reference_required",
     "error_generic",
+    "export_csv", "export_csv_title", "export_failed",
 )
 
 

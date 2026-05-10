@@ -437,6 +437,26 @@
         fetchAlerts().then(renderAlerts).then(refreshStats);
       }
     });
+
+    // CSV export — uses fetch + blob so the Authorization header rides
+    // along with the request (anchor href downloads can't carry it).
+    var alertsExportEl = $("pwl-alerts-export-csv");
+    if (alertsExportEl) alertsExportEl.addEventListener("click", function () {
+      var qs = state.alertStatusFilter ? ("?status=" + encodeURIComponent(state.alertStatusFilter)) : "";
+      authFetch(API_ALERT + "/export.csv" + qs)
+        .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.blob(); })
+        .then(function (blob) {
+          var url = URL.createObjectURL(blob);
+          var a = document.createElement("a");
+          a.href = url;
+          a.download = "patent_alerts.csv";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+        })
+        .catch(function () { toast(t("patent_watchlist.export_failed", "Export failed"), "error"); });
+    });
   }
 
   function init() {

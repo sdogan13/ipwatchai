@@ -13,13 +13,20 @@ are 404 from this user's perspective.
 """
 from __future__ import annotations
 
+import csv
+import io
 import logging
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence
 from uuid import UUID
 
 from fastapi import HTTPException, status
+from fastapi.responses import StreamingResponse
 
 from database.crud import Database
+
+
+MAX_EXPORT_ALERTS = 5000
 
 
 logger = logging.getLogger("turkpatent.patent_alerts")
@@ -215,6 +222,125 @@ def _transition(
             raise HTTPException(status_code=404, detail="Alert not found")
         db.commit()
     return _row_to_dict(row)
+
+
+CSV_ALERT_HEADERS_TR = [
+    "Uyarı ID", "Tarih", "Önem", "Durum", "Eşleşme Tipi", "Skor",
+    "Takip Etiketi", "Takip Türü",
+    "Başvuru No", "Yayın No", "Tür Kodu", "Başlık",
+    "Hak Sahibi", "Ülke", "IPC", "Bülten No", "Bülten Tarihi",
+    "Onay Tarihi", "Çözüm Tarihi", "Notlar",
+]
+
+
+def export_patent_alerts_csv(
+    *,
+    current_user,
+    status_filters: Optional[Sequence[str]] = None,
+    severity_filters: Optional[Sequence[str]] = None,
+    watchlist_item_id: Optional[UUID] = None,
+    min_score: float = 0.0,
+    db_factory=Database,
+) -> StreamingResponse:
+    """Export patent alerts as CSV. Same filter args as list_patent_alerts.
+    Org-scoped at the SQL layer; capped at MAX_EXPORT_ALERTS rows.
+
+    No plan gate — alerts are user-owned (their watchlist generated
+    them) so any authenticated user with watchlist access can export
+    their own alerts. The watchlist itself is plan-gated upstream.
+    """
+    where = ["a.organization_id = %(org)s"]
+    params: Dict[str, Any] = {"org": str(current_user.organization_id)}
+
+    if status_filters:
+        valid = [s for s in status_filters if s in ALLOWED_STATUSES]
+        if valid:
+            where.append("a.status = ANY(%(statuses)s::text[])")
+            params["statuses"] = valid
+    if severity_filters:
+        valid = [s for s in severity_filters if s in ALLOWED_SEVERITIES]
+        if valid:
+            where.append("a.severity = ANY(%(severities)s::text[])")
+            params["severities"] = valid
+    if watchlist_item_id:
+        where.append("a.watchlist_item_id = %(wl)s")
+        params["wl"] = str(watchlist_item_id)
+    if min_score and min_score > 0:
+        where.append("a.overall_similarity_score >= %(min_score)s")
+        params["min_score"] = float(min_score) / 100.0
+
+    where_sql = " AND ".join(where)
+    params["limit"] = MAX_EXPORT_ALERTS
+
+    with db_factory() as db:
+        cur = db.cursor()
+        cur.execute(
+            f"""
+            SELECT a.id::text, a.created_at, a.severity, a.status, a.match_type,
+                   a.overall_similarity_score,
+                   w.label AS watchlist_label, w.watch_type AS watchlist_watch_type,
+                   a.conflicting_application_no, a.conflicting_publication_no,
+                   a.conflicting_kind_code, a.conflicting_title,
+                   a.conflicting_holder_name, a.conflicting_holder_country,
+                   a.conflicting_ipc_classes,
+                   a.conflicting_bulletin_no, a.conflicting_bulletin_date,
+                   a.acknowledged_at, a.resolved_at, a.resolution_notes
+            FROM patent_alerts_mt a
+            LEFT JOIN patent_watchlist_mt w ON w.id = a.watchlist_item_id
+            WHERE {where_sql}
+            ORDER BY a.created_at DESC
+            LIMIT %(limit)s
+            """,
+            params,
+        )
+        rows = cur.fetchall()
+
+    # UTF-8 BOM so Excel opens TR characters correctly
+    output = io.StringIO()
+    output.write("﻿")
+    writer = csv.writer(output)
+    writer.writerow(CSV_ALERT_HEADERS_TR)
+
+    def _iso(d):
+        return d.isoformat() if d else ""
+
+    for r in rows:
+        rd = dict(r)
+        score = rd.get("overall_similarity_score") or 0
+        try:
+            score_pct = f"{float(score) * 100:.1f}%"
+        except (TypeError, ValueError):
+            score_pct = ""
+        writer.writerow([
+            rd.get("id") or "",
+            _iso(rd.get("created_at")),
+            rd.get("severity") or "",
+            rd.get("status") or "",
+            rd.get("match_type") or "",
+            score_pct,
+            rd.get("watchlist_label") or "",
+            rd.get("watchlist_watch_type") or "",
+            rd.get("conflicting_application_no") or "",
+            rd.get("conflicting_publication_no") or "",
+            rd.get("conflicting_kind_code") or "",
+            (rd.get("conflicting_title") or "").replace("\n", " ").replace("\r", " "),
+            rd.get("conflicting_holder_name") or "",
+            rd.get("conflicting_holder_country") or "",
+            ", ".join(rd.get("conflicting_ipc_classes") or []),
+            rd.get("conflicting_bulletin_no") or "",
+            _iso(rd.get("conflicting_bulletin_date")),
+            _iso(rd.get("acknowledged_at")),
+            _iso(rd.get("resolved_at")),
+            (rd.get("resolution_notes") or "").replace("\n", " "),
+        ])
+
+    output.seek(0)
+    filename = f"patent_alerts_{datetime.now().strftime('%Y%m%d')}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 def acknowledge_patent_alert(*, alert_id, notes, current_user, db_factory=Database):

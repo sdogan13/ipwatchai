@@ -271,6 +271,38 @@
       state.holder = (holderEl && holderEl.value) || "";
       load(1);
     });
+    var exportEl = $("patent-leads-export-csv");
+    if (exportEl) exportEl.addEventListener("click", function () {
+      // CSV download via direct GET — token in Authorization header is
+      // not natively supported by anchor downloads, so route through
+      // a fetch + blob to preserve the auth session.
+      var params = new URLSearchParams({ category: state.category });
+      if (state.watchlistScoped) params.set("watchlist_scoped", "true");
+      if (state.holder && state.holder.length >= 2) params.set("holder", state.holder);
+      authFetch("/api/v1/patent-leads/export.csv?" + params.toString())
+        .then(function (r) {
+          if (r.status === 403) {
+            alert(t("patent_leads.upgrade_required", "Bu özellik için yükseltme gerekli."));
+            return null;
+          }
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.blob();
+        })
+        .then(function (blob) {
+          if (!blob) return;
+          var url = URL.createObjectURL(blob);
+          var a = document.createElement("a");
+          a.href = url;
+          a.download = "patent_leads_" + state.category + ".csv";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+        })
+        .catch(function () {
+          alert(t("patent_leads.error", "Yükleme başarısız."));
+        });
+    });
     var prev = $("patent-leads-prev");
     if (prev) prev.addEventListener("click", function () { if (state.page > 1) load(state.page - 1); });
     var next = $("patent-leads-next");

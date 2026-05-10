@@ -16,6 +16,7 @@ EXPECTED_KEYS = (
     "scope_watchlist", "holder_placeholder", "refresh",
     "loading", "empty", "error", "upgrade_required",
     "bulletin_date", "total_found",
+    "export_csv", "export_csv_title",
     "event_grant_fee_lapse", "event_application_fee_lapse",
     "event_application_lapsed_or_rejected", "event_application_rejected",
     "event_assignment_recorded", "event_license_offer",

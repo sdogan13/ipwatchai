@@ -67,3 +67,25 @@ def register_patent_lead_routes(app, limiter):
             current_user=current_user,
             watchlist_scoped=watchlist_scoped,
         )
+
+    @app.get("/api/v1/patent-leads/export.csv", tags=["Patent Leads"])
+    @limiter.limit("10/minute")
+    async def export_patent_leads_csv(
+        request: Request,
+        category: str = Query(..., description="lapse|transfer|license|rejected"),
+        holder: Optional[str] = Query(None),
+        date_from: Optional[str] = Query(None),
+        date_to: Optional[str] = Query(None),
+        watchlist_scoped: bool = Query(False),
+        current_user=Depends(get_current_user),
+    ):
+        if current_user is None:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        return svc.export_patent_leads_csv(
+            current_user=current_user,
+            category=category,
+            holder=holder,
+            date_from=date_from,
+            date_to=date_to,
+            watchlist_scoped=watchlist_scoped,
+        )

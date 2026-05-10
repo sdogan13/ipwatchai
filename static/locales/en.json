@@ -1921,6 +1921,8 @@
     "upgrade_required": "Upgrade required for this feature.",
     "bulletin_date": "Bulletin",
     "total_found": "leads",
+    "export_csv": "CSV",
+    "export_csv_title": "Export current view as CSV",
     "event_grant_fee_lapse": "Grant fee lapsed",
     "event_application_fee_lapse": "Application fee lapsed",
     "event_application_lapsed_or_rejected": "Application lapsed",
@@ -1994,7 +1996,10 @@
     "error_label_required": "Label is required",
     "error_holder_required": "Holder name is required",
     "error_reference_required": "Reference query is required",
-    "error_generic": "Add failed"
+    "error_generic": "Add failed",
+    "export_csv": "CSV",
+    "export_csv_title": "Export alerts as CSV",
+    "export_failed": "Export failed"
   },
   "design_watchlist": {
     "panel_title": "Design Watchlist",
