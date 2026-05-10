@@ -5,11 +5,20 @@ Built one helper at a time. Each step adds its own test block.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from pipeline.merge_into_metadata import (
+    BACKUP_SUFFIX,
+    CD_METADATA_FILENAME,
+    MERGED_METADATA_FILENAME,
+    METADATA_FILENAME,
+    main,
     merge_pdf_record_with_cd_dossier,
     merge_to_pdf_shape,
+    parse_argv,
     synthesize_cd_record_in_pdf_shape,
 )
 from pipeline.merge_into_metadata import (
@@ -23,6 +32,7 @@ from pipeline.merge_into_metadata import (
     _index_existing_embeddings,
     _merge_design_views,
     _merge_designs,
+    _process_folder,
 )
 
 
@@ -667,3 +677,234 @@ def test_attach_existing_embeddings_no_op_on_empty_index():
     assert _attach_existing_embeddings(merged, {}) == 0
     # Original dict unchanged
     assert "embeddings" not in merged["records"][0]["designs"][0]["views"][0]
+
+
+# ---------------------------------------------------------------------------
+# CLI — parse_argv
+# ---------------------------------------------------------------------------
+
+def _seed_folder(tmp_path: Path, name: str = "TS_240_2016-03-09",
+                  *, with_pdf: bool = True, with_cd: bool = True,
+                  with_merged: bool = False) -> Path:
+    """Build a TS folder for CLI tests with the requested source files."""
+    folder = tmp_path / name
+    folder.mkdir()
+    if with_pdf:
+        pdf = _minimal_pdf_doc()
+        pdf["records"] = [_real_pdf_record_2016_01059()]
+        (folder / METADATA_FILENAME).write_text(
+            json.dumps(pdf, ensure_ascii=False), encoding="utf-8",
+        )
+    if with_cd:
+        cd = _minimal_cd_doc()
+        cd["dossiers"] = [_real_cd_dossier_2016_01059()]
+        (folder / CD_METADATA_FILENAME).write_text(
+            json.dumps(cd, ensure_ascii=False), encoding="utf-8",
+        )
+    if with_merged:
+        (folder / MERGED_METADATA_FILENAME).write_text(
+            '{"placeholder": true}', encoding="utf-8",
+        )
+    return folder
+
+
+def test_parse_argv_issue_and_all_mutually_exclusive(tmp_path, capsys):
+    _seed_folder(tmp_path)
+    with pytest.raises(SystemExit):
+        parse_argv([
+            "--issue", "TS_240_2016-03-09",
+            "--all",
+            "--bulletins-root", str(tmp_path),
+        ])
+    assert "mutually exclusive" in capsys.readouterr().err
+
+
+def test_parse_argv_requires_issue_or_all(tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        parse_argv(["--bulletins-root", str(tmp_path)])
+    assert "provide --issue or --all" in capsys.readouterr().err
+
+
+def test_parse_argv_all_no_ts_folders_errors(tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        parse_argv(["--all", "--bulletins-root", str(tmp_path)])
+    assert "no TS_* folders" in capsys.readouterr().err
+
+
+def test_parse_argv_default_flags(tmp_path):
+    _seed_folder(tmp_path)
+    args = parse_argv([
+        "--issue", "TS_240_2016-03-09",
+        "--bulletins-root", str(tmp_path),
+    ])
+    assert args.backup is True               # default: backup enabled
+    assert args.drop_merged_metadata is True  # default: drop redundant file
+    assert args.preserve_embeddings is True   # default: carry embeddings
+
+
+def test_parse_argv_flag_negations(tmp_path):
+    _seed_folder(tmp_path)
+    args = parse_argv([
+        "--issue", "TS_240_2016-03-09",
+        "--bulletins-root", str(tmp_path),
+        "--no-backup",
+        "--keep-merged-metadata",
+        "--no-preserve-embeddings",
+    ])
+    assert args.backup is False
+    assert args.drop_merged_metadata is False
+    assert args.preserve_embeddings is False
+
+
+# ---------------------------------------------------------------------------
+# CLI — _process_folder + main
+# ---------------------------------------------------------------------------
+
+def test_process_folder_both_writes_merged_into_metadata(tmp_path):
+    folder = _seed_folder(tmp_path, with_pdf=True, with_cd=True)
+    result = _process_folder(folder, backup=True,
+                              drop_merged_metadata=True,
+                              preserve_embeddings=True)
+    assert result["merge_source"] == "both"
+    assert result["record_count"] == 1
+    out = json.loads((folder / METADATA_FILENAME).read_text(encoding="utf-8"))
+    # CD wins on registration_no
+    assert out["records"][0]["registration_no"] == "2016 01059"
+    # Merge metadata tags
+    assert out["merge_source"] == "both"
+    assert "merged_at" in out
+
+
+def test_process_folder_writes_backup(tmp_path):
+    folder = _seed_folder(tmp_path)
+    pdf_path = folder / METADATA_FILENAME
+    original_content = pdf_path.read_text(encoding="utf-8")
+
+    _process_folder(folder, backup=True, drop_merged_metadata=False,
+                     preserve_embeddings=True)
+
+    backup = folder / METADATA_FILENAME.replace(".json", "" + BACKUP_SUFFIX)
+    assert backup.is_file()
+    assert backup.read_text(encoding="utf-8") == original_content
+
+
+def test_process_folder_no_backup_skips_bak(tmp_path):
+    folder = _seed_folder(tmp_path)
+    _process_folder(folder, backup=False, drop_merged_metadata=False,
+                     preserve_embeddings=True)
+    backup = folder / METADATA_FILENAME.replace(".json", "" + BACKUP_SUFFIX)
+    assert not backup.exists()
+
+
+def test_process_folder_drops_merged_metadata(tmp_path):
+    folder = _seed_folder(tmp_path, with_merged=True)
+    assert (folder / MERGED_METADATA_FILENAME).is_file()
+    _process_folder(folder, backup=False, drop_merged_metadata=True,
+                     preserve_embeddings=True)
+    assert not (folder / MERGED_METADATA_FILENAME).exists()
+
+
+def test_process_folder_keeps_merged_metadata_when_flag_off(tmp_path):
+    folder = _seed_folder(tmp_path, with_merged=True)
+    _process_folder(folder, backup=False, drop_merged_metadata=False,
+                     preserve_embeddings=True)
+    assert (folder / MERGED_METADATA_FILENAME).is_file()
+
+
+def test_process_folder_cd_only_synthesizes(tmp_path):
+    """CD-only folder gets a synthesized PDF-shape metadata.json (the
+    real fix for the 14 missing-from-DB folders)."""
+    folder = _seed_folder(tmp_path, with_pdf=False, with_cd=True)
+    result = _process_folder(folder, backup=True,
+                              drop_merged_metadata=False,
+                              preserve_embeddings=True)
+    assert result["merge_source"] == "cd_only"
+    assert (folder / METADATA_FILENAME).is_file()
+    out = json.loads((folder / METADATA_FILENAME).read_text(encoding="utf-8"))
+    assert out["records"][0]["application_no"] == "2016/01059"
+
+
+def test_process_folder_pdf_only_passthrough(tmp_path):
+    folder = _seed_folder(tmp_path, with_pdf=True, with_cd=False)
+    result = _process_folder(folder, backup=True,
+                              drop_merged_metadata=False,
+                              preserve_embeddings=True)
+    assert result["merge_source"] == "pdf_only"
+
+
+def test_process_folder_skip_when_neither_source(tmp_path):
+    """Empty TS folder — no metadata.json or cd_metadata.json. Skip."""
+    folder = tmp_path / "TS_999_2099-01-01"
+    folder.mkdir()
+    result = _process_folder(folder, backup=True,
+                              drop_merged_metadata=False,
+                              preserve_embeddings=True)
+    assert result["skipped"] is True
+    assert not (folder / METADATA_FILENAME).exists()
+
+
+def test_process_folder_preserves_embeddings(tmp_path):
+    """Existing per-view embeddings carry through to the merged file
+    via image_path lookup."""
+    folder = _seed_folder(tmp_path)
+    pdf_path = folder / METADATA_FILENAME
+    pdf_doc = json.loads(pdf_path.read_text(encoding="utf-8"))
+    pdf_doc["records"][0]["designs"][0]["views"][0]["embeddings"] = {
+        "dinov2_vitl14": [0.5] * 1024,
+    }
+    pdf_path.write_text(json.dumps(pdf_doc, ensure_ascii=False),
+                         encoding="utf-8")
+
+    result = _process_folder(folder, backup=False,
+                              drop_merged_metadata=False,
+                              preserve_embeddings=True)
+    assert result["embeddings_attached"] == 1
+
+    out = json.loads(pdf_path.read_text(encoding="utf-8"))
+    assert "embeddings" in out["records"][0]["designs"][0]["views"][0]
+
+
+def test_process_folder_no_preserve_embeddings_drops_them(tmp_path):
+    folder = _seed_folder(tmp_path)
+    pdf_path = folder / METADATA_FILENAME
+    pdf_doc = json.loads(pdf_path.read_text(encoding="utf-8"))
+    pdf_doc["records"][0]["designs"][0]["views"][0]["embeddings"] = {
+        "dinov2_vitl14": [0.5] * 1024,
+    }
+    pdf_path.write_text(json.dumps(pdf_doc, ensure_ascii=False),
+                         encoding="utf-8")
+
+    result = _process_folder(folder, backup=False,
+                              drop_merged_metadata=False,
+                              preserve_embeddings=False)
+    assert result["embeddings_attached"] == 0
+
+    out = json.loads(pdf_path.read_text(encoding="utf-8"))
+    # Pre-existing embeddings dropped (not attached to merged output)
+    assert "embeddings" not in out["records"][0]["designs"][0]["views"][0]
+
+
+def test_main_all_processes_every_ts_folder(tmp_path):
+    _seed_folder(tmp_path, "TS_240_2016-03-09")
+    _seed_folder(tmp_path, "TS_241_2016-03-24", with_pdf=False, with_cd=True)
+    rc = main(["--all", "--bulletins-root", str(tmp_path), "--no-backup"])
+    assert rc == 0
+    # Both folders now have metadata.json (one merged BOTH, one synthesized cd_only)
+    assert (tmp_path / "TS_240_2016-03-09" / METADATA_FILENAME).is_file()
+    assert (tmp_path / "TS_241_2016-03-24" / METADATA_FILENAME).is_file()
+
+
+def test_main_returns_1_on_per_folder_exception(tmp_path, monkeypatch):
+    """If _process_folder raises for some folder, main reports rc=1 but
+    keeps processing the rest."""
+    _seed_folder(tmp_path, "TS_240_2016-03-09")
+
+    real = _process_folder
+    def boom(folder, **kw):
+        if "240" in folder.name:
+            raise RuntimeError("simulated parse failure")
+        return real(folder, **kw)
+    monkeypatch.setattr("pipeline.merge_into_metadata._process_folder", boom)
+
+    rc = main(["--all", "--bulletins-root", str(tmp_path)])
+    assert rc == 1

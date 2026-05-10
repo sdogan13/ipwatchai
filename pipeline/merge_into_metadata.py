@@ -27,12 +27,16 @@ Built incrementally. Each helper has its own unit-test block.
 
 from __future__ import annotations
 
+import argparse
+import json
 import logging
 import re
 import sys
+import time
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -592,3 +596,229 @@ def _attach_existing_embeddings(
                     v["embeddings"] = embeddings_by_image_path[ip]
                     attached += 1
     return attached
+
+
+# ---------------------------------------------------------------------------
+# CLI entrypoint
+# ---------------------------------------------------------------------------
+
+_LOCAL_DEFAULT_BULLETINS_DIR = PROJECT_ROOT / "bulletins" / "Tasarim"
+METADATA_FILENAME = "metadata.json"
+CD_METADATA_FILENAME = "cd_metadata.json"
+MERGED_METADATA_FILENAME = "merged_metadata.json"
+BACKUP_SUFFIX = "_pre_merge.json.bak"
+
+
+@dataclass
+class CLIArgs:
+    issue_folders: List[Path]
+    backup: bool
+    drop_merged_metadata: bool
+    preserve_embeddings: bool
+
+
+def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
+    """Parse CLI arguments for the metadata-merger entrypoint."""
+    parser = argparse.ArgumentParser(
+        prog="merge_into_metadata",
+        description=(
+            "Merge cd_metadata.json into metadata.json (PDF-shape) so "
+            "ingest_designs and embeddings_tasarim pick up CD-prefered "
+            "field values + previously-missing CD-only folders."
+        ),
+    )
+    parser.add_argument(
+        "--issue",
+        type=str,
+        default=None,
+        help="Single issue folder name under --bulletins-root.",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Process every TS_*/ folder under --bulletins-root.",
+    )
+    parser.add_argument(
+        "--bulletins-root",
+        type=Path,
+        default=_LOCAL_DEFAULT_BULLETINS_DIR,
+        help=f"Bulletins root (default: {_LOCAL_DEFAULT_BULLETINS_DIR}).",
+    )
+    parser.add_argument(
+        "--no-backup",
+        action="store_true",
+        help="Skip writing metadata_pre_merge.json.bak before overwrite "
+             "(default: backup is written for safety).",
+    )
+    parser.add_argument(
+        "--keep-merged-metadata",
+        action="store_true",
+        help="Leave the now-redundant merged_metadata.json on disk "
+             "(default: delete it after a successful write — metadata.json "
+             "is the canonical merged file going forward).",
+    )
+    parser.add_argument(
+        "--no-preserve-embeddings",
+        action="store_true",
+        help="Drop existing per-view embeddings during merge (default: "
+             "preserve them by image_path lookup so stage 5 only embeds "
+             "newly-added views).",
+    )
+    ns = parser.parse_args(argv)
+
+    if ns.all and ns.issue:
+        parser.error("--issue and --all are mutually exclusive")
+
+    if ns.all:
+        if not ns.bulletins_root.is_dir():
+            parser.error(f"--bulletins-root not found: {ns.bulletins_root}")
+        folders = sorted(
+            p for p in ns.bulletins_root.glob("TS_*") if p.is_dir()
+        )
+        if not folders:
+            parser.error(f"--all matched no TS_* folders in {ns.bulletins_root}")
+        return CLIArgs(
+            issue_folders=folders,
+            backup=not ns.no_backup,
+            drop_merged_metadata=not ns.keep_merged_metadata,
+            preserve_embeddings=not ns.no_preserve_embeddings,
+        )
+
+    if ns.issue:
+        folder = ns.bulletins_root / ns.issue
+        if not folder.is_dir():
+            parser.error(f"issue folder not found: {folder}")
+        return CLIArgs(
+            issue_folders=[folder],
+            backup=not ns.no_backup,
+            drop_merged_metadata=not ns.keep_merged_metadata,
+            preserve_embeddings=not ns.no_preserve_embeddings,
+        )
+
+    parser.error("provide --issue or --all")
+    raise SystemExit(2)  # unreachable
+
+
+def _load_json_or_none(path: Path) -> Optional[Dict[str, Any]]:
+    """Read a JSON file if it exists; return ``None`` if it doesn't.
+
+    Raises any JSON-parse error so the caller surfaces it as a per-folder
+    failure rather than silently skipping a corrupt file.
+    """
+    if not path.is_file():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _process_folder(
+    folder: Path,
+    *,
+    backup: bool,
+    drop_merged_metadata: bool,
+    preserve_embeddings: bool,
+) -> Dict[str, Any]:
+    """Merge cd_metadata.json + metadata.json -> metadata.json (PDF-shape).
+
+    Returns ``{"folder", "merge_source", "embeddings_attached",
+    "skipped"}``. ``skipped=True`` only when the folder has neither
+    source file (nothing to merge).
+    """
+    pdf_path     = folder / METADATA_FILENAME
+    cd_path      = folder / CD_METADATA_FILENAME
+    merged_path  = folder / MERGED_METADATA_FILENAME
+
+    pdf_doc = _load_json_or_none(pdf_path)
+    cd_doc  = _load_json_or_none(cd_path)
+
+    if pdf_doc is None and cd_doc is None:
+        logger.warning(
+            "[skip] %s: neither metadata.json nor cd_metadata.json present",
+            folder.name,
+        )
+        return {"folder": folder.name, "skipped": True}
+
+    existing_embeddings: Dict[str, Dict[str, Any]] = {}
+    if preserve_embeddings and pdf_doc is not None:
+        existing_embeddings = _index_existing_embeddings(pdf_doc)
+
+    merged = merge_to_pdf_shape(pdf_doc=pdf_doc, cd_doc=cd_doc)
+    attached = _attach_existing_embeddings(merged, existing_embeddings)
+
+    if backup and pdf_path.is_file():
+        backup_path = pdf_path.with_name(METADATA_FILENAME.replace(".json", "") + BACKUP_SUFFIX)
+        # Atomic replace via rename — pdf_path becomes the .bak; we'll write
+        # the merged content to a fresh metadata.json below.
+        pdf_path.rename(backup_path)
+
+    pdf_path.write_text(
+        json.dumps(merged, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    if drop_merged_metadata and merged_path.is_file():
+        merged_path.unlink()
+
+    return {
+        "folder":              folder.name,
+        "merge_source":        merged.get("merge_source", "unknown"),
+        "record_count":        merged.get("record_count", 0),
+        "embeddings_attached": attached,
+        "skipped":             False,
+    }
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    """CLI entrypoint. Returns 0 unless any folder raised an exception.
+
+    A skipped folder (neither metadata.json nor cd_metadata.json) is NOT
+    a failure — it's an idempotent no-op for any TS folder that's an
+    empty stub.
+    """
+    args = parse_argv(argv)
+
+    started = time.time()
+    succeeded: List[str] = []
+    skipped:   List[str] = []
+    failed:    List[Tuple[str, str]] = []
+    by_source: Dict[str, int] = {"pdf_only": 0, "cd_only": 0, "both": 0}
+
+    for folder in args.issue_folders:
+        try:
+            result = _process_folder(
+                folder,
+                backup=args.backup,
+                drop_merged_metadata=args.drop_merged_metadata,
+                preserve_embeddings=args.preserve_embeddings,
+            )
+        except Exception as e:
+            failed.append((folder.name, repr(e)))
+            logger.error("[!] %s: %r", folder.name, e)
+            continue
+
+        if result.get("skipped"):
+            skipped.append(folder.name)
+            continue
+
+        succeeded.append(folder.name)
+        src = result["merge_source"]
+        by_source[src] = by_source.get(src, 0) + 1
+        logger.info(
+            "[+] %s: merge=%s, records=%d, embeddings_carried=%d",
+            folder.name, src, result["record_count"],
+            result["embeddings_attached"],
+        )
+
+    duration = time.time() - started
+    logger.info(
+        "Done in %.1fs: %d succeeded (cd_only=%d pdf_only=%d both=%d), "
+        "%d skipped, %d failed",
+        duration, len(succeeded),
+        by_source.get("cd_only", 0), by_source.get("pdf_only", 0),
+        by_source.get("both", 0),
+        len(skipped), len(failed),
+    )
+    return 0 if not failed else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
