@@ -110,12 +110,20 @@ def register_system_routes(app, settings):
                 except Exception:
                     patent_count = 0
 
+                cografi_count = 0
+                try:
+                    cur.execute("SELECT COUNT(*) FROM cografi_records")
+                    cografi_count = cur.fetchone()["count"]
+                except Exception:
+                    cografi_count = 0
+
                 return {
                     "status": "operational",
                     "statistics": {
                         "total_trademarks": trademark_count,
                         "total_designs": design_count,
                         "total_patents": patent_count,
+                        "total_cografi": cografi_count,
                         "last_bulletin_date": last_bulletin,
                     },
                     "timestamp": datetime.utcnow().isoformat(),
@@ -127,6 +135,7 @@ def register_system_routes(app, settings):
                     "total_trademarks": 0,
                     "total_designs": 0,
                     "total_patents": 0,
+                    "total_cografi": 0,
                     "last_bulletin_date": None,
                 },
                 "timestamp": datetime.utcnow().isoformat(),

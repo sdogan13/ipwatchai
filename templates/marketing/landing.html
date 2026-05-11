@@ -946,7 +946,7 @@
                     </button>
                 </div>
             </div>
-            <p x-show="!searchLoading" class="mt-2 text-center text-sm px-1" style="color:var(--color-text-muted)" x-text="t('landing.search_hint')"></p>
+            <p x-show="!searchLoading" class="mt-2 text-center text-sm px-1" style="color:var(--color-text-muted)" x-text="analysisHint()"></p>
             <div x-show="searchLoading" x-cloak class="mt-2 flex items-center justify-center gap-2 text-sm font-medium" style="color:var(--color-primary)">
                 <span class="animate-pulse">&#9203;</span>
                 <span x-text="t('landing.ai_analysis_started')">AI analizi baslatildi...</span>
@@ -1489,9 +1489,9 @@
         </div>
 
         <!-- Live DB Count -->
-        <div x-show="dbCount > 0" x-cloak class="flex items-center justify-center gap-2 mt-8 text-sm" style="color:var(--color-text-muted)">
+        <div x-show="dbCountForView() > 0" x-cloak class="flex items-center justify-center gap-2 mt-8 text-sm" style="color:var(--color-text-muted)">
             <span class="inline-block w-2 h-2 rounded-full animate-pulse" style="background:#22c55e"></span>
-            <span x-text="dbCount.toLocaleString() + ' ' + t('landing.stats_db_records')"></span>
+            <span x-text="dbCountForView().toLocaleString() + ' ' + dbCountLabel()"></span>
         </div>
     </div>
 </section>
@@ -2751,6 +2751,6 @@
 <script src="/static/js/utils/toast.js?v=32"></script>
 <script src="/static/js/utils/upgrade-modal.js?v=10"></script>
 <script src="/static/js/components/score-badge.js?v=33"></script>
-<script src="/static/js/marketing/landing.js?v=69"></script>
+<script src="/static/js/marketing/landing.js?v=70"></script>
 </body>
 </html>

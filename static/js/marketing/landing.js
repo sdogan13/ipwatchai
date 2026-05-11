@@ -144,8 +144,15 @@ function landing() {
         regLoading: false,
         regError: '',
 
-        // Stats
+        // Stats — per-registry corpus sizes pulled from /api/v1/status.
+        // `dbCount` keeps the trademark size as the default landing
+        // headline; the per-registry counts power the registry-aware
+        // stats line under the search box (dbCountLine).
         dbCount: 0,
+        dbTrademarkCount: 0,
+        dbDesignCount: 0,
+        dbPatentCount: 0,
+        dbCografiCount: 0,
 
         // Education state
         educationLoading: false,
@@ -253,10 +260,51 @@ function landing() {
                 .then(function (res) { return res.ok ? res.json() : null; })
                 .then(function (data) {
                     if (data && data.statistics) {
-                        self.dbCount = data.statistics.total_trademarks || 0;
+                        self.dbTrademarkCount = data.statistics.total_trademarks || 0;
+                        self.dbDesignCount = data.statistics.total_designs || 0;
+                        self.dbPatentCount = data.statistics.total_patents || 0;
+                        self.dbCografiCount = data.statistics.total_cografi || 0;
+                        self.dbCount = self.dbTrademarkCount;
                     }
                 })
                 .catch(function () { /* silent */ });
+        },
+
+        // Per-registry "analysis dimensions" tagline shown under the
+        // search box. Mirrors the dashboard's analysis_hint keys per
+        // subview so the landing visually echoes which corpus the
+        // current tab will search and how it scores matches.
+        analysisHint: function () {
+            switch (this.searchView) {
+                case 'patent':  return this.t('patent_search.analysis_hint');
+                case 'design':  return this.t('design_search.analysis_hint');
+                case 'cografi': return this.t('cografi_search.analysis_hint');
+                case 'trademark':
+                default:        return this.t('landing.search_hint');
+            }
+        },
+
+        // Per-registry "X records being analyzed live" line. Picks the
+        // right corpus count + the right registry-shaped label so the
+        // headline updates as the tab changes.
+        dbCountForView: function () {
+            switch (this.searchView) {
+                case 'patent':  return this.dbPatentCount;
+                case 'design':  return this.dbDesignCount;
+                case 'cografi': return this.dbCografiCount;
+                case 'trademark':
+                default:        return this.dbTrademarkCount;
+            }
+        },
+
+        dbCountLabel: function () {
+            switch (this.searchView) {
+                case 'patent':  return this.t('patent_search.stats_db_records');
+                case 'design':  return this.t('design_search.stats_db_records');
+                case 'cografi': return this.t('cografi_search.stats_db_records');
+                case 'trademark':
+                default:        return this.t('landing.stats_db_records');
+            }
         },
 
         // ==================== EDUCATION ====================
