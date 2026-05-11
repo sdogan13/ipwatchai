@@ -41,19 +41,14 @@
     </div>
 
     <!-- ============================================
-         Shared search bar + image dropzone — lives
-         outside the registry x-show blocks so the
-         text query + uploaded image persist visually
-         when switching tabs (mirrors the landing-page
-         UX). Placeholder + dropzone caption swap per
-         registry via the active searchView. Each
-         registry's per-tab "Ara" button still reads
-         these inputs by id (#search-input, #search-image),
-         so the existing patent/design/cografi drivers
-         keep working without rewires.
+         Shared search bar + image dropzone — sits flat
+         (no outer card chrome) above the registry x-show
+         blocks so the text query + uploaded image persist
+         visually when switching tabs and feel like one
+         continuous search engine with the filter card
+         below, matching the landing-page layout.
          ============================================ -->
-    <div class="rounded-xl shadow-sm border p-5 mb-4"
-         style="background:var(--color-bg-card);border-color:var(--color-border)">
+    <div class="mb-3">
 
         <!-- Text Input (shared) -->
         <div class="max-w-full mx-auto mb-3 relative" @click.outside="showSearchHistory = false">
