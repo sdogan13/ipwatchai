@@ -456,7 +456,25 @@ Quota is shared across all four registries (trademarks + designs + patents + cog
 
 **Post-ingest hook**: `pipeline/ingest_cografi.py --all` calls `trigger_cografi_watchlist_scan` after a successful run, scoping each scan to the upserted record_ids only (cost is O(watchlist_count × new_ids), not O(watchlist_count × corpus_size)). `--skip-watchlist-scan` opts out for backfills.
 
-**Notification delivery** (email digest + webhook) is the F3 follow-up — the schema (F1) already has `email_sent` + `webhook_sent` flags + partial pending-delivery indexes, the scanner properly inserts alerts; the digest worker that ships them mirrors the existing patent digest pattern in `notifications/service.py`.
+**Notification delivery — `notifications/service.py` additions (Phase F3).** Mirrors the patent digest pattern:
+
+- `EmailService.send_cografi_digest(...)` — bilingual TR/EN HTML digest. Cografi-specific columns (watch label, name + region + gi_type + bulletin date, per-watch_type Eşleşme summary, score, severity). Critical-count subject prefix.
+- `WebhookService.send_cografi_alert_webhook(...)` — `event: "cografi.alert.new"` JSON payload. Discriminating `watched.watch_type` lets integrators branch cleanly across the 4 watch types (holder / reference / region / lifecycle) without parsing free-text labels.
+- `NotificationWorker.process_cografi_immediate_webhooks()` — every minute, pulls unsent webhook alerts ordered by severity + score, fires one POST per alert via `WebhookService.send_cografi_alert_webhook`, marks `webhook_sent=TRUE` on success. Failures stay unsent so the next run retries.
+- `NotificationWorker.process_cografi_daily_digest()` / `process_cografi_weekly_digest()` — daily 09:10 / weekly Monday 09:10 (5-min stagger after the patent runs to spread SMTP load). Selects unsent email alerts grouped by user; sends one digest per user; marks `email_sent=TRUE` per alert.
+- CLI entries: `python -m notifications.service [cografi-daily-digest | cografi-weekly-digest | cografi-webhooks]` for one-shot manual runs.
+
+```powershell
+# Run the worker (registers all four registries' schedules):
+python -m notifications.service worker
+
+# One-shot manual runs (cron / debugging):
+python -m notifications.service cografi-daily-digest
+python -m notifications.service cografi-weekly-digest
+python -m notifications.service cografi-webhooks
+```
+
+Empirical: 14 new pure-helper tests pass (severity colour mapping, no-alerts short-circuit, bilingual phrasing, watch_type column variation, webhook payload shape across all 4 watch_types). End-to-end smoke against the live empty-inbox DB confirms both CLI commands complete cleanly and report "nothing to send".
 
 Per-PDF quality verifier built into the extractor cross-checks Section 2 index counts against the parsed body for every bulletin during `--all`; structural problems are surfaced as `[?]` warnings so a regression is loud.
 
