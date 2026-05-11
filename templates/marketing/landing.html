@@ -397,7 +397,7 @@
                     @keydown.escape="showSearchHistory = false"
                     @click="if(searchHistory.length) showSearchHistory = true"
                     @input="showSearchHistory = (searchQuery.trim().length > 0 && filteredSearchHistory().length > 0); clearRiskReportState(); if(!searchQuery.trim() && !selectedImage) { searchResults = []; searchError = ''; expandedResult = null; }"
-                    :placeholder="t('landing.search_placeholder')"
+                    :placeholder="searchPlaceholder()"
                     class="flex-1 px-4 py-4 text-base outline-none min-w-0"
                     style="background:transparent;color:var(--color-text-primary)"
                     autocomplete="off"
@@ -456,8 +456,8 @@
                             </svg>
                         </div>
                         <div class="flex-1 min-w-0">
-                            <p class="text-sm font-medium" style="color:var(--color-text-primary)" x-text="t('landing.drop_logo_title')">Logo Yukle</p>
-                            <p class="text-xs" style="color:var(--color-text-muted)" x-text="t('landing.drop_logo_hint')">PNG, JPG, WEBP - max 5MB</p>
+                            <p class="text-sm font-medium" style="color:var(--color-text-primary)" x-text="imageDropTitle()">Logo Yukle</p>
+                            <p class="text-xs" style="color:var(--color-text-muted)" x-text="imageDropHint()">PNG, JPG, WEBP - max 5MB</p>
                         </div>
                         <svg class="w-5 h-5 flex-shrink-0" style="color:var(--color-text-muted)" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
@@ -627,22 +627,40 @@
              on the authenticated dashboard.
              ============================================ -->
 
-        <!-- Patent filters -->
-        <div x-show="searchView === 'patent'" x-cloak class="max-w-2xl mx-auto mb-5 rounded-xl p-4 space-y-3"
-             style="background:var(--color-bg-card);border:1px solid var(--color-border)">
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <!-- Patent filters — collapsible button bar matching the Nice
+             class finder style. The bar shows a "Filtreler" label or
+             a summary of the active filters as chips; clicking opens
+             the body where users can fill IPC / holder / dates / kind. -->
+        <div x-show="searchView === 'patent'" x-cloak>
+        <div class="max-w-2xl mx-auto mb-5" x-data="{ patentFiltersOpen: false }">
+            <button @click="patentFiltersOpen = !patentFiltersOpen"
+                    data-testid="landing-patent-filters-toggle"
+                    class="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all"
+                    :style="'background:' + (patentFiltersOpen || patentIpc || patentHolder || patentDateFrom || patentDateTo || patentKindCode ? 'var(--color-primary-light)' : 'var(--color-bg-card)') + ';border:1px solid ' + (patentFiltersOpen ? 'var(--color-primary)' : 'var(--color-border)') + ';color:' + (patentFiltersOpen || patentIpc || patentHolder || patentDateFrom || patentDateTo || patentKindCode ? 'var(--color-primary)' : 'var(--color-text-secondary)')">
+                <div class="flex items-center gap-2 min-w-0 flex-1">
+                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/></svg>
+                    <span x-show="!(patentIpc || patentHolder || patentDateFrom || patentDateTo || patentKindCode)" x-text="t('search.patent_filters_toggle')"></span>
+                    <div x-show="patentIpc || patentHolder || patentDateFrom || patentDateTo || patentKindCode" x-cloak class="flex items-center flex-wrap gap-1.5 min-w-0">
+                        <template x-if="patentIpc"><span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold text-white" style="background:var(--color-primary)"><span x-text="'IPC: ' + patentIpc"></span><button @click.stop="patentIpc=''" class="hover:opacity-70 leading-none">&times;</button></span></template>
+                        <template x-if="patentHolder"><span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold text-white" style="background:var(--color-primary)"><span x-text="patentHolder"></span><button @click.stop="patentHolder=''" class="hover:opacity-70 leading-none">&times;</button></span></template>
+                        <template x-if="patentKindCode"><span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold text-white" style="background:var(--color-primary)"><span x-text="patentKindCode"></span><button @click.stop="patentKindCode=''" class="hover:opacity-70 leading-none">&times;</button></span></template>
+                        <template x-if="patentDateFrom || patentDateTo"><span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold text-white" style="background:var(--color-primary)"><span x-text="(patentDateFrom || '…') + ' → ' + (patentDateTo || '…')"></span><button @click.stop="patentDateFrom=''; patentDateTo=''" class="hover:opacity-70 leading-none">&times;</button></span></template>
+                    </div>
+                </div>
+                <svg class="w-4 h-4 shrink-0 transition-transform" :class="patentFiltersOpen ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </button>
+            <div x-show="patentFiltersOpen" x-cloak x-collapse class="mt-2 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-2 gap-3"
+                 style="border:1px solid var(--color-border);background:var(--color-bg-card)">
                 <label class="flex flex-col gap-1 text-left">
                     <span class="text-xs font-medium" style="color:var(--color-text-secondary)" x-text="t('search.ipc_label')">IPC Sınıfı</span>
-                    <input type="text" x-model="patentIpc"
-                           :placeholder="t('search.ipc_placeholder')"
+                    <input type="text" x-model="patentIpc" :placeholder="t('search.ipc_placeholder')"
                            data-testid="landing-patent-ipc"
                            class="px-3 py-2 rounded-lg text-sm outline-none"
                            style="border:1px solid var(--color-border);background:var(--color-bg-input);color:var(--color-text-primary)">
                 </label>
                 <label class="flex flex-col gap-1 text-left">
                     <span class="text-xs font-medium" style="color:var(--color-text-secondary)" x-text="t('search.holder_label')">Hak Sahibi</span>
-                    <input type="text" x-model="patentHolder"
-                           :placeholder="t('search.holder_placeholder')"
+                    <input type="text" x-model="patentHolder" :placeholder="t('search.holder_placeholder')"
                            data-testid="landing-patent-holder"
                            class="px-3 py-2 rounded-lg text-sm outline-none"
                            style="border:1px solid var(--color-border);background:var(--color-bg-input);color:var(--color-text-primary)">
@@ -663,44 +681,165 @@
                 </label>
                 <label class="flex flex-col gap-1 text-left sm:col-span-2">
                     <span class="text-xs font-medium" style="color:var(--color-text-secondary)" x-text="t('search.kind_code_label')">Tür Kodu</span>
-                    <input type="text" x-model="patentKindCode"
-                           :placeholder="t('search.kind_code_placeholder')"
+                    <input type="text" x-model="patentKindCode" :placeholder="t('search.kind_code_placeholder')"
                            data-testid="landing-patent-kind-code"
                            class="px-3 py-2 rounded-lg text-sm outline-none"
                            style="border:1px solid var(--color-border);background:var(--color-bg-input);color:var(--color-text-primary)">
                 </label>
             </div>
         </div>
-
-        <!-- Design filters -->
-        <div x-show="searchView === 'design'" x-cloak class="max-w-2xl mx-auto mb-5 rounded-xl p-4"
-             style="background:var(--color-bg-card);border:1px solid var(--color-border)">
-            <label class="flex flex-col gap-1 text-left">
-                <span class="text-xs font-medium" style="color:var(--color-text-secondary)" x-text="t('search.locarno_label')">Locarno Sınıfı</span>
-                <input type="text" x-model="designLocarno"
-                       :placeholder="t('search.locarno_placeholder')"
-                       data-testid="landing-design-locarno"
-                       class="px-3 py-2 rounded-lg text-sm outline-none"
-                       style="border:1px solid var(--color-border);background:var(--color-bg-input);color:var(--color-text-primary)">
-            </label>
         </div>
 
-        <!-- Cografi filters -->
-        <div x-show="searchView === 'cografi'" x-cloak class="max-w-2xl mx-auto mb-5 rounded-xl p-4 space-y-3"
-             style="background:var(--color-bg-card);border:1px solid var(--color-border)">
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <!-- Locarno class finder (design tab) — mirrors the Nice class
+             finder for trademark: collapsible button bar with selected
+             chips, AI "Locarno Öner" input + suggested chips, and a
+             browse-all-32 grid sourced from /api/v1/locarno-classes. -->
+        <div x-show="searchView === 'design'" x-cloak>
+        <div class="max-w-2xl mx-auto mb-5" x-data="{ locarnoOpen: false }">
+            <button @click="locarnoOpen = !locarnoOpen; if(locarnoOpen && allLocarnoClasses.length === 0) loadAllLocarno()"
+                    data-testid="landing-locarno-toggle"
+                    class="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all"
+                    :style="'background:' + (locarnoOpen || selectedLocarnoClasses.length > 0 ? 'var(--color-primary-light)' : 'var(--color-bg-card)') + ';border:1px solid ' + (locarnoOpen ? 'var(--color-primary)' : 'var(--color-border)') + ';color:' + (locarnoOpen || selectedLocarnoClasses.length > 0 ? 'var(--color-primary)' : 'var(--color-text-secondary)')">
+                <div class="flex items-center gap-2 min-w-0 flex-1">
+                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z"/></svg>
+                    <span x-show="selectedLocarnoClasses.length === 0" x-text="t('search.locarno_finder_toggle')"></span>
+                    <div x-show="selectedLocarnoClasses.length > 0" x-cloak class="flex items-center flex-wrap gap-1.5 min-w-0">
+                        <template x-for="code in selectedLocarnoClasses" :key="code">
+                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold text-white" style="background:var(--color-primary)" @click.stop>
+                                <span x-text="t('search.class_label') + ' ' + code"></span>
+                                <button @click.stop="removeLocarno(code)" class="hover:opacity-70 leading-none">&times;</button>
+                            </span>
+                        </template>
+                    </div>
+                </div>
+                <svg class="w-4 h-4 shrink-0 transition-transform" :class="locarnoOpen ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </button>
+
+            <div x-show="locarnoOpen" x-cloak x-collapse class="mt-2 rounded-xl overflow-hidden" style="border:1px solid var(--color-border);background:var(--color-bg-card)">
+                <!-- AI suggest input -->
+                <div class="p-4">
+                    <p class="text-xs mb-2" style="color:var(--color-text-muted)" x-text="t('search.locarno_input_placeholder')"></p>
+                    <div class="flex gap-2">
+                        <input type="text" x-model="locarnoInput"
+                               :placeholder="t('search.locarno_suggest_placeholder')"
+                               data-testid="landing-locarno-input"
+                               class="flex-1 px-3 py-2.5 rounded-lg text-sm outline-none"
+                               style="border:1px solid var(--color-border);color:var(--color-text-primary);background:var(--color-bg-input)"
+                               @keydown.enter.prevent="submitLocarnoInput()"
+                               @input="if(!locarnoInput.trim()) suggestedLocarno = []">
+                        <button x-show="selectedLocarnoClasses.length === 0" @click="submitLocarnoInput()" :disabled="suggestingLocarno || !locarnoInput.trim()"
+                                data-testid="landing-locarno-suggest"
+                                class="px-4 py-2.5 rounded-lg text-sm font-medium text-white whitespace-nowrap disabled:opacity-50 flex items-center gap-1.5"
+                                style="background:var(--color-primary)">
+                            <svg x-show="suggestingLocarno" x-cloak class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                            <svg x-show="!suggestingLocarno" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                            <span x-text="suggestingLocarno ? t('search.suggesting') : t('search.suggest_locarno')"></span>
+                        </button>
+                        <button x-show="selectedLocarnoClasses.length > 0" x-cloak @click="locarnoOpen = false"
+                                class="px-5 py-2.5 rounded-lg text-sm font-medium text-white whitespace-nowrap flex items-center gap-1.5"
+                                style="background:#22c55e">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                            <span>Tamam</span>
+                        </button>
+                    </div>
+
+                    <!-- Suggested chips -->
+                    <div x-show="suggestedLocarno.length > 0" x-cloak x-transition class="mt-3">
+                        <p class="text-[11px] uppercase tracking-wide mb-2 font-medium" style="color:var(--color-text-faint)" x-text="t('search.click_to_select')"></p>
+                        <div class="flex flex-wrap gap-2">
+                            <template x-for="cls in suggestedLocarno" :key="cls.class_number">
+                                <button @click="selectLocarno(cls)"
+                                        class="group flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+                                        :style="selectedLocarnoClasses.includes(_padLocarno(cls.class_number))
+                                            ? 'background:var(--color-primary);color:white;box-shadow:0 2px 8px rgba(99,102,241,0.3)'
+                                            : 'background:var(--color-bg-muted);color:var(--color-text-secondary);border:1px solid var(--color-border)'">
+                                    <span x-show="!selectedLocarnoClasses.includes(_padLocarno(cls.class_number))" class="w-3.5 h-3.5 flex-shrink-0 rounded border inline-flex items-center justify-center" style="border-color:var(--color-text-faint)"></span>
+                                    <span x-show="selectedLocarnoClasses.includes(_padLocarno(cls.class_number))" class="w-3.5 h-3.5 flex-shrink-0 rounded bg-white inline-flex items-center justify-center">
+                                        <svg class="w-2.5 h-2.5" fill="none" stroke="var(--color-primary)" stroke-width="3" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                                    </span>
+                                    <span class="font-bold" x-text="cls.class_number"></span>
+                                    <span class="opacity-80" x-text="(window.AppI18n && window.AppI18n.locale === 'en') ? cls.name_en : cls.name_tr"></span>
+                                    <template x-if="typeof cls.similarity === 'number'">
+                                        <span class="opacity-50 text-[10px]" x-text="Math.round(cls.similarity * 100) + '%'"></span>
+                                    </template>
+                                </button>
+                            </template>
+                        </div>
+                    </div>
+
+                    <div x-show="locarnoError" x-cloak class="mt-2 px-3 py-2 rounded-lg text-xs" style="background:var(--color-risk-high-bg);color:var(--color-risk-high-text)">
+                        <span x-text="locarnoError"></span>
+                    </div>
+                </div>
+
+                <div class="px-4"><div style="border-top:1px solid var(--color-border)"></div></div>
+
+                <!-- Browse all 32 -->
+                <div class="p-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <p class="text-xs font-medium" style="color:var(--color-text-secondary)" x-text="t('search.locarno_tab_browse')"></p>
+                        <input type="text" x-model="locarnoBrowseFilter"
+                               :placeholder="t('search.browse_filter_placeholder')"
+                               class="w-40 px-2.5 py-1.5 rounded-lg text-xs outline-none"
+                               style="border:1px solid var(--color-border);color:var(--color-text-primary);background:var(--color-bg-input)">
+                    </div>
+                    <div class="max-h-[220px] overflow-y-auto rounded-lg" style="scrollbar-width:thin">
+                        <div x-show="locarnoBrowseLoading" class="text-center py-6">
+                            <svg class="w-5 h-5 animate-spin mx-auto" style="color:var(--color-primary)" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                        </div>
+                        <div x-show="!locarnoBrowseLoading" class="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                            <template x-for="cls in filteredLocarnoClasses" :key="cls.code">
+                                <button @click="toggleBrowseLocarno(cls.code)"
+                                        class="flex items-center gap-2 px-3 py-2 rounded-lg text-left text-xs transition-all"
+                                        :style="selectedLocarnoClasses.includes(cls.code) ? 'background:var(--color-primary);color:white' : 'color:var(--color-text-secondary)'"
+                                        :class="!selectedLocarnoClasses.includes(cls.code) ? 'hover:bg-[var(--color-bg-muted)]' : ''">
+                                    <span x-show="!selectedLocarnoClasses.includes(cls.code)" class="w-3.5 h-3.5 flex-shrink-0 rounded border inline-flex items-center justify-center" style="border-color:var(--color-text-faint)"></span>
+                                    <span x-show="selectedLocarnoClasses.includes(cls.code)" class="w-3.5 h-3.5 flex-shrink-0 rounded bg-white inline-flex items-center justify-center">
+                                        <svg class="w-2.5 h-2.5" fill="none" stroke="var(--color-primary)" stroke-width="3" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                                    </span>
+                                    <span class="font-bold w-6 text-center flex-shrink-0" x-text="cls.code"></span>
+                                    <span class="flex-1 truncate" x-text="(window.AppI18n && window.AppI18n.locale === 'en') ? cls.name_en : cls.name_tr"></span>
+                                </button>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        </div>
+
+        <!-- Cografi filters — collapsible button bar matching the
+             Nice / patent class-finder style. -->
+        <div x-show="searchView === 'cografi'" x-cloak>
+        <div class="max-w-2xl mx-auto mb-5" x-data="{ cografiFiltersOpen: false }">
+            <button @click="cografiFiltersOpen = !cografiFiltersOpen"
+                    data-testid="landing-cografi-filters-toggle"
+                    class="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all"
+                    :style="'background:' + (cografiFiltersOpen || cografiSectionKeys || cografiRegion || cografiGiType || cografiRecordTypes || cografiDateFrom || cografiDateTo ? 'var(--color-primary-light)' : 'var(--color-bg-card)') + ';border:1px solid ' + (cografiFiltersOpen ? 'var(--color-primary)' : 'var(--color-border)') + ';color:' + (cografiFiltersOpen || cografiSectionKeys || cografiRegion || cografiGiType || cografiRecordTypes || cografiDateFrom || cografiDateTo ? 'var(--color-primary)' : 'var(--color-text-secondary)')">
+                <div class="flex items-center gap-2 min-w-0 flex-1">
+                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/></svg>
+                    <span x-show="!(cografiSectionKeys || cografiRegion || cografiGiType || cografiRecordTypes || cografiDateFrom || cografiDateTo)" x-text="t('search.cografi_filters_toggle')"></span>
+                    <div x-show="cografiSectionKeys || cografiRegion || cografiGiType || cografiRecordTypes || cografiDateFrom || cografiDateTo" x-cloak class="flex items-center flex-wrap gap-1.5 min-w-0">
+                        <template x-if="cografiRegion"><span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold text-white" style="background:var(--color-primary)"><span x-text="cografiRegion"></span><button @click.stop="cografiRegion=''" class="hover:opacity-70 leading-none">&times;</button></span></template>
+                        <template x-if="cografiSectionKeys"><span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold text-white" style="background:var(--color-primary)"><span x-text="cografiSectionKeys"></span><button @click.stop="cografiSectionKeys=''" class="hover:opacity-70 leading-none">&times;</button></span></template>
+                        <template x-if="cografiGiType"><span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold text-white" style="background:var(--color-primary)"><span x-text="cografiGiType"></span><button @click.stop="cografiGiType=''" class="hover:opacity-70 leading-none">&times;</button></span></template>
+                        <template x-if="cografiDateFrom || cografiDateTo"><span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold text-white" style="background:var(--color-primary)"><span x-text="(cografiDateFrom || '…') + ' → ' + (cografiDateTo || '…')"></span><button @click.stop="cografiDateFrom=''; cografiDateTo=''" class="hover:opacity-70 leading-none">&times;</button></span></template>
+                    </div>
+                </div>
+                <svg class="w-4 h-4 shrink-0 transition-transform" :class="cografiFiltersOpen ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </button>
+            <div x-show="cografiFiltersOpen" x-cloak x-collapse class="mt-2 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-2 gap-3"
+                 style="border:1px solid var(--color-border);background:var(--color-bg-card)">
                 <label class="flex flex-col gap-1 text-left">
                     <span class="text-xs font-medium" style="color:var(--color-text-secondary)" x-text="t('search.section_label')">Bölüm</span>
-                    <input type="text" x-model="cografiSectionKeys"
-                           :placeholder="t('search.section_placeholder')"
+                    <input type="text" x-model="cografiSectionKeys" :placeholder="t('search.section_placeholder')"
                            data-testid="landing-cografi-section"
                            class="px-3 py-2 rounded-lg text-sm outline-none"
                            style="border:1px solid var(--color-border);background:var(--color-bg-input);color:var(--color-text-primary)">
                 </label>
                 <label class="flex flex-col gap-1 text-left">
                     <span class="text-xs font-medium" style="color:var(--color-text-secondary)" x-text="t('search.region_label')">Bölge</span>
-                    <input type="text" x-model="cografiRegion"
-                           :placeholder="t('search.region_placeholder')"
+                    <input type="text" x-model="cografiRegion" :placeholder="t('search.region_placeholder')"
                            data-testid="landing-cografi-region"
                            class="px-3 py-2 rounded-lg text-sm outline-none"
                            style="border:1px solid var(--color-border);background:var(--color-bg-input);color:var(--color-text-primary)">
@@ -719,8 +858,7 @@
                 </label>
                 <label class="flex flex-col gap-1 text-left">
                     <span class="text-xs font-medium" style="color:var(--color-text-secondary)" x-text="t('search.record_types_label')">Kayıt Türü</span>
-                    <input type="text" x-model="cografiRecordTypes"
-                           :placeholder="t('search.record_types_placeholder')"
+                    <input type="text" x-model="cografiRecordTypes" :placeholder="t('search.record_types_placeholder')"
                            data-testid="landing-cografi-record-types"
                            class="px-3 py-2 rounded-lg text-sm outline-none"
                            style="border:1px solid var(--color-border);background:var(--color-bg-input);color:var(--color-text-primary)">
@@ -740,6 +878,7 @@
                            style="border:1px solid var(--color-border);background:var(--color-bg-input);color:var(--color-text-primary)">
                 </label>
             </div>
+        </div>
         </div>
 
         <!-- Search Buttons (unified for text + image + classes) -->
@@ -2612,6 +2751,6 @@
 <script src="/static/js/utils/toast.js?v=32"></script>
 <script src="/static/js/utils/upgrade-modal.js?v=10"></script>
 <script src="/static/js/components/score-badge.js?v=33"></script>
-<script src="/static/js/marketing/landing.js?v=68"></script>
+<script src="/static/js/marketing/landing.js?v=69"></script>
 </body>
 </html>

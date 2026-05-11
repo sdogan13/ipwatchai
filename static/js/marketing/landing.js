@@ -49,8 +49,20 @@ function landing() {
         patentDateTo: '',
         patentKindCode: '',
 
-        // Design filters (mirror /api/v1/design-search/public)
+        // Design filters (mirror /api/v1/design-search/public).
+        // `designLocarno` is the raw comma-joined string sent to the API.
+        // The Locarno class finder mirrors the trademark Nice picker:
+        // chips for selected codes, AI suggest, and a browse-all-32 grid
+        // backed by GET /api/v1/locarno-classes.
         designLocarno: '',
+        selectedLocarnoClasses: [],
+        locarnoInput: '',
+        suggestedLocarno: [],
+        suggestingLocarno: false,
+        locarnoError: '',
+        allLocarnoClasses: [],
+        locarnoBrowseLoading: false,
+        locarnoBrowseFilter: '',
 
         // Cografi filters (mirror /api/v1/cografi-search/public)
         cografiSectionKeys: '',
@@ -1692,6 +1704,188 @@ function landing() {
             this._syncClassInput();
         },
 
+        // ==================== LOCARNO CLASS FINDER (design tab) ====================
+        // Mirrors the Nice class picker for trademark search. Codes are
+        // stored as zero-padded strings (e.g. "06", "26") to match what
+        // the dashboard /design-search/quick + AI suggester expect.
+
+        _padLocarno: function (raw) {
+            var s = String(raw || '').trim();
+            if (!s) return '';
+            // Two-level codes like "06-01" pass through untouched.
+            if (s.indexOf('-') !== -1) return s;
+            // Top-level codes (1..32) zero-padded.
+            var n = parseInt(s, 10);
+            if (isNaN(n) || n < 1 || n > 32) return '';
+            return n < 10 ? '0' + n : String(n);
+        },
+
+        _syncLocarnoInput: function () {
+            // Mirror the Nice picker's pattern: keep the input populated
+            // with the comma-joined selection so users can edit freely.
+            this.locarnoInput = this.selectedLocarnoClasses.join(', ');
+            this.designLocarno = this.selectedLocarnoClasses.join(',');
+        },
+
+        submitLocarnoInput: function () {
+            var input = this.locarnoInput.trim();
+            if (!input) return;
+            this.locarnoError = '';
+
+            // Manual entry path: every comma-separated token parses as a
+            // valid Locarno code (numeric 1..32 or NN-NN form). Otherwise
+            // treat the input as a free-text description and hit AI.
+            var self = this;
+            var parts = input.split(/[,\s]+/).filter(function (p) { return p.length > 0; });
+            var normalised = parts.map(function (p) { return self._padLocarno(p); });
+            var allValid = normalised.length > 0 && normalised.every(function (n) { return !!n; });
+
+            if (allValid) {
+                var added = 0;
+                normalised.forEach(function (code) {
+                    if (self.selectedLocarnoClasses.indexOf(code) === -1) {
+                        self.selectedLocarnoClasses.push(code);
+                        added++;
+                    }
+                });
+                if (added === 0) {
+                    this.locarnoError = this.t('search.locarno_invalid_number');
+                }
+                this._syncLocarnoInput();
+            } else {
+                this.suggestLocarno();
+            }
+        },
+
+        suggestLocarno: function () {
+            var desc = this.locarnoInput.trim();
+            if (!desc) return;
+            if (desc.length < 3) {
+                this.locarnoError = this.t('search.description_too_short');
+                return;
+            }
+
+            this.suggestingLocarno = true;
+            this.locarnoError = '';
+            this.suggestedLocarno = [];
+            var self = this;
+
+            fetch('/api/v1/tools/suggest-locarno-classes', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    description: desc,
+                    language: (window.AppI18n && window.AppI18n.locale === 'en') ? 'en' : 'tr',
+                    count: 5,
+                })
+            })
+                .then(function (res) {
+                    if (res.ok) return res.json().then(function (d) { return { ok: true, data: d }; });
+                    return res.json().catch(function () { return {}; }).then(function (d) {
+                        return { ok: false, status: res.status, detail: d && d.detail };
+                    });
+                })
+                .then(function (r) {
+                    if (r.ok) {
+                        self.suggestedLocarno = r.data.suggestions || [];
+                        if (self.suggestedLocarno.length === 0) {
+                            self.locarnoError = self.t('search.no_locarno_suggestions');
+                        }
+                        return;
+                    }
+                    self.suggestedLocarno = [];
+                    if (r.status === 401 || r.status === 402 || r.status === 403) {
+                        var d = r.detail || {};
+                        var handled = window.AppUpgradeModal
+                            && typeof window.AppUpgradeModal.maybeHandle === 'function'
+                            && window.AppUpgradeModal.maybeHandle(d, 'class_suggestions');
+                        if (!handled) {
+                            var msg = (window.AppI18n && window.AppI18n.locale === 'en')
+                                ? (d.message_en || d.message)
+                                : (d.message || d.message_en);
+                            self.locarnoError = msg || self.t('search.class_suggestion_upgrade_required');
+                        } else {
+                            self.locarnoError = '';
+                        }
+                    } else {
+                        self.locarnoError = self.t('search.class_suggestion_failed');
+                    }
+                })
+                .catch(function () {
+                    self.suggestedLocarno = [];
+                    self.locarnoError = self.t('search.class_suggestion_failed');
+                })
+                .finally(function () {
+                    self.suggestingLocarno = false;
+                });
+        },
+
+        selectLocarno: function (cls) {
+            var code = this._padLocarno(cls.class_number);
+            if (!code) return;
+            var idx = this.selectedLocarnoClasses.indexOf(code);
+            if (idx === -1) {
+                this.selectedLocarnoClasses.push(code);
+            } else {
+                this.selectedLocarnoClasses.splice(idx, 1);
+            }
+            this._syncLocarnoInput();
+        },
+
+        loadAllLocarno: function () {
+            if (this.allLocarnoClasses.length > 0) return;
+            this.locarnoBrowseLoading = true;
+            var self = this;
+            fetch('/api/v1/locarno-classes')
+                .then(function (res) { return res.ok ? res.json() : { items: [] }; })
+                .then(function (data) {
+                    self.allLocarnoClasses = (data.items || []).map(function (it) {
+                        var raw = it.class_number;
+                        var code = self._padLocarno(raw);
+                        return {
+                            code: code,
+                            name_tr: it.name_tr,
+                            name_en: it.name_en,
+                        };
+                    }).filter(function (it) { return !!it.code; });
+                })
+                .catch(function () { self.allLocarnoClasses = []; })
+                .finally(function () { self.locarnoBrowseLoading = false; });
+        },
+
+        toggleBrowseLocarno: function (code) {
+            var idx = this.selectedLocarnoClasses.indexOf(code);
+            if (idx === -1) {
+                this.selectedLocarnoClasses.push(code);
+            } else {
+                this.selectedLocarnoClasses.splice(idx, 1);
+            }
+            this._syncLocarnoInput();
+        },
+
+        get filteredLocarnoClasses() {
+            var f = (this.locarnoBrowseFilter || '').trim().toLowerCase();
+            if (!f) return this.allLocarnoClasses;
+            return this.allLocarnoClasses.filter(function (cls) {
+                return cls.code.indexOf(f) !== -1
+                    || (cls.name_tr || '').toLowerCase().indexOf(f) !== -1
+                    || (cls.name_en || '').toLowerCase().indexOf(f) !== -1;
+            });
+        },
+
+        removeLocarno: function (code) {
+            var idx = this.selectedLocarnoClasses.indexOf(code);
+            if (idx !== -1) {
+                this.selectedLocarnoClasses.splice(idx, 1);
+            }
+            this._syncLocarnoInput();
+        },
+
+        clearAllLocarno: function () {
+            this.selectedLocarnoClasses = [];
+            this._syncLocarnoInput();
+        },
+
         // ==================== PUBLIC SEARCH ====================
         // ==================== SEARCH HISTORY ====================
         loadSearchHistory: function () {
@@ -1730,6 +1924,42 @@ function landing() {
         selectSearchHistoryItem: function (item) {
             this.searchQuery = item;
             this.showSearchHistory = false;
+        },
+
+        // Placeholder + uploader labels that swap to match the active
+        // registry's dashboard subview, so the search box and dropzone
+        // visually echo which corpus is selected. The user's typed
+        // query and uploaded image persist across switches — only the
+        // visual hints change. Falls back to the trademark wording for
+        // missing keys.
+        searchPlaceholder: function () {
+            switch (this.searchView) {
+                case 'patent':  return this.t('patent_search.query_placeholder');
+                case 'design':  return this.t('design_search.query_placeholder');
+                case 'cografi': return this.t('cografi_search.query_placeholder');
+                case 'trademark':
+                default:        return this.t('landing.search_placeholder');
+            }
+        },
+
+        imageDropTitle: function () {
+            switch (this.searchView) {
+                case 'patent':  return this.t('landing.drop_image_title_patent');
+                case 'design':  return this.t('landing.drop_image_title_design');
+                case 'cografi': return this.t('landing.drop_image_title_cografi');
+                case 'trademark':
+                default:        return this.t('landing.drop_logo_title');
+            }
+        },
+
+        imageDropHint: function () {
+            switch (this.searchView) {
+                case 'patent':  return this.t('landing.drop_image_hint_patent');
+                case 'design':  return this.t('landing.drop_image_hint_design');
+                case 'cografi': return this.t('landing.drop_image_hint_cografi');
+                case 'trademark':
+                default:        return this.t('landing.drop_logo_hint');
+            }
         },
 
         // Endpoint URL for the currently selected registry. All four

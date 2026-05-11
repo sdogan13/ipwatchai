@@ -359,16 +359,51 @@ def register_design_search_routes(app, limiter):
             })
         return {"items": items, "total": len(items)}
 
+    from auth.authentication import get_current_user_optional
+    from utils.anon_quota import (
+        ANON_CLASS_SUGGEST_DAILY_LIMIT,
+        _client_ip_from_request,
+        check_and_consume_anon_class_suggest,
+    )
+
     @app.post("/api/v1/tools/suggest-locarno-classes", tags=["Design Search"])
     @limiter.limit("20/minute")
     async def suggest_locarno_classes_route(
         request: Request,
-        current_user=Depends(get_current_user),
+        current_user=Depends(get_current_user_optional),
     ):
+        """Locarno class suggestion. Mirrors the Nice public path:
+          * Anonymous: ANON_CLASS_SUGGEST_DAILY_LIMIT calls per IP per day,
+            then 401 with an upgrade-context payload.
+          * Authenticated: AI-credits gate inside the service (1 credit per
+            call from the shared monthly_ai_credits pool).
+        """
         from services.locarno_suggest_service import (
             LocarnoSuggestionRequest,
             suggest_locarno_classes_data,
         )
+
+        if current_user is None:
+            ip = _client_ip_from_request(request)
+            allowed, _remaining = check_and_consume_anon_class_suggest(ip)
+            if not allowed:
+                raise HTTPException(
+                    status_code=401,
+                    detail={
+                        "error": "anon_limit_reached",
+                        "upgrade_context": "class_suggestions",
+                        "anon_daily_limit": ANON_CLASS_SUGGEST_DAILY_LIMIT,
+                        "message": (
+                            "Ücretsiz Locarno öneri hakkınız bugün için doldu. "
+                            "Devam etmek için giriş yapın veya bir plana abone olun."
+                        ),
+                        "message_en": (
+                            f"Anonymous daily limit ({ANON_CLASS_SUGGEST_DAILY_LIMIT}) "
+                            "reached. Sign in or subscribe to a plan to continue."
+                        ),
+                    },
+                )
+
         body = await request.json()
         try:
             payload = LocarnoSuggestionRequest(**body)

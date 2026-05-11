@@ -208,13 +208,15 @@ async def suggest_locarno_classes_data(
         from generative_ai.gemini_client import get_gemini_client
         gemini_client_getter = get_gemini_client
 
-    # AI-credit gate (skip for superadmin)
+    # AI-credit gate. Superadmins bypass it; an explicit ``current_user=None``
+    # means the caller is the public landing-page route which already enforced
+    # an IP-based anonymous quota — skip the org/credit checks in that case.
     from services.creative_service import _is_superadmin_user
     from utils.subscription import check_ai_credit_eligibility
 
     is_superadmin = _is_superadmin_user(current_user)
     org_id = str(getattr(current_user, "organization_id", "") or "")
-    if not is_superadmin:
+    if current_user is not None and not is_superadmin:
         if not org_id:
             raise HTTPException(status_code=403, detail={
                 "error": "no_organization",
