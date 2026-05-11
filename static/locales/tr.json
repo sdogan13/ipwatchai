@@ -1844,7 +1844,8 @@
     "image_remove": "Şekli kaldır",
     "score_figure": "Şekil",
     "filters_toggle": "Filtreler",
-    "stats_db_records": "patent canlı veritabanında analiz ediliyor"
+    "stats_db_records": "patent canlı veritabanında analiz ediliyor",
+    "no_image": "Görsel yok"
   },
   "design_search": {
     "panel_title": "Tasarım Arama",

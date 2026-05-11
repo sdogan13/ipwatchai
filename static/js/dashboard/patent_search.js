@@ -303,6 +303,19 @@
     var attorney = item.attorney || null;
     var bd = item.similarity_breakdown || {};
     var sim = item.similarity != null ? Number(item.similarity).toFixed(0) : "";
+    var imgUrl = item.image_url || "";
+
+    var noImgLabel = escapeHtml(t("patent_search.no_image", "No image"));
+    var imgHtml = imgUrl
+      ? '<img src="' + escapeHtml(imgUrl) +
+        '" alt="' + escapeHtml(item.title || "") +
+        '" loading="lazy" class="w-full h-40 object-contain rounded-md mb-3" ' +
+        'style="background:var(--color-bg-muted)" ' +
+        'onerror="this.onerror=null;this.replaceWith(Object.assign(document.createElement(\'div\'),{className:\'w-full h-40 flex items-center justify-center text-xs rounded-md mb-3\',style:\'background:var(--color-bg-muted);color:var(--color-text-faint)\',textContent:\'' +
+        noImgLabel + '\'}));" />'
+      : '<div class="w-full h-40 flex items-center justify-center text-xs rounded-md mb-3" ' +
+        'style="background:var(--color-bg-muted);color:var(--color-text-faint)">' +
+        noImgLabel + "</div>";
 
     // ALL IPC classes — no truncation. Patent users frequently care about
     // the full classification spread.
@@ -354,6 +367,7 @@
       'data-patent-card-id="' + cardId + '" ' +
       'data-pd-open="' + escapeHtml(item.id || "") + '" ' +
       'style="background:var(--color-bg-card);border-color:var(--color-border)">' +
+        imgHtml +
         '<div class="flex items-start justify-between gap-2 mb-2">' +
           '<h4 class="text-sm font-semibold leading-snug" style="color:var(--color-text-primary)">' +
             title +

@@ -1,10 +1,11 @@
 """Patent / Faydalı Model search routes.
 
-Three endpoints + an IPC autocomplete:
   * ``POST /api/v1/patent-search/quick``      — authenticated, full results
   * ``GET/POST /api/v1/patent-search/public`` — anonymous, max 10 results, text-only
   * ``GET /api/v1/patent-search/ipc-autocomplete?q=`` — typeahead over IPC
     classes that actually exist in the patent corpus
+  * ``GET /api/v1/patent-image/{path:path}`` — serve figure thumbs;
+    converts CD-era TIFFs to JPEG on the fly
 
 The authenticated endpoint computes a query text embedding using the
 same SentenceTransformer (multilingual-e5-large) the corpus was indexed
@@ -21,13 +22,24 @@ from pathlib import Path
 from typing import List, Optional
 
 from fastapi import Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse, Response
 from PIL import Image
 
 
 logger = logging.getLogger("turkpatent.patent_search_routes")
 
+PROJECT_ROOT = Path(__file__).resolve().parent
+PATENT_BULLETINS_ROOT = PROJECT_ROOT / "bulletins" / "Patent__Faydali_Model"
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/jpg", "image/png", "image/webp", "image/tiff"}
 MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
+
+MEDIA_TYPES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
+_CACHE_HEADER = {"Cache-Control": "public, max-age=86400"}
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +138,52 @@ def _save_upload_to_temp(content: bytes) -> str:
     tmp.write(content)
     tmp.close()
     return tmp.name
+
+
+# ---------------------------------------------------------------------------
+# Image-serving route — figures stored under bulletins/Patent__Faydali_Model
+# ---------------------------------------------------------------------------
+
+def _resolve_patent_image(image_path: str) -> Optional[str]:
+    if not image_path or ".." in image_path:
+        return None
+    candidate = (PATENT_BULLETINS_ROOT / image_path.replace("/", os.sep)).resolve()
+    try:
+        candidate.relative_to(PATENT_BULLETINS_ROOT.resolve())
+    except ValueError:
+        return None
+    if not candidate.is_file():
+        return None
+    return str(candidate)
+
+
+def _tiff_to_jpeg_bytes(path: str) -> bytes:
+    """Convert a TIFF figure to JPEG bytes. CD-era figures ship as TIFF,
+    which browsers can't render natively; PDF-era figures are PNG and
+    served as-is."""
+    with Image.open(path) as im:
+        rgb = im.convert("RGB")
+        buf = io.BytesIO()
+        rgb.save(buf, format="JPEG", quality=85)
+        return buf.getvalue()
+
+
+def patent_image_response(image_path: str):
+    """Serve a patent figure. Direct ``FileResponse`` for displayable
+    formats; on-the-fly TIFF→JPEG conversion otherwise."""
+    full = _resolve_patent_image(image_path)
+    if not full:
+        raise HTTPException(status_code=404, detail="Patent image not found")
+    suffix = os.path.splitext(full)[1].lower()
+    if suffix in (".tif", ".tiff"):
+        try:
+            jpeg = _tiff_to_jpeg_bytes(full)
+        except Exception:
+            logger.exception("Failed to convert patent TIFF to JPEG: %s", full)
+            raise HTTPException(status_code=500, detail="Image conversion failed")
+        return Response(content=jpeg, media_type="image/jpeg", headers=_CACHE_HEADER)
+    media_type = MEDIA_TYPES.get(suffix, "application/octet-stream")
+    return FileResponse(full, media_type=media_type, headers=_CACHE_HEADER)
 
 
 # ---------------------------------------------------------------------------
@@ -402,3 +460,7 @@ def register_patent_search_routes(app, limiter):
         limit: int = Query(20, ge=1, le=50),
     ):
         return patent_ipc_autocomplete(q, limit=limit)
+
+    @app.get("/api/v1/patent-image/{image_path:path}", tags=["Patent Search"])
+    async def serve_patent_image(image_path: str):
+        return patent_image_response(image_path)

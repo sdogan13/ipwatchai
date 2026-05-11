@@ -397,11 +397,26 @@ def _lookup_by_id(
 # Hydrate & rank
 # ---------------------------------------------------------------------------
 
+def patent_image_url(image_path: Optional[str], bulletin_folder: Optional[str]) -> Optional[str]:
+    """Build a frontend-resolvable URL for a patent figure.
+
+    ``patent_figures.image_path`` is relative to the bulletin folder (e.g.
+    ``figures/2017_15048.tif``); the full filesystem path is
+    ``bulletins/Patent__Faydali_Model/{bulletin_folder}/{image_path}``.
+    The serving route reads under ``bulletins/Patent__Faydali_Model``,
+    so we prepend the folder. TIFFs are converted to JPEG at serve time.
+    """
+    if not image_path or not bulletin_folder:
+        return None
+    rel = image_path.lstrip("/")
+    return f"/api/v1/patent-image/{bulletin_folder}/{rel}"
+
+
 HYDRATE_COLS = (
     "p.id::text AS patent_id, p.registry_type, p.application_no, p.publication_no, "
     "p.kind_code, p.record_type, "
     "p.application_date, p.publication_date, p.grant_date, "
-    "p.bulletin_no, p.bulletin_date, "
+    "p.bulletin_no, p.bulletin_date, p.bulletin_folder, "
     "p.title, p.abstract, p.ipc_classes, p.patent_type, "
     "(SELECT ph.name FROM patent_holders ph "
     " WHERE ph.patent_id = p.id ORDER BY ph.seq ASC LIMIT 1) AS first_holder_name, "
@@ -415,7 +430,10 @@ HYDRATE_COLS = (
     "(SELECT pa.name FROM patent_attorneys pa "
     " WHERE pa.patent_id = p.id ORDER BY pa.seq ASC LIMIT 1) AS first_attorney_name, "
     "(SELECT pa.firm FROM patent_attorneys pa "
-    " WHERE pa.patent_id = p.id ORDER BY pa.seq ASC LIMIT 1) AS first_attorney_firm"
+    " WHERE pa.patent_id = p.id ORDER BY pa.seq ASC LIMIT 1) AS first_attorney_firm, "
+    "(SELECT pf.image_path FROM patent_figures pf "
+    " WHERE pf.patent_id = p.id AND pf.image_path IS NOT NULL "
+    " ORDER BY pf.seq ASC LIMIT 1) AS first_image_path"
 )
 
 
@@ -460,6 +478,7 @@ def _result_row(
     record_type = record.get("record_type")
     if hasattr(record_type, "value"):  # enum
         record_type = record_type.value
+    image_url = patent_image_url(record.get("first_image_path"), record.get("bulletin_folder"))
     return {
         "id": record["patent_id"],
         "registry_type": record.get("registry_type") or "patent",
@@ -479,6 +498,7 @@ def _result_row(
         "holder": holder,
         "inventors": list(record.get("inventors") or []),
         "attorney": attorney,
+        "image_url": image_url,
         "similarity": round(similarity * 100.0, 2),
         "similarity_breakdown": {k: round(float(v or 0.0), 4) for k, v in breakdown.items()},
     }

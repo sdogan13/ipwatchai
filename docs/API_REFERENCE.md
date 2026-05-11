@@ -150,6 +150,7 @@ Patent search:
 - queries that look like an application/publication number (`2017/15048`, `TR 2017 15048 U3`, etc.) short-circuit to a direct row lookup and skip embedding/trigram retrieval
 - `GET /api/v1/patent-search/public` and `POST /api/v1/patent-search/public` are anonymous text-only variants capped at 10 results, rate-limited at 10/min per IP; only `query` and `ipc` filters are honored
 - `GET /api/v1/patent-search/ipc-autocomplete?q=` returns IPC classes that actually appear in the corpus (`patents.ipc_classes`) prefix-matching the query, joined to `ipc_classes_lookup` for descriptions when available; rate-limited at 60/min
+- `GET /api/v1/patent-image/{path:path}` serves figure thumbnails for search result cards; resolves under `bulletins/Patent__Faydali_Model/` with a directory-traversal guard, direct-serves PNG/JPEG figures, and converts CD-era `.tif` figures to JPEG on the fly so browsers can render them; cached for 24h. Search results include an `image_url` field built from `patent_figures.image_path` and `patents.bulletin_folder` (the first non-null figure by `seq` is selected)
 
 Design watchlist + alerts:
 - `POST /api/v1/design-watchlist` creates a tracked design (text + Locarno classes, optional `customer_application_no`, optional `reference_design_id` to clone embeddings from an existing design row); subject to the combined trademark+design watchlist quota (`subscription_plans.max_watchlist_items`)

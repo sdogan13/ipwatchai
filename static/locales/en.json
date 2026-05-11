@@ -1839,7 +1839,8 @@
     "image_remove": "Remove figure",
     "score_figure": "Figure",
     "filters_toggle": "Filters",
-    "stats_db_records": "patents analyzed in live database"
+    "stats_db_records": "patents analyzed in live database",
+    "no_image": "No image"
   },
   "design_search": {
     "panel_title": "Design Search",

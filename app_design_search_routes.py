@@ -82,14 +82,36 @@ def _parse_locarno_param(raw: Optional[str]) -> Optional[List[str]]:
 def _resolve_design_image(image_path: str) -> Optional[str]:
     if not image_path or ".." in image_path:
         return None
-    candidate = (DESIGN_BULLETINS_ROOT / image_path.replace("/", os.sep)).resolve()
-    try:
-        candidate.relative_to(DESIGN_BULLETINS_ROOT.resolve())
-    except ValueError:
-        return None
-    if not candidate.is_file():
-        return None
-    return str(candidate)
+    root = DESIGN_BULLETINS_ROOT.resolve()
+
+    def _check(rel: str) -> Optional[str]:
+        candidate = (DESIGN_BULLETINS_ROOT / rel.replace("/", os.sep)).resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            return None
+        return str(candidate) if candidate.is_file() else None
+
+    # 1. Literal lookup (works for rows whose image_path already includes
+    # the correct subdir prefix).
+    hit = _check(image_path)
+    if hit:
+        return hit
+
+    # 2. Fallback for rows ingested before the D.1 CD-first refactor
+    # (commit a8de7f3e), where image_path was stored without the
+    # cd_images/ or images/ subdir prefix. DB-stored paths look like
+    # "{source_folder}/{design_id}/{view}.jpg"; the real files live at
+    # "{source_folder}/cd_images/{design_id}/{view}.jpg" (CD-sourced)
+    # or "{source_folder}/images/{design_id}/{view}.jpg" (PDF-sourced).
+    parts = image_path.split("/", 1)
+    if len(parts) == 2:
+        source_folder, rest = parts
+        for subdir in ("cd_images", "images"):
+            hit = _check(f"{source_folder}/{subdir}/{rest}")
+            if hit:
+                return hit
+    return None
 
 
 def design_image_response(image_path: str) -> FileResponse:

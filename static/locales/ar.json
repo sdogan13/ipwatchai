@@ -1841,7 +1841,8 @@
     "image_remove": "إزالة الرسم",
     "score_figure": "الرسم",
     "filters_toggle": "المرشحات",
-    "stats_db_records": "براءة يتم تحليلها في قاعدة البيانات المباشرة"
+    "stats_db_records": "براءة يتم تحليلها في قاعدة البيانات المباشرة",
+    "no_image": "لا توجد صورة"
   },
   "design_search": {
     "panel_title": "بحث التصاميم",

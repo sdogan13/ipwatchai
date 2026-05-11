@@ -11,13 +11,16 @@ import pytest
 from services.patent_search_service import (
     DEFAULT_LIMIT,
     EXCLUDED_RECORD_TYPES,
+    HYDRATE_COLS,
     MAX_LIMIT,
     PUBLIC_RESULT_CAP,
     WEIGHTS,
+    _result_row,
     cap_limit,
     combine_scores,
     normalize_ipc_filter,
     parse_id_query,
+    patent_image_url,
     to_halfvec_literal,
 )
 
@@ -170,3 +173,134 @@ def test_excluded_record_types_includes_unknown_and_legacy():
     # LEGACY rows lack INID-coded fields so titles/abstracts are unreliable.
     assert "UNKNOWN" in EXCLUDED_RECORD_TYPES
     assert "LEGACY" in EXCLUDED_RECORD_TYPES
+
+
+# ---------------------------------------------------------------------------
+# patent_image_url + result-row image wiring
+# ---------------------------------------------------------------------------
+
+def test_patent_image_url_builds_route_path():
+    url = patent_image_url("figures/2017_15048.tif", "PT_2017_11_2017-11-21")
+    assert url == "/api/v1/patent-image/PT_2017_11_2017-11-21/figures/2017_15048.tif"
+
+
+def test_patent_image_url_handles_leading_slash():
+    url = patent_image_url("/figures/foo.png", "PT_2025_8_2025-08-21")
+    assert url == "/api/v1/patent-image/PT_2025_8_2025-08-21/figures/foo.png"
+
+
+def test_patent_image_url_returns_none_when_either_part_missing():
+    assert patent_image_url(None, "PT_2025_8") is None
+    assert patent_image_url("figures/foo.tif", None) is None
+    assert patent_image_url("", "PT_2025_8") is None
+
+
+def test_hydrate_cols_includes_first_image_path_and_bulletin_folder():
+    # Result-row wiring depends on these columns; if either is dropped
+    # from HYDRATE_COLS, every result card silently loses its image.
+    assert "first_image_path" in HYDRATE_COLS
+    assert "bulletin_folder" in HYDRATE_COLS
+    assert "FROM patent_figures" in HYDRATE_COLS
+
+
+def test_result_row_emits_image_url_when_figure_present():
+    record = {
+        "patent_id": "00000000-0000-0000-0000-000000000001",
+        "registry_type": "patent",
+        "application_no": "2017/15048",
+        "publication_no": None,
+        "kind_code": "B",
+        "record_type": "GRANT",
+        "patent_type": "1",
+        "title": "x", "abstract": "y",
+        "ipc_classes": ["A61M"],
+        "bulletin_no": "2017/11", "bulletin_date": None,
+        "bulletin_folder": "PT_2017_11_2017-11-21",
+        "application_date": None, "publication_date": None, "grant_date": None,
+        "first_holder_name": None, "first_holder_country": None,
+        "first_holder_tpe_id": None, "inventors": None,
+        "first_attorney_name": None, "first_attorney_firm": None,
+        "first_image_path": "figures/2017_15048.tif",
+    }
+    out = _result_row(record, similarity=0.5, breakdown={})
+    assert out["image_url"] == "/api/v1/patent-image/PT_2017_11_2017-11-21/figures/2017_15048.tif"
+
+
+def test_result_row_image_url_none_when_no_figure():
+    record = {
+        "patent_id": "00000000-0000-0000-0000-000000000002",
+        "registry_type": "patent",
+        "application_no": "2020/00001",
+        "publication_no": None, "kind_code": "A1", "record_type": "APPLICATION",
+        "patent_type": "1", "title": "x", "abstract": "y",
+        "ipc_classes": [], "bulletin_no": None, "bulletin_date": None,
+        "bulletin_folder": "PT_2020_1_2020-01-01",
+        "application_date": None, "publication_date": None, "grant_date": None,
+        "first_holder_name": None, "first_holder_country": None,
+        "first_holder_tpe_id": None, "inventors": None,
+        "first_attorney_name": None, "first_attorney_firm": None,
+        "first_image_path": None,
+    }
+    out = _result_row(record, similarity=0.5, breakdown={})
+    assert out["image_url"] is None
+
+
+# ---------------------------------------------------------------------------
+# Image route resolver — directory traversal protection + TIFF conversion
+# ---------------------------------------------------------------------------
+
+def test_resolve_patent_image_rejects_traversal():
+    from app_patent_search_routes import _resolve_patent_image
+    assert _resolve_patent_image("../../../etc/passwd") is None
+    assert _resolve_patent_image("..\\windows\\win.ini") is None
+
+
+def test_resolve_patent_image_returns_none_for_missing_file():
+    from app_patent_search_routes import _resolve_patent_image
+    assert _resolve_patent_image("PT_doesnotexist/figures/foo.tif") is None
+
+
+def test_resolve_patent_image_returns_path_when_file_exists(tmp_path, monkeypatch):
+    from app_patent_search_routes import _resolve_patent_image
+    import app_patent_search_routes as routes
+    fake_root = tmp_path / "Patent__Faydali_Model"
+    figs = fake_root / "PT_test/figures"
+    figs.mkdir(parents=True)
+    target = figs / "x.png"
+    target.write_bytes(b"\x89PNG\r\n\x1a\n")  # PNG magic
+    monkeypatch.setattr(routes, "PATENT_BULLETINS_ROOT", fake_root)
+    resolved = _resolve_patent_image("PT_test/figures/x.png")
+    assert resolved is not None
+    from pathlib import Path
+    assert Path(resolved).samefile(target)
+
+
+def test_tiff_to_jpeg_bytes_produces_valid_jpeg(tmp_path):
+    """Crucial path: CD-era figures ship as TIFF; the image route must
+    convert them on the fly so the browser can render the card.
+
+    ``conftest.py`` mocks ``PIL`` globally for the ML-light test suite;
+    we restore the real package and re-import the route module so
+    ``Image.open`` resolves to actual Pillow rather than a MagicMock.
+    """
+    import sys, importlib
+    pil_keys = [k for k in list(sys.modules) if k == "PIL" or k.startswith("PIL.")]
+    for k in pil_keys:
+        del sys.modules[k]
+    sys.modules.pop("app_patent_search_routes", None)
+    try:
+        import PIL.Image as PILImage
+        routes = importlib.import_module("app_patent_search_routes")
+        tif_path = tmp_path / "fig.tif"
+        PILImage.new("RGB", (10, 10), color=(200, 100, 50)).save(tif_path, format="TIFF")
+        out = routes._tiff_to_jpeg_bytes(str(tif_path))
+        assert out[:3] == b"\xff\xd8\xff"  # JPEG SOI
+        import io as _io
+        decoded = PILImage.open(_io.BytesIO(out))
+        decoded.verify()
+    finally:
+        # Re-mock for downstream tests so the harness contract is restored.
+        from unittest.mock import MagicMock
+        sys.modules["PIL"] = MagicMock()
+        sys.modules["PIL.Image"] = MagicMock()
+        sys.modules.pop("app_patent_search_routes", None)
