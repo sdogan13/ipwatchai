@@ -18,7 +18,10 @@ It is intentionally high-level.
 - `legacy_main.py`: current app assembly surface
 - `risk_engine.py`: shared scoring facade and search risk evaluation entrypoint
 - `agentic_search.py`: intelligent search orchestration and related runtime helpers
-- `data_collection.py`: bulletin collection entrypoint
+- `data_collection.py`: bulletin collection entrypoint (Marka)
+- `data_collection_patent.py`: bulletin collection entrypoint (Patent / Faydalı Model)
+- `data_collection_tasarim.py`: bulletin collection entrypoint (Tasarım)
+- `data_collection_cografi.py`: bulletin collection entrypoint (Coğrafi İşaret ve Geleneksel Ürün Adı)
 - `ingest_events.py`: event ingest entrypoint
 - `compute_idf.py`: IDF and corpus-derived descriptor-classification recomputation utility
 
@@ -62,6 +65,7 @@ The app still uses several root-level route and assembly modules:
 - `pipeline/`: embedding and ingest modules
   canonical ingest modules are `pipeline/ingest.py` (compat wrapper), `pipeline/ingest_rules.py`, `pipeline/ingest_runtime.py`, `pipeline/ingest_bootstrap.py`, and `pipeline/ingest_helpers.py`
 - Tasarım (industrial design) pipeline: `data_collection_tasarim.py`, `pdf_extract_tasarim.py`, `pdf_extract_tasarim_events.py`, `cd_extract_tasarim.py`, `embeddings_tasarim.py`, `pipeline/reconcile_tasarim.py`, `pipeline/ingest_designs.py`, plus the one-shot folder-hygiene `scripts/fix_tasarim_folder_dates.py`. Each issue is materialized into `bulletins/Tasarim/TS_{N}_{date}/` containing `bulletin.pdf`, `metadata.json`, `events.json`, `images/`, `cd_metadata.json`, `cd_images/`, and the reconciler's `merged_metadata.json`. PDF and CD outputs share a canonical `image_path` key shape `{appno_norm}/{d}_{v}.jpg`; the reconciler pairs records by `application_no` (TR) or normalised `registration_no` (Hague) and merges with CD-wins precedence.
+- Coğrafi İşaret ve Geleneksel Ürün Adı pipeline (Phase B1 — collector + extractor): `data_collection_cografi.py`, `pdf_extract_cografi.py`, plus the one-shot `scripts/migrate_cografi_layout.py`. Each issue is materialized into `bulletins/Cografi_Isaret_ve_Geleneksel_Urun_Adi/CI_{card_id}_{date}/` containing `bulletin.pdf` and the extractor's `metadata.json`. The collector takes a direct-href fast path against the TÜRKPATENT cografi category and writes magic-byte-detected RAR bundles separately as `{card_id}_bundle.rar` for the migration helper to expand. The extractor uses Section 2's `Sıralı Liste` as its parsing oracle and emits records across up to 6 semantic types (examined / registered / article 40 modified / article 42 change requests / article 42 finalized / corrections); its built-in per-PDF quality verifier cross-checks index counts against parsed body counts. Modern format only (cards 100-220 ≈ 2,300 records, ~99.5% record-level success); cards 1-99 (legacy KHK 555 era) are migrated to subfolders but produce no metadata.json in B1. Embed / ingest / search routes are not yet implemented.
 - `bulletins/`: bulletin data root
 - `custom_bulletins/`: local bulletin inputs and experiments
 - `archive_bulletins/`: archived bulletin data

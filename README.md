@@ -279,6 +279,7 @@ Pipeline and data-collection code lives in:
 - `data_collection.py` (Marka)
 - `data_collection_patent.py` (Patent / Faydalı Model)
 - `data_collection_tasarim.py` (Tasarım)
+- `data_collection_cografi.py` (Coğrafi İşaret ve Geleneksel Ürün Adı)
 - `zip.py`
 - `pdf_extract.py`
 - `pdf_extract_tasarim.py`, `pdf_extract_tasarim_events.py`, `cd_extract_tasarim.py`, `embeddings_tasarim.py` (Tasarım extractors)
@@ -340,6 +341,57 @@ python data_collection_patent.py --bulletins-root C:\path\to\elsewhere
 A legacy menu fallback path is retained in case TÜRKPATENT reintroduces a dropdown UI for some bulletins (Marka and Tasarım both rely on that path), but it is not exercised by the current Patent flow.
 
 Pure-helper unit tests live in `tests/test_data_collection_patent.py` and cover card-id normalization, recency window, per-track filename construction, completeness check (including the legacy multi-month bundle false-match guard), menu-item CD/PDF classification, the direct-href validator, and CLI argv parsing.
+
+### Coğrafi İşaret ve Geleneksel Ürün Adı pipeline
+
+The cografi pipeline materializes every issue into a single canonical folder, mirroring the tasarım layout so downstream stages have one predictable place to look:
+
+```
+bulletins/Cografi_Isaret_ve_Geleneksel_Urun_Adi/
+├── CI_{card_id}_{YYYY-MM-DD}/
+│   ├── bulletin.pdf                ← PDF source (data_collection_cografi)
+│   └── metadata.json               ← extracted records (pdf_extract_cografi)
+└── {card_id}_bundle.rar            ← legacy multi-bulletin RAR archives
+                                      (cards 1-99 era; expanded by the
+                                      one-shot migration helper)
+```
+
+**Collector — `data_collection_cografi.py`** targets the TÜRKPATENT bulletin page for the **Coğrafi İşaret ve Geleneksel Ürün Adı** (geographical indication / traditional product name) category. Each downloaded card lands directly in `CI_{card_id}_{date}/bulletin.pdf`. Files whose magic bytes are `Rar!` (legacy multi-bulletin bundles served with a `.pdf` content-disposition) are renamed to `{card_id}_bundle.rar` for the migration helper to expand.
+
+```powershell
+python data_collection_cografi.py                     # incremental, headless
+python data_collection_cografi.py --full              # walk full archive
+python data_collection_cografi.py --limit 1           # stop after 1 download
+python data_collection_cografi.py --headless=false    # show browser
+python data_collection_cografi.py --force             # ignore on-disk freshness
+python data_collection_cografi.py --bulletins-root C:\path\to\elsewhere
+```
+
+**UI reality (verified 2026-05-10):** every cografi card on the live UI surfaces a single direct-href `<a>` (`webim.turkpatent.gov.tr/file/{uuid}?name={ID}&download`) pointing at the issue PDF (or, for cards 1-99, a RAR archive). No CD bundle and no İndir dropdown menu. Cards rendered without a usable href are reported as failures (not silently skipped) so a future UI change is loud.
+
+Card IDs are sequential issue numbers (`220, 219, 218 ...`) rather than the patent collector's `YYYY_M` shape; cadence is roughly biweekly. The card-date regex is intentionally wider than the patent collector's (`\d{1,2}` vs `\d{2}` for the day) — the cografi UI emits dates with single-digit days (e.g. `4.05.2026`).
+
+**Migration helper — `scripts/migrate_cografi_layout.py`** is the one-shot conversion from the legacy flat layout (`{N}.pdf` + RAR bundles named `{N1}-{N2}.pdf`) into the subfolder layout. Idempotent.
+
+```powershell
+python scripts/migrate_cografi_layout.py --dry-run     # preview
+python scripts/migrate_cografi_layout.py               # apply
+```
+
+**Extractor — `pdf_extract_cografi.py`** reads each `CI_*/bulletin.pdf` and emits the sibling `metadata.json` containing one record per published application across up to 6 record types (examined / registered / article 40 modified / article 42 change requests / article 42 finalized / corrections). Section 2's `Sıralı Liste` is the parsing oracle.
+
+```powershell
+python pdf_extract_cografi.py --pdf path/to/bulletin.pdf
+python pdf_extract_cografi.py --issue 220
+python pdf_extract_cografi.py --all                    # every CI_*/bulletin.pdf
+python pdf_extract_cografi.py --all --force            # overwrite metadata.json
+```
+
+**Modern format only.** Cards 100-220 use SMK 6769 (post-2018) and extract cleanly. Cards 1-99 (legacy KHK 555 era, packaged as RAR bundles) are migrated to the subfolder layout but intentionally produce no `metadata.json` in B1 — see the extractor's docstring for the full Known Limitations list (~99.5% record-level success on the modern set, with the remaining gap split between source-data omissions and 2021-era transitional dual-section bulletins).
+
+Per-PDF quality verifier built into the extractor cross-checks Section 2 index counts against the parsed body for every bulletin during `--all`; structural problems are surfaced as `[?]` warnings so a regression is loud.
+
+Pure-helper unit tests live in `tests/test_data_collection_cografi.py` (collector + subfolder layout + RAR detection) and `tests/test_pdf_extract_cografi.py` (extractor helpers + section-key classification + record header parsing + change-request / correction parsers).
 
 ### Tasarım (industrial design) pipeline
 
