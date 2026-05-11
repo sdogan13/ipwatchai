@@ -414,6 +414,20 @@ python -m pipeline.ingest_cografi --dry-run         # parse + project + rollback
 
 Empirical: 3.5 min for the full 220-bulletin set on local Postgres 16 + pgvector 0.8.1. End-to-end HNSW similarity verified: querying for `Karapınar Halısı` returns the self-match at distance 0.0, then `Karapınar Tülü Dokuması` (0.075, same region + product family), then `Emirgazi Halısı` (0.097, same region) — semantic ranking working as expected on Turkish text.
 
+**Search API — `services/cografi_search_service.py` + `app_cografi_search_routes.py` (Phase E).** Mirrors the patent / design / marka search route conventions:
+
+| Endpoint | Auth | Purpose |
+|---|---|---|
+| `POST /api/v1/cografi-search/quick` | yes | hybrid text + image, all filters, up to 100 results |
+| `GET\|POST /api/v1/cografi-search/public` | no | text-only, capped at 10 results, region + section_keys filters only |
+| `GET /api/v1/cografi-search/autocomplete?q=` | yes | typeahead over distinct names + regions |
+| `GET /api/v1/cografi/{record_id}` | yes | full hydrated detail (record + holders + change_requests + figures + related siblings) |
+| `GET /api/v1/cografi-image/{path:path}` | — | serve figure thumbnails with 24h cache |
+
+Score modes follow the patent pattern: text-only (text 0.4 + embedding 0.6), text+image hybrid (0.25 / 0.35 / 0.40), image-only (1.0). Exact-ID shortcut: `C{YYYY}/{NNNNNN}` short-circuits to `application_no` lookup; bare integers short-circuit to `registration_no` lookup (also matches the `existing_registration_no` of art42 records that reference that registration). Filter set: `section_keys`, `record_types`, `gi_type`, `region` (trigram on `geographical_boundary`), `bulletin_date` range, `application_no`, `registration_no`, `include_admin` (defaults false; admin records — corrections + gazette-only announcements — are excluded from name searches by default). Watchlist + alerts are deferred to Phase F.
+
+Empirical: app-boot smoke confirms the routes register cleanly; an integration test against the live ingested DB ranks `Karapınar Halısı` first when its name is queried, and the C-style exact-ID lookup short-circuits to direct-row hits.
+
 Per-PDF quality verifier built into the extractor cross-checks Section 2 index counts against the parsed body for every bulletin during `--all`; structural problems are surfaced as `[?]` warnings so a regression is loud.
 
 Pure-helper unit tests live in `tests/test_data_collection_cografi.py` (collector + subfolder layout + RAR detection) and `tests/test_pdf_extract_cografi.py` (extractor helpers + section-key classification + record header parsing + change-request / correction parsers).
