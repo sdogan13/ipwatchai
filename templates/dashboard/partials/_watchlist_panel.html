@@ -44,6 +44,13 @@
                 :class="watchlistView === 'patent' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
                 :style="watchlistView === 'patent' ? '' : 'color:var(--color-text-muted)'"
                 x-text="t('watchlist.view_patent')">Patent</button>
+        <button type="button"
+                @click="watchlistView = 'cografi';
+                        if (typeof window.initCografiWatchlistTab === 'function') window.initCografiWatchlistTab();"
+                class="px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                :class="watchlistView === 'cografi' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
+                :style="watchlistView === 'cografi' ? '' : 'color:var(--color-text-muted)'"
+                x-text="t('watchlist.view_cografi')">Coğrafi</button>
     </div>
 
     <!-- ============================================
@@ -216,6 +223,13 @@
          ============================================ -->
     <div x-show="watchlistView === 'patent'" x-cloak>
         {% include 'dashboard/partials/_watchlist_patent_subview.html' %}
+    </div>
+
+    <!-- ============================================
+         COĞRAFI İŞARET (GI) SUB-VIEW
+         ============================================ -->
+    <div x-show="watchlistView === 'cografi'" x-cloak>
+        {% include 'dashboard/partials/_watchlist_cografi_subview.html' %}
     </div>
 </main>
 

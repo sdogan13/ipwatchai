@@ -1,0 +1,384 @@
+{# ==========================================================
+   Coğrafi İşaret watchlist sub-view (Coğrafi İşaret Takibi).
+   Mirrors _watchlist_patent_subview.html structure but adapted to:
+   - Four watch types (holder / reference / region / lifecycle)
+     vs patent's two — add-modal radio + per-type fields switch
+     accordingly.
+   - 5-cell stats bar (total + 4 watch_type counts + new alerts)
+     vs patent's 4.
+   - GI-specific optional filters: gi_type, section_keys multi-
+     select (mirrors search subview's pattern).
+   - No CSV export (no /api/v1/cografi-alerts/export.csv endpoint
+     exists yet — patent has it, cografi doesn't).
+
+   IDs prefixed `cografi-watchlist-` / `cwl-` so cografi_watchlist.js
+   selectors don't collide with the other registries.
+   ========================================================== #}
+<div class="pt-2 pb-4">
+
+  {# Header + toolbar #}
+  <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-3">
+    <div>
+      <h2 class="text-xl font-bold" style="color:var(--color-text-primary)"
+          x-text="t('cografi_watchlist.panel_title')">Coğrafi İşaret Takibi</h2>
+      <p class="text-sm mt-1" style="color:var(--color-text-muted)"
+         x-text="t('cografi_watchlist.panel_description')">Track GI holders, similar GIs, regions, or specific registrations.</p>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      <button id="cwl-btn-scan-all"
+              class="px-3 py-2 text-sm font-medium rounded-lg transition-colors flex items-center border disabled:opacity-50"
+              style="color:var(--color-primary);border-color:var(--color-primary);background:transparent"
+              :title="t('cografi_watchlist.scan_all_title')">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+      </button>
+      <button id="cwl-btn-add"
+              class="px-3 py-2 text-sm font-medium rounded-lg transition-colors flex items-center bg-indigo-600 text-white hover:bg-indigo-700"
+              :title="t('cografi_watchlist.add_button')">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  {# Stats bar — 6 cells (total + 4 watch_types + new alerts) #}
+  <div id="cwl-stats-bar" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
+    <div class="rounded-xl border p-3 flex items-center gap-3"
+         style="background:var(--color-bg-card);border-color:var(--color-border)">
+      <div class="w-9 h-9 rounded-lg flex items-center justify-center bg-blue-100">
+        <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+        </svg>
+      </div>
+      <div>
+        <div id="cwl-stat-total" class="text-lg font-bold" style="color:var(--color-text-primary)">-</div>
+        <div class="text-xs" style="color:var(--color-text-muted)"
+             x-text="t('cografi_watchlist.stat_total')">Total</div>
+      </div>
+    </div>
+    <div class="rounded-xl border p-3 flex items-center gap-3"
+         style="background:var(--color-bg-card);border-color:var(--color-border)">
+      <div class="w-9 h-9 rounded-lg flex items-center justify-center bg-purple-100">
+        <svg class="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a3 3 0 015.356-1.857M17 8a3 3 0 11-6 0 3 3 0 016 0zM7 8a3 3 0 11-6 0 3 3 0 016 0z"/>
+        </svg>
+      </div>
+      <div>
+        <div id="cwl-stat-holder" class="text-lg font-bold" style="color:var(--color-text-primary)">-</div>
+        <div class="text-xs" style="color:var(--color-text-muted)"
+             x-text="t('cografi_watchlist.stat_holder')">Holder watches</div>
+      </div>
+    </div>
+    <div class="rounded-xl border p-3 flex items-center gap-3"
+         style="background:var(--color-bg-card);border-color:var(--color-border)">
+      <div class="w-9 h-9 rounded-lg flex items-center justify-center bg-amber-100">
+        <svg class="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+        </svg>
+      </div>
+      <div>
+        <div id="cwl-stat-reference" class="text-lg font-bold" style="color:var(--color-text-primary)">-</div>
+        <div class="text-xs" style="color:var(--color-text-muted)"
+             x-text="t('cografi_watchlist.stat_reference')">Reference watches</div>
+      </div>
+    </div>
+    <div class="rounded-xl border p-3 flex items-center gap-3"
+         style="background:var(--color-bg-card);border-color:var(--color-border)">
+      <div class="w-9 h-9 rounded-lg flex items-center justify-center bg-green-100">
+        <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0zM15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+        </svg>
+      </div>
+      <div>
+        <div id="cwl-stat-region" class="text-lg font-bold" style="color:var(--color-text-primary)">-</div>
+        <div class="text-xs" style="color:var(--color-text-muted)"
+             x-text="t('cografi_watchlist.stat_region')">Region watches</div>
+      </div>
+    </div>
+    <div class="rounded-xl border p-3 flex items-center gap-3"
+         style="background:var(--color-bg-card);border-color:var(--color-border)">
+      <div class="w-9 h-9 rounded-lg flex items-center justify-center bg-teal-100">
+        <svg class="w-5 h-5 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+      </div>
+      <div>
+        <div id="cwl-stat-lifecycle" class="text-lg font-bold" style="color:var(--color-text-primary)">-</div>
+        <div class="text-xs" style="color:var(--color-text-muted)"
+             x-text="t('cografi_watchlist.stat_lifecycle')">Lifecycle watches</div>
+      </div>
+    </div>
+    <div class="rounded-xl border p-3 flex items-center gap-3"
+         style="background:var(--color-bg-card);border-color:var(--color-border)">
+      <div class="w-9 h-9 rounded-lg flex items-center justify-center bg-red-100">
+        <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+        </svg>
+      </div>
+      <div>
+        <div id="cwl-stat-new-alerts" class="text-lg font-bold" style="color:var(--color-text-primary)">-</div>
+        <div class="text-xs" style="color:var(--color-text-muted)"
+             x-text="t('cografi_watchlist.stat_new_alerts')">New alerts</div>
+      </div>
+    </div>
+  </div>
+
+  {# Watchlist items list #}
+  <div class="rounded-xl shadow-sm border p-5 mb-5"
+       style="background:var(--color-bg-card);border-color:var(--color-border)">
+    <h3 class="text-sm font-semibold mb-3" style="color:var(--color-text-primary)"
+        x-text="t('cografi_watchlist.section_items')">Watchlist items</h3>
+    <div id="cwl-list" class="space-y-2"></div>
+    <div id="cwl-empty" class="hidden py-8 text-center">
+      <p class="text-sm" style="color:var(--color-text-muted)"
+         x-text="t('cografi_watchlist.empty_body')">No watchlist items yet.</p>
+    </div>
+  </div>
+
+  {# Inline alerts list #}
+  <div class="rounded-xl shadow-sm border p-5"
+       style="background:var(--color-bg-card);border-color:var(--color-border)">
+    <div class="flex items-center justify-between mb-3 gap-2 flex-wrap">
+      <h3 class="text-sm font-semibold" style="color:var(--color-text-primary)"
+          x-text="t('cografi_watchlist.section_alerts')">Recent alerts</h3>
+      <div class="flex items-center gap-2">
+        <select id="cwl-alert-status-filter" class="text-xs px-2 py-1 rounded"
+                style="border:1px solid var(--color-border-input);background:var(--color-bg-input);color:var(--color-text-primary)">
+          <option value="" x-text="t('cografi_watchlist.alert_filter_all')">All</option>
+          <option value="new" selected x-text="t('cografi_watchlist.alert_filter_new')">New</option>
+          <option value="seen" x-text="t('cografi_watchlist.alert_filter_seen')">Seen</option>
+          <option value="acknowledged" x-text="t('cografi_watchlist.alert_filter_ack')">Acknowledged</option>
+          <option value="resolved" x-text="t('cografi_watchlist.alert_filter_resolved')">Resolved</option>
+          <option value="dismissed" x-text="t('cografi_watchlist.alert_filter_dismissed')">Dismissed</option>
+        </select>
+      </div>
+    </div>
+    <div id="cwl-alerts-list" class="space-y-2"></div>
+    <div id="cwl-alerts-empty" class="hidden py-6 text-center">
+      <p class="text-sm" style="color:var(--color-text-muted)"
+         x-text="t('cografi_watchlist.alerts_empty')">No alerts at this filter.</p>
+    </div>
+  </div>
+
+  {# Add-watchlist modal #}
+  <div id="cwl-add-modal"
+       class="hidden fixed inset-0 z-50 flex items-center justify-center p-4"
+       style="background:rgba(0,0,0,0.5)">
+    <div class="rounded-xl shadow-xl border max-w-xl w-full max-h-[90vh] overflow-y-auto"
+         style="background:var(--color-bg-card);border-color:var(--color-border)">
+      <div class="flex items-center justify-between px-5 py-4 sticky top-0 z-10"
+           style="background:var(--color-bg-card);border-bottom:1px solid var(--color-border)">
+        <h3 class="text-lg font-semibold" style="color:var(--color-text-primary)"
+            x-text="t('cografi_watchlist.add_modal_title')">Add GI watch</h3>
+        <button id="cwl-add-close" type="button" style="color:var(--color-text-faint)">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div class="p-5 space-y-4">
+
+        {# watch_type — 2×2 grid for 4 options #}
+        <div>
+          <label class="block text-xs font-medium mb-2" style="color:var(--color-text-faint)"
+                 x-text="t('cografi_watchlist.watch_type_label')">Watch type</label>
+          <div class="grid grid-cols-2 gap-2">
+            {% for wt, hint_key in [
+              ('holder',    'cografi_watchlist.watch_type_holder_hint'),
+              ('reference', 'cografi_watchlist.watch_type_reference_hint'),
+              ('region',    'cografi_watchlist.watch_type_region_hint'),
+              ('lifecycle', 'cografi_watchlist.watch_type_lifecycle_hint'),
+            ] %}
+            <label class="flex items-start gap-2 px-3 py-2 rounded-lg border cursor-pointer"
+                   style="border-color:var(--color-border)">
+              <input type="radio" name="cwl-watch-type" value="{{ wt }}"
+                     {% if wt == 'holder' %}checked{% endif %} class="accent-indigo-600 mt-0.5">
+              <div>
+                <div class="text-sm font-medium" style="color:var(--color-text-primary)"
+                     x-text="t('cografi_watchlist.watch_type_{{ wt }}')">{{ wt|capitalize }}</div>
+                <div class="text-[10px]" style="color:var(--color-text-muted)"
+                     x-text="t('{{ hint_key }}')"></div>
+              </div>
+            </label>
+            {% endfor %}
+          </div>
+        </div>
+
+        {# Label (always required) #}
+        <div>
+          <label class="block text-xs font-medium mb-1" style="color:var(--color-text-faint)"
+                 x-text="t('cografi_watchlist.label_field')">Label</label>
+          <input type="text" id="cwl-add-label" maxlength="500"
+                 :placeholder="t('cografi_watchlist.label_placeholder')"
+                 class="w-full px-3 py-2 rounded-lg border text-sm outline-none"
+                 style="background:transparent;color:var(--color-text-primary);border-color:var(--color-border)"/>
+        </div>
+
+        {# Holder fields #}
+        <div id="cwl-holder-fields">
+          <label class="block text-xs font-medium mb-1" style="color:var(--color-text-faint)"
+                 x-text="t('cografi_watchlist.holder_name_field')">Holder name</label>
+          <input type="text" id="cwl-add-holder-name" maxlength="500"
+                 :placeholder="t('cografi_watchlist.holder_name_placeholder')"
+                 class="w-full px-3 py-2 rounded-lg border text-sm outline-none"
+                 style="background:transparent;color:var(--color-text-primary);border-color:var(--color-border)"/>
+          <p class="text-[10px] mt-1" style="color:var(--color-text-faint)"
+             x-text="t('cografi_watchlist.holder_name_hint')"></p>
+        </div>
+
+        {# Reference fields #}
+        <div id="cwl-reference-fields" class="hidden">
+          <label class="block text-xs font-medium mb-1" style="color:var(--color-text-faint)"
+                 x-text="t('cografi_watchlist.reference_query_field')">Reference text</label>
+          <textarea id="cwl-add-reference-query" rows="3"
+                    :placeholder="t('cografi_watchlist.reference_query_placeholder')"
+                    class="w-full px-3 py-2 rounded-lg border text-sm outline-none"
+                    style="background:transparent;color:var(--color-text-primary);border-color:var(--color-border)"></textarea>
+          <p class="text-[10px] mt-1" style="color:var(--color-text-faint)"
+             x-text="t('cografi_watchlist.reference_query_hint')"></p>
+        </div>
+
+        {# Region fields #}
+        <div id="cwl-region-fields" class="hidden space-y-2">
+          <div>
+            <label class="block text-xs font-medium mb-1" style="color:var(--color-text-faint)"
+                   x-text="t('cografi_watchlist.region_query_field')">Region</label>
+            <input type="text" id="cwl-add-region-query" maxlength="200"
+                   :placeholder="t('cografi_watchlist.region_query_placeholder')"
+                   class="w-full px-3 py-2 rounded-lg border text-sm outline-none"
+                   style="background:transparent;color:var(--color-text-primary);border-color:var(--color-border)"/>
+            <p class="text-[10px] mt-1" style="color:var(--color-text-faint)"
+               x-text="t('cografi_watchlist.region_query_hint')"></p>
+          </div>
+          <div>
+            <label class="block text-xs font-medium mb-1" style="color:var(--color-text-faint)"
+                   x-text="t('cografi_watchlist.region_terms_field')">Extra terms</label>
+            <input type="text" id="cwl-add-region-terms" maxlength="500"
+                   :placeholder="t('cografi_watchlist.region_terms_placeholder')"
+                   class="w-full px-3 py-2 rounded-lg border text-sm outline-none"
+                   style="background:transparent;color:var(--color-text-primary);border-color:var(--color-border)"/>
+          </div>
+        </div>
+
+        {# Lifecycle fields #}
+        <div id="cwl-lifecycle-fields" class="hidden">
+          <label class="block text-xs font-medium mb-1" style="color:var(--color-text-faint)"
+                 x-text="t('cografi_watchlist.lifecycle_reg_no_field')">Registration no</label>
+          <input type="text" id="cwl-add-lifecycle-reg-no" inputmode="numeric" maxlength="10"
+                 :placeholder="t('cografi_watchlist.lifecycle_reg_no_placeholder')"
+                 class="w-full px-3 py-2 rounded-lg border text-sm outline-none"
+                 style="background:transparent;color:var(--color-text-primary);border-color:var(--color-border)"/>
+          <p class="text-[10px] mt-1" style="color:var(--color-text-faint)"
+             x-text="t('cografi_watchlist.lifecycle_reg_no_hint')"></p>
+        </div>
+
+        {# Optional gi_type narrowing #}
+        <div>
+          <label class="block text-xs font-medium mb-1" style="color:var(--color-text-faint)"
+                 x-text="t('cografi_watchlist.gi_type_field')">GI type (optional)</label>
+          <select id="cwl-add-gi-type" class="w-full px-3 py-2 rounded-lg border text-sm outline-none"
+                  style="background:transparent;color:var(--color-text-primary);border-color:var(--color-border)">
+            <option value="" x-text="t('cografi_watchlist.gi_type_any')">Any</option>
+            <option value="Mahreç işareti" x-text="t('cografi_watchlist.gi_type_mahrec')">Mahreç işareti</option>
+            <option value="Menşe adı" x-text="t('cografi_watchlist.gi_type_mensei')">Menşe adı</option>
+            <option value="Geleneksel ürün adı" x-text="t('cografi_watchlist.gi_type_geleneksel')">Traditional product name</option>
+          </select>
+        </div>
+
+        {# Optional section_keys multi-select (mirrors search subview) #}
+        <div>
+          <label class="block text-xs font-medium mb-1.5" style="color:var(--color-text-faint)"
+                 x-text="t('cografi_watchlist.section_keys_field')">Sections (optional)</label>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+            {% for key, label_key in [
+              ('examined', 'cografi_watchlist.section_examined'),
+              ('registered', 'cografi_watchlist.section_registered'),
+              ('article_40_modified', 'cografi_watchlist.section_art40_modified'),
+              ('article_42_change_requests', 'cografi_watchlist.section_art42_change_requests'),
+              ('article_42_finalized', 'cografi_watchlist.section_art42_finalized'),
+              ('article_43_modified', 'cografi_watchlist.section_art43_modified'),
+            ] %}
+            <label class="inline-flex items-center gap-2 text-xs cursor-pointer">
+              <input type="checkbox" class="cwl-add-section-key" value="{{ key }}"
+                     style="accent-color:var(--color-primary)"/>
+              <span style="color:var(--color-text-primary)"
+                    x-text="t('{{ label_key }}')"></span>
+            </label>
+            {% endfor %}
+          </div>
+        </div>
+
+        {# Threshold (reference only) #}
+        <div id="cwl-threshold-row" class="hidden">
+          <label class="block text-xs font-medium mb-1" style="color:var(--color-text-faint)"
+                 x-text="t('cografi_watchlist.threshold_field')">Similarity threshold</label>
+          <select id="cwl-add-threshold" class="w-full px-3 py-2 rounded-lg border text-sm outline-none"
+                  style="background:transparent;color:var(--color-text-primary);border-color:var(--color-border)">
+            <option value="0.50" selected>50%</option>
+            <option value="0.60">60%</option>
+            <option value="0.70">70%</option>
+            <option value="0.80">80%</option>
+            <option value="0.90">90%</option>
+          </select>
+        </div>
+
+        {# Alert frequency + delivery #}
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium mb-1" style="color:var(--color-text-faint)"
+                   x-text="t('cografi_watchlist.frequency_field')">Alert frequency</label>
+            <select id="cwl-add-frequency" class="w-full px-3 py-2 rounded-lg border text-sm outline-none"
+                    style="background:transparent;color:var(--color-text-primary);border-color:var(--color-border)">
+              <option value="daily" selected x-text="t('cografi_watchlist.frequency_daily')">Daily digest</option>
+              <option value="weekly" x-text="t('cografi_watchlist.frequency_weekly')">Weekly digest</option>
+              <option value="immediate" x-text="t('cografi_watchlist.frequency_immediate')">Immediate (webhook only)</option>
+            </select>
+          </div>
+          <div class="flex items-end">
+            <label class="inline-flex items-center gap-2 text-xs cursor-pointer">
+              <input type="checkbox" id="cwl-add-alert-email" checked
+                     style="accent-color:var(--color-primary)"/>
+              <span style="color:var(--color-text-secondary)"
+                    x-text="t('cografi_watchlist.alert_email_field')">Email me when alerts trigger</span>
+            </label>
+          </div>
+        </div>
+
+        <div>
+          <label class="inline-flex items-center gap-2 text-xs cursor-pointer">
+            <input type="checkbox" id="cwl-add-alert-webhook" style="accent-color:var(--color-primary)"/>
+            <span style="color:var(--color-text-secondary)"
+                  x-text="t('cografi_watchlist.alert_webhook_field')">POST to webhook</span>
+          </label>
+          <input type="url" id="cwl-add-webhook-url" maxlength="2000"
+                 :placeholder="t('cografi_watchlist.webhook_url_placeholder')"
+                 class="hidden mt-2 w-full px-3 py-2 rounded-lg border text-sm outline-none"
+                 style="background:transparent;color:var(--color-text-primary);border-color:var(--color-border)"/>
+        </div>
+
+        <p id="cwl-add-error" class="hidden text-xs px-3 py-2 rounded"
+           style="background:var(--color-bg-error,#fee2e2);color:var(--color-text-error,#991b1b)"></p>
+
+        <div class="flex items-center justify-end gap-2 pt-2"
+             style="border-top:1px solid var(--color-border)">
+          <button id="cwl-add-cancel" type="button"
+                  class="px-3 py-2 text-sm rounded-lg"
+                  style="color:var(--color-text-secondary);border:1px solid var(--color-border)"
+                  x-text="t('cografi_watchlist.cancel')">Cancel</button>
+          <button id="cwl-add-submit" type="button"
+                  class="px-3 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"
+                  x-text="t('cografi_watchlist.add_submit')">Add</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
