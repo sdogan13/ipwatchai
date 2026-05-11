@@ -475,7 +475,8 @@ def get_active_patent_watchlist_items(*, db) -> List[Dict[str, Any]]:
                reference_patent_id, reference_query,
                reference_embedding::text AS reference_embedding,
                ipc_classes, kind_codes, customer_application_no,
-               similarity_threshold
+               similarity_threshold,
+               alert_frequency, last_scan_at, created_at
         FROM patent_watchlist_mt
         WHERE is_active = TRUE
         """

@@ -458,6 +458,8 @@ Quota is shared across all four registries (trademarks + designs + patents + cog
 
 **Weekly re-sweep cron**: `workers/scheduler.py` registers `weekly_cografi_watchlist_scan` to run **Wednesday at 02:00 (Europe/London)** — picks up drift from retroactively-added watchlist items that weren't caught by the post-ingest hook. Mirrors the trademark scan's plan-gating: free-tier orgs are skipped, paid orgs are capped per their plan's `auto_scan_max_items`, per-item `alert_frequency` window is honoured (weekly items skipped if scanned within 6 days, daily within 20 hours). Manual one-shot: `python -m workers.scheduler --run-cografi`.
 
+**Parallel patent + design weekly re-sweeps**: same scheduler now also registers `weekly_patent_watchlist_scan` (**Wed 03:00**) and `weekly_design_watchlist_scan` (**Wed 04:00**), both following the same plan-gating + frequency-window + per-org item-cap pattern. Hourly offset across the three registry crons spreads DB load across the night window without overlapping with the existing trademark scan (Mon 00:00) or universal opposition radar (Tue 00:00). Manual one-shots: `python -m workers.scheduler --run-patent` / `--run-design`. `--run-now` now runs all five sweeps (trademark + universal + cografi + patent + design) in sequence.
+
 **Notification delivery — `notifications/service.py` additions (Phase F3).** Mirrors the patent digest pattern:
 
 - `EmailService.send_cografi_digest(...)` — bilingual TR/EN HTML digest. Cografi-specific columns (watch label, name + region + gi_type + bulletin date, per-watch_type Eşleşme summary, score, severity). Critical-count subject prefix.
