@@ -476,6 +476,17 @@ python -m notifications.service cografi-webhooks
 
 Empirical: 14 new pure-helper tests pass (severity colour mapping, no-alerts short-circuit, bilingual phrasing, watch_type column variation, webhook payload shape across all 4 watch_types). End-to-end smoke against the live empty-inbox DB confirms both CLI commands complete cleanly and report "nothing to send".
 
+**Pipeline orchestrator — `scripts/run_cografi_pipeline.py` (Phase G).** Chains all four stages (collect → extract → embed → ingest) under one entrypoint. Idempotent by default; `--force` forwards to stages 1-3 (ingest is naturally idempotent via UPSERT and has no `--force` flag — the runner emits a one-line note and skips passing it).
+
+```powershell
+python scripts/run_cografi_pipeline.py                  # idempotent end-to-end
+python scripts/run_cografi_pipeline.py --force          # re-run stages 1-3 + re-UPSERT
+python scripts/run_cografi_pipeline.py --stages 2,3,4   # skip the network-heavy collector
+python scripts/run_cografi_pipeline.py --stages 4       # re-ingest only (post-watchlist-change)
+python scripts/run_cografi_pipeline.py --dry-run        # print per-stage commands without running
+python scripts/run_cografi_pipeline.py --stop-on-error  # abort on first failure (default: report and continue)
+```
+
 Per-PDF quality verifier built into the extractor cross-checks Section 2 index counts against the parsed body for every bulletin during `--all`; structural problems are surfaced as `[?]` warnings so a regression is loud.
 
 Pure-helper unit tests live in `tests/test_data_collection_cografi.py` (collector + subfolder layout + RAR detection) and `tests/test_pdf_extract_cografi.py` (extractor helpers + section-key classification + record header parsing + change-request / correction parsers).
