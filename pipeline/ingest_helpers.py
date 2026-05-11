@@ -1142,7 +1142,15 @@ def process_file_batch(conn, file_path, force=False):
                 try:
                     from watchlist.scanner import trigger_watchlist_scan
                     trigger_watchlist_scan(new_trademark_ids, 'bulletin' if is_bulletin_source else ('gazette' if is_gazette_source else 'application'), folder_name)
-                except Exception: pass
+                except Exception as exc:
+                    # Mirror the patent/design/cografi post-ingest hooks:
+                    # log scan failures so an observability gap doesn't
+                    # swallow missed alerts. Never re-raise — a failed
+                    # scan must not poison a successful ingest commit.
+                    logging.warning(
+                        f"   Watchlist scan failed for {folder_name} "
+                        f"({len(new_trademark_ids)} new trademarks): {exc!r}"
+                    )
 
             if new_trademark_ids and is_bulletin_source:
                 queue_bulletin_no, queue_bulletin_date = extract_bulletin_info(folder_name)
