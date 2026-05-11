@@ -507,7 +507,8 @@ def get_active_cografi_watchlist_items(*, db) -> List[Dict[str, Any]]:
                section_keys, record_types, gi_type,
                customer_application_no, customer_registration_no,
                similarity_threshold,
-               alert_email, alert_webhook, webhook_url
+               alert_email, alert_webhook, webhook_url,
+               alert_frequency, last_scan_at
         FROM cografi_watchlist_mt
         WHERE is_active = TRUE
         """,

@@ -456,6 +456,8 @@ Quota is shared across all four registries (trademarks + designs + patents + cog
 
 **Post-ingest hook**: `pipeline/ingest_cografi.py --all` calls `trigger_cografi_watchlist_scan` after a successful run, scoping each scan to the upserted record_ids only (cost is O(watchlist_count × new_ids), not O(watchlist_count × corpus_size)). `--skip-watchlist-scan` opts out for backfills.
 
+**Weekly re-sweep cron**: `workers/scheduler.py` registers `weekly_cografi_watchlist_scan` to run **Wednesday at 02:00 (Europe/London)** — picks up drift from retroactively-added watchlist items that weren't caught by the post-ingest hook. Mirrors the trademark scan's plan-gating: free-tier orgs are skipped, paid orgs are capped per their plan's `auto_scan_max_items`, per-item `alert_frequency` window is honoured (weekly items skipped if scanned within 6 days, daily within 20 hours). Manual one-shot: `python -m workers.scheduler --run-cografi`.
+
 **Notification delivery — `notifications/service.py` additions (Phase F3).** Mirrors the patent digest pattern:
 
 - `EmailService.send_cografi_digest(...)` — bilingual TR/EN HTML digest. Cografi-specific columns (watch label, name + region + gi_type + bulletin date, per-watch_type Eşleşme summary, score, severity). Critical-count subject prefix.

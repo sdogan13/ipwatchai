@@ -25,6 +25,18 @@ WATCHLIST_SCAN_HOUR = 0
 UNIVERSAL_SCAN_HOUR = 0
 WATCHLIST_SCAN_JOB_ID = "weekly_watchlist_scan"
 UNIVERSAL_SCAN_JOB_ID = "weekly_universal_scan"
+
+# Cografi weekly watchlist sweep — Wed 02:00 to avoid Mon/Tue 00:00
+# collisions with the trademark + universal scans, and to give the
+# post-ingest hook (which catches NEW records) a different window
+# from the periodic re-scan-everything sweep (which catches drift
+# from retroactively-added watchlist items).
+COGRAFI_SCAN_DAY = "wed"
+COGRAFI_SCAN_DAY_LABEL = "Wednesday"
+COGRAFI_SCAN_HOUR = 2
+COGRAFI_SCAN_MINUTE = 0
+COGRAFI_SCAN_JOB_ID = "weekly_cografi_watchlist_scan"
+
 SCAN_TIMEZONE_NAME = "Europe/London"
 SCAN_TIMEZONE = ZoneInfo(SCAN_TIMEZONE_NAME)
 
@@ -78,6 +90,20 @@ def start_scheduler():
         replace_existing=True,
     )
 
+    # Weekly cografi watchlist sweep on Wednesday at 02:00.
+    scheduler.add_job(
+        weekly_cografi_watchlist_scan,
+        trigger=CronTrigger(
+            day_of_week=COGRAFI_SCAN_DAY,
+            hour=COGRAFI_SCAN_HOUR,
+            minute=COGRAFI_SCAN_MINUTE,
+            timezone=SCAN_TIMEZONE,
+        ),
+        id=COGRAFI_SCAN_JOB_ID,
+        name='Weekly Cografi Watchlist Auto-Scan',
+        replace_existing=True,
+    )
+
     # Subscription expiry reminders at 09:00 UTC
     scheduler.add_job(
         check_subscription_expiry,
@@ -90,7 +116,12 @@ def start_scheduler():
     scheduler.start()
     next_run = scheduler.get_job(WATCHLIST_SCAN_JOB_ID).next_run_time
     next_universal = scheduler.get_job(UNIVERSAL_SCAN_JOB_ID).next_run_time
-    logger.info(f"Scheduler started - next watchlist scan: {next_run}, next universal scan: {next_universal}")
+    next_cografi = scheduler.get_job(COGRAFI_SCAN_JOB_ID).next_run_time
+    logger.info(
+        f"Scheduler started - next watchlist scan: {next_run}, "
+        f"next universal scan: {next_universal}, "
+        f"next cografi scan: {next_cografi}"
+    )
     return scheduler
 
 
@@ -122,6 +153,14 @@ def get_watchlist_scan_schedule_label() -> str:
 def get_universal_scan_schedule_label() -> str:
     """Return the user-facing Opposition Radar scan schedule label."""
     return f"Weekly on {UNIVERSAL_SCAN_DAY_LABEL} at {UNIVERSAL_SCAN_HOUR:02d}:00"
+
+
+def get_cografi_scan_schedule_label() -> str:
+    """Return the user-facing cografi watchlist auto-scan schedule label."""
+    return (
+        f"Weekly on {COGRAFI_SCAN_DAY_LABEL} at "
+        f"{COGRAFI_SCAN_HOUR:02d}:{COGRAFI_SCAN_MINUTE:02d}"
+    )
 
 
 def weekly_watchlist_scan():
@@ -241,6 +280,144 @@ def weekly_watchlist_scan():
 
     except Exception as e:
         logger.error(f"Weekly watchlist scan failed: {e}", exc_info=True)
+
+
+def weekly_cografi_watchlist_scan():
+    """Scan active cografi watchlist items, gated by organization plan.
+
+    Mirrors ``weekly_watchlist_scan`` (trademark) shape so the two
+    weekly sweeps stay structurally aligned:
+
+    - Plan gating: free orgs (``auto_scan_max_items == 0``) are
+      skipped entirely; other plans cap items per org by their
+      ``auto_scan_max_items`` limit.
+    - Per-item ``alert_frequency`` window: ``weekly`` items are
+      skipped if scanned within the last 6 days, ``daily`` items
+      if scanned within the last 20 hours; ``immediate`` falls
+      through to the daily window for the periodic re-sweep.
+
+    Complements (does not replace) the post-ingest hook in
+    ``pipeline/ingest_cografi.py``: that hook scans against the
+    new record_ids only when fresh data lands, while this weekly
+    sweep catches drift from retroactively-added watchlist items
+    against the existing corpus.
+
+    Runs weekly on Wednesday at 02:00 (Europe/London).
+    """
+    logger.info("=== Weekly Cografi Watchlist Auto-Scan starting ===")
+
+    try:
+        from database.crud import Database
+        from services.cografi_watchlist_service import (
+            get_active_cografi_watchlist_items,
+        )
+        from services.cografi_scanner_service import scan_and_store
+        from utils.subscription import get_plan_limit
+        from psycopg2.extras import RealDictCursor
+
+        now = datetime.utcnow()
+
+        with Database() as db:
+            all_items = get_active_cografi_watchlist_items(db=db)
+
+        if not all_items:
+            logger.info("No active cografi watchlist items - nothing to scan")
+            return
+
+        # Group items by organization
+        org_items: dict = {}
+        for item in all_items:
+            org_id = str(item.get('organization_id', ''))
+            org_items.setdefault(org_id, []).append(item)
+
+        # Look up each org's plan
+        org_plans: dict = {}
+        with Database() as db:
+            cur = db.cursor(cursor_factory=RealDictCursor)
+            for org_id in org_items:
+                cur.execute("""
+                    SELECT COALESCE(sp.name, 'free') as plan_name
+                    FROM organizations o
+                    LEFT JOIN subscription_plans sp ON o.subscription_plan_id = sp.id
+                    WHERE o.id = %s
+                """, (org_id,))
+                row = cur.fetchone()
+                org_plans[org_id] = row['plan_name'] if row else 'free'
+
+        scanned = 0
+        skipped = 0
+        skipped_plan = 0
+        total_alerts = 0
+
+        for org_id, items in org_items.items():
+            plan_name = org_plans.get(org_id, 'free')
+            max_scan_items = get_plan_limit(plan_name, 'auto_scan_max_items')
+
+            # Skip orgs with no auto-scan (free)
+            if max_scan_items == 0:
+                logger.info(
+                    f"Skipping org {org_id} (plan: {plan_name}) - "
+                    "auto-scan not included"
+                )
+                skipped_plan += len(items)
+                continue
+
+            # Most recently added first, capped at the plan's limit.
+            items_sorted = sorted(
+                items,
+                key=lambda x: x.get('created_at', datetime.min),
+                reverse=True,
+            )[:max_scan_items]
+
+            if len(items) > max_scan_items:
+                logger.info(
+                    f"  Org {org_id} ({plan_name}): {len(items)} items, "
+                    f"capped to {max_scan_items}"
+                )
+
+            with Database() as db:
+                for item in items_sorted:
+                    freq = (item.get('alert_frequency') or 'daily').lower()
+                    last_scan = item.get('last_scan_at')
+
+                    # Determine minimum interval (immediate falls back to
+                    # the daily window for the periodic re-sweep — the
+                    # immediate webhook path handles per-bulletin freshness
+                    # separately).
+                    if freq == 'weekly':
+                        min_interval = timedelta(days=6)
+                    else:
+                        min_interval = timedelta(hours=20)
+
+                    if last_scan and (now - last_scan) < min_interval:
+                        skipped += 1
+                        continue
+
+                    try:
+                        result = scan_and_store(db, item)
+                        scanned += 1
+                        alerts_count = int(result.get('alerts_created') or 0)
+                        total_alerts += alerts_count
+                        if alerts_count > 0:
+                            logger.info(
+                                f"  [{item.get('label', '?')}] "
+                                f"{alerts_count} new alerts"
+                            )
+                    except Exception as e:
+                        logger.error(
+                            f"  [{item.get('label', '?')}] scan failed: {e}"
+                        )
+
+        logger.info(
+            f"=== Cografi Auto-Scan complete: {scanned} scanned, "
+            f"{skipped} skipped, {skipped_plan} skipped (plan), "
+            f"{total_alerts} alerts ==="
+        )
+
+    except Exception as e:
+        logger.error(
+            f"Weekly cografi watchlist scan failed: {e}", exc_info=True
+        )
 
 
 def weekly_universal_scan():
@@ -408,9 +585,11 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Watchlist & Universal scanner scheduler")
     parser.add_argument("--run-now", action="store_true",
-                        help="Run weekly scans immediately (don't wait for schedule)")
+                        help="Run all weekly scans immediately (trademark + universal + cografi)")
     parser.add_argument("--run-universal", action="store_true",
                         help="Run universal conflict scan immediately")
+    parser.add_argument("--run-cografi", action="store_true",
+                        help="Run cografi watchlist sweep immediately")
     parser.add_argument("--daemon", action="store_true",
                         help="Start scheduler daemon (blocks forever)")
     args = parser.parse_args()
@@ -419,9 +598,13 @@ if __name__ == "__main__":
         logger.info("Running weekly scans immediately...")
         weekly_watchlist_scan()
         weekly_universal_scan()
+        weekly_cografi_watchlist_scan()
     elif args.run_universal:
         logger.info("Running universal conflict scan immediately...")
         weekly_universal_scan()
+    elif args.run_cografi:
+        logger.info("Running cografi watchlist sweep immediately...")
+        weekly_cografi_watchlist_scan()
     elif args.daemon:
         import time
         scheduler = start_scheduler()
@@ -432,4 +615,4 @@ if __name__ == "__main__":
         except (KeyboardInterrupt, SystemExit):
             shutdown_scheduler()
     else:
-        print("Usage: python -m workers.scheduler --run-now | --daemon")
+        print("Usage: python -m workers.scheduler --run-now | --run-cografi | --daemon")
