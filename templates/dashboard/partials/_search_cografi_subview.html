@@ -45,111 +45,16 @@
                  this.cografiSetFile(f);
                } }">
 
-  {# ===== Search form card ===== #}
+  {# ===== Search form card — text input + image dropzone are
+     served by the shared block at the top of _search_panel.html.
+     The hidden #cografi-search-input + #cografi-search-image
+     elements stay so cografi_search.js can read by id; an
+     x-effect in the parent panel mirrors the shared
+     searchQuery + selectedImage into them. ===== #}
+  <input type="text" id="cografi-search-input" class="hidden" autocomplete="off" maxlength="200" />
+  <input type="file" id="cografi-search-image" accept="image/png,image/jpeg,image/webp,image/tiff" class="hidden" />
   <div class="rounded-xl shadow-sm border p-5"
        style="background:var(--color-bg-card);border-color:var(--color-border)">
-
-    {# ---------- Text query (with clear-× and history dropdown) ---------- #}
-    <div class="mb-3 relative">
-      <div class="flex items-center rounded-xl overflow-hidden"
-           style="background:var(--color-bg-card);border:2px solid var(--color-border)">
-        <svg class="w-5 h-5 ml-4 shrink-0" style="color:var(--color-text-muted)" fill="none"
-             stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                d="M21 21l-4.35-4.35M11 19a8 8 0 110-16 8 8 0 010 16z"/>
-        </svg>
-        <input type="text" id="cografi-search-input"
-               :placeholder="t('cografi_search.query_placeholder')"
-               class="flex-1 px-4 py-4 text-base outline-none min-w-0"
-               style="background:transparent;color:var(--color-text-primary)"
-               autocomplete="off" maxlength="200" />
-        <button type="button" id="cografi-search-input-clear"
-                class="hidden mr-2 p-1.5 rounded hover:opacity-80 transition-opacity"
-                style="color:var(--color-text-muted)"
-                :title="t('search.clear')">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                  d="M6 18L18 6M6 6l12 12"/>
-          </svg>
-        </button>
-      </div>
-
-      {# Search history + autocomplete dropdown (rendered by cografi_search.js) #}
-      <div id="cografi-search-history"
-           class="hidden absolute left-0 right-0 mt-1 rounded-xl shadow-lg border overflow-hidden"
-           style="background:var(--color-bg-card);border-color:var(--color-border);z-index:50;max-height:360px;overflow-y:auto">
-        <div class="flex items-center justify-between px-4 py-2"
-             style="border-bottom:1px solid var(--color-border)">
-          <span class="text-xs font-medium" style="color:var(--color-text-faint)"
-                x-text="t('cografi_search.recent_searches')">Recent searches</span>
-          <button type="button" id="cografi-search-history-clear-all"
-                  class="text-xs hover:underline"
-                  style="color:var(--color-text-faint)"
-                  x-text="t('cografi_search.clear_history')">Clear</button>
-        </div>
-        <div id="cografi-search-history-list"></div>
-      </div>
-    </div>
-
-    {# ---------- Figure upload (drag-drop + preview) ---------- #}
-    <div class="mb-3">
-      <div class="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-all"
-           :class="cografiDragOver ? 'ring-2 ring-indigo-400' : ''"
-           :style="'background:' + (cografiDragOver ? 'var(--color-primary-light)' : 'var(--color-bg-muted)') + ';border:1px dashed var(--color-border)'"
-           @click="document.getElementById('cografi-search-image').click()"
-           @dragover.prevent="cografiDragOver = true"
-           @dragleave="cografiDragOver = false"
-           @drop.prevent="cografiHandleDrop($event)">
-
-        <template x-if="!cografiImagePreview">
-          <div class="flex items-center gap-3 w-full">
-            <div class="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
-                 style="background:var(--color-primary-light)">
-              <svg class="w-5 h-5" style="color:var(--color-primary)" fill="none" stroke="currentColor"
-                   viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                      d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
-              </svg>
-            </div>
-            <div class="flex-1 min-w-0">
-              <span class="text-sm font-medium" style="color:var(--color-text-secondary)"
-                    x-text="t('cografi_search.image_drop_label')">Drop a GI figure here or click to upload</span>
-              <span class="text-xs ml-1" style="color:var(--color-text-faint)"
-                    x-text="t('cografi_search.image_optional')">(optional)</span>
-              <p class="text-xs mt-0.5" style="color:var(--color-text-faint)"
-                 x-text="t('cografi_search.image_hint')">DINOv2 figure similarity</p>
-            </div>
-            <svg class="w-5 h-5 flex-shrink-0" style="color:var(--color-text-faint)" fill="none"
-                 stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                    d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
-            </svg>
-          </div>
-        </template>
-
-        <template x-if="cografiImagePreview">
-          <div class="flex items-center gap-3 w-full">
-            <div class="relative flex-shrink-0">
-              <img :src="cografiImagePreview" class="h-12 w-12 object-contain rounded-lg border"
-                   style="border-color:var(--color-border);background:var(--color-bg-card)" alt="GI figure">
-            </div>
-            <div class="flex-1 min-w-0">
-              <p class="text-sm font-medium truncate" style="color:var(--color-text-primary)"
-                 x-text="cografiImageName"></p>
-              <p class="text-xs" style="color:var(--color-text-muted)"
-                 x-text="t('cografi_search.image_attached')">Figure attached</p>
-            </div>
-            <button type="button" id="cografi-search-image-clear" @click.stop="cografiClearImage()"
-                    class="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-sm"
-                    style="background:var(--color-bg-muted);color:var(--color-text-secondary)"
-                    :title="t('cografi_search.image_remove')">&times;</button>
-          </div>
-        </template>
-      </div>
-      <input type="file" id="cografi-search-image"
-             accept="image/png,image/jpeg,image/webp,image/tiff" class="hidden"
-             @change="cografiHandleSelect($event)"/>
-    </div>
 
     {# ---------- Filters (collapsible) ---------- #}
     <div class="mb-3"
