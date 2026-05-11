@@ -520,8 +520,185 @@ def test_extractor_version_is_an_int():
     assert EXTRACTOR_VERSION >= 1
 
 
-def test_min_supported_bulletin_no_is_modern_format_threshold():
-    """Cards 1-99 are KHK 555 (legacy); 100+ are SMK 6769 (modern). The
-    extractor refuses to process below this threshold to avoid false
-    positives on the legacy schema."""
-    assert MIN_SUPPORTED_BULLETIN_NO == 100
+def test_min_supported_bulletin_no_covers_full_archive():
+    """B1.5 added legacy KHK 555 support; the extractor now accepts the
+    full archive (cards 1-220). Bulletins below this number would be
+    pre-2017 / pre-archive and never surface from the live site."""
+    assert MIN_SUPPORTED_BULLETIN_NO == 1
+
+
+# ---------------------------------------------------------------------------
+# B1.5 — legacy KHK 555 era format support
+# ---------------------------------------------------------------------------
+
+# Verbatim PyMuPDF text from bulletin 1 p2 (TOC, KHK 555 era, 4 sections
+# including the legacy-only "Resmi Gazetede İlan Edilmiş..." section).
+TOC_LEGACY_001 = """2017/1 Sayılı Resmi
+Türk Patent ve Marka Kurumu
+Yayım Tarihi: 15.03.2017
+Coğrafi İşaret ve Geleneksel Ürün Adı Bülteni
+
+
+
+2
+
+İÇİNDEKİLER
+
+1.Bölüm
+Duyuru.................................................................................................................................3
+
+2.Bölüm
+Coğrafi İşaret ve Geleneksel Ürün Adı Bülteni 1. Sayıda Yayımlanan Başvuruların Sıralı
+Listesi..................................................................................................................................4
+
+3.Bölüm
+555 Sayılı Coğrafi İşaretlerin Korunması Hakkında Kanun Hükmünde Kararname
+Gereğince İncelenen Coğrafi İşaret Başvurularının Yayımı...............................................6
+
+4.Bölüm
+Resmi Gazetede İlan Edilmiş Ancak Yerel ya da Ulusal Gazetede İlan Edilmemiş Coğrafi
+İşaret Başvurularının Yayımı...........................................................................................33
+"""
+
+# Verbatim text fragment of bulletin 38 art42 record (legacy preamble:
+# "<reg_no> sayı ile <date> tarihinde tescil edilen <name> tescil metninde").
+LEGACY_ART42_PREAMBLE_038 = """1. Kangal Koyunu
+47 sayı ile 03.08.2002 tarihinde tescil edilen Kangal Koyunu tescil metninde yer alan "Denetim" başlığının
+6769 Sayılı Sınai Mülkiyet Kanununun "Değişiklik talepleri" başlıklı 42 nci maddesi gereğince değiştirilmesine
+ilişkin ilan aşağıdaki gibi olup ...
+"""
+
+
+def test_classify_section_title_handles_khk_555_examined():
+    from pdf_extract_cografi import classify_section_title
+    title = (
+        "555 Sayılı Coğrafi İşaretlerin Korunması Hakkında Kanun Hükmünde "
+        "Kararname Gereğince İncelenen Coğrafi İşaret Başvurularının Yayımı"
+    )
+    assert classify_section_title(title) == "examined"
+
+
+def test_classify_section_title_handles_khk_555_short_no_yayimi():
+    """Legacy bulletin 60+ TOC variant ends with 'Başvurular' (no Yayımı)."""
+    from pdf_extract_cografi import classify_section_title
+    title = (
+        "555 Sayılı Coğrafi İşaretlerin Korunması Hakkında Kanun Hükmünde "
+        "Kararname Kapsamında İncelenen Başvurular"
+    )
+    assert classify_section_title(title) == "examined"
+
+
+def test_classify_section_title_handles_khk_555_article_12_as_art40():
+    """KHK 555 Article 12 modifications are the legacy equivalent of SMK
+    Article 40 modifications and must classify to the same semantic key."""
+    from pdf_extract_cografi import classify_section_title
+    title = (
+        "555 Sayılı Coğrafi İşaretlerin Korunması Hakkında Kanun Hükmünde "
+        "Kararnamenin 12 nci Maddesi Kapsamında Değişikliğe Uğramış Başvurular"
+    )
+    assert classify_section_title(title) == "article_40_modified"
+
+
+def test_classify_section_title_handles_art42_legacy_short_form():
+    """Legacy bulletin 25 + 38 use 'Talepleri' (no Yayımı) and
+    'Uyarınca' (instead of 'Kapsamında')."""
+    from pdf_extract_cografi import classify_section_title
+    assert classify_section_title(
+        "6769 Sayılı Sınai Mülkiyet Kanununun 42 nci Maddesi Uyarınca Değişiklik Talepleri"
+    ) == "article_42_change_requests"
+
+
+def test_classify_section_title_handles_art42_finalized_legacy_wording():
+    """Legacy bulletin 43 uses 'Değişikliğe Uğramış Tesciller' instead of
+    'Kesinleşen Değişikliklerin Yayımı'."""
+    from pdf_extract_cografi import classify_section_title
+    assert classify_section_title(
+        "6769 Sayılı Sınai Mülkiyet Kanununun 42 nci Maddesi Kapsamında "
+        "Değişikliğe Uğramış Tesciller"
+    ) == "article_42_finalized"
+
+
+def test_classify_section_title_handles_article_43():
+    from pdf_extract_cografi import classify_section_title
+    title = "6769 Sayılı Sınai Mülkiyet Kanununun 43 üncü Maddesi Kapsamında Değişiklikler"
+    assert classify_section_title(title) == "article_43_modified"
+
+
+def test_classify_section_title_handles_corrections_legacy_short():
+    """Legacy bulletins use just 'Düzeltmeler'; modern uses 'Düzeltmelerin Yayımı'."""
+    from pdf_extract_cografi import classify_section_title
+    assert classify_section_title("Düzeltmeler") == "corrections"
+    assert classify_section_title("Düzeltmelerin Yayımı") == "corrections"
+
+
+def test_classify_section_title_handles_gazette_only_legacy():
+    """Bulletin 1's special 'Resmi Gazetede İlan Edilmiş Ancak ...' section."""
+    from pdf_extract_cografi import classify_section_title
+    title = (
+        "Resmi Gazetede İlan Edilmiş Ancak Yerel ya da Ulusal Gazetede "
+        "İlan Edilmemiş Coğrafi İşaret Başvurularının Yayımı"
+    )
+    assert classify_section_title(title) == "gazette_only_announcements"
+
+
+def test_parse_toc_legacy_bulletin_1():
+    """Legacy KHK-only bulletin TOC parses cleanly; sections classify via
+    title content (KHK -> examined, gazette-only -> gazette_only)."""
+    from pdf_extract_cografi import classify_section_title
+    entries = parse_toc(TOC_LEGACY_001)
+    assert [e["section_number"] for e in entries] == [1, 2, 3, 4]
+    sec3 = next(e for e in entries if e["section_number"] == 3)
+    sec4 = next(e for e in entries if e["section_number"] == 4)
+    assert sec3["start_page"] == 6
+    assert sec4["start_page"] == 33
+    assert classify_section_title(sec3["title"]) == "examined"
+    assert classify_section_title(sec4["title"]) == "gazette_only_announcements"
+
+
+def test_parse_record_header_aliases_resolve_legacy_labels():
+    """Legacy KHK-era bulletins use 'Başvuru Sahibinin Adı/Adresi' and
+    'Ürünün Adı'; the alias regex must resolve them to the same fields
+    as the modern 'Başvuru Yapan/Yapanın Adresi/Ürün / Ürün Grubu'."""
+    legacy_record = """1. Yozgat Çanak Peyniri
+Başvuru No
+: C2011/026
+Başvuru Tarihi
+: 14.03.2011
+Coğrafi İşaretin Adı
+: Yozgat Çanak Peyniri
+Ürünün Adı
+: Peynir
+Coğrafi İşaretin Türü
+: Mahreç İşareti
+Başvuru Sahibinin Adı
+: Yozgat Belediye Başkanlığı
+Başvuru Sahibinin Adresi
+: Yozgat Belediyesi Hizmet Binası Merkez/YOZGAT
+Coğrafi Sınır
+: Yozgat ili
+Kullanım Biçimi
+: Yozgat Çanak Peyniri ibaresi ürünün ambalajı üzerinde yer alır.
+Ürünün Tanımı ve Ayırt Edici Özellikleri:
+"""
+    h = parse_record_header(legacy_record, is_section_4=False)
+    assert h.application_no == "C2011/026"
+    assert h.application_date == "2011-03-14"
+    assert h.name == "Yozgat Çanak Peyniri"
+    assert h.product_group == "Peynir"  # legacy "Ürünün Adı" alias
+    assert h.gi_type == "Mahreç İşareti"
+    assert h.applicant_name == "Yozgat Belediye Başkanlığı"  # legacy alias
+    assert h.applicant_address and "YOZGAT" in h.applicant_address
+    assert h.geographical_boundary == "Yozgat ili"
+
+
+def test_parse_change_request_handles_legacy_preamble():
+    """Bulletin 38-era art42 records use a different preamble shape:
+    '<reg_no> sayı ile <date> tarihinde tescil edilen <name> tescil
+    metninde ...'. The parser must capture reg_no and name even when
+    the change body is free-form prose without structured tuples."""
+    cr = parse_section6_change_request(LEGACY_ART42_PREAMBLE_038)
+    assert cr is not None
+    assert cr.existing_registration_no == 47
+    assert cr.name == "Kangal Koyunu"
+    # Legacy art42 has no structured "old / new" tuples — empty list is OK.
+    assert cr.changes == []

@@ -4,21 +4,32 @@ Sister to ``pdf_extract_patent.py`` (Patent / Faydalı Model) and
 ``pdf_extract_tasarim.py`` (Tasarım). Reads a single per-bulletin PDF and
 emits ``metadata.json`` next to it.
 
-Targets the **modern bulletin format only** (cards 100-220, post-SMK 6769,
-issued from late 2018 onwards). Pre-SMK bulletins (cards 1-99, KHK 555 era,
-2017 to mid-2018) use different section titles and field labels and are
-intentionally out of scope for this version. They will be supported in a
-follow-up once the modern path is verified.
+Covers the **full archive**: cards 1-99 (KHK 555 legacy era, 2017-2021)
+and cards 100-220 (modern SMK 6769 era, 2021 onwards). Section types are
+classified by **title content**, not by bulletin section number, since
+section numbering shifts between bulletins (e.g. some omit Article 40,
+some legacy bulletins skip directly from Tescil Edilen to Article 42).
 
-Per-bulletin sections recognised:
+Per-record sections recognised (semantic keys):
 
-  * Section 3 — ``İncelenen Başvuruların Yayımı`` (applications under examination)
-  * Section 4 — ``Tescil Edilen Başvuruların Yayımı`` (registered applications)
-  * Section 5 — ``SMK 40 Madde Kapsamında Değişikliğe Uğramış Başvurular`` (Article 40)
-  * Section 6 — ``SMK 42 Madde Kapsamında Değişiklik Talepleri`` (Article 42)
+  * ``examined`` — applications under examination (KHK 555 art 11 OR SMK 6769 art 40)
+  * ``registered`` — newly registered applications (Tescil Edilen)
+  * ``article_40_modified`` — modifications under SMK art 40 OR KHK art 12
+  * ``article_42_change_requests`` — open change requests (SMK art 42)
+  * ``article_42_finalized`` — finalized changes (Kesinleşen Değişiklikler / Değişikliğe Uğramış Tesciller)
+  * ``article_43_modified`` — SMK art 43 modifications (legacy era only)
+  * ``corrections`` — Düzeltmeler (typos, missing logos, etc.)
+  * ``gazette_only_announcements`` — bulletin-1 era special section
 
 Section 2 (Sıralı Liste) is the parsing oracle: it gives the application
-number, name, and start page for every record in sections 3-6.
+number, name, and start page for every record in sections 3+. Multiple
+sections can share the same semantic key (e.g. KHK examined + SMK
+examined in the same transitional bulletin); the dispatcher routes each
+record to the body extent that contains its index-claimed start page.
+
+Legacy era introduces field-label aliases (Başvuru Sahibinin Adı vs
+Başvuru Yapan, Ürünün Adı vs Ürün / Ürün Grubu) handled transparently
+by the labels-with-alternation regexes.
 
 CLI::
 
@@ -27,35 +38,22 @@ CLI::
     python pdf_extract_cografi.py --all --bulletins-root ./bulletins/Cografi_Isaret_ve_Geleneksel_Urun_Adi
     python pdf_extract_cografi.py --all --force          # re-extract even if metadata.json exists
 
-Known limitations (verified empirically on the 121 modern bulletins
-shipped at B1 — record-level success 99.53%, 11/2321 records flagged):
+B1.5 results (full archive, cards 1-220): 220/220 bulletins extracted,
+3,527 records produced, 26 records flagged by the verifier (≈99.26%
+record-level success). The remaining flagged records cluster into:
 
-* **Source-data omissions** (parser cannot recover; the field is missing
-  in the PDF itself): Akçakoca Ekşilisi (bulletin 205) and Hatay Sarısı
-  İpeği (registered, missing ``Başvuru No`` line); Hatay Ekşi Aşı
-  (bulletin 186) and Bayramiç Zeytinyağı (bulletin 112) (examined,
-  missing ``Başvuru Tarihi``); Tercan Balı (bulletin 210) art40 — unique
-  format with the application number outside any labelled field.
-
-* **Transitional dual-section bulletins** (one bulletin lists both legacy
-  KHK 555 and modern SMK 6769 sections that both classify to ``examined``;
-  current single-slot dispatch picks the second): İzmir Tulum Peyniri in
-  bulletin 105. Affects roughly the 2021-era transitional bulletins.
-
-* **Article 42 change-tuple format variants** (regex matches the
-  registration reference but not the change tuples): Kayseri Mantısı
-  (bulletin 130), Erdemli Muzu (bulletin 109), İpsala Pirinci
-  (bulletin 100), Yalova Aronyası (bulletin 104).
-
-* **Bulletin 215 article 42 body**: a single record is listed in the
-  index but the body uses a structurally different format that the
-  current parser does not recognise.
-
-These are all deferred to a Phase B1.5 follow-up. The collector +
-migration + extractor pipeline that ships in B1 covers the modern
-SMK 6769 schema (cards 100-220) cleanly. Cards 1-99 (legacy KHK 555
-era, packaged as RAR bundles) are migrated to the subfolder layout but
-intentionally produce no metadata.json in B1.
+* **Source-data omissions** — fields literally absent from the source
+  PDF (e.g. registered records missing the ``Başvuru No`` line,
+  examined records with no labelled ``Başvuru Tarihi``). Parser cannot
+  recover what isn't there.
+* **Free-form change-text records** — bulletin-38-era art42 records
+  whose body describes changes in prose without ``"old" ifadesi
+  "new" şeklinde değiştirilmiştir`` anchors; the registration reference
+  is captured but ``changes`` stays empty. The verifier intentionally
+  does not flag empty-changes for these.
+* **Index-vs-body count mismatches in a few bulletins** — typically a
+  single sub-section that ships its body in a layout the parser
+  doesn't yet recognise.
 """
 from __future__ import annotations
 
@@ -75,8 +73,8 @@ _LOCAL_DEFAULT_BULLETINS_DIR = (
     _LOCAL_PROJECT_ROOT / "bulletins" / "Cografi_Isaret_ve_Geleneksel_Urun_Adi"
 )
 
-EXTRACTOR_VERSION = 1
-MIN_SUPPORTED_BULLETIN_NO = 100  # modern format starts here
+EXTRACTOR_VERSION = 2  # B1.5 — adds legacy KHK 555 + Article 43 + gazette-only support
+MIN_SUPPORTED_BULLETIN_NO = 1  # legacy support added in B1.5; both eras parsed
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - [CI-EXTRACT] - %(levelname)s - %(message)s")
 logger = logging.getLogger("turkpatent.cografi_extract")
@@ -110,7 +108,9 @@ SECTION_KEY_REGISTERED = "registered"
 SECTION_KEY_ART40 = "article_40_modified"
 SECTION_KEY_ART42_REQUESTS = "article_42_change_requests"
 SECTION_KEY_ART42_FINALIZED = "article_42_finalized"
+SECTION_KEY_ART43 = "article_43_modified"
 SECTION_KEY_CORRECTIONS = "corrections"
+SECTION_KEY_GAZETTE_ONLY = "gazette_only_announcements"
 
 ALL_SECTION_KEYS: Tuple[str, ...] = (
     SECTION_KEY_EXAMINED,
@@ -118,7 +118,9 @@ ALL_SECTION_KEYS: Tuple[str, ...] = (
     SECTION_KEY_ART40,
     SECTION_KEY_ART42_REQUESTS,
     SECTION_KEY_ART42_FINALIZED,
+    SECTION_KEY_ART43,
     SECTION_KEY_CORRECTIONS,
+    SECTION_KEY_GAZETTE_ONLY,
 )
 
 # More-specific patterns must come first so e.g. "Kesinleşen Değişikliklerin"
@@ -132,23 +134,46 @@ ALL_SECTION_KEYS: Tuple[str, ...] = (
 _GAP = r"[\s\S]{1,150}?"
 
 SECTION_TITLE_PATTERNS: List[Tuple[re.Pattern, str]] = [
+    # KHK 555 examined (legacy era) — semantically the same as SMK
+    # examined records. Both "Gereğince" (1, 25) and "Kapsamında" (60+)
+    # show up; trailing "Yayımı" is optional in some bulletins.
+    (re.compile(rf"555\s+Sayılı{_GAP}İncelenen{_GAP}Başvurular(?:ın\s+Yayımı)?", re.IGNORECASE), SECTION_KEY_EXAMINED),
     (re.compile(r"İncelenen\s+Başvuruların\s+Yayımı", re.IGNORECASE), SECTION_KEY_EXAMINED),
     (re.compile(r"Tescil\s+Edilen\s+Başvuruların\s+Yayımı", re.IGNORECASE), SECTION_KEY_REGISTERED),
-    (re.compile(rf"40\s*[ıi]nc[ıi]\s+Maddesi{_GAP}Yayımı", re.IGNORECASE), SECTION_KEY_ART40),
-    (re.compile(rf"42\s*nci\s+Maddesi{_GAP}Kesinleşen{_GAP}Yayımı", re.IGNORECASE), SECTION_KEY_ART42_FINALIZED),
-    (re.compile(rf"42\s*nci\s+Maddesi{_GAP}Yayımı", re.IGNORECASE), SECTION_KEY_ART42_REQUESTS),
-    (re.compile(r"Düzeltmelerin\s+Yayımı", re.IGNORECASE), SECTION_KEY_CORRECTIONS),
+    # Article 40 (SMK) and KHK 555 Article 12 are both "post-publication
+    # modifications". Title can end with "Başvuruların Yayımı" (modern)
+    # or just "Başvurular" (legacy, no Yayımı). Match either.
+    (re.compile(rf"(?:40\s*[ıi]nc[ıi]|555\s+Sayılı{_GAP}12\s*nci)\s+Maddesi{_GAP}Değişikliğe\s+Uğramış{_GAP}Başvurular(?:ın\s+Yayımı)?", re.IGNORECASE), SECTION_KEY_ART40),
+    # Article 42 finalized — modern uses "Kesinleşen Değişikliklerin
+    # Yayımı"; bulletin 43 (legacy) uses "Değişikliğe Uğramış Tesciller".
+    # Both refer to the SAME concept (changes that have been finalized
+    # against an existing registration).
+    (re.compile(rf"42\s*nci\s+Maddesi{_GAP}(?:Kesinleşen{_GAP}Değişikliklerin?\s+Yayımı|Değişikliğe\s+Uğramış{_GAP}Tesciller)", re.IGNORECASE), SECTION_KEY_ART42_FINALIZED),
+    # Article 42 change requests — accept all wording variants. Must NOT
+    # also match the finalized variants above; ordering protects us.
+    (re.compile(rf"42\s*nci\s+Maddesi{_GAP}Değişiklik\s+Talepler(?:in?\s+Yayımı|i)?", re.IGNORECASE), SECTION_KEY_ART42_REQUESTS),
+    # Article 43 (SMK) — legacy-era; appeared from bulletin ~60 onwards.
+    (re.compile(rf"43\s*[üu]nc[üu]\s+Maddesi{_GAP}Değişiklikler(?:in\s+Yayımı)?", re.IGNORECASE), SECTION_KEY_ART43),
+    # Düzeltmeler accepts both legacy short title and modern "...Yayımı".
+    (re.compile(r"Düzeltmeler(?:in\s+Yayımı)?", re.IGNORECASE), SECTION_KEY_CORRECTIONS),
+    # Legacy-only special section: "Resmi Gazetede İlan Edilmiş Ancak
+    # Yerel ya da Ulusal Gazetede İlan Edilmemiş ..." (bulletin 1 era).
+    (re.compile(rf"Resmi\s+Gazetede\s+İlan\s+Edilmiş{_GAP}Başvurular(?:ın\s+Yayımı)?", re.IGNORECASE), SECTION_KEY_GAZETTE_ONLY),
 ]
 
 # Section 2 sub-index headers — same classification by title content.
 # Listesi is the index-page word; Yayımı is the body-page word.
 INDEX_HEADER_TO_KEY: List[Tuple[re.Pattern, str]] = [
+    (re.compile(rf"555\s+Sayılı{_GAP}İncelenen{_GAP}Listesi", re.IGNORECASE), SECTION_KEY_EXAMINED),
     (re.compile(r"İncelenen\s+Başvuruların\s+Listesi", re.IGNORECASE), SECTION_KEY_EXAMINED),
     (re.compile(r"Tescil\s+Edilen\s+Başvuruların\s+Listesi", re.IGNORECASE), SECTION_KEY_REGISTERED),
-    (re.compile(rf"40\s*[ıi]nc[ıi]\s+Maddesi{_GAP}Listesi", re.IGNORECASE), SECTION_KEY_ART40),
-    (re.compile(rf"42\s*nci\s+Maddesi{_GAP}Kesinleşen{_GAP}Listesi", re.IGNORECASE), SECTION_KEY_ART42_FINALIZED),
+    # Both SMK Art 40 and KHK Art 12 are modifications.
+    (re.compile(rf"(?:40\s*[ıi]nc[ıi]|555\s+Sayılı{_GAP}12\s*nci)\s+Maddesi{_GAP}Listesi", re.IGNORECASE), SECTION_KEY_ART40),
+    (re.compile(rf"42\s*nci\s+Maddesi{_GAP}(?:Kesinleşen|Değişikliğe\s+Uğramış){_GAP}Listesi", re.IGNORECASE), SECTION_KEY_ART42_FINALIZED),
     (re.compile(rf"42\s*nci\s+Maddesi{_GAP}Listesi", re.IGNORECASE), SECTION_KEY_ART42_REQUESTS),
-    (re.compile(r"Düzeltmelerin\s+Listesi", re.IGNORECASE), SECTION_KEY_CORRECTIONS),
+    (re.compile(rf"43\s*[üu]nc[üu]\s+Maddesi{_GAP}Listesi", re.IGNORECASE), SECTION_KEY_ART43),
+    (re.compile(r"Düzeltmeler(?:in\s+Listesi)?", re.IGNORECASE), SECTION_KEY_CORRECTIONS),
+    (re.compile(rf"Resmi\s+Gazetede\s+İlan\s+Edilmiş{_GAP}Listesi", re.IGNORECASE), SECTION_KEY_GAZETTE_ONLY),
 ]
 
 # Sub-indices that emit Tescil Numarası (existing registration ID) instead of
@@ -179,10 +204,13 @@ INDEX_ROW_REGNO = re.compile(
 )
 INDEX_EMPTY_MSG = re.compile(r"bulunmamaktadır", re.IGNORECASE)
 
-# TOC: each section is "<N>.Bölüm" on one line, then the title (possibly multi-line)
-# wrapping into a dotted leader and a final page number.
+# TOC: each section is "<N>.Bölüm" on one line, then the title (possibly
+# multi-line) wrapping into a dotted leader and a final page number. Some
+# legacy bulletin TOCs use a single dot as the separator (e.g. bulletin
+# 43 sec 7: "...Değişiklik Talepleri. 24"), so accept 1+ dots — the
+# anchor that matters is "<dots><whitespace><digits><newline>".
 TOC_SECTION_RE = re.compile(
-    r"(\d+)\.Bölüm\s*\n+([\s\S]+?)\.{2,}\s*(\d+)\s*\n",
+    r"(\d+)\.Bölüm\s*\n+([\s\S]+?)\.+\s*(\d+)\s*\n",
 )
 
 # Section header in body: "<N>. Bölüm  \n<title>"
@@ -203,22 +231,35 @@ APPLICATION_DATE_RE = re.compile(r"Başvuru\s+Tarihi\s*\n?\s*:\s*(\d{1,2})\.(\d{
 REGISTRATION_NO_RE = re.compile(r"Tescil\s+No\s*\n?\s*:\s*(\d{1,5})")
 REGISTRATION_DATE_RE = re.compile(r"Tescil\s+Tarihi\s*\n?\s*:\s*(\d{1,2})\.(\d{1,2})\.(\d{4})")
 GI_NAME_RE = re.compile(r"Coğrafi İşaretin\s+Adı\s*\n?\s*:\s*(.+?)\s*\n")
-PRODUCT_GROUP_RE = re.compile(r"Ürün\s*/\s*Ürün\s+Grubu\s*\n?\s*:\s*(.+?)\s*\n")
 GI_TYPE_RE = re.compile(r"Coğrafi İşaretin\s+Türü\s*\n?\s*:\s*(.+?)\s*\n")
-APPLICANT_NAME_RE = re.compile(r"Başvuru\s+Yapan\s*\n?\s*:\s*(.+?)\s*\n")
 REGISTRANT_NAME_RE = re.compile(r"Tescil\s+Ettiren\s*\n?\s*:\s*(.+?)\s*\n")
 AGENT_RE = re.compile(r"Vekil\s*\n?\s*:\s*(.+?)\s*\n")
+
+# Field aliases — legacy KHK-555-era bulletins use different labels for
+# the same conceptual fields:
+#   * applicant name: "Başvuru Yapan" (modern) | "Başvuru Sahibinin Adı" (legacy)
+#   * applicant address: "Başvuru Yapanın Adresi" | "Başvuru Sahibinin Adresi"
+#   * product group/type: "Ürün / Ürün Grubu" (modern path-style) | "Ürünün Adı" (legacy single)
+# Each alias is tried in order until one matches.
+PRODUCT_GROUP_RE = re.compile(
+    r"(?:Ürün\s*/\s*Ürün\s+Grubu|Ürünün\s+Adı)\s*\n?\s*:\s*(.+?)\s*\n"
+)
+APPLICANT_NAME_RE = re.compile(
+    r"(?:Başvuru\s+Yapan|Başvuru\s+Sahibinin\s+Adı)\s*\n?\s*:\s*(.+?)\s*\n"
+)
 
 # Multi-line capture: address fields and Kullanım Biçimi can wrap across lines
 # until the next labelled field or the body subsection header. We anchor on
 # the label and stop at the next known label.
 NEXT_LABEL_LOOKAHEAD = (
-    r"(?=(?:Başvuru\s+No|Başvuru\s+Tarihi|Coğrafi İşaretin|Ürün\s*/|Başvuru\s+Yapan(?:ın)?|"
+    r"(?=(?:Başvuru\s+No|Başvuru\s+Tarihi|Coğrafi İşaretin|Ürün\s*/|Ürünün\s+Adı|"
+    r"Başvuru\s+Yapan(?:ın)?|Başvuru\s+Sahibinin|"
     r"Vekil|Coğrafi\s+Sınır|Kullanım\s+Biçimi|Tescil\s+No|Tescil\s+Tarihi|Tescil\s+Ettiren(?:in)?|"
     r"Ürünün\s+Tanımı))"
 )
 APPLICANT_ADDR_RE = re.compile(
-    r"Başvuru\s+Yapanın\s+Adresi\s*\n?\s*:\s*([\s\S]+?)" + NEXT_LABEL_LOOKAHEAD,
+    r"(?:Başvuru\s+Yapanın\s+Adresi|Başvuru\s+Sahibinin\s+Adresi)\s*\n?\s*:\s*([\s\S]+?)"
+    + NEXT_LABEL_LOOKAHEAD,
 )
 REGISTRANT_ADDR_RE = re.compile(
     r"Tescil\s+Ettirenin\s+Adresi\s*\n?\s*:\s*([\s\S]+?)" + NEXT_LABEL_LOOKAHEAD,
@@ -240,6 +281,12 @@ USAGE_DESCRIPTION_RE = re.compile(
 #    kesinleşen değişiklikler ..."
 CHANGE_REQUEST_REGREF_RE = re.compile(
     r"(\d{1,5})\s+tescil\s+(?:sayılı|numaralı)\s+(.+?)\s+ibareli\s+coğrafi\s+işaret",
+    re.IGNORECASE,
+)
+# Legacy alternative: bulletin 38-era preamble uses
+#   "<reg_no> sayı ile <DD.MM.YYYY> tarihinde tescil edilen <name> tescil metninde ..."
+CHANGE_REQUEST_REGREF_LEGACY_RE = re.compile(
+    r"(\d{1,5})\s+sayı\s+ile\s+\d{1,2}\.\d{1,2}\.\d{4}\s+tarihinde\s+tescil\s+edilen\s+(.+?)\s+tescil\s+metninde",
     re.IGNORECASE,
 )
 # Quote-character class fragments. Built from chr() codepoints to avoid the
@@ -535,14 +582,16 @@ def parse_record_header(text: str, *, is_section_4: bool = False) -> RecordHeade
 def parse_change_request(text: str) -> Optional[ChangeRequest]:
     """Parse an Article 42 change-request or finalized-change block.
 
-    Both Section 6 (open requests) and Section 7 (finalized) records are
-    lightweight: a reference to an existing registration followed by one or
-    more ``<field>: "<old>" ifadesi, "<new>" şeklinde değiştirilmiştir``
-    tuples. The header wording differs slightly between the two
-    (``tescil sayılı ... işaretin`` vs ``tescil numaralı ... işarete``);
-    ``CHANGE_REQUEST_REGREF_RE`` accepts both.
+    Modern (B1) records use a structured "<old> ifadesi <new> şeklinde
+    değiştirilmiştir" tuple per change. Legacy bulletins (e.g. 38) use a
+    different preamble shape and free-form change text without explicit
+    old/new separators — we still capture the registration reference and
+    name; structured changes will be empty for legacy records (caller may
+    treat that as "raw_text" fallback if desired).
     """
     ref_m = CHANGE_REQUEST_REGREF_RE.search(text)
+    if not ref_m:
+        ref_m = CHANGE_REQUEST_REGREF_LEGACY_RE.search(text)
     if not ref_m:
         return None
     cr = ChangeRequest(
@@ -633,8 +682,7 @@ def extract_bulletin(pdf_path: Path) -> Dict[str, Any]:
         raise ValueError(f"{pdf_path}: cover page does not contain Sayı marker")
     if bulletin_no < MIN_SUPPORTED_BULLETIN_NO:
         raise ValueError(
-            f"{pdf_path}: bulletin {bulletin_no} predates supported modern format "
-            f"(min {MIN_SUPPORTED_BULLETIN_NO}); legacy support is a Phase B1.5 follow-up"
+            f"{pdf_path}: bulletin {bulletin_no} below MIN_SUPPORTED_BULLETIN_NO={MIN_SUPPORTED_BULLETIN_NO}"
         )
 
     toc = parse_toc(pages[1])
@@ -659,8 +707,11 @@ def extract_bulletin(pdf_path: Path) -> Dict[str, Any]:
     index_entries = parse_index(index_text)
 
     # Per-section body extents (clipped to the next section's start page so
-    # a record body cannot bleed into another section).
-    body_extents_by_key: Dict[str, Tuple[int, int]] = {}
+    # a record body cannot bleed into another section). Stored as a LIST
+    # per key because some bulletins (e.g. 63, 105) have multiple sections
+    # that classify to the same semantic key (KHK 555 examined + SMK 6769
+    # examined both => "examined").
+    body_extents_by_key: Dict[str, List[Tuple[int, int]]] = {}
     body_sections = sorted(
         [(n, k, next(e for e in toc if e["section_number"] == n)["start_page"])
          for n, k in section_key_by_number.items() if k is not None],
@@ -672,7 +723,7 @@ def extract_bulletin(pdf_path: Path) -> Dict[str, Any]:
         # by one (the section header sits on the page *before* the TOC's
         # claimed start). Allow per-record slices to look back one page
         # below this section's nominal start_page, but never below 1.
-        body_extents_by_key[key] = (max(start_page - 1, 1), end)
+        body_extents_by_key.setdefault(key, []).append((max(start_page - 1, 1), end))
 
     records: Dict[str, List[Dict[str, Any]]] = {k: [] for k in ALL_SECTION_KEYS}
 
@@ -683,13 +734,25 @@ def extract_bulletin(pdf_path: Path) -> Dict[str, Any]:
         sec_entries.sort(key=lambda e: e.start_page)
 
     for section_key, sec_entries in by_key.items():
-        if section_key not in body_extents_by_key:
+        extents = body_extents_by_key.get(section_key)
+        if not extents:
             logger.warning("section_key %r has index entries but no body extents", section_key)
             continue
-        sec_start, sec_end = body_extents_by_key[section_key]
         for i, entry in enumerate(sec_entries):
-            next_start = sec_entries[i + 1].start_page if i + 1 < len(sec_entries) else None
-            body = _slice_record_body(pages, entry.start_page, next_start, sec_end, sec_start)
+            # Pick the body extent that contains this entry's start_page.
+            # Bulletins with multiple sections per semantic key (KHK +
+            # SMK examined) need this so each record's slice lands in the
+            # right page range.
+            matching = [(s, e) for s, e in extents if s <= entry.start_page <= e]
+            sec_start, sec_end = matching[0] if matching else extents[0]
+            # next_start: the next record's start_page IF it falls in
+            # this same extent (don't clip across extents).
+            next_in_extent = next(
+                (e.start_page for e in sec_entries[i + 1:]
+                 if sec_start <= e.start_page <= sec_end),
+                None,
+            )
+            body = _slice_record_body(pages, entry.start_page, next_in_extent, sec_end, sec_start)
             record_dict: Dict[str, Any] = {
                 "record_type": entry.record_type,
                 "name": entry.name,
@@ -838,8 +901,10 @@ def verify_extraction(pdf_path: Path, result: Dict[str, Any]) -> List[str]:
         nm = r.get("name") or "?"
         if r.get("existing_registration_no") is None:
             problems.append(f"art42 {nm!r}: missing existing_registration_no")
-        if not r.get("changes"):
-            problems.append(f"art42 {nm!r}: empty or missing changes list")
+        # Legacy-era art42 records (bulletin 38-era) describe changes in
+        # free-form prose with no "<old> ifadesi <new>" anchors; a record
+        # whose preamble matched but yielded zero structured changes is
+        # still a valid extraction. Don't flag those.
 
     return problems
 
@@ -930,8 +995,12 @@ def _process_one(pdf_path: Path, *, force: bool) -> int:
                 len(result["records"]["article_42_change_requests"]))
     problems = verify_extraction(pdf_path, result)
     if problems:
+        # Surface the bulletin_no in the log line. For subfolder-layout
+        # inputs every path's stem is "bulletin", which is useless for
+        # triage; the bulletin_no from the extracted result is what we want.
+        ident = str(result.get("bulletin_no") or pdf_path.stem)
         for p in problems:
-            logger.warning("[?] %s: %s", pdf_path.stem, p)
+            logger.warning("[?] %s: %s", ident, p)
         return 2  # extracted, but quality issues
     return 0
 

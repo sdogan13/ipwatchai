@@ -387,7 +387,7 @@ python pdf_extract_cografi.py --all                    # every CI_*/bulletin.pdf
 python pdf_extract_cografi.py --all --force            # overwrite metadata.json
 ```
 
-**Modern format only.** Cards 100-220 use SMK 6769 (post-2018) and extract cleanly. Cards 1-99 (legacy KHK 555 era, packaged as RAR bundles) are migrated to the subfolder layout but intentionally produce no `metadata.json` in B1 — see the extractor's docstring for the full Known Limitations list (~99.5% record-level success on the modern set, with the remaining gap split between source-data omissions and 2021-era transitional dual-section bulletins).
+**Full archive supported (B1.5).** Cards 1-220 (KHK 555 + SMK 6769 eras) extract via a label-mapping refactor that handles both legal regimes' field labels and section types. Section dispatch is by **semantic key** classified from the TOC title (so transitional bulletins with both KHK and SMK examined sub-sections get routed correctly), and per-record slicing supports multiple body extents per semantic key. **Empirical: 220/220 bulletins, 3,527 records, ≈99.26% record-level success** — see the extractor's docstring for the residual edge-case categories (mostly source-data omissions).
 
 Per-PDF quality verifier built into the extractor cross-checks Section 2 index counts against the parsed body for every bulletin during `--all`; structural problems are surfaced as `[?]` warnings so a regression is loud.
 
