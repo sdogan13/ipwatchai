@@ -32,6 +32,33 @@ function landing() {
         riskReportLoading: false,
         riskReportError: '',
         riskReport: null,
+
+        // Registry switcher — which corpus the landing-page search hits.
+        // Mirrors dashboard's _search_panel.html switcher and persists via
+        // localStorage so a returning visitor lands on the same tab they
+        // last used. Risk-report flow only makes sense for trademarks.
+        searchView: (function() {
+            try { return localStorage.getItem('landingSearchView') || 'trademark'; }
+            catch (e) { return 'trademark'; }
+        })(),
+
+        // Patent filters (mirror /api/v1/patent-search/public)
+        patentIpc: '',
+        patentHolder: '',
+        patentDateFrom: '',
+        patentDateTo: '',
+        patentKindCode: '',
+
+        // Design filters (mirror /api/v1/design-search/public)
+        designLocarno: '',
+
+        // Cografi filters (mirror /api/v1/cografi-search/public)
+        cografiSectionKeys: '',
+        cografiRecordTypes: '',
+        cografiGiType: '',
+        cografiRegion: '',
+        cografiDateFrom: '',
+        cografiDateTo: '',
         // Sort mode for the results list — mirrors dashboard's sortMode.
         // Public landing has no risk_report sort because risk report is a
         // dashboard-only feature.
@@ -1705,10 +1732,67 @@ function landing() {
             this.showSearchHistory = false;
         },
 
+        // Endpoint URL for the currently selected registry. All four
+        // public endpoints accept multipart POST with image + filters
+        // (see app_*_search_routes.py).
+        publicEndpointForView: function (view) {
+            switch (view) {
+                case 'patent':   return '/api/v1/patent-search/public';
+                case 'design':   return '/api/v1/design-search/public';
+                case 'cografi':  return '/api/v1/cografi-search/public';
+                case 'trademark':
+                default:         return '/api/v1/search/public';
+            }
+        },
+
+        // Build a FormData with the right filter fields for the active
+        // registry. Each public endpoint expects different Form() names
+        // (mirrors the dashboard /quick endpoint surface).
+        buildPublicSearchFormData: function (query) {
+            var view = this.searchView || 'trademark';
+            var fd = new FormData();
+            if (query) fd.append('query', query);
+            if (this.selectedImage) fd.append('image', this.selectedImage);
+
+            if (view === 'trademark') {
+                if (this.selectedClasses && this.selectedClasses.length > 0) {
+                    fd.append('classes', this.selectedClasses.join(','));
+                }
+            } else if (view === 'patent') {
+                if (this.patentIpc) fd.append('ipc', this.patentIpc.trim());
+                if (this.patentHolder) fd.append('holder', this.patentHolder.trim());
+                if (this.patentDateFrom) fd.append('date_from', this.patentDateFrom);
+                if (this.patentDateTo) fd.append('date_to', this.patentDateTo);
+                if (this.patentKindCode) fd.append('kind_code', this.patentKindCode.trim());
+            } else if (view === 'design') {
+                if (this.designLocarno) fd.append('locarno', this.designLocarno.trim());
+            } else if (view === 'cografi') {
+                if (this.cografiSectionKeys) fd.append('section_keys', this.cografiSectionKeys.trim());
+                if (this.cografiRecordTypes) fd.append('record_types', this.cografiRecordTypes.trim());
+                if (this.cografiGiType) fd.append('gi_type', this.cografiGiType.trim());
+                if (this.cografiRegion) fd.append('region', this.cografiRegion.trim());
+                if (this.cografiDateFrom) fd.append('date_from', this.cografiDateFrom);
+                if (this.cografiDateTo) fd.append('date_to', this.cografiDateTo);
+            }
+            return fd;
+        },
+
+        // Persist the chosen registry tab so a return visit lands on
+        // the same corpus. Also clears prior results so users don't see
+        // a trademark hit list after switching to patent.
+        setSearchView: function (view) {
+            if (this.searchView === view) return;
+            this.searchView = view;
+            try { localStorage.setItem('landingSearchView', view); } catch (e) {}
+            this.searchResults = [];
+            this.searchError = '';
+            this.expandedResult = null;
+            this.clearRiskReportState();
+        },
+
         publicSearch: function () {
             var query = this.searchQuery.trim();
             var hasImage = !!this.selectedImage;
-            var hasClasses = this.selectedClasses.length > 0;
 
             // Need at least text or image
             if (!hasImage && (!query || query.length < 2)) {
@@ -1727,92 +1811,43 @@ function landing() {
             else this._lastSearchType = 'text';
 
             var self = this;
+            var endpoint = this.publicEndpointForView(this.searchView);
+            var formData = this.buildPublicSearchFormData(query);
 
-            if (hasImage || hasClasses) {
-                // POST with FormData (image and/or classes)
-                var formData = new FormData();
-                if (query) {
-                    formData.append('query', query);
-                }
-                if (hasImage) {
-                    formData.append('image', this.selectedImage);
-                }
-                if (hasClasses) {
-                    formData.append('classes', this.selectedClasses.join(','));
-                }
-
-                fetch('/api/v1/search/public', {
-                    method: 'POST',
-                    body: formData
+            fetch(endpoint, { method: 'POST', body: formData })
+                .then(function (res) {
+                    if (res.status === 429) {
+                        return res.json().catch(function () { return {}; }).then(function (errData) {
+                            var detail = errData.detail || errData;
+                            if (window.AppUpgradeModal && typeof window.AppUpgradeModal.maybeHandle === 'function'
+                                && window.AppUpgradeModal.maybeHandle(detail, 'public_search')) {
+                                return null;
+                            }
+                            self.searchError = self.t('search.rate_limited');
+                            return null;
+                        });
+                    }
+                    if (!res.ok) throw new Error('Search failed');
+                    return res.json();
                 })
-                    .then(function (res) {
-                        if (res.status === 429) {
-                            return res.json().catch(function () { return {}; }).then(function (errData) {
-                                var detail = errData.detail || errData;
-                                if (window.AppUpgradeModal && typeof window.AppUpgradeModal.maybeHandle === 'function'
-                                    && window.AppUpgradeModal.maybeHandle(detail, 'public_search')) {
-                                    return null;
-                                }
-                                self.searchError = self.t('search.rate_limited');
-                                return null;
-                            });
+                .then(function (data) {
+                    if (data) {
+                        self.searchResults = (data.results || []).map(function (r) { r._showGoods = false; return r; });
+                        self.resultsAtBottom = false;
+                        self.expandedResult = null;
+                        self.saveSearchQuery(query);
+                        self.showSearchHistory = false;
+                        if (self.searchResults.length === 0) {
+                            self.searchError = self.t('search.no_results');
                         }
-                        if (!res.ok) throw new Error('Search failed');
-                        return res.json();
-                    })
-                    .then(function (data) {
-                        if (data) {
-                            self.searchResults = (data.results || []).map(function (r) { r._showGoods = false; return r; });
-                            self.resultsAtBottom = false;
-                            self.expandedResult = null;
-                            self.saveSearchQuery(query);
-                            self.showSearchHistory = false;
-                            if (self.searchResults.length === 0) {
-                                self.searchError = self.t('search.no_results');
-                            }
-                        }
-                    })
-                    .catch(function () {
-                        self.searchError = self.t('search.search_failed');
-                    })
-                    .finally(function () {
-                        self.searchLoading = false;
-                    });
-            } else {
-                // GET text-only search
-                fetch('/api/v1/search/public?query=' + encodeURIComponent(query))
-                    .then(function (res) {
-                        if (res.status === 429) {
-                            return res.json().catch(function () { return {}; }).then(function (errData) {
-                                var detail = errData.detail || errData;
-                                if (window.AppUpgradeModal && typeof window.AppUpgradeModal.maybeHandle === 'function'
-                                    && window.AppUpgradeModal.maybeHandle(detail, 'public_search')) {
-                                    return null;
-                                }
-                                self.searchError = self.t('search.rate_limited');
-                                return null;
-                            });
-                        }
-                        if (!res.ok) throw new Error('Search failed');
-                        return res.json();
-                    })
-                    .then(function (data) {
-                        if (data) {
-                            self.searchResults = (data.results || []).map(function (r) { r._showGoods = false; return r; });
-                            self.saveSearchQuery(query);
-                            self.showSearchHistory = false;
-                            if (self.searchResults.length === 0) {
-                                self.searchError = self.t('search.no_results');
-                            }
-                        }
-                    })
-                    .catch(function () {
-                        self.searchError = self.t('search.search_failed');
-                    })
-                    .finally(function () {
-                        self.searchLoading = false;
-                    });
-            }
+                    }
+                })
+                .catch(function () {
+                    self.searchError = self.t('search.search_failed');
+                })
+                .finally(function () {
+                    self.searchLoading = false;
+                });
         },
 
         buildRiskReportCandidate: function (r) {

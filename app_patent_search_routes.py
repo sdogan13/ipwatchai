@@ -21,8 +21,8 @@ import tempfile
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import Depends, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi import Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
+from fastapi.responses import FileResponse
 from PIL import Image
 
 
@@ -206,7 +206,7 @@ async def _do_patent_search(
     from services.patent_search_service import search_patents
 
     text_embedding = None
-    if not public and query and len(query.strip()) >= 2:
+    if query and len(query.strip()) >= 2:
         # Skip embedding when the query parses as an exact ID — service
         # short-circuits to a direct row lookup so the embed is wasted.
         from services.patent_search_service import parse_id_query
@@ -214,7 +214,7 @@ async def _do_patent_search(
             text_embedding = _embed_query_text(query)
 
     figure_embedding = None
-    if not public and image_temp_path:
+    if image_temp_path:
         figure_embedding = _embed_query_image(image_temp_path)
 
     with Database() as db:
@@ -311,23 +311,53 @@ async def patent_search_quick(
 async def patent_search_public(
     *,
     query: Optional[str],
-    ipc: Optional[str],
+    image: Optional[UploadFile] = None,
+    ipc: Optional[str] = None,
+    holder: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    kind_code: Optional[str] = None,
 ) -> dict:
-    """Public anonymous text-only patent search. Capped at 10 results.
-    No image upload — public path stays cheap."""
-    if not query or len(query.strip()) < 2:
-        raise HTTPException(status_code=422, detail="Provide a query (min 2 chars)")
-    return await _do_patent_search(
-        query=query.strip(),
-        image_temp_path=None,
-        ipc_classes=_parse_csv_param(ipc),
-        holder=None,
-        date_from=None,
-        date_to=None,
-        kind_code=None,
-        limit=10,
-        public=True,
-    )
+    """Public anonymous patent search. Capped at 10 results.
+
+    Accepts the same inputs as the authenticated quick endpoint (query,
+    image, full filter surface) so the landing-page experience matches
+    the dashboard. Quota enforcement is the caller's responsibility —
+    the route layer wraps this with ``enforce_public_search_quota`` and
+    ``record_public_search_usage`` so failed searches don't burn quota.
+    """
+    has_image = image is not None and image.filename
+    has_query = bool(query and query.strip())
+    if not has_query and not has_image:
+        raise HTTPException(
+            status_code=422,
+            detail="Provide a query (min 2 chars) or upload an image",
+        )
+
+    temp_path: Optional[str] = None
+    if has_image:
+        if image.content_type not in ALLOWED_IMAGE_TYPES:
+            raise HTTPException(status_code=400, detail="Invalid image type")
+        content = await image.read()
+        temp_path = _save_upload_to_temp(content)
+    try:
+        return await _do_patent_search(
+            query=query.strip() if has_query else None,
+            image_temp_path=temp_path,
+            ipc_classes=_parse_csv_param(ipc),
+            holder=holder.strip() if holder else None,
+            date_from=date_from or None,
+            date_to=date_to or None,
+            kind_code=kind_code.strip().upper() if kind_code else None,
+            limit=10,
+            public=True,
+        )
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -404,25 +434,52 @@ def register_patent_search_routes(app, limiter):
     wired internally via ``Depends(get_current_user)`` to match the
     existing trademark/design-route conventions.
     """
+    from app_public_search_quota import (
+        enforce_public_search_quota,
+        record_public_search_usage,
+    )
     from auth.authentication import get_current_user
 
     @app.get("/api/v1/patent-search/public", tags=["Patent Search"])
     @limiter.limit("10/minute")
     async def public_patent_search_get(
         request: Request,
+        response: Response,
         query: str = Query(..., min_length=2, max_length=200),
         ipc: Optional[str] = Query(None),
+        holder: Optional[str] = Query(None),
+        date_from: Optional[str] = Query(None),
+        date_to: Optional[str] = Query(None),
+        kind_code: Optional[str] = Query(None),
     ):
-        return await patent_search_public(query=query, ipc=ipc)
+        client_id = enforce_public_search_quota(request, response)
+        payload = await patent_search_public(
+            query=query, ipc=ipc, holder=holder,
+            date_from=date_from, date_to=date_to, kind_code=kind_code,
+        )
+        record_public_search_usage(client_id)
+        return payload
 
     @app.post("/api/v1/patent-search/public", tags=["Patent Search"])
     @limiter.limit("10/minute")
     async def public_patent_search_post(
         request: Request,
+        response: Response,
         query: Optional[str] = Form(None),
+        image: Optional[UploadFile] = File(None),
         ipc: Optional[str] = Form(None),
+        holder: Optional[str] = Form(None),
+        date_from: Optional[str] = Form(None),
+        date_to: Optional[str] = Form(None),
+        kind_code: Optional[str] = Form(None),
     ):
-        return await patent_search_public(query=query, ipc=ipc)
+        client_id = enforce_public_search_quota(request, response)
+        payload = await patent_search_public(
+            query=query, image=image, ipc=ipc, holder=holder,
+            date_from=date_from, date_to=date_to, kind_code=kind_code,
+        )
+        record_public_search_usage(client_id)
+        return payload
 
     @app.post("/api/v1/patent-search/quick", tags=["Patent Search"])
     @limiter.limit("60/minute")

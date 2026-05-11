@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from PIL import Image
 
@@ -217,18 +217,44 @@ async def design_search_quick(
 async def design_search_public(
     *,
     query: Optional[str],
-    locarno: Optional[str],
+    image: Optional[UploadFile] = None,
+    locarno: Optional[str] = None,
 ) -> dict:
-    """Public anonymous text-only search. Capped at 10 results."""
-    if not query or len(query.strip()) < 2:
-        raise HTTPException(status_code=422, detail="Provide a product name (min 2 chars)")
-    return await _do_design_search(
-        query=query.strip(),
-        image_temp_path=None,
-        locarno_classes=_parse_locarno_param(locarno),
-        limit=10,
-        public=True,
-    )
+    """Public anonymous design search. Capped at 10 results.
+
+    Mirrors the authenticated quick endpoint's input surface (text +
+    image + Locarno chips) so landing-page searches behave identically
+    to the dashboard. Visual-dominant ranking via DINOv2 + CLIP + HSV
+    runs the same way on the public path.
+    """
+    has_image = image is not None and image.filename
+    has_query = bool(query and query.strip())
+    if not has_query and not has_image:
+        raise HTTPException(
+            status_code=422,
+            detail="Provide a product name (min 2 chars) or upload a design image",
+        )
+
+    temp_path: Optional[str] = None
+    if has_image:
+        if image.content_type not in ALLOWED_IMAGE_TYPES:
+            raise HTTPException(status_code=400, detail="Invalid image type")
+        content = await image.read()
+        temp_path = _save_upload_to_temp(content)
+    try:
+        return await _do_design_search(
+            query=query.strip() if has_query else None,
+            image_temp_path=temp_path,
+            locarno_classes=_parse_locarno_param(locarno),
+            limit=10,
+            public=True,
+        )
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -242,6 +268,10 @@ def register_design_search_routes(app, limiter):
     Auth is wired internally via ``Depends(get_current_user)`` from
     ``auth.authentication`` to match the existing trademark-route conventions.
     """
+    from app_public_search_quota import (
+        enforce_public_search_quota,
+        record_public_search_usage,
+    )
     from auth.authentication import get_current_user
 
     @app.get("/api/v1/design-image/{image_path:path}", tags=["Design Search"])
@@ -252,19 +282,30 @@ def register_design_search_routes(app, limiter):
     @limiter.limit("10/minute")
     async def public_design_search_get(
         request: Request,
+        response: Response,
         query: str = Query(..., min_length=2, max_length=100),
         locarno: Optional[str] = Query(None),
     ):
-        return await design_search_public(query=query, locarno=locarno)
+        client_id = enforce_public_search_quota(request, response)
+        payload = await design_search_public(query=query, locarno=locarno)
+        record_public_search_usage(client_id)
+        return payload
 
     @app.post("/api/v1/design-search/public", tags=["Design Search"])
     @limiter.limit("10/minute")
     async def public_design_search_post(
         request: Request,
+        response: Response,
         query: Optional[str] = Form(None),
+        image: Optional[UploadFile] = File(None),
         locarno: Optional[str] = Form(None),
     ):
-        return await design_search_public(query=query, locarno=locarno)
+        client_id = enforce_public_search_quota(request, response)
+        payload = await design_search_public(
+            query=query, image=image, locarno=locarno,
+        )
+        record_public_search_usage(client_id)
+        return payload
 
     @app.post("/api/v1/design-search/quick", tags=["Design Search"])
     @limiter.limit("60/minute")

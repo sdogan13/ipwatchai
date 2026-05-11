@@ -348,6 +348,42 @@
             Yapay zeka destekli marka risk analizi ile Turkiye pazarinda markanizi guvenle tescil ettirin.
         </p>
 
+        <!-- ============================================
+             Registry switcher — 4-way toggle that swaps the
+             active corpus on the landing-page search box.
+             Mirrors the dashboard's _search_panel.html pattern
+             so users see the same UX before/after login.
+             ============================================ -->
+        <div class="max-w-2xl mx-auto mb-4 flex justify-center">
+            <div class="inline-flex rounded-xl p-1 flex-wrap gap-1"
+                 style="background:var(--color-bg-muted);border:1px solid var(--color-border)">
+                <button type="button" @click="setSearchView('trademark')"
+                        data-testid="landing-switch-trademark"
+                        class="px-4 py-1.5 rounded-lg text-sm font-medium transition-all"
+                        :class="searchView === 'trademark' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
+                        :style="searchView === 'trademark' ? '' : 'color:var(--color-text-muted)'"
+                        x-text="t('search.view_trademark')">Marka</button>
+                <button type="button" @click="setSearchView('design')"
+                        data-testid="landing-switch-design"
+                        class="px-4 py-1.5 rounded-lg text-sm font-medium transition-all"
+                        :class="searchView === 'design' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
+                        :style="searchView === 'design' ? '' : 'color:var(--color-text-muted)'"
+                        x-text="t('search.view_design')">Tasarım</button>
+                <button type="button" @click="setSearchView('patent')"
+                        data-testid="landing-switch-patent"
+                        class="px-4 py-1.5 rounded-lg text-sm font-medium transition-all"
+                        :class="searchView === 'patent' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
+                        :style="searchView === 'patent' ? '' : 'color:var(--color-text-muted)'"
+                        x-text="t('search.view_patent')">Patent</button>
+                <button type="button" @click="setSearchView('cografi')"
+                        data-testid="landing-switch-cografi"
+                        class="px-4 py-1.5 rounded-lg text-sm font-medium transition-all"
+                        :class="searchView === 'cografi' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
+                        :style="searchView === 'cografi' ? '' : 'color:var(--color-text-muted)'"
+                        x-text="t('search.view_cografi')">Coğrafi</button>
+            </div>
+        </div>
+
         <!-- Search Bar: text input only -->
         <div class="max-w-2xl mx-auto mb-3 relative" @click.outside="showSearchHistory = false">
             <div class="flex items-center rounded-xl overflow-hidden" style="background:var(--color-bg-card);border:2px solid var(--color-border);box-shadow:var(--shadow-card)">
@@ -452,8 +488,8 @@
                    class="hidden" @change="onImageSelected($event)">
         </div>
 
-        <!-- ===== Nice Class Finder (collapsible) ===== -->
-        <div class="max-w-2xl mx-auto mb-5" x-data="{ classOpen: false }">
+        <!-- ===== Nice Class Finder (collapsible, trademark only) ===== -->
+        <div x-show="searchView === 'trademark'" class="max-w-2xl mx-auto mb-5" x-data="{ classOpen: false }">
             <!-- Toggle header bar -->
             <button @click="classOpen = !classOpen; if(classOpen && allClasses.length === 0) loadAllClasses()"
                     class="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all"
@@ -574,9 +610,133 @@
             </div>
         </div>
 
+        <!-- ============================================
+             Per-registry filter strips. Each mirrors the
+             filter surface the dashboard /quick endpoint
+             exposes for that registry, but uses simple
+             inputs (no chip pickers) to keep the landing
+             page light. Power-users get the full chip UI
+             on the authenticated dashboard.
+             ============================================ -->
+
+        <!-- Patent filters -->
+        <div x-show="searchView === 'patent'" x-cloak class="max-w-2xl mx-auto mb-5 rounded-xl p-4 space-y-3"
+             style="background:var(--color-bg-card);border:1px solid var(--color-border)">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label class="flex flex-col gap-1 text-left">
+                    <span class="text-xs font-medium" style="color:var(--color-text-secondary)" x-text="t('search.ipc_label')">IPC Sınıfı</span>
+                    <input type="text" x-model="patentIpc"
+                           :placeholder="t('search.ipc_placeholder')"
+                           data-testid="landing-patent-ipc"
+                           class="px-3 py-2 rounded-lg text-sm outline-none"
+                           style="border:1px solid var(--color-border);background:var(--color-bg-input);color:var(--color-text-primary)">
+                </label>
+                <label class="flex flex-col gap-1 text-left">
+                    <span class="text-xs font-medium" style="color:var(--color-text-secondary)" x-text="t('search.holder_label')">Hak Sahibi</span>
+                    <input type="text" x-model="patentHolder"
+                           :placeholder="t('search.holder_placeholder')"
+                           data-testid="landing-patent-holder"
+                           class="px-3 py-2 rounded-lg text-sm outline-none"
+                           style="border:1px solid var(--color-border);background:var(--color-bg-input);color:var(--color-text-primary)">
+                </label>
+                <label class="flex flex-col gap-1 text-left">
+                    <span class="text-xs font-medium" style="color:var(--color-text-secondary)" x-text="t('search.date_from_label')">Tarih (başlangıç)</span>
+                    <input type="date" x-model="patentDateFrom"
+                           data-testid="landing-patent-date-from"
+                           class="px-3 py-2 rounded-lg text-sm outline-none"
+                           style="border:1px solid var(--color-border);background:var(--color-bg-input);color:var(--color-text-primary)">
+                </label>
+                <label class="flex flex-col gap-1 text-left">
+                    <span class="text-xs font-medium" style="color:var(--color-text-secondary)" x-text="t('search.date_to_label')">Tarih (bitiş)</span>
+                    <input type="date" x-model="patentDateTo"
+                           data-testid="landing-patent-date-to"
+                           class="px-3 py-2 rounded-lg text-sm outline-none"
+                           style="border:1px solid var(--color-border);background:var(--color-bg-input);color:var(--color-text-primary)">
+                </label>
+                <label class="flex flex-col gap-1 text-left sm:col-span-2">
+                    <span class="text-xs font-medium" style="color:var(--color-text-secondary)" x-text="t('search.kind_code_label')">Tür Kodu</span>
+                    <input type="text" x-model="patentKindCode"
+                           :placeholder="t('search.kind_code_placeholder')"
+                           data-testid="landing-patent-kind-code"
+                           class="px-3 py-2 rounded-lg text-sm outline-none"
+                           style="border:1px solid var(--color-border);background:var(--color-bg-input);color:var(--color-text-primary)">
+                </label>
+            </div>
+        </div>
+
+        <!-- Design filters -->
+        <div x-show="searchView === 'design'" x-cloak class="max-w-2xl mx-auto mb-5 rounded-xl p-4"
+             style="background:var(--color-bg-card);border:1px solid var(--color-border)">
+            <label class="flex flex-col gap-1 text-left">
+                <span class="text-xs font-medium" style="color:var(--color-text-secondary)" x-text="t('search.locarno_label')">Locarno Sınıfı</span>
+                <input type="text" x-model="designLocarno"
+                       :placeholder="t('search.locarno_placeholder')"
+                       data-testid="landing-design-locarno"
+                       class="px-3 py-2 rounded-lg text-sm outline-none"
+                       style="border:1px solid var(--color-border);background:var(--color-bg-input);color:var(--color-text-primary)">
+            </label>
+        </div>
+
+        <!-- Cografi filters -->
+        <div x-show="searchView === 'cografi'" x-cloak class="max-w-2xl mx-auto mb-5 rounded-xl p-4 space-y-3"
+             style="background:var(--color-bg-card);border:1px solid var(--color-border)">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label class="flex flex-col gap-1 text-left">
+                    <span class="text-xs font-medium" style="color:var(--color-text-secondary)" x-text="t('search.section_label')">Bölüm</span>
+                    <input type="text" x-model="cografiSectionKeys"
+                           :placeholder="t('search.section_placeholder')"
+                           data-testid="landing-cografi-section"
+                           class="px-3 py-2 rounded-lg text-sm outline-none"
+                           style="border:1px solid var(--color-border);background:var(--color-bg-input);color:var(--color-text-primary)">
+                </label>
+                <label class="flex flex-col gap-1 text-left">
+                    <span class="text-xs font-medium" style="color:var(--color-text-secondary)" x-text="t('search.region_label')">Bölge</span>
+                    <input type="text" x-model="cografiRegion"
+                           :placeholder="t('search.region_placeholder')"
+                           data-testid="landing-cografi-region"
+                           class="px-3 py-2 rounded-lg text-sm outline-none"
+                           style="border:1px solid var(--color-border);background:var(--color-bg-input);color:var(--color-text-primary)">
+                </label>
+                <label class="flex flex-col gap-1 text-left">
+                    <span class="text-xs font-medium" style="color:var(--color-text-secondary)" x-text="t('search.gi_type_label')">CI Türü</span>
+                    <select x-model="cografiGiType"
+                            data-testid="landing-cografi-gi-type"
+                            class="px-3 py-2 rounded-lg text-sm outline-none"
+                            style="border:1px solid var(--color-border);background:var(--color-bg-input);color:var(--color-text-primary)">
+                        <option value="" x-text="t('search.gi_type_any')">Hepsi</option>
+                        <option value="mensei" x-text="t('search.gi_type_mensei')">Menşe Adı</option>
+                        <option value="mahreç" x-text="t('search.gi_type_mahrec')">Mahreç İşareti</option>
+                        <option value="geleneksel" x-text="t('search.gi_type_geleneksel')">Geleneksel Ürün</option>
+                    </select>
+                </label>
+                <label class="flex flex-col gap-1 text-left">
+                    <span class="text-xs font-medium" style="color:var(--color-text-secondary)" x-text="t('search.record_types_label')">Kayıt Türü</span>
+                    <input type="text" x-model="cografiRecordTypes"
+                           :placeholder="t('search.record_types_placeholder')"
+                           data-testid="landing-cografi-record-types"
+                           class="px-3 py-2 rounded-lg text-sm outline-none"
+                           style="border:1px solid var(--color-border);background:var(--color-bg-input);color:var(--color-text-primary)">
+                </label>
+                <label class="flex flex-col gap-1 text-left">
+                    <span class="text-xs font-medium" style="color:var(--color-text-secondary)" x-text="t('search.date_from_label')">Tarih (başlangıç)</span>
+                    <input type="date" x-model="cografiDateFrom"
+                           data-testid="landing-cografi-date-from"
+                           class="px-3 py-2 rounded-lg text-sm outline-none"
+                           style="border:1px solid var(--color-border);background:var(--color-bg-input);color:var(--color-text-primary)">
+                </label>
+                <label class="flex flex-col gap-1 text-left">
+                    <span class="text-xs font-medium" style="color:var(--color-text-secondary)" x-text="t('search.date_to_label')">Tarih (bitiş)</span>
+                    <input type="date" x-model="cografiDateTo"
+                           data-testid="landing-cografi-date-to"
+                           class="px-3 py-2 rounded-lg text-sm outline-none"
+                           style="border:1px solid var(--color-border);background:var(--color-bg-input);color:var(--color-text-primary)">
+                </label>
+            </div>
+        </div>
+
         <!-- Search Buttons (unified for text + image + classes) -->
         <div class="max-w-2xl mx-auto mb-4">
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div class="grid grid-cols-1 gap-3" :class="searchView === 'trademark' ? 'sm:grid-cols-2' : ''">
                 <button
                     @click="publicSearch()"
                     :disabled="searchLoading || (!searchQuery.trim() && !selectedImage)"
@@ -587,6 +747,7 @@
                     <span x-text="t('search.button')">Ara</span>
                 </button>
                 <button
+                    x-show="searchView === 'trademark'"
                     id="landing-risk-report-btn"
                     @click="generateRiskReport()"
                     :disabled="searchLoading || riskReportLoading || (!searchQuery.trim() && !selectedImage)"
@@ -650,8 +811,10 @@
             <span x-text="searchError"></span>
         </div>
 
-        <!-- Search Results (scrollable) -->
-        <div x-show="searchResults.length > 0" x-cloak class="max-w-2xl mx-auto text-left mb-6">
+        <!-- Search Results — trademark-specific rich UI (risk scoring,
+             watchlist add, goods toggle, safe-brand CTA). Patent / design /
+             cografi results render through the simpler block below. -->
+        <div x-show="searchResults.length > 0 && searchView === 'trademark'" x-cloak class="max-w-2xl mx-auto text-left mb-6">
             <div class="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
                 <div class="text-sm font-medium" style="color:var(--color-text-secondary)" x-text="t('landing.top_matches', { count: searchResults.length })"></div>
                 <!-- Sort bar (mirrors dashboard sort UX: similarity ↑/↓, application date ↑/↓) -->
@@ -1021,6 +1184,76 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- ============================================
+             Generic results list for patent / design /
+             cografi. The trademark UI above carries
+             watchlist/risk-report features that don't
+             apply here; this block shows a compact card
+             with the core fields each registry returns.
+             ============================================ -->
+        <div x-show="searchResults.length > 0 && searchView !== 'trademark'" x-cloak
+             data-testid="landing-generic-results"
+             class="max-w-2xl mx-auto text-left mb-6">
+            <div class="text-sm font-medium mb-3" style="color:var(--color-text-secondary)"
+                 x-text="t('landing.top_matches', { count: searchResults.length })"></div>
+            <div class="space-y-3">
+                <template x-for="(r, idx) in searchResults" :key="idx">
+                    <div class="rounded-xl p-4 flex gap-3"
+                         style="background:var(--color-bg-card);border:1px solid var(--color-border);box-shadow:var(--shadow-card)">
+                        <!-- Thumbnail (registry-aware figure URL) -->
+                        <div x-show="r.image_url || r.figure_url || (r.figures && r.figures.length)"
+                             class="w-20 h-20 rounded-lg overflow-hidden flex-shrink-0"
+                             style="background:var(--color-bg-muted)">
+                            <img :src="r.image_url || r.figure_url || (r.figures && r.figures[0] && (r.figures[0].url || r.figures[0]))"
+                                 class="w-full h-full object-contain cursor-pointer"
+                                 @click="lightboxImage = r.image_url || r.figure_url || (r.figures && r.figures[0] && (r.figures[0].url || r.figures[0]))"
+                                 alt="">
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-sm font-semibold truncate" style="color:var(--color-text-primary)"
+                                 x-text="r.title || r.name || r.name_tr || r.design_title || ('#' + (r.application_no || r.publication_no || r.registration_no || ''))"></div>
+                            <div x-show="r.application_no || r.publication_no || r.registration_no"
+                                 class="text-xs mt-0.5" style="color:var(--color-text-muted)">
+                                <span x-show="r.application_no" x-text="r.application_no"></span>
+                                <span x-show="r.publication_no" class="ml-2" x-text="r.publication_no"></span>
+                                <span x-show="r.registration_no" class="ml-2" x-text="r.registration_no"></span>
+                            </div>
+                            <div x-show="r.holder_name || r.holder" class="text-xs mt-1" style="color:var(--color-text-secondary)">
+                                <span class="font-medium" x-text="t('search.holder_label')"></span>:
+                                <span x-text="r.holder_name || r.holder"></span>
+                            </div>
+                            <!-- Patent: IPC -->
+                            <div x-show="searchView === 'patent' && r.ipc_classes && r.ipc_classes.length"
+                                 class="text-xs mt-1" style="color:var(--color-text-secondary)">
+                                <span class="font-medium" x-text="t('search.ipc_label')"></span>:
+                                <span x-text="(r.ipc_classes || []).join(', ')"></span>
+                            </div>
+                            <!-- Design: Locarno -->
+                            <div x-show="searchView === 'design' && r.locarno_classes && r.locarno_classes.length"
+                                 class="text-xs mt-1" style="color:var(--color-text-secondary)">
+                                <span class="font-medium" x-text="t('search.locarno_label')"></span>:
+                                <span x-text="(r.locarno_classes || []).join(', ')"></span>
+                            </div>
+                            <!-- Cografi: region + gi_type -->
+                            <div x-show="searchView === 'cografi' && (r.region || r.geographical_boundary || r.gi_type)"
+                                 class="text-xs mt-1" style="color:var(--color-text-secondary)">
+                                <span x-show="r.region || r.geographical_boundary">
+                                    <span class="font-medium" x-text="t('search.region_label')"></span>:
+                                    <span x-text="r.region || r.geographical_boundary"></span>
+                                </span>
+                                <span x-show="r.gi_type" class="ml-2">
+                                    <span class="font-medium" x-text="t('search.gi_type_label')"></span>:
+                                    <span x-text="r.gi_type"></span>
+                                </span>
+                            </div>
+                            <div x-show="r.abstract" class="text-xs mt-2 line-clamp-2" style="color:var(--color-text-muted)"
+                                 x-text="r.abstract"></div>
+                        </div>
+                    </div>
+                </template>
             </div>
         </div>
 

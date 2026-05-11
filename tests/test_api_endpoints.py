@@ -1063,6 +1063,182 @@ class TestPublicEndpoints:
         assert mock_search.await_args.kwargs["query"] == "NIKE"
         assert mock_search.await_args.kwargs["nice_classes"] == [9, 35]
 
+    def test_patent_public_search_post_accepts_image_and_filters(self, client):
+        """Patent public POST now mirrors /quick: image upload + IPC + holder
+        + date range + kind_code, all gated by the shared 5/day quota."""
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value.fetchone.side_effect = [None, {"searches": 1}]
+        image_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+
+        with patch(
+            "app_patent_search_routes.patent_search_public",
+            new_callable=AsyncMock,
+        ) as mock_impl, patch(
+            "database.crud.get_db_connection",
+            return_value=mock_conn,
+        ):
+            mock_impl.return_value = {"results": [], "total": 0}
+            resp = client.post(
+                "/api/v1/patent-search/public",
+                data={
+                    "query": "elektrik motoru",
+                    "ipc": "H02K",
+                    "holder": "ASELSAN",
+                    "date_from": "2024-01-01",
+                    "date_to": "2024-12-31",
+                    "kind_code": "B",
+                },
+                files={"image": ("logo.png", image_bytes, "image/png")},
+            )
+
+        assert resp.status_code == 200
+        assert mock_impl.await_count == 1
+        kwargs = mock_impl.await_args.kwargs
+        assert kwargs["query"] == "elektrik motoru"
+        assert kwargs["ipc"] == "H02K"
+        assert kwargs["holder"] == "ASELSAN"
+        assert kwargs["kind_code"] == "B"
+        assert kwargs["image"] is not None and kwargs["image"].filename == "logo.png"
+
+    def test_design_public_search_post_accepts_image_and_locarno(self, client):
+        """Design public POST now accepts image + Locarno chips, matching /quick."""
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value.fetchone.side_effect = [None, {"searches": 1}]
+        image_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * 32
+
+        with patch(
+            "app_design_search_routes.design_search_public",
+            new_callable=AsyncMock,
+        ) as mock_impl, patch(
+            "database.crud.get_db_connection",
+            return_value=mock_conn,
+        ):
+            mock_impl.return_value = {"results": [], "total": 0}
+            resp = client.post(
+                "/api/v1/design-search/public",
+                data={"query": "sandalye", "locarno": "06-01, 06-03"},
+                files={"image": ("chair.jpg", image_bytes, "image/jpeg")},
+            )
+
+        assert resp.status_code == 200
+        assert mock_impl.await_count == 1
+        kwargs = mock_impl.await_args.kwargs
+        assert kwargs["query"] == "sandalye"
+        assert kwargs["locarno"] == "06-01, 06-03"
+        assert kwargs["image"] is not None and kwargs["image"].filename == "chair.jpg"
+
+    def test_cografi_public_search_post_accepts_image_and_filters(self, client):
+        """Cografi public POST mirrors /quick — image + section + region + gi_type."""
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value.fetchone.side_effect = [None, {"searches": 1}]
+        image_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * 32
+
+        with patch(
+            "app_cografi_search_routes.cografi_search_public",
+            new_callable=AsyncMock,
+        ) as mock_impl, patch(
+            "database.crud.get_db_connection",
+            return_value=mock_conn,
+        ):
+            mock_impl.return_value = {"results": [], "total": 0}
+            resp = client.post(
+                "/api/v1/cografi-search/public",
+                data={
+                    "query": "konya",
+                    "section_keys": "gida,tarim",
+                    "region": "Konya",
+                    "gi_type": "mensei",
+                },
+                files={"image": ("photo.jpg", image_bytes, "image/jpeg")},
+            )
+
+        assert resp.status_code == 200
+        assert mock_impl.await_count == 1
+        kwargs = mock_impl.await_args.kwargs
+        assert kwargs["query"] == "konya"
+        assert kwargs["section_keys"] == "gida,tarim"
+        assert kwargs["region"] == "Konya"
+        assert kwargs["gi_type"] == "mensei"
+        assert kwargs["image"] is not None and kwargs["image"].filename == "photo.jpg"
+
+    def test_public_search_quota_returns_429_when_exhausted(self, client):
+        """Once today's shared quota is gone, every public endpoint should 429
+        — proves the shared-counter wiring is live on patent/design/cografi."""
+        from services import search_service
+
+        mock_conn = MagicMock()
+
+        with patch.object(
+            search_service,
+            "check_public_search_eligibility",
+            return_value=(False, "daily_limit_exceeded", {
+                "error": "daily_limit_exceeded",
+                "daily_limit": 5,
+                "used_today": 5,
+                "remaining": 0,
+            }),
+        ), patch(
+            "database.crud.get_db_connection",
+            return_value=mock_conn,
+        ):
+            for url, data in [
+                ("/api/v1/patent-search/public", {"query": "x"}),
+                ("/api/v1/design-search/public", {"query": "x"}),
+                ("/api/v1/cografi-search/public", {"query": "x"}),
+            ]:
+                resp = client.post(url, data=data)
+                assert resp.status_code == 429, f"{url} should 429 over quota"
+                assert resp.json()["detail"]["error"] == "daily_limit_exceeded"
+
+    def test_public_search_shared_counter_increments_across_registries(self, client):
+        """A trademark search and a patent search by the same anonymous client
+        should both increment the SAME public_search_usage row. Proves the
+        5/day quota is one bucket across all 4 registries, not 4 buckets."""
+        from services import search_service
+
+        increments = []
+
+        def _capture_increment(db, client_id, today_factory=None):
+            increments.append(client_id)
+            return len(increments)
+
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value.fetchone.return_value = None
+
+        with patch.object(
+            search_service,
+            "increment_public_search_usage",
+            side_effect=_capture_increment,
+        ), patch.object(
+            search_service,
+            "check_public_search_eligibility",
+            return_value=(True, "ok", {"remaining": 5}),
+        ), patch(
+            "app_patent_search_routes.patent_search_public",
+            new_callable=AsyncMock,
+            return_value={"results": []},
+        ), patch(
+            "app_design_search_routes.design_search_public",
+            new_callable=AsyncMock,
+            return_value={"results": []},
+        ), patch(
+            "database.crud.get_db_connection",
+            return_value=mock_conn,
+        ):
+            # First request gets a cookie; reuse it for the second so both
+            # hits land on the same client_id row.
+            r1 = client.post("/api/v1/patent-search/public", data={"query": "abc"})
+            assert r1.status_code == 200
+            cookie = r1.cookies.get("public_search_client_id")
+            assert cookie, "First public request must set the tracking cookie"
+
+            client.cookies.set("public_search_client_id", cookie)
+            r2 = client.post("/api/v1/design-search/public", data={"query": "def"})
+            assert r2.status_code == 200
+
+        assert len(increments) == 2
+        assert increments[0] == increments[1] == cookie
+
     def test_public_portfolio_route_delegates_to_extracted_impl(self, client):
         with patch(
             "app_public_portfolio_routes.public_portfolio_impl",
@@ -9859,6 +10035,42 @@ async def test_creative_service_status_data_marks_gemini_availability():
 
 
 @pytest.mark.asyncio
+async def test_creative_service_status_data_marks_name_available_with_risk_report_provider():
+    from services.creative_service import creative_suite_status_data
+
+    qwen_provider = SimpleNamespace(
+        provider_name="qwen",
+        text_model="qwen-max",
+        is_available=lambda: True,
+    )
+    name_client = SimpleNamespace(
+        provider_name="risk_report_provider_chain",
+        text_model="unavailable",
+        providers=[qwen_provider],
+        is_available=lambda: True,
+    )
+    gemini_client = SimpleNamespace(
+        is_available=lambda: False,
+        image_model="gemini-3-pro-image-preview",
+        text_model="gemini-2.5-pro",
+    )
+    openai_client = SimpleNamespace(is_available=lambda: False, image_model="gpt-image-2")
+
+    response = await creative_suite_status_data(
+        feature_enabled_getter=lambda name: True,
+        openai_image_client_getter=lambda: openai_client,
+        gemini_client_getter=lambda: gemini_client,
+        name_generation_client_getter=lambda: name_client,
+        ai_module=SimpleNamespace(clip_model=None),
+    )
+
+    assert response["name_generator"]["available"] is True
+    assert response["name_generator"]["provider"] == "qwen"
+    assert response["name_generator"]["model"] == "qwen-max"
+    assert response["logo_studio"]["available"] is False
+
+
+@pytest.mark.asyncio
 async def test_creative_service_status_data_marks_logo_available_with_clip():
     from services.creative_service import creative_suite_status_data
 
@@ -9898,6 +10110,7 @@ async def test_creative_service_status_data_marks_logo_available_when_openai_is_
         feature_enabled_getter=lambda name: True,
         openai_image_client_getter=lambda: openai_client,
         gemini_client_getter=lambda: gemini_client,
+        name_generation_client_getter=lambda: SimpleNamespace(is_available=lambda: False),
         ai_module=SimpleNamespace(clip_model=None),
     )
 
@@ -10802,12 +11015,13 @@ def test_ai_studio_name_risk_prompt_uses_database_candidates_without_scores():
     name_items = _coerce_name_results_to_risk_items([deterministic])
     name_items[0]["db_candidates"] = [
         {
-            "name": "ACME",
-            "application_no": "2026/000001",
+            "name": f"ACME {index}",
+            "application_no": f"2026/{index:06d}",
             "status": "registered",
             "nice_classes": [25],
             "owner": "Existing Holder",
         }
+        for index in range(1, 13)
     ]
 
     system_prompt, user_prompt, expected_ids = _build_ai_studio_name_risk_messages(
@@ -10821,12 +11035,34 @@ def test_ai_studio_name_risk_prompt_uses_database_candidates_without_scores():
 
     assert expected_ids == ["name_1"]
     assert "ACMIA" in user_prompt
-    assert "ACME" in user_prompt
+    assert "ACME 1" in user_prompt
+    assert "ACME 10" in user_prompt
+    assert "ACME 11" not in user_prompt
     assert "2026/000001" in user_prompt
+    assert "2026/000010" in user_prompt
+    assert "2026/000011" not in user_prompt
     assert "deterministic" not in user_prompt
     assert "text_similarity" not in user_prompt
-    assert "prior similarity scores" in system_prompt
+    assert "semantic_similarity" not in user_prompt
+    assert "semantic candidates" in system_prompt
+    assert "similarity scores" in system_prompt
+    assert "strongest single conflict" in system_prompt
+    assert "Do not average" in system_prompt
     assert parsed_scores["name_1"] == 12.0
+
+
+def test_ai_studio_name_retrieval_is_lexical_not_semantic():
+    import inspect
+    from services.creative_service import _collect_name_risk_inputs
+
+    source = inspect.getsource(_collect_name_risk_inputs)
+
+    assert "text_embedding" not in source
+    assert "get_text_embedding" not in source
+    assert "get_text_embeddings" not in source
+    assert "from pipeline import ai" not in source
+    assert "dmetaphone" in source
+    assert "levenshtein" in source
 
 
 @pytest.mark.asyncio
@@ -11095,6 +11331,279 @@ async def test_creative_service_suggest_names_data_generates_and_logs_results():
     generation_log_handler.assert_called_once()
     assert generation_log_handler.call_args.kwargs["output_data"]["risk_source"] == "risk_report_llm"
     audit_log_handler.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_creative_service_suggest_names_data_uses_risk_report_provider_for_generation():
+    from models.schemas import NameSuggestionRequest, SafeNameResult
+    from services.creative_service import suggest_names_data
+
+    org_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    current_user = SimpleNamespace(id=user_id, organization_id=org_id, is_superadmin=True)
+    request = NameSuggestionRequest(
+        query="Acme",
+        nice_classes=[25],
+        industry="Footwear",
+        style="modern",
+        language="tr",
+        avoid_names=["Nike"],
+    )
+
+    class _RiskReportNameGenerator:
+        provider_name = "risk_report_provider_chain"
+        text_model = "qwen:qwen-max"
+
+        def __init__(self):
+            self.calls = []
+
+        def is_available(self):
+            return True
+
+        async def generate_json(self, **kwargs):
+            self.calls.append(kwargs)
+            return {"names": ["ACMIA", "ACMEO"]}
+
+    generator = _RiskReportNameGenerator()
+    generation_log_handler = MagicMock()
+    audit_log_handler = MagicMock()
+    safe_result = SafeNameResult(
+        name="ACMIA",
+        risk_score=10.0,
+        text_similarity=0.1,
+        semantic_similarity=0.15,
+        phonetic_match=False,
+        closest_match="ACME",
+        is_safe=True,
+        translation_similarity=0.0,
+        risk_level="low",
+    )
+    filtered_result = SafeNameResult(
+        name="ACMEO",
+        risk_score=84.0,
+        text_similarity=0.8,
+        semantic_similarity=0.8,
+        phonetic_match=False,
+        closest_match="ACME",
+        is_safe=False,
+        translation_similarity=0.0,
+        risk_level="high",
+    )
+
+    response = await suggest_names_data(
+        request=request,
+        current_user=current_user,
+        settings_obj=SimpleNamespace(
+            creative=SimpleNamespace(name_batch_size=4, name_similarity_threshold=0.7)
+        ),
+        name_generation_client_getter=lambda: generator,
+        session_count_getter=MagicMock(return_value=0),
+        cached_results_getter=MagicMock(return_value=None),
+        batch_validate_names_handler=MagicMock(return_value=[safe_result, filtered_result]),
+        name_risk_scorer_handler=AsyncMock(
+            return_value={
+                "name_1": {"llm_risk_score": 10.0, "risk_source": "risk_report_llm"},
+                "name_2": {"llm_risk_score": 84.0, "risk_source": "risk_report_llm"},
+            }
+        ),
+        session_count_incrementer=MagicMock(return_value=1),
+        cache_results_handler=MagicMock(),
+        generation_log_handler=generation_log_handler,
+        audit_log_handler=audit_log_handler,
+    )
+
+    assert response.total_generated == 2
+    assert [item.name for item in response.safe_names] == ["ACMIA"]
+    assert len(generator.calls) == 1
+    call = generator.calls[0]
+    assert call["temperature"] == 1.0
+    assert "ai_studio_name_generation" in call["user_prompt"]
+    assert '"required_name_count": 4' in call["user_prompt"]
+    assert '"primary_language": "tr"' in call["user_prompt"]
+    assert "Turkish-first" in call["user_prompt"]
+    assert "TechGuardian" in call["user_prompt"]
+    assert "similarity_score" not in call["user_prompt"]
+    log_kwargs = generation_log_handler.call_args.kwargs
+    assert log_kwargs["input_params"]["name_generation_provider"] == "qwen"
+    assert log_kwargs["input_params"]["name_generation_model"] == "qwen-max"
+    assert log_kwargs["output_data"]["name_generation_provider"] == "qwen"
+    assert log_kwargs["output_data"]["name_generation_provider_chain"] == "risk_report_provider_chain"
+    assert audit_log_handler.call_args.kwargs["metadata"]["name_generation_provider"] == "qwen"
+
+
+@pytest.mark.asyncio
+async def test_creative_service_suggest_names_data_retries_english_heavy_turkish_output():
+    from models.schemas import NameSuggestionRequest, SafeNameResult
+    from services.creative_service import suggest_names_data
+
+    org_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    current_user = SimpleNamespace(id=user_id, organization_id=org_id, is_superadmin=True)
+    request = NameSuggestionRequest(
+        query="IP Watch AI",
+        nice_classes=[9, 42],
+        industry="Technology",
+        style="modern",
+        language="tr",
+    )
+
+    class _RiskReportNameGenerator:
+        provider_name = "risk_report_provider_chain"
+        text_model = "qwen:qwen-max"
+
+        def __init__(self):
+            self.calls = []
+
+        def is_available(self):
+            return True
+
+        async def generate_json(self, **kwargs):
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                return {"names": ["TechGuardian", "CodeDefender", "CyberProtect", "DataShield"]}
+            return {"names": ["VeriKalkan", "MarkaNobet", "HakIz", "AkilKoru"]}
+
+    generator = _RiskReportNameGenerator()
+    batch_validate_names_handler = MagicMock(
+        side_effect=lambda candidate_names, **kwargs: [
+            SafeNameResult(
+                name=name,
+                risk_score=10.0,
+                text_similarity=0.1,
+                semantic_similarity=0.1,
+                phonetic_match=False,
+                closest_match=None,
+                is_safe=True,
+                translation_similarity=0.0,
+                risk_level="low",
+            )
+            for name in candidate_names
+        ]
+    )
+    generation_log_handler = MagicMock()
+
+    response = await suggest_names_data(
+        request=request,
+        current_user=current_user,
+        settings_obj=SimpleNamespace(
+            creative=SimpleNamespace(name_batch_size=4, name_similarity_threshold=0.7)
+        ),
+        name_generation_client_getter=lambda: generator,
+        session_count_getter=MagicMock(return_value=0),
+        cached_results_getter=MagicMock(return_value=None),
+        batch_validate_names_handler=batch_validate_names_handler,
+        name_risk_scorer_handler=AsyncMock(
+            return_value={
+                f"name_{idx}": {"llm_risk_score": 10.0, "risk_source": "risk_report_llm"}
+                for idx in range(1, 5)
+            }
+        ),
+        session_count_incrementer=MagicMock(return_value=4),
+        cache_results_handler=MagicMock(),
+        generation_log_handler=generation_log_handler,
+        audit_log_handler=MagicMock(),
+    )
+
+    assert len(generator.calls) == 2
+    assert "STRICT_LANGUAGE_RETRY" in generator.calls[1]["user_prompt"]
+    assert [item.name for item in response.safe_names] == ["VeriKalkan", "MarkaNobet", "HakIz", "AkilKoru"]
+    assert batch_validate_names_handler.call_args.kwargs["candidate_names"] == [
+        "VeriKalkan",
+        "MarkaNobet",
+        "HakIz",
+        "AkilKoru",
+    ]
+    log_kwargs = generation_log_handler.call_args.kwargs
+    assert log_kwargs["input_params"]["name_language_retry_used"] is True
+    assert log_kwargs["output_data"]["name_language_retry_used"] is True
+
+
+def test_creative_service_detects_english_heavy_turkish_name_batch():
+    from services.creative_service import _turkish_name_batch_is_english_heavy
+
+    assert _turkish_name_batch_is_english_heavy(
+        ["TechGuardian", "CodeDefender", "CyberProtect", "DataShield"]
+    ) is True
+    assert _turkish_name_batch_is_english_heavy(
+        ["VeriKalkan", "MarkaNobet", "HakIz", "AkilKoru"]
+    ) is False
+
+
+def test_creative_service_name_generation_supports_mixed_language_policy():
+    from models.schemas import NameSuggestionRequest
+    from services.creative_service import _build_ai_studio_name_generation_messages
+
+    request = NameSuggestionRequest(
+        query="IP Watch AI",
+        nice_classes=[9, 42],
+        industry="Technology",
+        style="modern",
+        language="mixed",
+    )
+
+    _, user_prompt = _build_ai_studio_name_generation_messages(
+        request=request,
+        avoid_list=["IP Watch AI"],
+        count=8,
+    )
+
+    assert '"primary_language": "mixed"' in user_prompt
+    assert "Mixed Turkish-English" in user_prompt
+    assert "Do not let one language dominate" in user_prompt
+
+
+@pytest.mark.parametrize(
+    ("language", "expected_policy"),
+    [
+        ("de", "German-first brand names"),
+        ("it", "Italian-first brand names"),
+        ("fr", "French-first brand names"),
+        ("ar", "Arabic-first brand names"),
+        ("ku", "Kurdish-first brand names"),
+        ("fa", "Persian-first brand names"),
+        ("zh", "Chinese-first brand names"),
+        ("ru", "Russian-first brand names"),
+    ],
+)
+def test_creative_service_name_generation_supports_additional_language_policies(language, expected_policy):
+    from models.schemas import NameSuggestionRequest
+    from services.creative_service import _build_ai_studio_name_generation_messages
+
+    request = NameSuggestionRequest(
+        query="IP Watch AI",
+        nice_classes=[9, 42],
+        industry="Technology",
+        style="modern",
+        language=language,
+    )
+
+    _, user_prompt = _build_ai_studio_name_generation_messages(
+        request=request,
+        avoid_list=[],
+        count=8,
+    )
+
+    assert f'"primary_language": "{language}"' in user_prompt
+    assert expected_policy in user_prompt
+
+
+def test_creative_service_parses_risk_report_name_generation_response():
+    from services.creative_service import _parse_ai_studio_name_generation_response
+
+    parsed = _parse_ai_studio_name_generation_response(
+        {
+            "names": [
+                "  1. ACMIA  ",
+                {"name": "ACMEO"},
+                {"brand_name": "Acmevo"},
+                "acmia",
+                "",
+            ]
+        },
+        max_count=4,
+    )
+
+    assert parsed == ["ACMIA", "ACMEO", "Acmevo"]
 
 
 @pytest.mark.asyncio

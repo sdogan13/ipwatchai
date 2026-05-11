@@ -1,6 +1,6 @@
 # IP Watch AI API Reference
 
-Last updated: 2026-04-21
+Last updated: 2026-05-11
 Status: Current high-level map
 
 ## Purpose
@@ -65,8 +65,14 @@ Public search and portfolio:
 - `POST /api/v1/search/public`
 - `GET /api/v1/patent-search/public`
 - `POST /api/v1/patent-search/public`
+- `GET /api/v1/design-search/public`
+- `POST /api/v1/design-search/public`
+- `GET /api/v1/cografi-search/public`
+- `POST /api/v1/cografi-search/public`
 - `GET /api/v1/portfolio/public`
 - `GET /api/v1/portfolio/public/csv`
+
+All four public search endpoints share a single anonymous daily quota — 5 searches/day per visitor, tracked by the long-lived `public_search_client_id` cookie. Switching registries does not reset the count; one bucket covers trademark + patent + design + cografi. Quota enforcement lives in `app_public_search_quota.py` (`enforce_public_search_quota` / `record_public_search_usage`), wired in front of each public route. Failed searches are not counted — the usage increment runs only after a successful retrieval.
 
 Public education content:
 - `GET /api/v1/education/catalog`
@@ -148,9 +154,24 @@ Watchlist similarity alerts exclude same-holder conflicts when the watched mark'
 Patent search:
 - `POST /api/v1/patent-search/quick` is authenticated and runs a text-first hybrid retrieval (trigram on `patents.title` plus cosine on `title_abstract_embedding` produced by `intfloat/multilingual-e5-large`); accepts `query`, `ipc` (comma-separated IPC class filter), `holder` (free-text trigram on `patent_holders.name`), `date_from`/`date_to` (filing-date window), `kind_code` (e.g. `B`, `A1`, `U3`, `T4`), and `limit` (default 20, max 100); shares the daily `max_daily_quick_searches` quota with trademark and design quick searches; returns 429 with the upgrade-hint payload over quota
 - queries that look like an application/publication number (`2017/15048`, `TR 2017 15048 U3`, etc.) short-circuit to a direct row lookup and skip embedding/trigram retrieval
-- `GET /api/v1/patent-search/public` and `POST /api/v1/patent-search/public` are anonymous text-only variants capped at 10 results, rate-limited at 10/min per IP; only `query` and `ipc` filters are honored
+- `GET /api/v1/patent-search/public` and `POST /api/v1/patent-search/public` are anonymous variants capped at 10 results, rate-limited at 10/min per IP and gated by the shared landing-page free-tier quota. The POST surface accepts the same inputs as `/quick` — `query`, optional `image` upload, `ipc`, `holder`, `date_from`, `date_to`, `kind_code` — and runs the same hybrid retrieval (e5 text embedding + DINOv2 figure embedding when an image is supplied). The GET variant accepts `query` plus the same filter set as query params for link-share use cases
 - `GET /api/v1/patent-search/ipc-autocomplete?q=` returns IPC classes that actually appear in the corpus (`patents.ipc_classes`) prefix-matching the query, joined to `ipc_classes_lookup` for descriptions when available; rate-limited at 60/min
 - `GET /api/v1/patent-image/{path:path}` serves figure thumbnails for search result cards; resolves under `bulletins/Patent__Faydali_Model/` with a directory-traversal guard, direct-serves PNG/JPEG figures, and converts CD-era `.tif` figures to JPEG on the fly so browsers can render them; cached for 24h. Search results include an `image_url` field built from `patent_figures.image_path` and `patents.bulletin_folder` (the first non-null figure by `seq` is selected)
+
+Design search:
+- `POST /api/v1/design-search/quick` is authenticated and runs visual-dominant retrieval against `designs` (DINOv2 ViT-L/14 ≈55% + CLIP ViT-B/32 ≈30% + HSV color ≈10% + trigram text ≈5%); accepts `query`, optional `image`, `locarno` (comma-separated Locarno classes), and `limit` (default 20); shares the daily `max_daily_quick_searches` quota with trademark/patent/cografi quick searches
+- `GET /api/v1/design-search/public` and `POST /api/v1/design-search/public` are anonymous variants capped at 10 results, rate-limited at 10/min per IP and gated by the shared landing-page free-tier quota. The POST surface accepts `query`, optional `image`, and `locarno` — the same input shape as `/quick`. Image-based retrieval runs the same visual model stack on the public path
+- `GET /api/v1/locarno-classes` is public and lists the 32 top-level Locarno classes with localized names for the design search filter UI; rate-limited at 60/min
+- `POST /api/v1/tools/suggest-locarno-classes` is authenticated and returns AI-suggested Locarno classes for a free-text product description; rate-limited at 20/min
+- `GET /api/v1/design-image/{path:path}` serves design view JPEGs from `bulletins/Tasarim/` with a directory-traversal guard; resolves both pre-CD-refactor paths (no `cd_images/`/`images/` prefix) and post-refactor paths, cached for 24h
+
+Cografi search (Geographical Indications + Traditional Specialties):
+- `POST /api/v1/cografi-search/quick` is authenticated and runs a hybrid retrieval against `cografi_records` (trigram on name plus cosine on `text_embedding` from e5-large, fused with DINOv2 figure embedding when an image is supplied); accepts `query`, optional `image`, `section_keys` (comma-separated), `record_types` (comma-separated), `gi_type` (`mensei` / `mahreç` / `geleneksel`), `region` (free-text trigram on `geographical_boundary`), `date_from`/`date_to`, `application_no`, `registration_no`, `include_admin`, and `limit` (default 20); shares the daily `max_daily_quick_searches` quota
+- queries that look like an application/registration number short-circuit to a direct row lookup and skip embedding/trigram retrieval
+- `GET /api/v1/cografi-search/public` and `POST /api/v1/cografi-search/public` are anonymous variants capped at 10 results, rate-limited at 10/min per IP and gated by the shared landing-page free-tier quota. The POST surface accepts the same input as `/quick` (less `include_admin`, which stays admin-side). The public path runs the same e5 text + DINOv2 figure embeddings
+- `GET /api/v1/cografi-search/autocomplete?q=` returns name + region typeahead from the cografi corpus; rate-limited at 60/min
+- `GET /api/v1/cografi/{record_id}` returns the full cografi detail record
+- `GET /api/v1/cografi-image/{path:path}` serves figure thumbnails from `bulletins/Cografi_Isaret_ve_Geleneksel_Urun_Adi/` with a directory-traversal guard; auto-inserts the `figures/` segment when the caller uses the service's compact URL form; cached for 24h
 
 Design watchlist + alerts:
 - `POST /api/v1/design-watchlist` creates a tracked design (text + Locarno classes, optional `customer_application_no`, optional `reference_design_id` to clone embeddings from an existing design row); subject to the combined trademark+design watchlist quota (`subscription_plans.max_watchlist_items`)
@@ -303,8 +324,9 @@ curl -X DELETE http://127.0.0.1:8000/api/v1/reports/<report_id> `
 
 ## Notes
 
-- public search is rate-limited separately from authenticated search
-- public landing-page search also enforces the free-tier daily quota and returns structured `429` detail when that quota is exhausted
+- public search is rate-limited separately from authenticated search; each public route has its own slowapi limit (10/min per IP) but all four registries share a single 5/day per-visitor counter via the `public_search_client_id` cookie. Over-quota responses return structured `429` detail with the upgrade-hint payload so the landing page can render the upgrade modal
+- the shared anonymous counter lets a visitor mix and match across trademark / patent / design / cografi within their free 5/day allowance; it is implemented in `services/search_service.py` (primitives) and wrapped by `app_public_search_quota.py` (route-level helpers)
+- all four `/public` POST endpoints accept multipart with an optional `image` field plus the full filter surface of their `/quick` siblings; the dashboard and landing page hit the same service-layer search functions, so retrieval quality on the public path matches the authenticated path (only the result cap and quota differ)
 - authenticated quick search reads the plan daily cap from runtime settings, and startup now realigns the known legacy quick-search overrides to the current product defaults
 - some legacy routes remain for compatibility while newer flows live under `/api/v1`
 - browser and live E2E suites in `tests/` are often the best source for real end-to-end request/response behavior

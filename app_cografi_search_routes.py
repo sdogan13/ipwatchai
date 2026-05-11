@@ -22,8 +22,8 @@ import tempfile
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import Depends, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi import Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
+from fastapi.responses import FileResponse
 from PIL import Image
 
 
@@ -210,14 +210,14 @@ async def _do_cografi_search(
     from services.cografi_search_service import parse_id_query, search_cografi
 
     text_embedding = None
-    if not public and query and len(query.strip()) >= 2:
+    if query and len(query.strip()) >= 2:
         # Skip embedding when the query parses as an exact ID — service
         # short-circuits to a direct row lookup so the embed is wasted.
         if not parse_id_query(query):
             text_embedding = _embed_query_text(query)
 
     figure_embedding = None
-    if not public and image_temp_path:
+    if image_temp_path:
         figure_embedding = _embed_query_image(image_temp_path)
 
     with Database() as db:
@@ -326,31 +326,59 @@ async def cografi_search_quick(
 async def cografi_search_public(
     *,
     query: Optional[str],
+    image: Optional[UploadFile] = None,
     section_keys: Optional[str] = None,
+    record_types: Optional[str] = None,
+    gi_type: Optional[str] = None,
     region: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    application_no: Optional[str] = None,
+    registration_no: Optional[str] = None,
 ) -> dict:
-    """Public anonymous text-only cografi search. Capped at 10 results.
-    No image upload — public path stays cheap. A small filter surface
-    (section_keys + region) is exposed so anonymous users can scope
-    common queries like "show me registered Konya GIs".
+    """Public anonymous cografi search. Capped at 10 results.
+
+    Mirrors the authenticated quick endpoint's input surface (text +
+    image + full filter set) so the landing-page experience matches
+    the dashboard. The figure-embedding + e5 text-embedding hybrid
+    ranking runs identically on the public path.
     """
-    if not query or len(query.strip()) < 2:
-        raise HTTPException(status_code=422, detail="Provide a query (min 2 chars)")
-    return await _do_cografi_search(
-        query=query.strip(),
-        image_temp_path=None,
-        section_keys=_parse_csv_param(section_keys),
-        record_types=None,
-        gi_type=None,
-        region=region.strip() if region else None,
-        date_from=None,
-        date_to=None,
-        application_no=None,
-        registration_no=None,
-        include_admin=False,
-        limit=10,
-        public=True,
-    )
+    has_image = image is not None and image.filename
+    has_query = bool(query and query.strip())
+    if not has_query and not has_image:
+        raise HTTPException(
+            status_code=422,
+            detail="Provide a query (min 2 chars) or upload an image",
+        )
+
+    temp_path: Optional[str] = None
+    if has_image:
+        if image.content_type not in ALLOWED_IMAGE_TYPES:
+            raise HTTPException(status_code=400, detail="Invalid image type")
+        content = await image.read()
+        temp_path = _save_upload_to_temp(content)
+    try:
+        return await _do_cografi_search(
+            query=query.strip() if has_query else None,
+            image_temp_path=temp_path,
+            section_keys=_parse_csv_param(section_keys),
+            record_types=_parse_csv_param(record_types),
+            gi_type=gi_type.strip() if gi_type else None,
+            region=region.strip() if region else None,
+            date_from=date_from or None,
+            date_to=date_to or None,
+            application_no=application_no.strip() if application_no else None,
+            registration_no=_parse_int_param(registration_no),
+            include_admin=False,
+            limit=10,
+            public=True,
+        )
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -429,31 +457,62 @@ def register_cografi_search_routes(app, limiter):
     wired internally via ``Depends(get_current_user)`` to match the
     existing patent / design / marka conventions.
     """
+    from app_public_search_quota import (
+        enforce_public_search_quota,
+        record_public_search_usage,
+    )
     from auth.authentication import get_current_user
 
     @app.get("/api/v1/cografi-search/public", tags=["Cografi Search"])
     @limiter.limit("10/minute")
     async def public_cografi_search_get(
         request: Request,
+        response: Response,
         query: str = Query(..., min_length=2, max_length=200),
         section_keys: Optional[str] = Query(None),
+        record_types: Optional[str] = Query(None),
+        gi_type: Optional[str] = Query(None),
         region: Optional[str] = Query(None),
+        date_from: Optional[str] = Query(None),
+        date_to: Optional[str] = Query(None),
+        application_no: Optional[str] = Query(None),
+        registration_no: Optional[str] = Query(None),
     ):
-        return await cografi_search_public(
-            query=query, section_keys=section_keys, region=region,
+        client_id = enforce_public_search_quota(request, response)
+        payload = await cografi_search_public(
+            query=query, section_keys=section_keys,
+            record_types=record_types, gi_type=gi_type, region=region,
+            date_from=date_from, date_to=date_to,
+            application_no=application_no, registration_no=registration_no,
         )
+        record_public_search_usage(client_id)
+        return payload
 
     @app.post("/api/v1/cografi-search/public", tags=["Cografi Search"])
     @limiter.limit("10/minute")
     async def public_cografi_search_post(
         request: Request,
+        response: Response,
         query: Optional[str] = Form(None),
+        image: Optional[UploadFile] = File(None),
         section_keys: Optional[str] = Form(None),
+        record_types: Optional[str] = Form(None),
+        gi_type: Optional[str] = Form(None),
         region: Optional[str] = Form(None),
+        date_from: Optional[str] = Form(None),
+        date_to: Optional[str] = Form(None),
+        application_no: Optional[str] = Form(None),
+        registration_no: Optional[str] = Form(None),
     ):
-        return await cografi_search_public(
-            query=query, section_keys=section_keys, region=region,
+        client_id = enforce_public_search_quota(request, response)
+        payload = await cografi_search_public(
+            query=query, image=image, section_keys=section_keys,
+            record_types=record_types, gi_type=gi_type, region=region,
+            date_from=date_from, date_to=date_to,
+            application_no=application_no, registration_no=registration_no,
         )
+        record_public_search_usage(client_id)
+        return payload
 
     @app.post("/api/v1/cografi-search/quick", tags=["Cografi Search"])
     @limiter.limit("60/minute")

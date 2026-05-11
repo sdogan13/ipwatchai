@@ -138,6 +138,7 @@ services:
       - ./app_middleware.py:/app/app_middleware.py:ro
       - ./app_nice_class_routes.py:/app/app_nice_class_routes.py:ro
       - ./app_public_portfolio_routes.py:/app/app_public_portfolio_routes.py:ro
+      - ./app_public_search_quota.py:/app/app_public_search_quota.py:ro
       - ./app_public_search_routes.py:/app/app_public_search_routes.py:ro
       - ./app_rate_limit.py:/app/app_rate_limit.py:ro
       - ./app_registry_search_routes.py:/app/app_registry_search_routes.py:ro
