@@ -178,7 +178,7 @@
       : 'd="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"';
     var kindLabel = kind === "region"
       ? t("cografi_search.region_label_card", "Region")
-      : t("cografi_search.untitled", "Name");
+      : t("cografi_search.name_label_card", "Name");
     return (
       '<div data-cografi-autocomplete ' +
       'class="flex items-center gap-2 px-4 py-2 text-sm cursor-pointer transition-colors" ' +
