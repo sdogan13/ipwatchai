@@ -403,6 +403,17 @@ python embeddings_cografi.py --force            # re-embed everything
 
 Vision branch is auto-skipped when no figures exist across the selected metadata.json files (saves ~1.8 GB GPU memory). Idempotent — already-embedded records pass through untouched unless `--force`. Empirical: 5.3 min on an RTX 4070 for the full 220-bulletin set (3,527 text + 5,393 image embeddings + 1,458 primary aggregates).
 
+**DB ingest — `pipeline/ingest_cografi.py` + `migrations/cografi.sql` (Phase D).** Upserts each `CI_*/metadata.json` into four `cografi_*` tables (records, holders, change_requests, figures). Reuses the global `holders` table for applicants/registrants/agents (TPECLIENT IDs are shared across all four registries — locked decision). HNSW indexes on `halfvec(1024)` text + image embeddings; trigram (`gist_trgm_ops`) on `name` and `geographical_boundary` for fuzzy lookup; full natural-key UPSERT for idempotency.
+
+```powershell
+psql ... -f migrations/cografi.sql                  # apply schema
+python -m pipeline.ingest_cografi                   # ingest all CI_*/metadata.json
+python -m pipeline.ingest_cografi --issue 220
+python -m pipeline.ingest_cografi --dry-run         # parse + project + rollback
+```
+
+Empirical: 3.5 min for the full 220-bulletin set on local Postgres 16 + pgvector 0.8.1. End-to-end HNSW similarity verified: querying for `Karapınar Halısı` returns the self-match at distance 0.0, then `Karapınar Tülü Dokuması` (0.075, same region + product family), then `Emirgazi Halısı` (0.097, same region) — semantic ranking working as expected on Turkish text.
+
 Per-PDF quality verifier built into the extractor cross-checks Section 2 index counts against the parsed body for every bulletin during `--all`; structural problems are surfaced as `[?]` warnings so a regression is loud.
 
 Pure-helper unit tests live in `tests/test_data_collection_cografi.py` (collector + subfolder layout + RAR detection) and `tests/test_pdf_extract_cografi.py` (extractor helpers + section-key classification + record header parsing + change-request / correction parsers).
