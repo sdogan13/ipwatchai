@@ -488,8 +488,15 @@
                    class="hidden" @change="onImageSelected($event)">
         </div>
 
-        <!-- ===== Nice Class Finder (collapsible, trademark only) ===== -->
-        <div x-show="searchView === 'trademark'" class="max-w-2xl mx-auto mb-5" x-data="{ classOpen: false }">
+        <!-- ===== Nice Class Finder (collapsible, trademark only) =====
+             The x-show lives on the OUTER wrapper while the nested
+             x-data scope stays on the inner block. Co-locating both
+             on one element put the x-show expression inside the
+             child scope, where `searchView` only resolved via the
+             Alpine prototype chain — splitting them removes the
+             ambiguity and matches the dashboard's pattern. -->
+        <div x-show="searchView === 'trademark'">
+        <div class="max-w-2xl mx-auto mb-5" x-data="{ classOpen: false }">
             <!-- Toggle header bar -->
             <button @click="classOpen = !classOpen; if(classOpen && allClasses.length === 0) loadAllClasses()"
                     class="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all"
@@ -608,6 +615,7 @@
                     </div>
                 </div>
             </div>
+        </div>
         </div>
 
         <!-- ============================================
@@ -2604,6 +2612,6 @@
 <script src="/static/js/utils/toast.js?v=32"></script>
 <script src="/static/js/utils/upgrade-modal.js?v=10"></script>
 <script src="/static/js/components/score-badge.js?v=33"></script>
-<script src="/static/js/marketing/landing.js?v=67"></script>
+<script src="/static/js/marketing/landing.js?v=68"></script>
 </body>
 </html>
