@@ -237,12 +237,20 @@ def slice_label(slice_id: str, watch_type: str = "watch") -> str:
 
 def open_cografi_search_subtab(page) -> None:
     """Activate the Search dashboard tab and the Coğrafi sub-tab inside
-    it. Idempotent — calling twice is safe."""
+    it. Idempotent. Locale-agnostic: drives the Alpine ``searchView``
+    state directly via x-data lookup rather than clicking a button
+    whose label changes per locale (Coğrafi / GI / المؤشر الجغرافي)."""
     page.evaluate("window.showDashboardTab && window.showDashboardTab('search')")
     page.wait_for_selector("#tab-content-search:not(.hidden)", timeout=5000)
-    page.locator(
-        "#tab-content-search button:has-text('Coğrafi')"
-    ).first.click()
+    page.evaluate(
+        """() => {
+            const root = document.getElementById('tab-content-search');
+            if (root && window.Alpine && window.Alpine.$data) {
+                const data = window.Alpine.$data(root);
+                if (data) data.searchView = 'cografi';
+            }
+        }"""
+    )
     page.wait_for_selector(
         "#cografi-search-input", state="visible", timeout=3000,
     )
@@ -250,14 +258,27 @@ def open_cografi_search_subtab(page) -> None:
 
 def open_cografi_watchlist_subtab(page) -> None:
     """Activate the Watchlist dashboard tab and the Coğrafi sub-tab
-    inside it. Idempotent."""
+    inside it. Idempotent + locale-agnostic — drives Alpine state
+    directly rather than clicking a localized button label."""
     page.evaluate(
         "window.showDashboardTab && window.showDashboardTab('watchlist')"
     )
     page.wait_for_selector("#tab-content-watchlist:not(.hidden)", timeout=5000)
-    page.locator(
-        "#tab-content-watchlist button:has-text('Coğrafi')"
-    ).first.click()
+    page.evaluate(
+        """() => {
+            const root = document.getElementById('tab-content-watchlist');
+            if (root && window.Alpine && window.Alpine.$data) {
+                const data = window.Alpine.$data(root);
+                if (data) data.watchlistView = 'cografi';
+            }
+            // Also fire the lazy init the click handler would have
+            // triggered, so the tab populates without needing a
+            // button click.
+            if (typeof window.initCografiWatchlistTab === 'function') {
+                window.initCografiWatchlistTab();
+            }
+        }"""
+    )
     page.wait_for_selector(
         "#cwl-stats-bar", state="visible", timeout=5000,
     )
