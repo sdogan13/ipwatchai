@@ -18,14 +18,38 @@ Mirrors the patent + design watchlist + alert route conventions.
 """
 from __future__ import annotations
 
+import csv
+import io
 import logging
-from typing import Optional
+from datetime import datetime
+from typing import List, Optional
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 
 
 logger = logging.getLogger("turkpatent.cografi_watchlist_routes")
+
+
+# CSV export constants — mirror patent_alert_service shape so all
+# four registries' alert exports stay structurally aligned.
+MAX_EXPORT_ALERTS = 5000
+ALLOWED_STATUSES = ("new", "seen", "acknowledged", "resolved", "dismissed")
+ALLOWED_SEVERITIES = ("low", "medium", "high", "critical")
+
+# Localized Turkish CSV headers — Excel opens UTF-8 with BOM correctly
+# and Turkish + Arabic alike preserve their diacritics. Cografi-
+# specific columns (no IPC; has section_key + gi_type + region +
+# reg-no variants) vs the patent headers.
+CSV_HEADERS_TR = [
+    "Uyarı ID", "Oluşturulma", "Önem", "Durum", "Eşleşme Türü",
+    "Skor", "İzleme Etiketi", "İzleme Türü",
+    "Bölüm", "Kayıt Türü", "Başvuru No", "Tescil No",
+    "Mevcut Tescil No", "Coğrafi İşaret Adı", "CI Türü",
+    "Coğrafi Sınır", "Bülten No", "Bülten Tarihi",
+    "Onay Tarihi", "Çözüm Tarihi",
+]
 
 
 def register_cografi_watchlist_routes(app, limiter):
@@ -227,6 +251,134 @@ def register_cografi_watchlist_routes(app, limiter):
             total = cur.fetchone()
             total_n = int(total["n"] if isinstance(total, dict) else total[0])
         return {"items": rows, "total": total_n, "limit": limit, "offset": offset}
+
+    @app.get("/api/v1/cografi-alerts/export.csv", tags=["Cografi Alerts"])
+    @limiter.limit("10/minute")
+    async def export_cografi_alerts_csv(
+        request: Request,
+        status: Optional[List[str]] = Query(None),
+        severity: Optional[List[str]] = Query(None),
+        watchlist_item_id: Optional[UUID] = Query(None),
+        match_type: Optional[str] = Query(None),
+        min_score: float = Query(0.0, ge=0.0, le=100.0),
+        current_user=Depends(get_current_user),
+    ):
+        """Export the caller's cografi alerts as a UTF-8 CSV with BOM.
+
+        Mirrors patent_alerts/export.csv: same filter shape, same
+        org-scoping at the SQL layer, same MAX_EXPORT_ALERTS cap, same
+        UTF-8 BOM (so Excel opens Turkish + Arabic columns cleanly).
+        Headers are cografi-specific: section_key / gi_type / region /
+        registration_no replace patent's IPC / kind / publication_no.
+
+        No plan gate — alerts are user-owned (the user's own watchlist
+        generated them) so any authenticated user with watchlist
+        access can export their own org's alerts. The watchlist
+        itself is plan-gated upstream via combined_watchlist_count.
+        """
+        if current_user is None:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        from database.crud import Database
+
+        where = ["a.organization_id = %(org)s"]
+        params: dict = {"org": str(current_user.organization_id)}
+
+        if status:
+            valid = [s for s in status if s in ALLOWED_STATUSES]
+            if valid:
+                where.append("a.status = ANY(%(statuses)s::text[])")
+                params["statuses"] = valid
+        if severity:
+            valid_sev = [s for s in severity if s in ALLOWED_SEVERITIES]
+            if valid_sev:
+                where.append("a.severity = ANY(%(severities)s::text[])")
+                params["severities"] = valid_sev
+        if watchlist_item_id:
+            where.append("a.watchlist_item_id = %(wl)s")
+            params["wl"] = str(watchlist_item_id)
+        if match_type:
+            where.append("a.match_type = %(mt)s")
+            params["mt"] = match_type
+        if min_score and min_score > 0:
+            where.append("a.overall_similarity_score >= %(min_score)s")
+            params["min_score"] = float(min_score) / 100.0
+
+        where_sql = " AND ".join(where)
+        params["limit"] = MAX_EXPORT_ALERTS
+
+        with Database() as db:
+            cur = db.cursor()
+            cur.execute(
+                f"""
+                SELECT a.id::text, a.created_at, a.severity, a.status,
+                       a.match_type, a.overall_similarity_score,
+                       w.label AS watchlist_label,
+                       w.watch_type AS watchlist_watch_type,
+                       a.conflicting_section_key, a.conflicting_record_type,
+                       a.conflicting_application_no,
+                       a.conflicting_registration_no,
+                       a.conflicting_existing_registration_no,
+                       a.conflicting_name, a.conflicting_gi_type,
+                       a.conflicting_geographical_boundary,
+                       a.conflicting_bulletin_no, a.conflicting_bulletin_date,
+                       a.acknowledged_at, a.resolved_at
+                FROM cografi_alerts_mt a
+                LEFT JOIN cografi_watchlist_mt w ON w.id = a.watchlist_item_id
+                WHERE {where_sql}
+                ORDER BY a.created_at DESC
+                LIMIT %(limit)s
+                """,
+                params,
+            )
+            rows = cur.fetchall()
+
+        output = io.StringIO()
+        # UTF-8 BOM so Excel opens TR + AR characters correctly.
+        output.write("﻿")
+        writer = csv.writer(output)
+        writer.writerow(CSV_HEADERS_TR)
+
+        def _iso(d):
+            return d.isoformat() if d else ""
+
+        for r in rows:
+            rd = dict(r)
+            score = rd.get("overall_similarity_score") or 0
+            try:
+                score_pct = f"{float(score) * 100:.1f}%"
+            except (TypeError, ValueError):
+                score_pct = ""
+            writer.writerow([
+                rd.get("id") or "",
+                _iso(rd.get("created_at")),
+                rd.get("severity") or "",
+                rd.get("status") or "",
+                rd.get("match_type") or "",
+                score_pct,
+                rd.get("watchlist_label") or "",
+                rd.get("watchlist_watch_type") or "",
+                rd.get("conflicting_section_key") or "",
+                rd.get("conflicting_record_type") or "",
+                rd.get("conflicting_application_no") or "",
+                rd.get("conflicting_registration_no") or "",
+                rd.get("conflicting_existing_registration_no") or "",
+                (rd.get("conflicting_name") or "").replace("\n", " ").replace("\r", " "),
+                rd.get("conflicting_gi_type") or "",
+                (rd.get("conflicting_geographical_boundary") or "")
+                    .replace("\n", " ").replace("\r", " "),
+                rd.get("conflicting_bulletin_no") or "",
+                _iso(rd.get("conflicting_bulletin_date")),
+                _iso(rd.get("acknowledged_at")),
+                _iso(rd.get("resolved_at")),
+            ])
+
+        output.seek(0)
+        filename = f"cografi_alerts_{datetime.now().strftime('%Y%m%d')}.csv"
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )
 
     @app.get("/api/v1/cografi-alerts/{alert_id}", tags=["Cografi Alerts"])
     @limiter.limit("60/minute")

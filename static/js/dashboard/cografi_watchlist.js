@@ -573,6 +573,36 @@
     });
   }
 
+  // ---------------------------------------------------------------
+  // CSV export
+  // ---------------------------------------------------------------
+
+  function exportAlertsCsv() {
+    var qs = state.alertStatusFilter
+      ? ("?status=" + encodeURIComponent(state.alertStatusFilter))
+      : "";
+    // authFetch + blob — anchor href downloads can't carry the
+    // Authorization header so we have to round-trip through fetch.
+    authFetch(API_ALERT + "/export.csv" + qs)
+      .then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.blob();
+      })
+      .then(function (blob) {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = "cografi_alerts.csv";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      })
+      .catch(function () {
+        toast(t("cografi_watchlist.export_failed", "Export failed"), "error");
+      });
+  }
+
   function init() {
     if (state.initialized) {
       refreshAll();
@@ -580,6 +610,13 @@
     }
     state.initialized = true;
     wire();
+    var exportBtn = $("cwl-alerts-export-csv");
+    if (exportBtn) {
+      exportBtn.addEventListener("click", function (ev) {
+        ev.preventDefault();
+        exportAlertsCsv();
+      });
+    }
     refreshAll();
   }
 

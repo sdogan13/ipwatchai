@@ -153,6 +153,22 @@ def _click_cografi_watchlist_subtab(page) -> dict:
     return {"stat_cells": stat_cells}
 
 
+def _assert_alerts_export_button_present(page) -> dict:
+    """The CSV export button (J-2.5) lives next to the alerts status
+    filter. Verify it renders and is clickable. We don't actually
+    click it here — the click triggers a real browser download dialog
+    which is awkward to assert against without an explicit Playwright
+    download listener, and the underlying endpoint is exercised by
+    the server-side curl smoke. This step just locks in the regression
+    that the button is wired into the watchlist DOM."""
+    btn = page.locator("#cwl-alerts-export-csv")
+    assert btn.count() == 1, "CSV export button missing"
+    assert btn.is_visible(), "CSV export button not visible"
+    label = btn.locator("span").inner_text().strip()
+    assert label == "CSV", f"CSV button label: got {label!r}"
+    return {"label": label}
+
+
 def _open_add_modal_and_cycle_watch_types(page) -> dict:
     page.locator("#cwl-btn-add").click()
     page.wait_for_selector("#cwl-add-modal", state="visible", timeout=5000)
@@ -288,6 +304,11 @@ def test_cografi_dashboard_browser_smoke():
                 REPORTER, page, monitor, CONFIG,
                 lambda: _click_cografi_watchlist_subtab(page),
                 allow_request_failures=_TRANSIENT_401S,
+            )
+            run_browser_step(
+                "Alerts CSV export button present (J-2.5)",
+                REPORTER, page, monitor, CONFIG,
+                lambda: _assert_alerts_export_button_present(page),
             )
             run_browser_step(
                 "Add modal: 4 watch_type radios toggle right field groups",

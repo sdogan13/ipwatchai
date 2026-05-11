@@ -447,6 +447,7 @@ DELETE /api/v1/cografi-watchlist/{id}              delete (cascades alerts)
 POST   /api/v1/cografi-watchlist/{id}/scan         on-demand scan
 
 GET    /api/v1/cografi-alerts                      list (filters: status, severity, match_type, watchlist_item_id)
+GET    /api/v1/cografi-alerts/export.csv           UTF-8 BOM CSV export (filters: status[], severity[], match_type, min_score, watchlist_item_id; capped at 5000 rows)
 GET    /api/v1/cografi-alerts/{id}                 fetch
 PATCH  /api/v1/cografi-alerts/{id}                 acknowledge / dismiss / resolve / change severity
 DELETE /api/v1/cografi-alerts/{id}                 hard delete
