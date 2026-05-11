@@ -17,8 +17,7 @@
      - Result cards show: name, region (geographical_boundary),
        gi_type, applicant, bulletin date + similarity badge.
 ============================================================ #}
-<div class="rounded-xl shadow-sm border p-5"
-     style="background:var(--color-bg-card);border-color:var(--color-border)">
+<div>
 <div x-data="{ cografiDragOver: false, cografiImageName: '', cografiImagePreview: '',
                cografiSetFile(file){
                  if(!file) return;
@@ -53,8 +52,7 @@
      searchQuery + selectedImage into them. ===== #}
   <input type="text" id="cografi-search-input" class="hidden" autocomplete="off" maxlength="200" />
   <input type="file" id="cografi-search-image" accept="image/png,image/jpeg,image/webp,image/tiff" class="hidden" />
-  <div class="rounded-xl shadow-sm border p-5"
-       style="background:var(--color-bg-card);border-color:var(--color-border)">
+  <div>
 
     {# ---------- Filters (collapsible) ---------- #}
     <div class="mb-3"

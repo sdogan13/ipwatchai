@@ -41,6 +41,18 @@
     </div>
 
     <!-- ============================================
+         Single unified search-engine card. Wraps the
+         shared input + dropzone AND the active
+         registry's filter / button / result content
+         so everything reads as one box, the way the
+         landing page does. Per-registry sub-views
+         strip their own card chrome so they sit flat
+         inside this outer card.
+         ============================================ -->
+    <div class="rounded-xl shadow-sm border p-5"
+         style="background:var(--color-bg-card);border-color:var(--color-border)">
+
+    <!-- ============================================
          Shared search bar + image dropzone — sits flat
          (no outer card chrome) above the registry x-show
          blocks so the text query + uploaded image persist
@@ -205,8 +217,7 @@
          TRADEMARK SUB-VIEW
          =========================================== -->
     <div x-show="searchView === 'trademark'">
-    <div class="rounded-xl shadow-sm border p-5"
-        style="background:var(--color-bg-card);border-color:var(--color-border)">
+    <div>
 
         <!-- ===== Nice Class Finder (collapsible) ===== -->
         <div class="mb-3" x-data="{ classOpen: false }">
@@ -1018,8 +1029,7 @@
          DESIGN (TASARIM) SUB-VIEW
          =========================================== -->
     <div x-show="searchView === 'design'" x-cloak>
-    <div class="rounded-xl shadow-sm border p-5"
-        style="background:var(--color-bg-card);border-color:var(--color-border)">
+    <div>
     <div x-data="{ designDragOver: false, designImageName: '', designImagePreview: '',
                    designSetFile(file){
                      if(!file) return;
@@ -1055,8 +1065,7 @@
            into them. -->
       <input type="text" id="design-search-input" class="hidden" autocomplete="off" maxlength="100" />
       <input type="file" id="design-search-image" accept="image/png,image/jpeg,image/webp,image/*" class="hidden" />
-      <div class="rounded-xl shadow-sm border p-5"
-           style="background:var(--color-bg-card);border-color:var(--color-border)">
+      <div>
 
         <!-- ===== Locarno Class Finder (collapsible) — exact mirror of the Marka picker ===== -->
         <div class="mb-3"
@@ -1477,6 +1486,8 @@
     <div x-show="searchView === 'cografi'" x-cloak>
         {% include 'dashboard/partials/_search_cografi_subview.html' %}
     </div>
+
+    </div><!-- /unified search-engine card -->
 
 <!-- Image Lightbox -->
 <div x-show="lightboxImage" x-cloak x-transition.opacity

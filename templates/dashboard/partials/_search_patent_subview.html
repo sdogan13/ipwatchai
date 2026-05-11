@@ -10,8 +10,7 @@
    spinner swap, idle/loading hints, live DB count, and a
    detached results card.
 ============================================================ #}
-<div class="rounded-xl shadow-sm border p-5"
-     style="background:var(--color-bg-card);border-color:var(--color-border)">
+<div>
 <div x-data="{ patentDragOver: false, patentImageName: '', patentImagePreview: '',
                patentSetFile(file){
                  if(!file) return;
@@ -46,8 +45,7 @@
      and selectedImage into them. ===== #}
   <input type="text" id="patent-search-input" class="hidden" autocomplete="off" maxlength="200" />
   <input type="file" id="patent-search-image" accept="image/png,image/jpeg,image/webp,image/tiff" class="hidden" />
-  <div class="rounded-xl shadow-sm border p-5"
-       style="background:var(--color-bg-card);border-color:var(--color-border)">
+  <div>
 
     {# ---------- Filters (collapsible — mirror of Locarno class finder) ---------- #}
     <div class="mb-3"
