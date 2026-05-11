@@ -1,21 +1,21 @@
 <!-- ============================================ -->
 <!-- SEARCH TAB (Alpine.js reactive)             -->
-<!-- 3-way sub-view: Marka | Tasarım | Patent     -->
+<!-- 4-way sub-view: Marka | Tasarım | Patent | Coğrafi -->
 <!-- ============================================ -->
 <div id="tab-content-search"
      x-data="{ searchView: (function () {
          try {
              var v = localStorage.getItem('searchView');
-             if (v === 'design' || v === 'patent') return v;
+             if (v === 'design' || v === 'patent' || v === 'cografi') return v;
          } catch (_) {}
          return 'trademark';
      })() }"
      x-init="$watch('searchView', v => { try { localStorage.setItem('searchView', v); } catch(_){} })"
      class="hidden max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-4">
 
-    <!-- Sub-view toggle: Marka ↔ Tasarım ↔ Patent. Same pattern as the
-         Watchlist tab. Selection persists via localStorage so the user
-         lands on their last-used registry on reload. -->
+    <!-- Sub-view toggle: Marka ↔ Tasarım ↔ Patent ↔ Coğrafi. Same pattern
+         as the Watchlist tab. Selection persists via localStorage so the
+         user lands on their last-used registry on reload. -->
     <div class="mb-5 inline-flex rounded-xl p-1"
          style="background:var(--color-bg-muted);border:1px solid var(--color-border)">
         <button type="button" @click="searchView = 'trademark'"
@@ -33,6 +33,11 @@
                 :class="searchView === 'patent' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
                 :style="searchView === 'patent' ? '' : 'color:var(--color-text-muted)'"
                 x-text="t('search.view_patent')">Patent</button>
+        <button type="button" @click="searchView = 'cografi'"
+                class="px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                :class="searchView === 'cografi' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
+                :style="searchView === 'cografi' ? '' : 'color:var(--color-text-muted)'"
+                x-text="t('search.view_cografi')">Coğrafi</button>
     </div>
 
     <!-- ===========================================
@@ -1533,6 +1538,13 @@
          =========================================== -->
     <div x-show="searchView === 'patent'" x-cloak>
         {% include 'dashboard/partials/_search_patent_subview.html' %}
+    </div>
+
+    <!-- ===========================================
+         COĞRAFI İŞARET (GI) SUB-VIEW
+         =========================================== -->
+    <div x-show="searchView === 'cografi'" x-cloak>
+        {% include 'dashboard/partials/_search_cografi_subview.html' %}
     </div>
 
 <!-- Image Lightbox -->

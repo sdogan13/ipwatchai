@@ -125,6 +125,8 @@ services:
       - ./app_patent_alert_routes.py:/app/app_patent_alert_routes.py:ro
       - ./app_patent_lead_routes.py:/app/app_patent_lead_routes.py:ro
       - ./app_patent_detail_routes.py:/app/app_patent_detail_routes.py:ro
+      - ./app_cografi_search_routes.py:/app/app_cografi_search_routes.py:ro
+      - ./app_cografi_watchlist_routes.py:/app/app_cografi_watchlist_routes.py:ro
       - ./app_enhanced_search_routes.py:/app/app_enhanced_search_routes.py:ro
       - ./app_errors.py:/app/app_errors.py:ro
       - ./app_factory.py:/app/app_factory.py:ro

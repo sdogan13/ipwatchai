@@ -1,0 +1,645 @@
+/**
+ * Coğrafi İşaret (GI) search tab driver.
+ *
+ * Mirrors patent_search.js patterns (vanilla JS, document-level event
+ * delegation, localStorage history, AppI18n + AppAuth integration) but
+ * tailored for the cografi search shape:
+ *
+ *   - Optional figure upload (DINOv2 hybrid retrieval)
+ *   - Autocomplete returns {names, regions} (not IPC items)
+ *   - GI-specific filters: gi_type, region, section_keys (multi),
+ *     application_no, registration_no, date range, include_admin
+ *   - Result-card shape: name, region, gi_type, applicant, bulletin,
+ *     similarity badge + per-signal score breakdown bars
+ */
+(function () {
+  "use strict";
+
+  var API_QUICK = "/api/v1/cografi-search/quick";
+  var API_AUTOCOMPLETE = "/api/v1/cografi-search/autocomplete";
+  var HISTORY_KEY = "cografi_search_history";
+  var HISTORY_MAX = 20;
+  var HISTORY_SUGGEST = 10;
+
+  var autocompleteDebounceTimer = null;
+  var autocompleteData = { names: [], regions: [] };
+
+  function $(id) { return document.getElementById(id); }
+  function show(el) { if (el) el.classList.remove("hidden"); }
+  function hide(el) { if (el) el.classList.add("hidden"); }
+
+  function t(key, fallback) {
+    if (window.AppI18n && typeof window.AppI18n.t === "function") {
+      var v = window.AppI18n.t(key);
+      if (v && v !== key) return v;
+    }
+    return fallback || key;
+  }
+
+  function getAuthToken() {
+    if (window.AppAuth && typeof window.AppAuth.getAuthToken === "function") {
+      return window.AppAuth.getAuthToken() || "";
+    }
+    return (
+      (window.localStorage && (
+        localStorage.getItem("auth_token") ||
+        localStorage.getItem("access_token") ||
+        localStorage.getItem("token"))) ||
+      ""
+    );
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+
+  function setStatus(text, kind) {
+    var el = $("cografi-search-status");
+    if (!el) return;
+    el.textContent = text || "";
+    el.style.color =
+      kind === "error" ? "var(--color-text-error,#dc2626)" :
+      kind === "ok"    ? "var(--color-success,#059669)"   :
+                          "var(--color-text-muted)";
+  }
+
+  function clearError() {
+    var err = $("cografi-search-error");
+    if (err) { err.textContent = ""; hide(err); }
+  }
+
+  function showError(text) {
+    var err = $("cografi-search-error");
+    if (!err) return;
+    err.textContent = text || t("cografi_search.error_generic", "Search failed");
+    show(err);
+  }
+
+  function selectedSectionKeys() {
+    var nodes = document.querySelectorAll(".cografi-section-key:checked");
+    var out = [];
+    for (var i = 0; i < nodes.length; i++) out.push(nodes[i].value);
+    return out;
+  }
+
+  function hasQuery() {
+    var q = ($("cografi-search-input") || {}).value || "";
+    return q.trim().length > 0;
+  }
+
+  function hasFilters() {
+    return (
+      (($("cografi-search-region") || {}).value || "").trim().length > 0 ||
+      (($("cografi-search-gi-type") || {}).value || "").trim() !== "" ||
+      (($("cografi-search-application-no") || {}).value || "").trim() !== "" ||
+      (($("cografi-search-registration-no") || {}).value || "").trim() !== "" ||
+      (($("cografi-search-date-from") || {}).value || "") !== "" ||
+      (($("cografi-search-date-to") || {}).value || "") !== "" ||
+      selectedSectionKeys().length > 0
+    );
+  }
+
+  function hasImage() {
+    var inp = $("cografi-search-image");
+    return !!(inp && inp.files && inp.files.length > 0);
+  }
+
+  // ---------------------------------------------------------------
+  // History (localStorage)
+  // ---------------------------------------------------------------
+
+  function loadHistory() {
+    try {
+      var raw = localStorage.getItem(HISTORY_KEY);
+      var arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch (e) { return []; }
+  }
+  function saveHistory(arr) {
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(arr || [])); } catch (e) {}
+  }
+  function pushHistory(query) {
+    if (!query) return;
+    var q = String(query).trim();
+    if (!q) return;
+    var arr = loadHistory().filter(function (h) { return h.toLowerCase() !== q.toLowerCase(); });
+    arr.unshift(q);
+    if (arr.length > HISTORY_MAX) arr = arr.slice(0, HISTORY_MAX);
+    saveHistory(arr);
+  }
+  function removeFromHistory(query) {
+    saveHistory(loadHistory().filter(function (h) { return h !== query; }));
+  }
+  function clearAllHistory() {
+    try { localStorage.removeItem(HISTORY_KEY); } catch (e) {}
+  }
+  function filteredHistory() {
+    var q = (($("cografi-search-input") || {}).value || "").trim().toLowerCase();
+    var arr = loadHistory();
+    if (!q) return arr.slice(0, HISTORY_SUGGEST);
+    return arr.filter(function (h) { return h.toLowerCase().indexOf(q) !== -1; })
+              .slice(0, HISTORY_SUGGEST);
+  }
+
+  // ---------------------------------------------------------------
+  // Combined dropdown: autocomplete (when query >= 2 chars) OR history (empty/short)
+  // ---------------------------------------------------------------
+
+  function _historyItem(item) {
+    var safe = escapeHtml(item);
+    return (
+      '<div data-cografi-history-item ' +
+      'class="flex items-center justify-between px-4 py-2.5 text-left text-sm cursor-pointer transition-colors" ' +
+      'style="color:var(--color-text-primary)" data-history-value="' + safe + '" ' +
+      'onmouseover="this.style.background=\'var(--color-bg-muted)\'" ' +
+      'onmouseout="this.style.background=\'\'">' +
+        '<span class="flex items-center gap-2 min-w-0">' +
+          '<svg class="w-4 h-4 shrink-0" style="color:var(--color-text-faint)" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>' +
+          '</svg>' +
+          '<span class="truncate">' + safe + '</span>' +
+        '</span>' +
+        '<span data-cografi-history-remove class="shrink-0 p-1 rounded hover:opacity-70" ' +
+        'style="color:var(--color-text-faint)" data-history-value="' + safe + '">' +
+          '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>' +
+          '</svg>' +
+        '</span>' +
+      '</div>'
+    );
+  }
+
+  function _autocompleteItem(value, kind) {
+    var safe = escapeHtml(value);
+    var icon = kind === "region"
+      ? 'd="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0zM15 11a3 3 0 11-6 0 3 3 0 016 0z"'
+      : 'd="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"';
+    var kindLabel = kind === "region"
+      ? t("cografi_search.region_label_card", "Region")
+      : t("cografi_search.untitled", "Name");
+    return (
+      '<div data-cografi-autocomplete ' +
+      'class="flex items-center gap-2 px-4 py-2 text-sm cursor-pointer transition-colors" ' +
+      'data-ac-kind="' + kind + '" data-ac-value="' + safe + '" ' +
+      'style="color:var(--color-text-primary)" ' +
+      'onmouseover="this.style.background=\'var(--color-bg-muted)\'" ' +
+      'onmouseout="this.style.background=\'\'">' +
+        '<svg class="w-4 h-4 shrink-0" style="color:var(--color-text-faint)" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+          '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" ' + icon + '/>' +
+        '</svg>' +
+        '<span class="truncate flex-1">' + safe + '</span>' +
+        '<span class="text-[10px] shrink-0" style="color:var(--color-text-faint)">' + escapeHtml(kindLabel) + '</span>' +
+      '</div>'
+    );
+  }
+
+  function renderDropdown() {
+    var dropdown = $("cografi-search-history");
+    var listEl = $("cografi-search-history-list");
+    if (!dropdown || !listEl) return;
+    var q = (($("cografi-search-input") || {}).value || "").trim();
+
+    var html = "";
+    if (q.length >= 2 && (autocompleteData.names.length > 0 || autocompleteData.regions.length > 0)) {
+      var names = autocompleteData.names.slice(0, 6);
+      var regions = autocompleteData.regions.slice(0, 4);
+      html += names.map(function (n) { return _autocompleteItem(n, "name"); }).join("");
+      html += regions.map(function (r) { return _autocompleteItem(r, "region"); }).join("");
+    }
+    var items = filteredHistory();
+    if (items.length > 0) {
+      if (html) {
+        html += '<div class="px-4 py-1.5 text-[10px] uppercase tracking-wide" ' +
+                'style="color:var(--color-text-faint);background:var(--color-bg-muted);border-top:1px solid var(--color-border)">' +
+                escapeHtml(t("cografi_search.recent_searches", "Recent searches")) + '</div>';
+      }
+      html += items.map(_historyItem).join("");
+    }
+    if (!html) {
+      hide(dropdown);
+      listEl.innerHTML = "";
+      return;
+    }
+    listEl.innerHTML = html;
+    show(dropdown);
+  }
+
+  function hideDropdown() { hide($("cografi-search-history")); }
+
+  function fetchAutocomplete(prefix) {
+    var url = API_AUTOCOMPLETE + "?q=" + encodeURIComponent(prefix);
+    var headers = {};
+    var token = getAuthToken();
+    if (token) headers["Authorization"] = "Bearer " + token;
+    fetch(url, { headers: headers })
+      .then(function (r) { return r.ok ? r.json() : { names: [], regions: [] }; })
+      .then(function (data) {
+        autocompleteData = {
+          names: (data && data.names) || [],
+          regions: (data && data.regions) || [],
+        };
+        renderDropdown();
+      })
+      .catch(function () {
+        autocompleteData = { names: [], regions: [] };
+        renderDropdown();
+      });
+  }
+
+  function onQueryInput() {
+    var v = (($("cografi-search-input") || {}).value || "").trim();
+    if (autocompleteDebounceTimer) clearTimeout(autocompleteDebounceTimer);
+    if (v.length < 2) {
+      autocompleteData = { names: [], regions: [] };
+      renderDropdown();
+      return;
+    }
+    autocompleteDebounceTimer = setTimeout(function () { fetchAutocomplete(v); }, 180);
+  }
+
+  // ---------------------------------------------------------------
+  // Result rendering
+  // ---------------------------------------------------------------
+
+  function _signalBar(label, value) {
+    var v = Math.max(0, Math.min(1, Number(value) || 0));
+    var pct = Math.round(v * 100);
+    return (
+      '<div class="flex items-center gap-2 text-[10px]">' +
+        '<span class="w-14 shrink-0" style="color:var(--color-text-faint)">' + label + '</span>' +
+        '<div class="flex-1 h-1 rounded-full overflow-hidden" style="background:var(--color-bg-muted)">' +
+          '<div class="h-full rounded-full" style="width:' + pct + '%;background:var(--color-primary)"></div>' +
+        '</div>' +
+        '<span class="w-8 text-right shrink-0 font-mono" style="color:var(--color-text-secondary)">' + pct + '%</span>' +
+      '</div>'
+    );
+  }
+
+  function _usageBlock(rawText, cardId) {
+    if (!rawText) return "";
+    var safe = escapeHtml(rawText);
+    var COLLAPSE_AT = 240;
+    if (safe.length <= COLLAPSE_AT) {
+      return '<p class="text-xs leading-relaxed mt-2" style="color:var(--color-text-secondary)">' +
+             safe + '</p>';
+    }
+    var preview = safe.slice(0, COLLAPSE_AT) + '…';
+    return (
+      '<div class="text-xs leading-relaxed mt-2" style="color:var(--color-text-secondary)">' +
+        '<span data-usage-preview="' + cardId + '">' + preview + '</span>' +
+        '<span data-usage-full="' + cardId + '" class="hidden">' + safe + '</span>' +
+        ' <button type="button" data-usage-toggle="' + cardId + '" ' +
+        'class="ml-1 text-xs font-medium hover:underline" style="color:var(--color-primary)">' +
+        escapeHtml(t("cografi_search.show_more", "Show more")) +
+        '</button>' +
+      '</div>'
+    );
+  }
+
+  function renderResultCard(item) {
+    var cardId = "cs-" + (item.id || Math.random().toString(36).slice(2, 9));
+    var name = escapeHtml(item.name || t("cografi_search.untitled", "Unnamed"));
+    var giType = escapeHtml(item.gi_type || "");
+    var region = escapeHtml(item.geographical_boundary || "");
+    var productGroup = escapeHtml(item.product_group || "");
+    var appNo = escapeHtml(item.application_no || "");
+    var regNo = item.registration_no != null ? escapeHtml(String(item.registration_no)) : "";
+    var applicant = escapeHtml(item.applicant_name || "");
+    var bulletinNo = escapeHtml(item.bulletin_no || "");
+    var bulletinDate = escapeHtml(item.bulletin_date || "");
+    var sim = item.similarity != null ? Number(item.similarity).toFixed(0) : "";
+    var imgUrl = item.image_url || "";
+    var bd = item.similarity_breakdown || {};
+
+    var noImgLabel = escapeHtml(t("cografi_search.no_image", "No image"));
+    var imgHtml = imgUrl
+      ? '<img src="' + escapeHtml(imgUrl) +
+        '" alt="' + escapeHtml(item.name || "") +
+        '" loading="lazy" class="w-full h-40 object-contain rounded-md mb-3" ' +
+        'style="background:var(--color-bg-muted)" ' +
+        'onerror="this.onerror=null;this.replaceWith(Object.assign(document.createElement(\'div\'),{className:\'w-full h-40 flex items-center justify-center text-xs rounded-md mb-3\',style:\'background:var(--color-bg-muted);color:var(--color-text-faint)\',textContent:\'' +
+        noImgLabel + '\'}));" />'
+      : '<div class="w-full h-40 flex items-center justify-center text-xs rounded-md mb-3" ' +
+        'style="background:var(--color-bg-muted);color:var(--color-text-faint)">' +
+        noImgLabel + "</div>";
+
+    var idChip = "";
+    if (appNo) {
+      idChip += '<span class="inline-block px-2 py-0.5 rounded text-xs font-mono" ' +
+                'style="background:var(--color-bg-muted);color:var(--color-text-muted)">' + appNo + '</span>';
+    }
+    if (regNo) {
+      idChip += '<span class="inline-block px-2 py-0.5 rounded text-xs font-mono" ' +
+                'style="background:var(--color-bg-muted);color:var(--color-text-muted)">#' + regNo + '</span>';
+    }
+
+    var giTypeChip = giType
+      ? '<span class="inline-block px-2 py-0.5 rounded text-[10px]" ' +
+        'style="background:var(--color-primary-light);color:var(--color-primary)">' + giType + '</span>'
+      : "";
+
+    var regionHtml = region
+      ? '<p class="text-xs mb-1" style="color:var(--color-text-secondary)">' +
+        '<span style="color:var(--color-text-faint)">' +
+        escapeHtml(t("cografi_search.region_label_card", "Region")) + ':</span> ' +
+        region + '</p>'
+      : "";
+
+    var productHtml = productGroup
+      ? '<p class="text-xs mb-1" style="color:var(--color-text-faint)">' + productGroup + '</p>'
+      : "";
+
+    var applicantHtml = applicant
+      ? '<div class="text-xs mt-1.5"><span style="color:var(--color-text-faint)">' +
+        escapeHtml(t("cografi_search.applicant_label", "Applicant")) + ':</span> ' +
+        '<span style="color:var(--color-text-secondary)">' + applicant + '</span></div>'
+      : "";
+
+    var bulletinHtml = "";
+    if (bulletinNo) {
+      bulletinHtml = '<span class="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded" ' +
+        'style="background:var(--color-bg-muted);color:var(--color-text-faint)">' +
+        escapeHtml(t("cografi_search.bulletin_label", "Bulletin")) + ' ' + bulletinNo +
+        (bulletinDate ? ' · ' + bulletinDate : '') + '</span>';
+    }
+
+    var bdHtml = "";
+    if (bd && (bd.text != null || bd.embedding != null || bd.image != null)) {
+      bdHtml =
+        '<div class="mt-2 space-y-1 pt-2" style="border-top:1px solid var(--color-border)">' +
+          (bd.text != null ? _signalBar(t("cografi_search.score_text", "Text"), bd.text) : "") +
+          (bd.embedding != null ? _signalBar(t("cografi_search.score_embedding", "Semantic"), bd.embedding) : "") +
+          (bd.image != null ? _signalBar(t("cografi_search.score_image", "Image"), bd.image) : "") +
+        '</div>';
+    }
+
+    return (
+      '<div class="rounded-lg border p-4 transition-all hover:shadow-md cursor-pointer" ' +
+      'data-cografi-card-id="' + cardId + '" ' +
+      'data-cd-open="' + escapeHtml(item.id || "") + '" ' +
+      'style="background:var(--color-bg-card);border-color:var(--color-border)">' +
+        imgHtml +
+        '<div class="flex items-start justify-between gap-2 mb-2">' +
+          '<h4 class="text-sm font-semibold leading-snug" style="color:var(--color-text-primary)">' +
+            name +
+          '</h4>' +
+          (sim ? ('<span class="shrink-0 text-xs font-medium px-2 py-0.5 rounded-full" ' +
+                  'style="background:var(--color-primary);color:white">' + sim + '%</span>') : '') +
+        '</div>' +
+        (idChip ? ('<div class="flex flex-wrap gap-1 mb-2">' + idChip + '</div>') : '') +
+        regionHtml +
+        productHtml +
+        (giTypeChip ? ('<div class="mb-1">' + giTypeChip + '</div>') : '') +
+        _usageBlock(item.usage_description, cardId) +
+        applicantHtml +
+        '<div class="flex flex-wrap items-center gap-2 mt-2 text-xs" style="color:var(--color-text-faint)">' +
+          bulletinHtml +
+        '</div>' +
+        bdHtml +
+      '</div>'
+    );
+  }
+
+  function renderResults(data) {
+    var card = $("cografi-search-results-card");
+    var grid = $("cografi-search-grid");
+    var empty = $("cografi-search-empty");
+    var totalBadge = $("cografi-search-total-badge");
+    var dur = $("cografi-search-duration");
+    if (!card || !grid) return;
+    show(card);
+    hide($("cografi-search-loading"));
+    setSubmitLoading(false);
+    clearError();
+    var items = (data && data.results) || [];
+    totalBadge && (totalBadge.textContent = String(items.length));
+    if (dur && data && data.duration_ms != null) {
+      dur.textContent = data.duration_ms + " ms";
+    }
+    if (items.length === 0) {
+      grid.innerHTML = "";
+      show(empty);
+      return;
+    }
+    hide(empty);
+    grid.innerHTML = items.map(renderResultCard).join("");
+  }
+
+  function setSubmitLoading(loading) {
+    var btn = $("cografi-search-submit");
+    if (btn) {
+      btn.disabled = !!loading;
+      var searchIcon = btn.querySelector('[data-cografi-submit-icon="search"]');
+      var spinIcon = btn.querySelector('[data-cografi-submit-icon="spinner"]');
+      if (searchIcon) searchIcon.classList.toggle("hidden", !!loading);
+      if (spinIcon) spinIcon.classList.toggle("hidden", !loading);
+    }
+    var idleHint = $("cografi-search-hint");
+    var loadHint = $("cografi-search-hint-loading");
+    if (idleHint) idleHint.classList.toggle("hidden", !!loading);
+    if (loadHint) loadHint.classList.toggle("hidden", !loading);
+  }
+
+  // ---------------------------------------------------------------
+  // Submit
+  // ---------------------------------------------------------------
+
+  function buildFormData() {
+    var fd = new FormData();
+    var q = (($("cografi-search-input") || {}).value || "").trim();
+    var region = (($("cografi-search-region") || {}).value || "").trim();
+    var giType = (($("cografi-search-gi-type") || {}).value || "").trim();
+    var appNo = (($("cografi-search-application-no") || {}).value || "").trim();
+    var regNo = (($("cografi-search-registration-no") || {}).value || "").trim();
+    var dfrom = (($("cografi-search-date-from") || {}).value || "").trim();
+    var dto = (($("cografi-search-date-to") || {}).value || "").trim();
+    var sectionKeys = selectedSectionKeys();
+    var includeAdmin = !!($("cografi-search-include-admin") && $("cografi-search-include-admin").checked);
+
+    if (q) fd.append("query", q);
+    if (region) fd.append("region", region);
+    if (giType) fd.append("gi_type", giType);
+    if (appNo) fd.append("application_no", appNo);
+    if (regNo) fd.append("registration_no", regNo);
+    if (dfrom) fd.append("date_from", dfrom);
+    if (dto) fd.append("date_to", dto);
+    if (sectionKeys.length) fd.append("section_keys", sectionKeys.join(","));
+    if (includeAdmin) fd.append("include_admin", "true");
+
+    var imgInp = $("cografi-search-image");
+    if (imgInp && imgInp.files && imgInp.files.length > 0) {
+      fd.append("image", imgInp.files[0]);
+    }
+    fd.append("limit", "20");
+    return fd;
+  }
+
+  function doSearch() {
+    if (!hasQuery() && !hasFilters() && !hasImage()) {
+      setStatus(t("cografi_search.empty_query_status", "Enter a query, region, or filter"), "error");
+      return;
+    }
+    var card = $("cografi-search-results-card");
+    var loading = $("cografi-search-loading");
+    show(card);
+    show(loading);
+    hide($("cografi-search-empty"));
+    clearError();
+    setStatus("");
+    setSubmitLoading(true);
+
+    var headers = {};
+    var token = getAuthToken();
+    if (token) headers["Authorization"] = "Bearer " + token;
+
+    var q = (($("cografi-search-input") || {}).value || "").trim();
+    if (q) pushHistory(q);
+
+    fetch(API_QUICK, { method: "POST", headers: headers, body: buildFormData() })
+      .then(function (r) {
+        if (r.status === 429) {
+          showError(t("cografi_search.quota_exceeded", "Daily search quota exceeded"));
+          hide(loading);
+          setSubmitLoading(false);
+          throw new Error("quota");
+        }
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
+      .then(function (data) { renderResults(data); })
+      .catch(function (err) {
+        hide(loading);
+        setSubmitLoading(false);
+        if (err && err.message === "quota") return;
+        showError(t("cografi_search.error_generic", "Search failed"));
+      });
+  }
+
+  // ---------------------------------------------------------------
+  // Wire-up (document-level delegation)
+  // ---------------------------------------------------------------
+
+  function wire() {
+    document.addEventListener("click", function (ev) {
+      var t_ = ev.target;
+      if (!t_) return;
+      // Submit button
+      if (t_.closest && t_.closest("#cografi-search-submit")) {
+        ev.preventDefault();
+        hideDropdown();
+        doSearch();
+        return;
+      }
+      // Clear button on text input
+      if (t_.closest && t_.closest("#cografi-search-input-clear")) {
+        var inp = $("cografi-search-input");
+        if (inp) inp.value = "";
+        $("cografi-search-input-clear").classList.add("hidden");
+        autocompleteData = { names: [], regions: [] };
+        hideDropdown();
+        return;
+      }
+      // Autocomplete pick: name -> fill query + search; region -> fill region + open filters
+      var ac = t_.closest && t_.closest("[data-cografi-autocomplete]");
+      if (ac) {
+        var kind = ac.getAttribute("data-ac-kind");
+        var val = ac.getAttribute("data-ac-value") || "";
+        if (kind === "region") {
+          var rInp = $("cografi-search-region");
+          if (rInp) rInp.value = val;
+        } else {
+          var qInp = $("cografi-search-input");
+          if (qInp) qInp.value = val;
+        }
+        hideDropdown();
+        doSearch();
+        return;
+      }
+      // History items
+      var histItem = t_.closest && t_.closest("[data-cografi-history-item]");
+      if (histItem) {
+        var removeBtn = t_.closest("[data-cografi-history-remove]");
+        if (removeBtn) {
+          removeFromHistory(removeBtn.getAttribute("data-history-value") || "");
+          renderDropdown();
+          return;
+        }
+        var val2 = histItem.getAttribute("data-history-value") || "";
+        var inp2 = $("cografi-search-input");
+        if (inp2) inp2.value = val2;
+        hideDropdown();
+        doSearch();
+        return;
+      }
+      if (t_.closest && t_.closest("#cografi-search-history-clear-all")) {
+        clearAllHistory();
+        renderDropdown();
+        return;
+      }
+      // Usage description show-more / show-less toggle
+      var usageToggle = t_.closest && t_.closest("[data-usage-toggle]");
+      if (usageToggle) {
+        var cardId = usageToggle.getAttribute("data-usage-toggle");
+        var prev = document.querySelector('[data-usage-preview="' + cardId + '"]');
+        var full = document.querySelector('[data-usage-full="' + cardId + '"]');
+        if (prev && full) {
+          var showingFull = !full.classList.contains("hidden");
+          if (showingFull) {
+            full.classList.add("hidden");
+            prev.classList.remove("hidden");
+            usageToggle.textContent = t("cografi_search.show_more", "Show more");
+          } else {
+            full.classList.remove("hidden");
+            prev.classList.add("hidden");
+            usageToggle.textContent = t("cografi_search.show_less", "Show less");
+          }
+        }
+        return;
+      }
+      // Click outside dropdown -> hide
+      if (!t_.closest("#cografi-search-input") &&
+          !t_.closest("#cografi-search-history")) {
+        hideDropdown();
+      }
+    });
+
+    document.addEventListener("input", function (ev) {
+      if (!ev.target) return;
+      if (ev.target.id === "cografi-search-input") {
+        var hasV = (ev.target.value || "").length > 0;
+        var clearBtn = $("cografi-search-input-clear");
+        if (clearBtn) clearBtn.classList.toggle("hidden", !hasV);
+        onQueryInput();
+      }
+    });
+
+    document.addEventListener("focusin", function (ev) {
+      if (!ev.target) return;
+      if (ev.target.id === "cografi-search-input") {
+        renderDropdown();
+      }
+    });
+
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key !== "Enter") return;
+      if (ev.target && (ev.target.id === "cografi-search-input" ||
+                        ev.target.id === "cografi-search-region" ||
+                        ev.target.id === "cografi-search-application-no" ||
+                        ev.target.id === "cografi-search-registration-no" ||
+                        ev.target.id === "cografi-search-date-from" ||
+                        ev.target.id === "cografi-search-date-to")) {
+        ev.preventDefault();
+        hideDropdown();
+        doSearch();
+      }
+    });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", wire);
+  } else {
+    wire();
+  }
+})();
