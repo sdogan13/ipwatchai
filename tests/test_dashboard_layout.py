@@ -434,6 +434,18 @@ class TestLocaleFiles:
             "classes_selected",
             "edit_classes",
             "done_classes",
+            "name_language",
+            "name_language_mixed",
+            "name_language_tr",
+            "name_language_en",
+            "name_language_de",
+            "name_language_it",
+            "name_language_fr",
+            "name_language_ar",
+            "name_language_ku",
+            "name_language_fa",
+            "name_language_zh",
+            "name_language_ru",
             "palette_label",
             "palette_blue",
             "palette_green",
@@ -491,6 +503,47 @@ class TestLocaleFiles:
             assert "risk_source_deterministic" not in source
         assert "ai_risk_score" in dashboard_app
         assert "ai_risk_score_short" in studio_card
+
+    def test_name_cards_do_not_render_retrieval_scores(self):
+        studio_card = (STATIC / "js" / "components" / "studio-card.js").read_text(encoding="utf-8")
+        name_card_source = studio_card.split("// ============================================\n// B) Logo result card")[0]
+
+        assert "renderSimilarityBadges(name)" not in name_card_source
+        assert "name.text_similarity" not in name_card_source
+        assert "name.semantic_similarity" not in name_card_source
+        assert "name.phonetic_match" not in name_card_source
+        assert "similarity_pct" not in name_card_source
+
+    def test_name_generation_language_is_user_selectable(self):
+        html = (PARTIALS / "_ai_studio_panel.html").read_text(encoding="utf-8")
+        dashboard_app = (STATIC / "js" / "dashboard" / "app.js").read_text(encoding="utf-8")
+        generate_names_source = dashboard_app.split("async function generateNames()")[1].split("function renderStudioNameResults")[0]
+
+        assert 'id="studio-name-language"' in html
+        assert '<option value="mixed"' in html
+        for language in ("tr", "en", "de", "it", "fr", "ar", "ku", "fa", "zh", "ru"):
+            assert f'<option value="{language}"' in html
+        assert "document.getElementById('studio-name-language')" in generate_names_source
+        assert "language: language" in generate_names_source
+        assert "language: 'tr'" not in generate_names_source
+
+    def test_studio_loading_status_uses_animated_dots(self):
+        import json
+
+        html = (PARTIALS / "_ai_studio_panel.html").read_text(encoding="utf-8")
+        css = (STATIC / "css" / "tokens.css").read_text(encoding="utf-8")
+
+        assert html.count("studio-loading-dots") == 2
+        assert "t('studio.name_loading')" in html
+        assert "t('studio.logo_loading')" in html
+        assert "AI is generating safe name alternatives..." not in html
+        assert "AI is generating logo variations..." not in html
+        assert "@keyframes studio-loading-dot" in css
+
+        for locale in ("en", "tr", "ar"):
+            data = json.loads((STATIC / "locales" / f"{locale}.json").read_text(encoding="utf-8"))
+            assert not data["studio"]["name_loading"].endswith("...")
+            assert not data["studio"]["logo_loading"].endswith("...")
 
     def test_i18n_asset_versions_bust_ai_studio_locale_cache(self):
         import re

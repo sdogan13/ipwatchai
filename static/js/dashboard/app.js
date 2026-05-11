@@ -3749,6 +3749,8 @@ async function generateNames() {
 
     var classes = getStudioNiceClasses('studio-name-classes');
     var industry = (document.getElementById('studio-name-industry').value || '').trim();
+    var languageEl = document.getElementById('studio-name-language');
+    var language = languageEl ? (languageEl.value || 'mixed') : 'mixed';
     var style = document.getElementById('studio-name-style').value || 'modern';
 
     // Show loading, hide others
@@ -3769,7 +3771,7 @@ async function generateNames() {
             nice_classes: classes,
             industry: industry,
             style: style,
-            language: 'tr',
+            language: language,
             avoid_names: []
         });
         studioLastNameResult = data;

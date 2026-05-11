@@ -303,7 +303,7 @@ class CreativeSettings(BaseSettings):
     gemini_max_retries: int = Field(default=2, alias="CREATIVE_GEMINI_MAX_RETRIES")
 
     # Name Generator
-    name_batch_size: int = Field(default=25, alias="CREATIVE_NAME_BATCH_SIZE")
+    name_batch_size: int = Field(default=10, alias="CREATIVE_NAME_BATCH_SIZE")
     name_similarity_threshold: float = Field(default=0.50, alias="CREATIVE_NAME_SIMILARITY_THRESHOLD")
     name_phonetic_check: bool = Field(default=True, alias="CREATIVE_NAME_PHONETIC_CHECK")
 
