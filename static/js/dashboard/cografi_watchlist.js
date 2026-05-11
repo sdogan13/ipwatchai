@@ -308,9 +308,14 @@
   // ---------------------------------------------------------------
 
   function fetchItems() {
+    // The watchlist list endpoint returns a raw array (unlike the
+    // alerts list which returns {items: [...]}). Tolerate both
+    // shapes so a future route normalization doesn't break the UI.
     return authFetch(API_WL + "?limit=200")
-      .then(function (r) { return r.ok ? r.json() : { items: [] }; })
-      .then(function (d) { state.items = d.items || []; });
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (d) {
+        state.items = Array.isArray(d) ? d : (d.items || []);
+      });
   }
 
   function fetchAlerts() {

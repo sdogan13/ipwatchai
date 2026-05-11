@@ -187,7 +187,7 @@ def _scan_holder(cur, item: Dict[str, Any], *, candidate_record_ids=None) -> Lis
     params = {**holder_params, **filter_params}
     cur.execute(sql, params)
     return [
-        ScanMatch(record_id=row[0], overall_score=1.0, match_type="holder")
+        ScanMatch(record_id=row["record_id"], overall_score=1.0, match_type="holder")
         for row in cur.fetchall()
     ]
 
@@ -219,7 +219,7 @@ def _scan_reference(cur, item: Dict[str, Any], *, candidate_record_ids=None) -> 
     if has_emb:
         cur.execute(
             f"""
-            SELECT r.id::text,
+            SELECT r.id::text AS record_id,
                    1 - (r.text_embedding <=> %(vec)s::halfvec) AS sim
             FROM cografi_records r
             WHERE r.text_embedding IS NOT NULL
@@ -230,17 +230,19 @@ def _scan_reference(cur, item: Dict[str, Any], *, candidate_record_ids=None) -> 
             {"vec": ref_emb_text, **filter_params},
         )
         for row in cur.fetchall():
-            matches[row[0]] = ScanMatch(
-                record_id=row[0],
-                overall_score=float(row[1] or 0.0),
-                embedding_sim=float(row[1] or 0.0),
+            rid = row["record_id"]
+            sim = float(row["sim"] or 0.0)
+            matches[rid] = ScanMatch(
+                record_id=rid,
+                overall_score=sim,
+                embedding_sim=sim,
                 match_type="reference_embedding",
             )
 
     if has_query:
         cur.execute(
             f"""
-            SELECT r.id::text,
+            SELECT r.id::text AS record_id,
                    similarity(LOWER(COALESCE(r.name, '')), LOWER(%(q)s)) AS sim
             FROM cografi_records r
             WHERE r.name IS NOT NULL
@@ -256,11 +258,12 @@ def _scan_reference(cur, item: Dict[str, Any], *, candidate_record_ids=None) -> 
             },
         )
         for row in cur.fetchall():
-            text_sim = float(row[1] or 0.0)
-            existing = matches.get(row[0])
+            rid = row["record_id"]
+            text_sim = float(row["sim"] or 0.0)
+            existing = matches.get(rid)
             if existing is None:
-                matches[row[0]] = ScanMatch(
-                    record_id=row[0],
+                matches[rid] = ScanMatch(
+                    record_id=rid,
                     overall_score=text_sim,
                     text_sim=text_sim,
                     match_type="reference_text",
@@ -332,7 +335,7 @@ def _scan_region(cur, item: Dict[str, Any], *, candidate_record_ids=None) -> Lis
         if region_query else "1.0"
     )
     sql = f"""
-        SELECT r.id::text, {score_expr} AS sim
+        SELECT r.id::text AS record_id, {score_expr} AS sim
         FROM cografi_records r
         WHERE r.geographical_boundary IS NOT NULL
           AND ({region_match})
@@ -343,9 +346,9 @@ def _scan_region(cur, item: Dict[str, Any], *, candidate_record_ids=None) -> Lis
     cur.execute(sql, {**region_params, **filter_params})
     return [
         ScanMatch(
-            record_id=row[0],
-            overall_score=float(row[1] or 0.0) if region_query else 1.0,
-            region_sim=float(row[1] or 0.0) if region_query else 1.0,
+            record_id=row["record_id"],
+            overall_score=float(row["sim"] or 0.0) if region_query else 1.0,
+            region_sim=float(row["sim"] or 0.0) if region_query else 1.0,
             match_type="region",
         )
         for row in cur.fetchall()
@@ -392,7 +395,7 @@ def _scan_lifecycle(cur, item: Dict[str, Any], *, candidate_record_ids=None) -> 
     )
 
     sql = f"""
-        SELECT r.id::text, r.section_key::text
+        SELECT r.id::text AS record_id, r.section_key::text AS section_key
         FROM cografi_records r
         WHERE (
               r.existing_registration_no = %(_reg)s
@@ -406,7 +409,7 @@ def _scan_lifecycle(cur, item: Dict[str, Any], *, candidate_record_ids=None) -> 
 
     out: List[ScanMatch] = []
     for row in cur.fetchall():
-        rec_id, section_key = row[0], row[1]
+        rec_id, section_key = row["record_id"], row["section_key"]
         if section_key == "article_42_change_requests":
             mt = "lifecycle_change_request"
         elif section_key == "article_42_finalized":

@@ -7,9 +7,14 @@ modal + autocomplete + watchlist subview + 4-way watch_type radio
 Run directly:
     python tests/browser/test_cografi_dashboard_browser.py
 
-Requires the app running and a member persona (TEST_BASE_URL /
-TEST_EMAIL / TEST_PASSWORD env vars; defaults to
-``mobiletest@test.com`` against ``http://127.0.0.1:8000``).
+Requires the app running. By default uses the managed-starter
+persona (``managed-starter-smoke@example.com``) — the round-trip
+lifecycle steps (create + scan + export + delete) need cross-
+registry watchlist quota that the default free persona doesn't
+have. The persona auto-provisions on first run via
+``tests/live/helpers/test_accounts.py``. Override with
+``TEST_EMAIL`` / ``TEST_PASSWORD`` env vars if you want a
+different persona.
 
 Caught one real bug on first run (autocomplete kind-chip reading
 "İsimsiz" instead of "İsim") that all server-side smoke missed,
@@ -18,6 +23,7 @@ which is the regression value this test is meant to preserve.
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -29,12 +35,41 @@ if str(ROOT) not in sys.path:
 from playwright.sync_api import sync_playwright
 
 from tests.browser.helpers.assertions import run_browser_step
-from tests.browser.helpers.config import load_browser_config
+from tests.browser.helpers.config import BrowserConfig, load_browser_config
 from tests.browser.helpers.session import launch_browser_page, login_via_modal
 from tests.live.helpers.assertions import LiveReporter
 
 
-CONFIG = load_browser_config()
+# This test exercises the full watchlist lifecycle (create -> scan ->
+# export -> delete), which requires a persona with cross-registry
+# watchlist quota. The default mobiletest@test.com is on the free plan
+# (quota=0) so POST /cografi-watchlist returns 403 for that account.
+# Use the managed-starter persona instead — it auto-provisions on
+# first run via tests/live/helpers/test_accounts.py and persists in
+# the DB. Falls back to the default config-resolved persona if the
+# managed account env override is set, so a paid persona can be
+# wired in by exporting TEST_EMAIL / TEST_PASSWORD.
+_BASE_CONFIG = load_browser_config()
+_MANAGED_STARTER_EMAIL = "managed-starter-smoke@example.com"
+_MANAGED_STARTER_PASSWORD = "Test1234!"
+
+# If TEST_EMAIL is explicitly set in the environment, respect it.
+# Otherwise upgrade from the default free persona to the managed-
+# starter paid persona so the round-trip lifecycle works.
+import os as _os
+if _os.environ.get("TEST_EMAIL"):
+    CONFIG = _BASE_CONFIG
+else:
+    CONFIG = BrowserConfig(
+        base_url=_BASE_CONFIG.base_url,
+        timeout_ms=_BASE_CONFIG.timeout_ms,
+        email=_MANAGED_STARTER_EMAIL,
+        password=_MANAGED_STARTER_PASSWORD,
+        browser_channel=_BASE_CONFIG.browser_channel,
+        headless=_BASE_CONFIG.headless,
+        artifacts_dir=_BASE_CONFIG.artifacts_dir,
+    )
+
 REPORTER = LiveReporter()
 
 pytestmark = pytest.mark.skip(
@@ -109,7 +144,11 @@ def _run_search_via_enter(page) -> dict:
     """Press Enter on the input (autocomplete dropdown overlays the
     submit button when open; Enter is the equivalent path)."""
     page.locator("#cografi-search-input").press("Enter")
-    page.wait_for_selector("#cografi-search-grid > div", timeout=20000)
+    # Longer wait: cografi-search/quick does a multi-signal cosine +
+    # trigram retrieval and the first hit after a cold backend takes
+    # several seconds; under per-IP rate-limit budgets it can also
+    # queue. 45s is the same safety budget design_search uses.
+    page.wait_for_selector("#cografi-search-grid > div", timeout=45000)
     grid = page.locator("#cografi-search-grid > div")
     return {"card_count": grid.count()}
 
@@ -197,6 +236,154 @@ def _open_add_modal_and_cycle_watch_types(page) -> dict:
     page.locator("#cwl-add-close").click()
     page.wait_for_timeout(300)
     return {"watch_types_cycled": list(groups.keys())}
+
+
+# ---------------------------------------------------------------------------
+# Round-trip lifecycle: create -> scan -> export -> delete
+# ---------------------------------------------------------------------------
+
+# Per-run label suffix so re-runs don't collide on the unique
+# (organization_id, label) constraint and so the finally-block
+# cleanup can find this run's item even if the test fails midway.
+ROUND_TRIP_LABEL = f"BROWSER SMOKE region {int(time.time())}"
+
+
+def _create_region_watch_item(page) -> dict:
+    """Open the add modal, switch to watch_type=region, fill the form,
+    submit (capturing the POST response so 4xx surfaces with detail),
+    and verify the new item appears in the list."""
+    page.locator("#cwl-btn-add").click()
+    page.wait_for_selector("#cwl-add-modal", state="visible", timeout=5000)
+    page.locator('input[name="cwl-watch-type"][value="region"]').click()
+    page.wait_for_selector("#cwl-region-fields", state="visible", timeout=3000)
+    page.locator("#cwl-add-label").fill(ROUND_TRIP_LABEL)
+    page.locator("#cwl-add-region-query").fill("Konya")
+    # alert_email defaults to checked + alert_webhook defaults to off;
+    # leave the daily frequency default. No need to fill gi_type or
+    # section_keys — they're optional narrowing filters.
+    with page.expect_response(
+        lambda r: r.url.endswith("/api/v1/cografi-watchlist")
+                  and r.request.method == "POST",
+        timeout=15000,
+    ) as resp_info:
+        page.locator("#cwl-add-submit").click()
+    response = resp_info.value
+    if response.status != 200:
+        # Surface the server's error body in the failure message so
+        # plan-gate / quota / validation issues are diagnosable.
+        try:
+            body = response.text()[:400]
+        except Exception:
+            body = "<unreadable>"
+        raise AssertionError(
+            f"POST /cografi-watchlist returned {response.status}: {body}"
+        )
+    # The modal closes on success + the list refreshes; wait for our
+    # label to appear in the items list.
+    try:
+        page.wait_for_selector(
+            f"#cwl-list h4:has-text({ROUND_TRIP_LABEL!r})",
+            timeout=15000,
+        )
+    except Exception:
+        # Dump diagnostics so the failure is debuggable. The POST
+        # returned 200 above, so the item exists server-side; the
+        # JS-side refreshAll() must have raced or the label is being
+        # transformed before render.
+        list_html = page.locator("#cwl-list").inner_html()[:1500]
+        item_count = page.locator("#cwl-list > div").count()
+        raise AssertionError(
+            f"created item not in list after 15s; "
+            f"#cwl-list has {item_count} child div(s). "
+            f"First 1500 chars of innerHTML: {list_html!r}"
+        )
+    return {"label": ROUND_TRIP_LABEL}
+
+
+def _find_round_trip_item_row(page):
+    """Locate the rendered list row that contains our timestamped label.
+    Returns the row Locator (or None if not found)."""
+    rows = page.locator("#cwl-list > div")
+    for i in range(rows.count()):
+        row = rows.nth(i)
+        if ROUND_TRIP_LABEL in row.inner_text():
+            return row
+    return None
+
+
+def _scan_round_trip_item(page) -> dict:
+    """Click the per-item Scan button on our test item and wait for the
+    POST /scan to return. Asserts the response was 200."""
+    row = _find_round_trip_item_row(page)
+    assert row is not None, f"round-trip item not found in list: {ROUND_TRIP_LABEL!r}"
+    scan_btn = row.locator("[data-cwl-scan]")
+    assert scan_btn.count() == 1, "scan button missing on round-trip item row"
+    with page.expect_response(
+        lambda r: "/api/v1/cografi-watchlist/" in r.url
+                  and r.url.endswith("/scan")
+                  and r.request.method == "POST",
+        timeout=20000,
+    ) as resp_info:
+        scan_btn.first.click()
+    response = resp_info.value
+    assert response.status == 200, (
+        f"scan POST returned {response.status}: {response.text()[:200]}"
+    )
+    # The scan handler returns {alerts_created: N, ...}
+    body = response.json()
+    return {"alerts_created": body.get("alerts_created", 0)}
+
+
+def _click_export_and_capture_download(page) -> dict:
+    """Click the CSV export button + intercept the resulting browser
+    download. Verify the saved blob starts with the UTF-8 BOM and that
+    the first line is the Turkish header row."""
+    with page.expect_download(timeout=15000) as dl_info:
+        page.locator("#cwl-alerts-export-csv").click()
+    download = dl_info.value
+    saved_path = Path("tests/browser/artifacts") / "cografi_smoke_export.csv"
+    saved_path.parent.mkdir(parents=True, exist_ok=True)
+    download.save_as(str(saved_path))
+    raw = saved_path.read_bytes()
+    # UTF-8 BOM == EF BB BF
+    assert raw[:3] == b"\xef\xbb\xbf", (
+        f"CSV missing UTF-8 BOM; first bytes: {raw[:6]!r}"
+    )
+    first_line = raw[3:].split(b"\n", 1)[0].decode("utf-8")
+    # Two expected Turkish header words must appear in the first line
+    for needle in ("Uyarı ID", "Coğrafi İşaret Adı"):
+        assert needle in first_line, (
+            f"CSV header missing {needle!r}; first line: {first_line!r}"
+        )
+    return {
+        "size_bytes": len(raw),
+        "filename": download.suggested_filename,
+    }
+
+
+def _delete_round_trip_item(page) -> dict:
+    """Delete our test item via its delete button. The JS uses a
+    native confirm() dialog — accept it via page.on('dialog'). Wait
+    for the item to disappear from the list."""
+    row = _find_round_trip_item_row(page)
+    if row is None:
+        # Item was never created or already cleaned up — nothing to do.
+        return {"deleted": False, "reason": "item not found in list"}
+    del_btn = row.locator("[data-cwl-delete]")
+    assert del_btn.count() == 1, "delete button missing on round-trip item row"
+
+    # Auto-accept the native confirm() prompt the JS fires before DELETE.
+    page.once("dialog", lambda d: d.accept())
+    del_btn.first.click()
+    # Wait for the list to refresh and our label to be gone.
+    deadline = time.time() + 15.0
+    while time.time() < deadline:
+        if _find_round_trip_item_row(page) is None:
+            return {"deleted": True}
+        page.wait_for_timeout(500)
+    raise AssertionError(
+        f"round-trip item not removed from list after delete: {ROUND_TRIP_LABEL!r}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -315,6 +502,41 @@ def test_cografi_dashboard_browser_smoke():
                 REPORTER, page, monitor, CONFIG,
                 lambda: _open_add_modal_and_cycle_watch_types(page),
             )
+
+            # --- Round-trip lifecycle ------------------------------------
+            # Create -> scan -> export -> delete. Cleanup runs in the
+            # `finally` so even partial failure leaves no test data.
+            # The flag is gated on the create step's actual return so
+            # cleanup only fires when create succeeded.
+            round_trip_created = False
+            try:
+                round_trip_created = run_browser_step(
+                    "Create region watch item",
+                    REPORTER, page, monitor, CONFIG,
+                    lambda: _create_region_watch_item(page),
+                    allow_request_failures=_TRANSIENT_401S,
+                )
+                if round_trip_created:
+                    run_browser_step(
+                        "Scan the round-trip item",
+                        REPORTER, page, monitor, CONFIG,
+                        lambda: _scan_round_trip_item(page),
+                        allow_request_failures=_TRANSIENT_401S,
+                    )
+                    run_browser_step(
+                        "CSV export downloads with BOM + Turkish headers",
+                        REPORTER, page, monitor, CONFIG,
+                        lambda: _click_export_and_capture_download(page),
+                        allow_request_failures=_TRANSIENT_401S,
+                    )
+            finally:
+                if round_trip_created:
+                    run_browser_step(
+                        "Cleanup: delete the round-trip item",
+                        REPORTER, page, monitor, CONFIG,
+                        lambda: _delete_round_trip_item(page),
+                        allow_request_failures=_TRANSIENT_401S,
+                    )
 
             # --- Locale switching ------------------------------------
             run_browser_step(
