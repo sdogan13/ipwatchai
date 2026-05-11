@@ -702,3 +702,113 @@ def test_parse_change_request_handles_legacy_preamble():
     assert cr.name == "Kangal Koyunu"
     # Legacy art42 has no structured "old / new" tuples — empty list is OK.
     assert cr.changes == []
+
+
+# ---------------------------------------------------------------------------
+# B2 — body free-text section extraction
+# ---------------------------------------------------------------------------
+
+RECORD_220_P8_BODY_TAIL = """1. Karapınar Halısı
+Başvuru No
+: C2022/000469
+Coğrafi İşaretin Adı
+: Karapınar Halısı
+Coğrafi Sınır
+: Konya ili Karapınar ilçesi
+Ürünün Tanımı ve Ayırt Edici Özellikleri:
+Karapınar Halısı; saf yün kullanılarak Türk düğüm tekniği ile dokunan bir halı türüdür. Anadolu Selçuklular
+dönemine dayanan bu halılar genellikle büyük ebatlı olup, dönemin sanat anlayışı ve yaratıcılığıyla şekillenmiştir.
+Üretim Metodu:
+Halı dokumacılığı yünün eğirilmesinden başlar. Karapınar ve yöresinde dokumacılıkta saf yün kullanılır.
+Coğrafi Sınır İçerisinde Gerçekleşmesi Gereken Üretim, İşleme ve Diğer İşlemler:
+Üretim metodunda yer alan tüm aşamalar coğrafi sınır içerisinde gerçekleşmelidir.
+Denetleme:
+Denetimler; Karapınar Ticaret ve Sanayi Odasının koordinasyonunda yapılır.
+"""
+
+
+def test_parse_body_sections_captures_all_four_known_subsections():
+    from pdf_extract_cografi import parse_body_sections
+    sections = parse_body_sections(RECORD_220_P8_BODY_TAIL)
+    assert set(sections.keys()) == {
+        "product_description",
+        "production_method",
+        "boundary_processing",
+        "inspection",
+    }
+    assert sections["product_description"].startswith("Karapınar Halısı; saf yün")
+    assert sections["production_method"].startswith("Halı dokumacılığı")
+    assert sections["boundary_processing"].startswith("Üretim metodunda yer alan")
+    assert sections["inspection"].startswith("Denetimler;")
+
+
+def test_parse_body_sections_strips_page_headers():
+    """Multi-page body slices contain repeating page-header lines that
+    leak into captured subsections. The parser must drop them."""
+    from pdf_extract_cografi import parse_body_sections
+    with_header = (
+        "Ürünün Tanımı ve Ayırt Edici Özellikleri:\n"
+        "Karapınar Halısı; saf yün kullanılarak dokunur.\n"
+        "2026/220 Sayılı Resmi\n"
+        "Türk Patent ve Marka Kurumu\n"
+        "Yayım Tarihi: 04.05.2026\n"
+        "Coğrafi İşaret ve Geleneksel Ürün Adı Bülteni\n"
+        "\n"
+        "9\n"
+        "Devam metni.\n"
+        "Üretim Metodu:\n"
+        "Devam.\n"
+    )
+    sections = parse_body_sections(with_header)
+    assert "product_description" in sections
+    assert "Türk Patent" not in sections["product_description"]
+    assert "Yayım Tarihi" not in sections["product_description"]
+    assert sections["product_description"].endswith("Devam metni.")
+
+
+def test_parse_body_sections_returns_empty_when_no_known_headers():
+    from pdf_extract_cografi import parse_body_sections
+    assert parse_body_sections("just a record with no subsection headers") == {}
+
+
+# ---------------------------------------------------------------------------
+# B2 — figure helpers
+# ---------------------------------------------------------------------------
+
+def test_figure_slug_prefers_application_no():
+    from pdf_extract_cografi import figure_slug_for_record
+    assert figure_slug_for_record(application_no="C2022/000469") == "C2022_000469"
+    assert figure_slug_for_record(application_no="  C2025 / 000485 ") == "C2025_000485"
+
+
+def test_figure_slug_falls_back_to_registration_no():
+    from pdf_extract_cografi import figure_slug_for_record
+    assert figure_slug_for_record(registration_no=1838) == "reg_1838"
+
+
+def test_figure_slug_falls_back_to_index_when_no_ids():
+    from pdf_extract_cografi import figure_slug_for_record
+    assert figure_slug_for_record(fallback_index=3) == "c_3"
+    assert figure_slug_for_record() == "_unknown"
+
+
+def test_is_template_image_flags_high_prevalence_xrefs():
+    from pdf_extract_cografi import is_template_image
+    # An xref that appears on 18 of 20 body pages (90%) is a header logo.
+    assert is_template_image(xref=5, page_prevalence={5: 18}, total_body_pages=20) is True
+
+
+def test_is_template_image_keeps_record_specific_xrefs():
+    from pdf_extract_cografi import is_template_image
+    # An xref that appears on 2 of 40 body pages (5%) is record-specific.
+    assert is_template_image(xref=42, page_prevalence={42: 2}, total_body_pages=40) is False
+
+
+def test_is_template_image_handles_unknown_xref():
+    from pdf_extract_cografi import is_template_image
+    assert is_template_image(xref=999, page_prevalence={1: 10}, total_body_pages=20) is False
+
+
+def test_is_template_image_safe_when_no_body_pages():
+    from pdf_extract_cografi import is_template_image
+    assert is_template_image(xref=1, page_prevalence={1: 5}, total_body_pages=0) is False

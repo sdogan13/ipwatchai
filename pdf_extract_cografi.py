@@ -31,6 +31,21 @@ Legacy era introduces field-label aliases (Başvuru Sahibinin Adı vs
 Başvuru Yapan, Ürünün Adı vs Ürün / Ürün Grubu) handled transparently
 by the labels-with-alternation regexes.
 
+B2 additions (figures + free-text body):
+
+  * Each non-art42/non-correction record may also carry ``body_sections``,
+    a dict keyed by ``product_description`` / ``production_method`` /
+    ``boundary_processing`` / ``inspection`` mapped to free-text values
+    captured between known subsection headers.
+  * Each record carries a ``figures`` list — embedded images saved to
+    ``<bulletin_dir>/figures/{record_slug}/{idx}.{ext}``. Smart filter
+    drops images appearing on >50% of body pages (header logos) and
+    images smaller than 50×50 px. Each figure entry has ``image_path``
+    (relative to ``figures/``), ``page``, ``bbox``, ``width``,
+    ``height``. Slug is the application_no (slugified), the
+    registration_no (``reg_{N}``), or a fallback counter when neither
+    is present.
+
 CLI::
 
     python pdf_extract_cografi.py --pdf path/to/220.pdf
@@ -73,8 +88,13 @@ _LOCAL_DEFAULT_BULLETINS_DIR = (
     _LOCAL_PROJECT_ROOT / "bulletins" / "Cografi_Isaret_ve_Geleneksel_Urun_Adi"
 )
 
-EXTRACTOR_VERSION = 2  # B1.5 — adds legacy KHK 555 + Article 43 + gazette-only support
+EXTRACTOR_VERSION = 3  # B2 — adds figure extraction + body_sections per record
 MIN_SUPPORTED_BULLETIN_NO = 1  # legacy support added in B1.5; both eras parsed
+
+# Figure extraction tuning
+FIGURE_MIN_DIM = 50               # skip images smaller than 50x50 px
+FIGURE_TEMPLATE_THRESHOLD = 0.5   # images on >50% of body pages are page-template noise
+FIGURES_SUBDIR = "figures"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - [CI-EXTRACT] - %(levelname)s - %(message)s")
 logger = logging.getLogger("turkpatent.cografi_extract")
@@ -633,6 +653,228 @@ parse_section6_change_request = parse_change_request
 
 
 # ---------------------------------------------------------------------------
+# Body free-text sections (B2)
+# ---------------------------------------------------------------------------
+
+# Each entry: (regex matching the subsection header, output key).
+# Order matters because a record's body presents these in roughly this
+# order, but the parser sorts matches by position so the listed order
+# below is purely for documentation. The "Coğrafi Sınır İçerisinde..."
+# header has alternate wordings ("Üretim, İşleme ve Diğer İşlemler" vs
+# just "İşlemler"); allow both.
+BODY_SUBSECTION_PATTERNS: List[Tuple[re.Pattern, str]] = [
+    (re.compile(r"Ürünün\s+Tanımı\s+ve\s+Ayırt\s+Edici\s+Özellikleri\s*:", re.IGNORECASE), "product_description"),
+    (re.compile(r"Üretim\s+Metodu\s*:", re.IGNORECASE), "production_method"),
+    (re.compile(r"Coğrafi\s+Sınır\s+İçerisinde\s+Gerçekleşmesi\s+Gereken[\s\S]{0,80}?İşlemler\s*:", re.IGNORECASE), "boundary_processing"),
+    (re.compile(r"Denetleme\s*:", re.IGNORECASE), "inspection"),
+]
+
+# Page-header / footer artefacts that leak into multi-page body text and
+# add no value to free-text body sections. Stripped during normalisation.
+PAGE_HEADER_FOOTER_RE = re.compile(
+    r"\d{4}/\d{1,4}\s+Sayılı\s+Resmi\s*\n"
+    r"\s*Türk\s+Patent\s+ve\s+Marka\s+Kurumu\s*\n"
+    r"\s*Yay[ıi][mn]\s+Tarihi[^\n]*\n"
+    r"\s*Coğrafi İşaret\s+ve\s+Geleneksel\s+Ürün\s+Adı\s+Bülteni\s*\n"
+    r"(?:\s*\n)*\s*\d{1,4}\s*\n",
+    re.IGNORECASE,
+)
+
+
+def _strip_page_header_footer(text: str) -> str:
+    """Remove repeated page-header lines from multi-page body text."""
+    return PAGE_HEADER_FOOTER_RE.sub("\n", text)
+
+
+def parse_body_sections(record_body: str) -> Dict[str, str]:
+    """Extract free-text body subsections keyed by semantic name.
+
+    Walks ``BODY_SUBSECTION_PATTERNS`` against the record body, then
+    sorts all matches by start position. The text for each subsection
+    runs from the end of its header to the start of the next subsection
+    header (or the end of the body slice). Whitespace is collapsed but
+    paragraph breaks are preserved as single newlines so downstream
+    consumers can still see structure.
+    """
+    cleaned = _strip_page_header_footer(record_body)
+    hits: List[Tuple[int, int, str]] = []  # (start, end_of_header, key)
+    for pat, key in BODY_SUBSECTION_PATTERNS:
+        for m in pat.finditer(cleaned):
+            hits.append((m.start(), m.end(), key))
+    if not hits:
+        return {}
+    hits.sort(key=lambda t: t[0])
+
+    out: Dict[str, str] = {}
+    for i, (start, header_end, key) in enumerate(hits):
+        next_start = hits[i + 1][0] if i + 1 < len(hits) else len(cleaned)
+        body = cleaned[header_end:next_start]
+        # Collapse runs of whitespace inside lines; preserve newlines
+        # between paragraphs.
+        body = re.sub(r"[ \t]+", " ", body)
+        body = re.sub(r"\n[ \t]+", "\n", body)
+        body = re.sub(r"\n{3,}", "\n\n", body).strip()
+        if not body:
+            continue
+        # Don't overwrite if the same subsection is matched twice (record
+        # spans multiple pages and the header appears in a header row).
+        out.setdefault(key, body)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Figure extraction (B2)
+# ---------------------------------------------------------------------------
+
+# Match application numbers and registration numbers so we can build
+# stable slugs for the per-record figures/ subfolder.
+_APPNO_SLUG_RE = re.compile(r"[^A-Za-z0-9_]+")
+
+
+def figure_slug_for_record(
+    *,
+    application_no: Optional[str] = None,
+    registration_no: Optional[int] = None,
+    fallback_index: Optional[int] = None,
+) -> str:
+    """Return the per-record subfolder name under ``figures/``.
+
+    Preference order: application_no (slugified) > registration_no >
+    fallback_index. Application numbers like ``C2022/000469`` become
+    ``C2022_000469``; whitespace and slashes collapse to underscores.
+    """
+    if application_no:
+        slug = _APPNO_SLUG_RE.sub("_", application_no.strip())
+        if slug:
+            return slug
+    if registration_no is not None:
+        return f"reg_{registration_no}"
+    if fallback_index is not None:
+        return f"c_{fallback_index}"
+    return "_unknown"
+
+
+def is_template_image(
+    xref: int,
+    page_prevalence: Dict[int, int],
+    total_body_pages: int,
+    threshold: float = FIGURE_TEMPLATE_THRESHOLD,
+) -> bool:
+    """True when an image xref appears on >= ``threshold`` fraction of body pages.
+
+    Per-page TÜRKPATENT header logos repeat on every body page and add no
+    value; the smart filter rejects them automatically based on page
+    prevalence rather than hand-coded denylists.
+    """
+    if total_body_pages <= 0:
+        return False
+    count = page_prevalence.get(xref, 0)
+    return (count / total_body_pages) >= threshold
+
+
+def _collect_image_page_prevalence(doc, first_body_page: int, last_body_page: int) -> Dict[int, int]:
+    """Count how many body pages each image xref appears on.
+
+    Pages are 1-based inclusive. We restrict the count to body pages so
+    that legend / cover / TOC images don't skew the page-prevalence
+    threshold (those pages aren't part of any record body).
+    """
+    prevalence: Dict[int, int] = {}
+    for p in range(first_body_page - 1, last_body_page):
+        if p < 0 or p >= doc.page_count:
+            continue
+        seen: set = set()
+        try:
+            for img_info in doc.load_page(p).get_images(full=True):
+                xref = img_info[0]
+                seen.add(xref)
+        except Exception:
+            continue
+        for xref in seen:
+            prevalence[xref] = prevalence.get(xref, 0) + 1
+    return prevalence
+
+
+def _extract_record_figures(
+    doc,
+    record_slice_pages: range,
+    figures_root: Path,
+    slug: str,
+    page_prevalence: Dict[int, int],
+    total_body_pages: int,
+) -> List[Dict[str, Any]]:
+    """Save and describe figures embedded in this record's body slice.
+
+    Walks every page in ``record_slice_pages`` (0-based), enumerates
+    embedded images, skips template-noise xrefs + tiny images, dedupes
+    by xref within the record, writes bytes to disk under
+    ``figures_root / slug / {idx}.{ext}``, and returns a list of dicts
+    with ``image_path`` relative to ``figures_root``.
+    """
+    out: List[Dict[str, Any]] = []
+    seen_xrefs: set = set()
+    record_dir = figures_root / slug
+
+    for page_index in record_slice_pages:
+        if page_index < 0 or page_index >= doc.page_count:
+            continue
+        try:
+            page = doc.load_page(page_index)
+            images = page.get_images(full=True)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("get_images failed on p%d: %r", page_index + 1, exc)
+            continue
+        for img_info in images:
+            xref = img_info[0]
+            if xref in seen_xrefs:
+                continue
+            if is_template_image(xref, page_prevalence, total_body_pages):
+                seen_xrefs.add(xref)
+                continue
+            try:
+                extracted = doc.extract_image(xref)
+            except Exception as exc:
+                logger.warning("extract_image failed on xref %d: %r", xref, exc)
+                seen_xrefs.add(xref)
+                continue
+            width = int(extracted.get("width") or 0)
+            height = int(extracted.get("height") or 0)
+            if width < FIGURE_MIN_DIM or height < FIGURE_MIN_DIM:
+                seen_xrefs.add(xref)
+                continue
+            ext = (extracted.get("ext") or "jpg").lower()
+            image_bytes = extracted.get("image")
+            if not image_bytes:
+                seen_xrefs.add(xref)
+                continue
+
+            # Locate the figure's bbox on this page (the FIRST rect; an
+            # image used multiple times in one page is rare for cografi).
+            bbox: Optional[List[float]] = None
+            try:
+                rects = page.get_image_rects(xref)
+                if rects:
+                    r = rects[0]
+                    bbox = [float(r.x0), float(r.y0), float(r.x1), float(r.y1)]
+            except Exception:
+                bbox = None
+
+            record_dir.mkdir(parents=True, exist_ok=True)
+            idx = len(out) + 1
+            out_name = f"{idx}.{ext}"
+            (record_dir / out_name).write_bytes(image_bytes)
+            seen_xrefs.add(xref)
+            out.append({
+                "image_path": f"{slug}/{out_name}",
+                "page": page_index + 1,
+                "bbox": bbox,
+                "width": width,
+                "height": height,
+            })
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Bulletin-level orchestration
 # ---------------------------------------------------------------------------
 
@@ -666,135 +908,182 @@ def _slice_record_body(
     return "\n".join(pages[real_start - 1: end])
 
 
-def extract_bulletin(pdf_path: Path) -> Dict[str, Any]:
-    """Extract a single modern-format cografi bulletin PDF into the dict
-    that becomes ``metadata.json``.
+def extract_bulletin(
+    pdf_path: Path,
+    *,
+    extract_figures: bool = True,
+) -> Dict[str, Any]:
+    """Extract a single cografi bulletin PDF into the dict that becomes
+    ``metadata.json``.
 
-    Refuses to process bulletins below ``MIN_SUPPORTED_BULLETIN_NO`` since
-    those use the legacy KHK 555 schema.
+    Walks the PDF once, parses cover/TOC/index/body, and (when
+    ``extract_figures=True``) also writes embedded record figures to
+    ``<pdf_dir>/figures/{record_slug}/{idx}.{ext}`` so downstream
+    embedding stages can read images by path. Refuses to process
+    bulletins below ``MIN_SUPPORTED_BULLETIN_NO``.
     """
-    pages = _read_pages(pdf_path)
-    if len(pages) < 5:
-        raise ValueError(f"{pdf_path}: too few pages ({len(pages)}) for a cografi bulletin")
+    fitz = _get_fitz()
+    doc = fitz.open(pdf_path)
+    try:
+        pages = [doc.load_page(i).get_text() for i in range(doc.page_count)]
+        if len(pages) < 5:
+            raise ValueError(f"{pdf_path}: too few pages ({len(pages)}) for a cografi bulletin")
 
-    bulletin_no, bulletin_date = parse_cover(pages[0])
-    if bulletin_no is None:
-        raise ValueError(f"{pdf_path}: cover page does not contain Sayı marker")
-    if bulletin_no < MIN_SUPPORTED_BULLETIN_NO:
-        raise ValueError(
-            f"{pdf_path}: bulletin {bulletin_no} below MIN_SUPPORTED_BULLETIN_NO={MIN_SUPPORTED_BULLETIN_NO}"
-        )
-
-    toc = parse_toc(pages[1])
-    # Per-bulletin map from section number -> semantic key, derived from
-    # TOC titles. Section numbering shifts between bulletins (some omit
-    # Article 40, some add Article 42 finalized + corrections), so we
-    # cannot bake the mapping into the extractor.
-    section_key_by_number: Dict[int, Optional[str]] = {}
-    for e in toc:
-        if e["section_number"] >= 3:
-            section_key_by_number[e["section_number"]] = classify_section_title(e["title"])
-
-    sections_present = sorted(n for n in section_key_by_number)
-
-    # Merge the Section 2 pages (typically p4..p7 depending on how many
-    # sub-indices the bulletin has) into one blob for index parsing.
-    sec2_entry = next((e for e in toc if e["section_number"] == 2), None)
-    sec3_entry = next((e for e in toc if e["section_number"] == 3), None)
-    sec2_start = sec2_entry["start_page"] if sec2_entry else 4
-    sec2_end = (sec3_entry["start_page"] - 1) if sec3_entry else sec2_start + 1
-    index_text = "\n".join(pages[sec2_start - 1: sec2_end])
-    index_entries = parse_index(index_text)
-
-    # Per-section body extents (clipped to the next section's start page so
-    # a record body cannot bleed into another section). Stored as a LIST
-    # per key because some bulletins (e.g. 63, 105) have multiple sections
-    # that classify to the same semantic key (KHK 555 examined + SMK 6769
-    # examined both => "examined").
-    body_extents_by_key: Dict[str, List[Tuple[int, int]]] = {}
-    body_sections = sorted(
-        [(n, k, next(e for e in toc if e["section_number"] == n)["start_page"])
-         for n, k in section_key_by_number.items() if k is not None],
-        key=lambda t: t[2],
-    )
-    for i, (n, key, start_page) in enumerate(body_sections):
-        end = body_sections[i + 1][2] - 1 if i + 1 < len(body_sections) else len(pages)
-        # Some bulletins' TOC page numbers for the section itself are off
-        # by one (the section header sits on the page *before* the TOC's
-        # claimed start). Allow per-record slices to look back one page
-        # below this section's nominal start_page, but never below 1.
-        body_extents_by_key.setdefault(key, []).append((max(start_page - 1, 1), end))
-
-    records: Dict[str, List[Dict[str, Any]]] = {k: [] for k in ALL_SECTION_KEYS}
-
-    by_key: Dict[str, List[IndexEntry]] = {}
-    for ie in index_entries:
-        by_key.setdefault(ie.section_key, []).append(ie)
-    for sec_entries in by_key.values():
-        sec_entries.sort(key=lambda e: e.start_page)
-
-    for section_key, sec_entries in by_key.items():
-        extents = body_extents_by_key.get(section_key)
-        if not extents:
-            logger.warning("section_key %r has index entries but no body extents", section_key)
-            continue
-        for i, entry in enumerate(sec_entries):
-            # Pick the body extent that contains this entry's start_page.
-            # Bulletins with multiple sections per semantic key (KHK +
-            # SMK examined) need this so each record's slice lands in the
-            # right page range.
-            matching = [(s, e) for s, e in extents if s <= entry.start_page <= e]
-            sec_start, sec_end = matching[0] if matching else extents[0]
-            # next_start: the next record's start_page IF it falls in
-            # this same extent (don't clip across extents).
-            next_in_extent = next(
-                (e.start_page for e in sec_entries[i + 1:]
-                 if sec_start <= e.start_page <= sec_end),
-                None,
+        bulletin_no, bulletin_date = parse_cover(pages[0])
+        if bulletin_no is None:
+            raise ValueError(f"{pdf_path}: cover page does not contain Sayı marker")
+        if bulletin_no < MIN_SUPPORTED_BULLETIN_NO:
+            raise ValueError(
+                f"{pdf_path}: bulletin {bulletin_no} below MIN_SUPPORTED_BULLETIN_NO={MIN_SUPPORTED_BULLETIN_NO}"
             )
-            body = _slice_record_body(pages, entry.start_page, next_in_extent, sec_end, sec_start)
-            record_dict: Dict[str, Any] = {
-                "record_type": entry.record_type,
-                "name": entry.name,
-                "start_page": entry.start_page,
-            }
-            if section_key in (SECTION_KEY_ART42_REQUESTS, SECTION_KEY_ART42_FINALIZED):
-                cr = parse_change_request(body)
-                if cr is None:
-                    logger.warning("%s entry %r at p%d: no change-request match",
-                                   section_key, entry.name, entry.start_page)
-                    record_dict["raw_text"] = body[:1000]
-                else:
-                    record_dict.update(asdict(cr))
-            elif section_key == SECTION_KEY_CORRECTIONS:
-                corr = parse_correction(body)
-                if corr is None:
-                    logger.warning("%s entry %r at p%d: no correction match",
-                                   section_key, entry.name, entry.start_page)
-                    record_dict["raw_text"] = body[:1000]
-                else:
-                    record_dict.update(asdict(corr))
-            else:
-                header = parse_record_header(body, is_section_4=(section_key == SECTION_KEY_REGISTERED))
-                header_dict = asdict(header)
-                # Index name is authoritative — only override if the header
-                # actually parsed one out (and it's non-empty). This
-                # handles records whose body header is on a different page
-                # than the index's start_page advertised, where the header
-                # regex misses but the index name is still trustworthy.
-                if not header_dict.get("name"):
-                    header_dict.pop("name", None)
-                record_dict.update(header_dict)
-            records[section_key].append(record_dict)
 
-    return {
-        "bulletin_no": bulletin_no,
-        "bulletin_date": bulletin_date,
-        "extracted_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "extractor_version": EXTRACTOR_VERSION,
-        "sections_present": sections_present,
-        "records": records,
-    }
+        toc = parse_toc(pages[1])
+        # Per-bulletin map from section number -> semantic key.
+        section_key_by_number: Dict[int, Optional[str]] = {}
+        for e in toc:
+            if e["section_number"] >= 3:
+                section_key_by_number[e["section_number"]] = classify_section_title(e["title"])
+
+        sections_present = sorted(n for n in section_key_by_number)
+
+        sec2_entry = next((e for e in toc if e["section_number"] == 2), None)
+        sec3_entry = next((e for e in toc if e["section_number"] == 3), None)
+        sec2_start = sec2_entry["start_page"] if sec2_entry else 4
+        sec2_end = (sec3_entry["start_page"] - 1) if sec3_entry else sec2_start + 1
+        index_text = "\n".join(pages[sec2_start - 1: sec2_end])
+        index_entries = parse_index(index_text)
+
+        body_extents_by_key: Dict[str, List[Tuple[int, int]]] = {}
+        body_section_specs = sorted(
+            [(n, k, next(e for e in toc if e["section_number"] == n)["start_page"])
+             for n, k in section_key_by_number.items() if k is not None],
+            key=lambda t: t[2],
+        )
+        for i, (n, key, start_page) in enumerate(body_section_specs):
+            end = body_section_specs[i + 1][2] - 1 if i + 1 < len(body_section_specs) else len(pages)
+            body_extents_by_key.setdefault(key, []).append((max(start_page - 1, 1), end))
+
+        # B2: compute body-page image prevalence ONCE per bulletin so
+        # repeated per-page header logos can be auto-filtered from
+        # every record's figure list.
+        first_body_page = (sec3_entry["start_page"]
+                           if sec3_entry else min((s for _, _, s in body_section_specs), default=4))
+        last_body_page = (body_section_specs[-1][2]
+                          if body_section_specs else len(pages))
+        # Walk through the end of the doc — record bodies span up to the
+        # last body page; section extents already cap correctly.
+        last_body_page = max(last_body_page, (body_section_specs[-1][2] if body_section_specs else 0))
+        last_body_page = max(
+            last_body_page,
+            max((end for extents in body_extents_by_key.values() for _, end in extents),
+                default=last_body_page),
+        )
+        total_body_pages = max(1, last_body_page - first_body_page + 1)
+        page_prevalence = (
+            _collect_image_page_prevalence(doc, first_body_page, last_body_page)
+            if extract_figures else {}
+        )
+        figures_root = pdf_path.parent / FIGURES_SUBDIR if extract_figures else None
+
+        records: Dict[str, List[Dict[str, Any]]] = {k: [] for k in ALL_SECTION_KEYS}
+
+        by_key: Dict[str, List[IndexEntry]] = {}
+        for ie in index_entries:
+            by_key.setdefault(ie.section_key, []).append(ie)
+        for sec_entries in by_key.values():
+            sec_entries.sort(key=lambda e: e.start_page)
+
+        # Track fallback index per section_key for slug fallback.
+        fallback_idx = {k: 0 for k in ALL_SECTION_KEYS}
+
+        for section_key, sec_entries in by_key.items():
+            extents = body_extents_by_key.get(section_key)
+            if not extents:
+                logger.warning("section_key %r has index entries but no body extents", section_key)
+                continue
+            for i, entry in enumerate(sec_entries):
+                matching = [(s, e) for s, e in extents if s <= entry.start_page <= e]
+                sec_start, sec_end = matching[0] if matching else extents[0]
+                next_in_extent = next(
+                    (e.start_page for e in sec_entries[i + 1:]
+                     if sec_start <= e.start_page <= sec_end),
+                    None,
+                )
+                body = _slice_record_body(pages, entry.start_page, next_in_extent, sec_end, sec_start)
+                record_dict: Dict[str, Any] = {
+                    "record_type": entry.record_type,
+                    "name": entry.name,
+                    "start_page": entry.start_page,
+                }
+                if section_key in (SECTION_KEY_ART42_REQUESTS, SECTION_KEY_ART42_FINALIZED):
+                    cr = parse_change_request(body)
+                    if cr is None:
+                        logger.warning("%s entry %r at p%d: no change-request match",
+                                       section_key, entry.name, entry.start_page)
+                        record_dict["raw_text"] = body[:1000]
+                    else:
+                        record_dict.update(asdict(cr))
+                elif section_key == SECTION_KEY_CORRECTIONS:
+                    corr = parse_correction(body)
+                    if corr is None:
+                        logger.warning("%s entry %r at p%d: no correction match",
+                                       section_key, entry.name, entry.start_page)
+                        record_dict["raw_text"] = body[:1000]
+                    else:
+                        record_dict.update(asdict(corr))
+                else:
+                    header = parse_record_header(body, is_section_4=(section_key == SECTION_KEY_REGISTERED))
+                    header_dict = asdict(header)
+                    if not header_dict.get("name"):
+                        header_dict.pop("name", None)
+                    record_dict.update(header_dict)
+                    # B2: capture body free-text subsections (product
+                    # description, production method, etc.) on records that
+                    # have a real record body (not art42 stubs or
+                    # corrections — those don't carry these subsections).
+                    bs = parse_body_sections(body)
+                    if bs:
+                        record_dict["body_sections"] = bs
+
+                # B2: figure extraction. Compute a stable per-record slug,
+                # then walk the record's page slice to capture embedded
+                # images. Empty list when there are no figures.
+                if extract_figures and figures_root is not None:
+                    slug_start = max(entry.start_page - 1, sec_start)
+                    slug_end = next_in_extent - 1 if next_in_extent else sec_end
+                    slug_end = min(slug_end, sec_end)
+                    page_range = range(slug_start - 1, slug_end)  # 0-based
+                    fallback_idx[section_key] += 1
+                    slug = figure_slug_for_record(
+                        application_no=record_dict.get("application_no"),
+                        registration_no=record_dict.get(
+                            "existing_registration_no",
+                            record_dict.get("registration_no"),
+                        ),
+                        fallback_index=fallback_idx[section_key],
+                    )
+                    figs = _extract_record_figures(
+                        doc=doc,
+                        record_slice_pages=page_range,
+                        figures_root=figures_root,
+                        slug=slug,
+                        page_prevalence=page_prevalence,
+                        total_body_pages=total_body_pages,
+                    )
+                    record_dict["figures"] = figs
+
+                records[section_key].append(record_dict)
+
+        return {
+            "bulletin_no": bulletin_no,
+            "bulletin_date": bulletin_date,
+            "extracted_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "extractor_version": EXTRACTOR_VERSION,
+            "sections_present": sections_present,
+            "records": records,
+        }
+    finally:
+        doc.close()
 
 
 # ---------------------------------------------------------------------------

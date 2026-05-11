@@ -378,7 +378,7 @@ python scripts/migrate_cografi_layout.py --dry-run     # preview
 python scripts/migrate_cografi_layout.py               # apply
 ```
 
-**Extractor — `pdf_extract_cografi.py`** reads each `CI_*/bulletin.pdf` and emits the sibling `metadata.json` containing one record per published application across up to 6 record types (examined / registered / article 40 modified / article 42 change requests / article 42 finalized / corrections). Section 2's `Sıralı Liste` is the parsing oracle.
+**Extractor — `pdf_extract_cografi.py`** reads each `CI_*/bulletin.pdf` and emits the sibling `metadata.json` containing one record per published application across 8 record types (examined / registered / article 40 modified / article 42 change requests / article 42 finalized / article 43 modified / corrections / gazette-only announcements). Section 2's `Sıralı Liste` is the parsing oracle. As of B2 the extractor also captures **figures** (embedded images written to `figures/{record_slug}/{idx}.ext`, smart-filtered against per-page header logos) and **body_sections** (the four free-text subsections found in every applied/registered record: product_description, production_method, boundary_processing, inspection).
 
 ```powershell
 python pdf_extract_cografi.py --pdf path/to/bulletin.pdf
@@ -388,6 +388,20 @@ python pdf_extract_cografi.py --all --force            # overwrite metadata.json
 ```
 
 **Full archive supported (B1.5).** Cards 1-220 (KHK 555 + SMK 6769 eras) extract via a label-mapping refactor that handles both legal regimes' field labels and section types. Section dispatch is by **semantic key** classified from the TOC title (so transitional bulletins with both KHK and SMK examined sub-sections get routed correctly), and per-record slicing supports multiple body extents per semantic key. **Empirical: 220/220 bulletins, 3,527 records, ≈99.26% record-level success** — see the extractor's docstring for the residual edge-case categories (mostly source-data omissions).
+
+**Embeddings — `embeddings_cografi.py` (B2+C1).** Reads each `CI_*/metadata.json` and writes embeddings back in place:
+- **Text** (`intfloat/multilingual-e5-large`, 1024-dim, L2-normalised): per-record passage built from name + gi_type + product_group + geographical_boundary + usage_description + body_sections; stored under `record.text_embedding`.
+- **DINOv2 ViT-L/14** (1024-dim) per figure under `figure.embeddings.dinov2_vitl14`; mean-pooled per record into `record.primary_figure_embedding`.
+- **CLIP ViT-B/32** (512-dim, L2-normalised) per figure under `figure.embeddings.clip_vitb32`.
+
+```powershell
+python embeddings_cografi.py                    # all bulletins missing aggregates
+python embeddings_cografi.py --issue 220
+python embeddings_cografi.py --device cuda      # default: auto-detect
+python embeddings_cografi.py --force            # re-embed everything
+```
+
+Vision branch is auto-skipped when no figures exist across the selected metadata.json files (saves ~1.8 GB GPU memory). Idempotent — already-embedded records pass through untouched unless `--force`. Empirical: 5.3 min on an RTX 4070 for the full 220-bulletin set (3,527 text + 5,393 image embeddings + 1,458 primary aggregates).
 
 Per-PDF quality verifier built into the extractor cross-checks Section 2 index counts against the parsed body for every bulletin during `--all`; structural problems are surfaced as `[?]` warnings so a regression is loud.
 
