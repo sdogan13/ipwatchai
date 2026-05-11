@@ -57,6 +57,7 @@ from app_patent_alert_routes import register_patent_alert_routes
 from app_patent_lead_routes import register_patent_lead_routes
 from app_patent_detail_routes import register_patent_detail_routes
 from app_cografi_search_routes import register_cografi_search_routes
+from app_cografi_watchlist_routes import register_cografi_watchlist_routes
 from app_registry_search_routes import register_registry_search_routes
 from app_design_watchlist_routes import register_design_watchlist_routes
 from app_design_alert_routes import register_design_alert_routes
@@ -215,6 +216,11 @@ register_patent_detail_routes(app, limiter)
 # to patent + design + trademark. Detail and image routes are registered
 # alongside search inside register_cografi_search_routes for cohesion.
 register_cografi_search_routes(app, limiter)
+
+# Coğrafi İşaret watchlist + alerts — four watch types (holder /
+# reference / region / lifecycle), backed by the cografi_watchlist_mt +
+# cografi_alerts_mt tables.
+register_cografi_watchlist_routes(app, limiter)
 
 # Cross-registry unified search — discovery surface across both registries.
 register_registry_search_routes(app, limiter)

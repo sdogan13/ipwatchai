@@ -428,6 +428,36 @@ Score modes follow the patent pattern: text-only (text 0.4 + embedding 0.6), tex
 
 Empirical: app-boot smoke confirms the routes register cleanly; an integration test against the live ingested DB ranks `Karapınar Halısı` first when its name is queried, and the C-style exact-ID lookup short-circuits to direct-row hits.
 
+**Watchlist + alerts — `services/cografi_watchlist_service.py` + `services/cografi_scanner_service.py` + `app_cografi_watchlist_routes.py` + `migrations/cografi_watchlist.sql` (Phase F).** Mirrors the patent + design watchlist conventions but with **four watch types** vs patent's two:
+
+| Watch type | Trigger | Match strategy |
+|---|---|---|
+| `holder` | new GI by a watched applicant | holder_id FK > tpe_client_id > name trigram on `cografi_holders.name` |
+| `reference` | semantic similarity vs a reference cografi record or free-text query | cosine on `text_embedding` (+ optional text trigram hybrid 0.4/0.6) |
+| `region` | new GI in a watched region (NEW for cografi) | trigram on `geographical_boundary` + `region_terms[]` ANY-match |
+| `lifecycle` | art42 / correction targeting a watched registration (NEW for cografi) | exact match on `registration_no` / `existing_registration_no` / `correction_referenced_record_id` |
+
+Endpoints:
+```
+POST   /api/v1/cografi-watchlist                   create
+GET    /api/v1/cografi-watchlist                   list
+GET    /api/v1/cografi-watchlist/{id}              fetch
+PATCH  /api/v1/cografi-watchlist/{id}              update mutable fields
+DELETE /api/v1/cografi-watchlist/{id}              delete (cascades alerts)
+POST   /api/v1/cografi-watchlist/{id}/scan         on-demand scan
+
+GET    /api/v1/cografi-alerts                      list (filters: status, severity, match_type, watchlist_item_id)
+GET    /api/v1/cografi-alerts/{id}                 fetch
+PATCH  /api/v1/cografi-alerts/{id}                 acknowledge / dismiss / resolve / change severity
+DELETE /api/v1/cografi-alerts/{id}                 hard delete
+```
+
+Quota is shared across all four registries (trademarks + designs + patents + cografi via `combined_watchlist_count`). Severity bucketing (critical/high/medium/low) follows the design + patent thresholds; the storage floor is 0.5 (alerts below that aren't persisted). `holder` / `region` / `lifecycle` matches always score 1.0 and bypass the threshold (they're binary).
+
+**Post-ingest hook**: `pipeline/ingest_cografi.py --all` calls `trigger_cografi_watchlist_scan` after a successful run, scoping each scan to the upserted record_ids only (cost is O(watchlist_count × new_ids), not O(watchlist_count × corpus_size)). `--skip-watchlist-scan` opts out for backfills.
+
+**Notification delivery** (email digest + webhook) is the F3 follow-up — the schema (F1) already has `email_sent` + `webhook_sent` flags + partial pending-delivery indexes, the scanner properly inserts alerts; the digest worker that ships them mirrors the existing patent digest pattern in `notifications/service.py`.
+
 Per-PDF quality verifier built into the extractor cross-checks Section 2 index counts against the parsed body for every bulletin during `--all`; structural problems are surfaced as `[?]` warnings so a regression is loud.
 
 Pure-helper unit tests live in `tests/test_data_collection_cografi.py` (collector + subfolder layout + RAR detection) and `tests/test_pdf_extract_cografi.py` (extractor helpers + section-key classification + record header parsing + change-request / correction parsers).

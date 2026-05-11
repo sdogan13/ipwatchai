@@ -485,18 +485,21 @@ def _replace_figures(cur, record_id: str, record: Dict[str, Any]) -> int:
 # ---------------------------------------------------------------------------
 
 
-def ingest_metadata(cur, metadata_path: Path) -> Dict[str, int]:
+def ingest_metadata(cur, metadata_path: Path) -> Dict[str, Any]:
     """Ingest one bulletin's metadata.json into the cografi_* tables.
 
-    Returns counters: {records, holders, change_requests, figures}.
-    Does NOT commit — the caller controls the transaction so a single
-    bad bulletin can be rolled back independently.
+    Returns counters + the list of upserted record_ids so the caller
+    can scope a post-ingest watchlist scan to just the rows that
+    landed (avoids re-scanning the full corpus on every ingest run).
     """
     raw = metadata_path.read_text(encoding="utf-8")
     metadata = scrub_nul(json.loads(raw))
     bulletin_folder = metadata_path.parent.name
 
-    counters = {"records": 0, "holders": 0, "change_requests": 0, "figures": 0}
+    counters: Dict[str, Any] = {
+        "records": 0, "holders": 0, "change_requests": 0, "figures": 0,
+        "record_ids": [],
+    }
 
     records_by_section = metadata.get("records") or {}
     if not isinstance(records_by_section, dict):
@@ -508,8 +511,6 @@ def ingest_metadata(cur, metadata_path: Path) -> Dict[str, int]:
         for record in items:
             if not isinstance(record, dict):
                 continue
-            # Stash the section_key inside the record so the row builder
-            # can read it without a separate parameter.
             record = dict(record)
             record["__section_key"] = section_key
 
@@ -528,6 +529,7 @@ def ingest_metadata(cur, metadata_path: Path) -> Dict[str, int]:
                 )
                 continue
             counters["records"] += 1
+            counters["record_ids"].append(record_id)
             counters["holders"] += _replace_record_holders(cur, record_id, record)
             if section_key in ("article_42_change_requests", "article_42_finalized"):
                 counters["change_requests"] += _replace_change_requests(
@@ -568,6 +570,10 @@ def parse_argv(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "--dry-run", action="store_true",
         help="parse and project rows; do NOT commit to DB",
     )
+    parser.add_argument(
+        "--skip-watchlist-scan", action="store_true",
+        help="skip the post-ingest watchlist scan (still useful for backfills)",
+    )
     return parser.parse_args(argv)
 
 
@@ -589,6 +595,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     started_at = datetime.now()
     totals = {"records": 0, "holders": 0, "change_requests": 0, "figures": 0}
+    all_record_ids: List[str] = []
     failures = 0
 
     conn = _connect()
@@ -601,13 +608,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                     except Exception as exc:
                         logger.error("[!] %s: %r", p.relative_to(args.bulletins_root), exc)
                         failures += 1
-                        # Re-raise to abort the whole transaction; preserves
-                        # all-or-nothing per the with-conn block.
                         if not args.dry_run:
                             raise
                         continue
                     for k in totals:
                         totals[k] += c[k]
+                    all_record_ids.extend(c.get("record_ids") or [])
                     logger.info(
                         "[+] %s | records=%d holders=%d chreq=%d figures=%d",
                         p.parent.name, c["records"], c["holders"],
@@ -621,6 +627,23 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     elapsed = (datetime.now() - started_at).total_seconds()
     logger.info("done in %.1fs | totals: %s | failures=%d", elapsed, totals, failures)
+
+    # Post-ingest watchlist scan — fan out scans for newly upserted
+    # record_ids against every active cografi watchlist item. Failures
+    # here are logged but never propagate; a busted watchlist row
+    # should not poison a successful ingest run.
+    if all_record_ids and not args.dry_run and not args.skip_watchlist_scan:
+        try:
+            from services.cografi_scanner_service import trigger_cografi_watchlist_scan
+            new_alerts = trigger_cografi_watchlist_scan(
+                all_record_ids,
+                source_type="ingest",
+                source_reference=str(args.issue) if args.issue else "all",
+            )
+            logger.info("post-ingest watchlist scan: %d new alerts", new_alerts)
+        except Exception:
+            logger.exception("post-ingest watchlist scan failed")
+
     return 0 if failures == 0 else 1
 
 
