@@ -282,33 +282,38 @@ def open_patent_watchlist_subtab(page) -> None:
 
 
 def open_patent_leads_subtab(page) -> None:
-    """Activate the Leads dashboard tab and the Patent leads sub-mode
-    (the leads tab has multiple registries; we want the patent-events
-    leads variant). Idempotent."""
-    page.evaluate("window.showDashboardTab && window.showDashboardTab('leads')")
-    page.wait_for_selector("#tab-content-leads:not(.hidden)", timeout=5000)
-    # The leads panel has its own internal mode toggle. The patent
-    # leads driver lazy-inits via window.initPatentLeads (or similar).
-    # Drive Alpine state to switch to the patent leads view.
+    """Activate the Opposition Radar dashboard tab and the Patent
+    leads sub-view.
+
+    The leads / opposition-radar panel lives under
+    ``#tab-content-opposition-radar`` (NOT ``tab-content-leads`` —
+    the JS tab name is ``'opposition-radar'``). Inside it, an
+    Alpine ``radarView`` switcher chooses between marka / tasarim
+    / patent / cografi. We drive radarView=patent and call the
+    JS-exposed ``loadPatentLeadsFeed()`` to fetch data without
+    needing a button click.
+    """
+    page.evaluate(
+        "window.showDashboardTab && window.showDashboardTab('opposition-radar')"
+    )
+    page.wait_for_selector(
+        "#tab-content-opposition-radar:not(.hidden)", timeout=5000,
+    )
     page.evaluate(
         """() => {
-            const root = document.getElementById('tab-content-leads');
+            const root = document.getElementById('tab-content-opposition-radar');
             if (root && window.Alpine && window.Alpine.$data) {
                 const data = window.Alpine.$data(root);
-                if (data && 'leadsRegistry' in data) {
-                    data.leadsRegistry = 'patent';
-                } else if (data && 'leadsMode' in data) {
-                    data.leadsMode = 'patent';
+                if (data && 'radarView' in data) {
+                    data.radarView = 'patent';
                 }
             }
-            if (typeof window.initPatentLeadsTab === 'function') {
-                window.initPatentLeadsTab();
-            } else if (typeof window.initPatentLeads === 'function') {
-                window.initPatentLeads();
+            if (typeof window.loadPatentLeadsFeed === 'function') {
+                window.loadPatentLeadsFeed();
             }
         }"""
     )
-    page.wait_for_timeout(500)
+    page.wait_for_timeout(1500)
 
 
 # ---------------------------------------------------------------------------
