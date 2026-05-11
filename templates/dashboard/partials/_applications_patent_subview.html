@@ -1,0 +1,253 @@
+<!-- ====================================================================
+     Applications: Patent sub-view
+     Mirrors the Marka + Tasarım list+form shell with patent-specific
+     fields:
+       - title    = invention_title (stored in brand_name column)
+       - classification = IPC codes (alphanumeric strings, e.g. "G06F",
+                         "A61K") in classification_codes
+       - details.patent_kind     = 'patent' | 'utility_model'
+       - details.abstract        = invention abstract (özet)
+       - details.claims          = patent claims (istemler)
+       - details.inventors       = list of inventor names
+     All IDs prefixed with `pa-` to keep ID namespaces isolated.
+     ==================================================================== -->
+
+<!-- ====== LIST VIEW ====== -->
+<div id="pa-list-view">
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6">
+        <div>
+            <h2 class="text-2xl font-bold flex items-center gap-3" style="color:var(--color-text-primary)"
+                x-text="t('applications.title')">Patent Başvuruları</h2>
+            <p class="mt-1" style="color:var(--color-text-muted)"
+               x-text="t('applications.patent_subtitle')">Patent ve faydalı model başvurularınızı yönetin</p>
+        </div>
+        <button onclick="showPatentApplicationForm()"
+                class="px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center gap-2 text-sm font-medium transition-colors btn-press min-h-[44px]">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+            </svg>
+            <span x-text="t('applications.new_application')">Yeni Başvuru</span>
+        </button>
+    </div>
+
+    <!-- Type Filter Tabs -->
+    <div class="flex items-center gap-2 mb-4 overflow-x-auto pb-1">
+        <span class="text-xs font-medium shrink-0" style="color:var(--color-text-muted)" x-text="t('applications.type_label')">Tip:</span>
+        <button onclick="filterPatentApplicationsByType(null)" id="pa-type-filter-all"
+                class="pa-type-filter-btn px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors bg-indigo-600 text-white">
+            <span x-text="t('applications.filter_all')">Tümü</span>
+        </button>
+        <button onclick="filterPatentApplicationsByType('registration')" id="pa-type-filter-registration"
+                class="pa-type-filter-btn px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors"
+                style="color:var(--color-text-muted);background:var(--color-bg-muted)">
+            <span x-text="t('applications.type_registration')">Tescil</span>
+        </button>
+        <button onclick="filterPatentApplicationsByType('appeal')" id="pa-type-filter-appeal"
+                class="pa-type-filter-btn px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors"
+                style="color:var(--color-text-muted);background:var(--color-bg-muted)">
+            <span x-text="t('applications.type_appeal')">İtiraz</span>
+        </button>
+        <button onclick="filterPatentApplicationsByType('renewal')" id="pa-type-filter-renewal"
+                class="pa-type-filter-btn px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors"
+                style="color:var(--color-text-muted);background:var(--color-bg-muted)">
+            <span x-text="t('applications.type_renewal')">Yenileme</span>
+        </button>
+    </div>
+
+    <!-- Status Filter Tabs -->
+    <div class="flex items-center gap-2 mb-4 overflow-x-auto pb-1">
+        <span class="text-xs font-medium shrink-0" style="color:var(--color-text-muted)" x-text="t('applications.status_label')">Durum:</span>
+        <button onclick="filterPatentApplications(null)" id="pa-filter-all"
+                class="pa-filter-btn px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors bg-indigo-600 text-white">
+            <span x-text="t('applications.filter_all')">Tümü</span>
+        </button>
+        <button onclick="filterPatentApplications('draft')" id="pa-filter-draft"
+                class="pa-filter-btn px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors"
+                style="color:var(--color-text-muted);background:var(--color-bg-muted)">
+            <span x-text="t('applications.status_draft')">Taslak</span>
+        </button>
+        <button onclick="filterPatentApplications('submitted')" id="pa-filter-submitted"
+                class="pa-filter-btn px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors"
+                style="color:var(--color-text-muted);background:var(--color-bg-muted)">
+            <span x-text="t('applications.status_submitted')">Gönderildi</span>
+        </button>
+        <button onclick="filterPatentApplications('under_review')" id="pa-filter-under_review"
+                class="pa-filter-btn px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors"
+                style="color:var(--color-text-muted);background:var(--color-bg-muted)">
+            <span x-text="t('applications.status_under_review')">İnceleniyor</span>
+        </button>
+        <button onclick="filterPatentApplications('completed')" id="pa-filter-completed"
+                class="pa-filter-btn px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors"
+                style="color:var(--color-text-muted);background:var(--color-bg-muted)">
+            <span x-text="t('applications.status_completed')">Tamamlandı</span>
+        </button>
+    </div>
+
+    <!-- Loading -->
+    <div id="pa-list-loading" class="text-center py-16 hidden">
+        <div class="space-y-3 max-w-2xl mx-auto mb-6">
+            <div class="skeleton h-20 rounded-xl"></div>
+            <div class="skeleton h-20 rounded-xl"></div>
+        </div>
+        <p style="color:var(--color-text-faint)" x-text="t('applications.loading')">Başvurular yükleniyor...</p>
+    </div>
+
+    <!-- Empty State -->
+    <div id="pa-list-empty" class="hidden text-center py-16">
+        <svg class="mx-auto h-12 w-12 mb-4" style="color:var(--color-text-faint)" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+        </svg>
+        <p class="mb-1" style="color:var(--color-text-faint)" x-text="t('applications.patent_empty')">Henüz patent başvurusu oluşturulmadı.</p>
+        <p class="text-sm mb-4" style="color:var(--color-text-faint)" x-text="t('applications.patent_empty_hint')">Yeni başvuru için butonu kullanın.</p>
+        <button onclick="showPatentApplicationForm()"
+                class="px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg inline-flex items-center gap-2 text-sm font-medium transition-colors btn-press">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+            </svg>
+            <span x-text="t('applications.new_application')">Yeni Başvuru</span>
+        </button>
+    </div>
+
+    <!-- Application Cards List -->
+    <div id="pa-list" class="space-y-3"></div>
+
+    <!-- Pagination -->
+    <div id="pa-pagination" class="hidden flex items-center justify-center gap-4 mt-6"></div>
+</div>
+
+<!-- ====== FORM VIEW ====== -->
+<div id="pa-form-view" class="hidden">
+    <!-- Back button -->
+    <button onclick="showPatentApplicationsList()" class="flex items-center gap-2 mb-4 text-sm font-medium btn-press" style="color:var(--color-text-muted)">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+        <span x-text="t('applications.back_to_list')">Listeye Dön</span>
+    </button>
+
+    <div class="rounded-xl p-6 sm:p-8 space-y-8" style="background:var(--color-bg-card);border:1px solid var(--color-border)">
+        <div>
+            <h3 id="pa-form-title" class="text-xl font-bold mb-1" style="color:var(--color-text-primary)"
+                x-text="t('applications.patent_form_title')">Yeni Patent Başvurusu</h3>
+            <p id="pa-form-subtitle" class="text-sm" style="color:var(--color-text-muted)"
+               x-text="t('applications.patent_form_subtitle')">Bilgileri doldurun — uzmanlarımız TURKPATENT'e patent veya faydalı model başvurusu yapacaktır.</p>
+        </div>
+
+        <input type="hidden" id="pa-form-id" value="">
+
+        <!-- Section 1: Applicant Info -->
+        <div>
+            <h4 class="text-sm font-semibold uppercase tracking-wider mb-4 flex items-center gap-2" style="color:var(--color-text-muted)">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                <span x-text="t('applications.section_applicant')">Başvuru Sahibi Bilgileri</span>
+            </h4>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('applications.full_name')">Ad Soyad / Ünvan</label>
+                    <input type="text" id="pa-applicant-name" class="w-full rounded-lg px-3 py-2.5 text-sm" style="background:var(--color-bg-input);border:1px solid var(--color-border);color:var(--color-text-primary)" :placeholder="t('applications.full_name_ph')">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('applications.id_type')">Kimlik Tipi</label>
+                    <select id="pa-applicant-id-type" class="w-full rounded-lg px-3 py-2.5 text-sm" style="background:var(--color-bg-input);border:1px solid var(--color-border);color:var(--color-text-primary)">
+                        <option value="tc_kimlik" x-text="t('applications.tc_kimlik')">TC Kimlik No</option>
+                        <option value="vergi_no" x-text="t('applications.vergi_no')">Vergi No</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('applications.id_no')">TC Kimlik / Vergi No</label>
+                    <input type="text" id="pa-applicant-id-no" class="w-full rounded-lg px-3 py-2.5 text-sm" style="background:var(--color-bg-input);border:1px solid var(--color-border);color:var(--color-text-primary)" :placeholder="t('applications.id_no_ph')">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('applications.phone')">Telefon</label>
+                    <input type="tel" id="pa-applicant-phone" class="w-full rounded-lg px-3 py-2.5 text-sm" style="background:var(--color-bg-input);border:1px solid var(--color-border);color:var(--color-text-primary)" placeholder="+90 5XX XXX XXXX">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('applications.email')">E-posta</label>
+                    <input type="email" id="pa-applicant-email" class="w-full rounded-lg px-3 py-2.5 text-sm" style="background:var(--color-bg-input);border:1px solid var(--color-border);color:var(--color-text-primary)" :placeholder="t('applications.email_ph')">
+                </div>
+                <div class="sm:col-span-2">
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('applications.address')">Adres</label>
+                    <textarea id="pa-applicant-address" rows="2" class="w-full rounded-lg px-3 py-2.5 text-sm" style="background:var(--color-bg-input);border:1px solid var(--color-border);color:var(--color-text-primary)" :placeholder="t('applications.address_ph')"></textarea>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 2: Patent Info -->
+        <div>
+            <h4 class="text-sm font-semibold uppercase tracking-wider mb-4 flex items-center gap-2" style="color:var(--color-text-muted)">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+                <span x-text="t('applications.section_patent_info')">Patent Bilgileri</span>
+            </h4>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="sm:col-span-2">
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('applications.invention_title')">Buluş Başlığı</label>
+                    <input type="text" id="pa-invention-title" class="w-full rounded-lg px-3 py-2.5 text-sm" style="background:var(--color-bg-input);border:1px solid var(--color-border);color:var(--color-text-primary)" :placeholder="t('applications.invention_title_ph')" required>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('applications.application_type')">Başvuru Tipi</label>
+                    <select id="pa-application-type" class="w-full rounded-lg px-3 py-2.5 text-sm" style="background:var(--color-bg-input);border:1px solid var(--color-border);color:var(--color-text-primary)">
+                        <option value="registration" x-text="t('applications.type_registration')">Tescil</option>
+                        <option value="appeal" x-text="t('applications.type_appeal')">İtiraz</option>
+                        <option value="renewal" x-text="t('applications.type_renewal')">Yenileme</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('applications.patent_kind')">Patent Tipi</label>
+                    <select id="pa-patent-kind" class="w-full rounded-lg px-3 py-2.5 text-sm" style="background:var(--color-bg-input);border:1px solid var(--color-border);color:var(--color-text-primary)">
+                        <option value="patent" x-text="t('applications.patent_kind_patent')">Patent</option>
+                        <option value="utility_model" x-text="t('applications.patent_kind_utility_model')">Faydalı Model</option>
+                    </select>
+                </div>
+                <div class="sm:col-span-2">
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('applications.ipc_classes')">IPC Sınıfları</label>
+                    <div id="pa-ipc-classes-container" class="flex flex-wrap gap-2 p-3 rounded-lg min-h-[44px]" style="background:var(--color-bg-input);border:1px solid var(--color-border)">
+                        <!-- IPC code chips rendered by JS -->
+                    </div>
+                    <div class="flex items-center gap-2 mt-2">
+                        <input type="text" id="pa-ipc-class-input" maxlength="20"
+                               class="rounded-lg px-3 py-2 text-sm flex-1 sm:flex-none"
+                               style="background:var(--color-bg-input);border:1px solid var(--color-border);color:var(--color-text-primary);min-width:140px"
+                               :placeholder="t('applications.ipc_class_ph')"
+                               onkeydown="if(event.key==='Enter'){event.preventDefault(); addPatentIpcClass();}">
+                        <button onclick="addPatentIpcClass()" class="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium btn-press" x-text="t('applications.add_class')">Ekle</button>
+                    </div>
+                </div>
+                <div class="sm:col-span-2">
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('applications.abstract')">Özet</label>
+                    <textarea id="pa-abstract" rows="3" class="w-full rounded-lg px-3 py-2.5 text-sm" style="background:var(--color-bg-input);border:1px solid var(--color-border);color:var(--color-text-primary)" :placeholder="t('applications.abstract_ph')"></textarea>
+                </div>
+                <div class="sm:col-span-2">
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('applications.claims')">İstemler</label>
+                    <textarea id="pa-claims" rows="4" class="w-full rounded-lg px-3 py-2.5 text-sm" style="background:var(--color-bg-input);border:1px solid var(--color-border);color:var(--color-text-primary)" :placeholder="t('applications.claims_ph')"></textarea>
+                </div>
+                <div class="sm:col-span-2">
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('applications.inventors')">Mucitler</label>
+                    <input type="text" id="pa-inventors" class="w-full rounded-lg px-3 py-2.5 text-sm" style="background:var(--color-bg-input);border:1px solid var(--color-border);color:var(--color-text-primary)" :placeholder="t('applications.inventors_ph')">
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 3: Notes -->
+        <div>
+            <h4 class="text-sm font-semibold uppercase tracking-wider mb-4 flex items-center gap-2" style="color:var(--color-text-muted)">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                <span x-text="t('applications.section_notes')">Notlar</span>
+            </h4>
+            <textarea id="pa-notes" rows="3" class="w-full rounded-lg px-3 py-2.5 text-sm" style="background:var(--color-bg-input);border:1px solid var(--color-border);color:var(--color-text-primary)" :placeholder="t('applications.notes_ph')"></textarea>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="flex items-center justify-end gap-3 pt-4" style="border-top:1px solid var(--color-border)">
+            <button onclick="showPatentApplicationsList()" class="px-4 py-2.5 rounded-lg text-sm font-medium btn-press" style="color:var(--color-text-secondary);background:var(--color-bg-muted)" x-text="t('applications.cancel')">İptal</button>
+            <button onclick="savePatentApplication('draft')" id="pa-btn-save-draft"
+                    class="px-4 py-2.5 rounded-lg text-sm font-medium text-indigo-600 btn-press flex items-center gap-2" style="background:rgba(99,102,241,0.1)">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>
+                <span x-text="t('applications.save_draft')">Taslak Kaydet</span>
+            </button>
+            <button onclick="submitPatentApplication()" id="pa-btn-submit"
+                    class="px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium btn-press flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
+                <span x-text="t('applications.submit')">Başvuruyu Gönder</span>
+            </button>
+        </div>
+    </div>
+</div>

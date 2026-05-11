@@ -1,11 +1,12 @@
 /**
  * Patent leads driver — fed by /api/v1/patent-leads.
  *
- * Hooks into the existing Opposition Radar mode toggle as the 6th
- * mode (`patent`). Surfaces actionable events from patent_events as
- * a paginated list with category + holder + watchlist-scope filters.
+ * Powers the Patent registry of Opposition Radar. Surfaces actionable
+ * events from patent_events as a paginated list with category + holder
+ * + watchlist-scope filters.
  *
- * Categories: lapse / transfer / license / rejected.
+ * Categories: lapse / transfer / license / rejected (chip strip wired
+ * via window.switchPatentLeadsCategory).
  * Watchlist scope (optional) restricts to events on patents whose
  * holder matches the user's active 'holder' watchlist rows.
  */
@@ -238,8 +239,33 @@
       });
   }
 
-  // Public entry — called by switchRadarMode('patent') in api.js
+  // Public entry — called by the Patent registry x-init / $watch in _leads_panel.html
   window.loadPatentLeadsFeed = load;
+
+  // Sub-category switcher — mirrors switchRadarMode for the Marka chips.
+  // Wired up via inline onclick handlers on the chip strip in _leads_panel.html.
+  var PATENT_CATS = {
+    lapse:    "patent-cat-lapse",
+    transfer: "patent-cat-transfer",
+    license:  "patent-cat-license",
+    rejected: "patent-cat-rejected",
+  };
+  window.switchPatentLeadsCategory = function (cat) {
+    if (!PATENT_CATS.hasOwnProperty(cat)) return;
+    state.category = cat;
+    Object.keys(PATENT_CATS).forEach(function (key) {
+      var btn = $(PATENT_CATS[key]);
+      if (!btn) return;
+      if (key === cat) {
+        btn.style.background = "var(--color-primary)";
+        btn.style.color = "white";
+      } else {
+        btn.style.background = "transparent";
+        btn.style.color = "var(--color-text-secondary)";
+      }
+    });
+    load(1);
+  };
 
   // ---------------------------------------------------------------
   // Wire-up
@@ -249,11 +275,6 @@
     if (state.initialized) return;
     state.initialized = true;
 
-    var catEl = $("patent-leads-category");
-    if (catEl) catEl.addEventListener("change", function () {
-      state.category = catEl.value || "lapse";
-      load(1);
-    });
     var scopeEl = $("patent-leads-watchlist-scope");
     if (scopeEl) scopeEl.addEventListener("change", function () {
       state.watchlistScoped = !!scopeEl.checked;

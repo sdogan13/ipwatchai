@@ -1,7 +1,69 @@
 <!-- ============================================ -->
 <!-- Tab: Applications (Basvurular)              -->
+<!-- Registry-first switcher mirrors Watchlist:
+       Marka | Tasarım | Patent | Coğrafi             -->
 <!-- ============================================ -->
-<div id="tab-content-applications" class="hidden max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+<div id="tab-content-applications"
+     x-data="{ applicationsView: (function () {
+         try {
+             var v = localStorage.getItem('applicationsView');
+             if (v === 'tasarim' || v === 'patent' || v === 'cografi') return v;
+         } catch (_) {}
+         return 'trademark';
+     })() }"
+     x-init="$watch('applicationsView', v => {
+                try { localStorage.setItem('applicationsView', v); } catch (_) {}
+                if (v === 'tasarim' && typeof window.initDesignApplicationsTab === 'function') {
+                    window.initDesignApplicationsTab();
+                }
+                if (v === 'patent' && typeof window.initPatentApplicationsTab === 'function') {
+                    window.initPatentApplicationsTab();
+                }
+                if (v === 'cografi' && typeof window.initCografiApplicationsTab === 'function') {
+                    window.initCografiApplicationsTab();
+                }
+            });
+            if (applicationsView === 'tasarim' && typeof window.initDesignApplicationsTab === 'function') {
+                window.initDesignApplicationsTab();
+            }
+            if (applicationsView === 'patent' && typeof window.initPatentApplicationsTab === 'function') {
+                window.initPatentApplicationsTab();
+            }
+            if (applicationsView === 'cografi' && typeof window.initCografiApplicationsTab === 'function') {
+                window.initCografiApplicationsTab();
+            }"
+     class="hidden max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+    <!-- Registry switcher -->
+    <div class="mb-5 inline-flex rounded-xl p-1"
+         style="background:var(--color-bg-muted);border:1px solid var(--color-border)">
+        <button type="button" @click="applicationsView = 'trademark'"
+                class="px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                :class="applicationsView === 'trademark' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
+                :style="applicationsView === 'trademark' ? '' : 'color:var(--color-text-muted)'"
+                x-text="t('applications.view_trademark')">Marka</button>
+        <button type="button"
+                @click="applicationsView = 'tasarim'; if (typeof window.initDesignApplicationsTab === 'function') window.initDesignApplicationsTab();"
+                class="px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                :class="applicationsView === 'tasarim' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
+                :style="applicationsView === 'tasarim' ? '' : 'color:var(--color-text-muted)'"
+                x-text="t('applications.view_design')">Tasarım</button>
+        <button type="button"
+                @click="applicationsView = 'patent'; if (typeof window.initPatentApplicationsTab === 'function') window.initPatentApplicationsTab();"
+                class="px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                :class="applicationsView === 'patent' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
+                :style="applicationsView === 'patent' ? '' : 'color:var(--color-text-muted)'"
+                x-text="t('applications.view_patent')">Patent</button>
+        <button type="button"
+                @click="applicationsView = 'cografi'; if (typeof window.initCografiApplicationsTab === 'function') window.initCografiApplicationsTab();"
+                class="px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                :class="applicationsView === 'cografi' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
+                :style="applicationsView === 'cografi' ? '' : 'color:var(--color-text-muted)'"
+                x-text="t('applications.view_cografi')">Coğrafi</button>
+    </div>
+
+    <!-- MARKA REGISTRY — existing Applications content (list + form views) -->
+    <div x-show="applicationsView === 'trademark'" x-cloak>
 
     <!-- ====== LIST VIEW ====== -->
     <div id="applications-list-view">
@@ -302,5 +364,22 @@
                 </button>
             </div>
         </div>
+    </div>
+
+    </div> <!-- end marka registry (x-show='trademark') -->
+
+    <!-- TASARIM REGISTRY — design applications workflow (Phase 1) -->
+    <div x-show="applicationsView === 'tasarim'" x-cloak>
+        {% include 'dashboard/partials/_applications_design_subview.html' %}
+    </div>
+
+    <!-- PATENT REGISTRY — patent applications workflow (Phase 2) -->
+    <div x-show="applicationsView === 'patent'" x-cloak>
+        {% include 'dashboard/partials/_applications_patent_subview.html' %}
+    </div>
+
+    <!-- COĞRAFİ REGISTRY — GI applications workflow (Phase 3) -->
+    <div x-show="applicationsView === 'cografi'" x-cloak>
+        {% include 'dashboard/partials/_applications_cografi_subview.html' %}
     </div>
 </div>

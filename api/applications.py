@@ -60,15 +60,21 @@ async def create_application(
 async def list_applications(
     status: Optional[str] = Query(None, description="Filter by status"),
     application_type: Optional[str] = Query(None, description="Filter by type: registration, appeal, renewal"),
+    registry: Optional[str] = Query(
+        None,
+        pattern=r'^(trademark|design|patent|cografi)$',
+        description="Filter by registry. Defaults to 'trademark' when omitted.",
+    ),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     user: CurrentUser = Depends(get_current_user),
 ):
-    """List applications for the user's organization."""
+    """List applications for the user's organization, filtered by registry."""
     return await list_applications_data(
         organization_id=user.organization_id,
         status=status,
         application_type=application_type,
+        registry_kind=registry,
         page=page,
         page_size=page_size,
     )

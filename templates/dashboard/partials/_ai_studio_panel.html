@@ -1,7 +1,44 @@
 <!-- ============================================ -->
 <!-- Tab: AI Studio (Name Lab + Logo Studio)      -->
+<!-- Registry-first switcher mirrors Watchlist:
+       Marka | Tasarım | Patent | Coğrafi             -->
 <!-- ============================================ -->
-<div id="tab-content-ai-studio" class="hidden max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+<div id="tab-content-ai-studio"
+     x-data="{ studioView: (function () {
+         try {
+             var v = localStorage.getItem('studioView');
+             if (v === 'tasarim' || v === 'patent') return v;
+         } catch (_) {}
+         return 'trademark';
+     })() }"
+     x-init="$watch('studioView', v => { try { localStorage.setItem('studioView', v); } catch (_) {} })"
+     class="hidden max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+    <!-- Registry switcher: Marka | Tasarım | Patent | Coğrafi
+         Same pattern as the Watchlist tab. -->
+    <div class="mb-5 inline-flex rounded-xl p-1"
+         style="background:var(--color-bg-muted);border:1px solid var(--color-border)">
+        <button type="button" @click="studioView = 'trademark'"
+                class="px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                :class="studioView === 'trademark' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
+                :style="studioView === 'trademark' ? '' : 'color:var(--color-text-muted)'"
+                x-text="t('studio.view_trademark')">Marka</button>
+        <button type="button" @click="studioView = 'tasarim'"
+                class="px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                :class="studioView === 'tasarim' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
+                :style="studioView === 'tasarim' ? '' : 'color:var(--color-text-muted)'"
+                x-text="t('studio.view_design')">Tasarım</button>
+        <button type="button" @click="studioView = 'patent'"
+                class="px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                :class="studioView === 'patent' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
+                :style="studioView === 'patent' ? '' : 'color:var(--color-text-muted)'"
+                x-text="t('studio.view_patent')">Patent</button>
+    </div>
+
+    <!-- ===========================================
+         MARKA REGISTRY — Name Lab + Logo Studio
+         =========================================== -->
+    <div x-show="studioView === 'trademark'" x-cloak>
     <section class="studio-shell">
         <header class="studio-header">
             <div class="min-w-0">
@@ -75,6 +112,23 @@
                         </div>
 
                         <div class="studio-field">
+                            <label for="studio-name-language" x-text="t('studio.name_language')">Name Language</label>
+                            <select id="studio-name-language" class="studio-input">
+                                <option value="mixed" selected x-text="t('studio.name_language_mixed')">Turkish + English</option>
+                                <option value="tr" x-text="t('studio.name_language_tr')">Turkish</option>
+                                <option value="en" x-text="t('studio.name_language_en')">English</option>
+                                <option value="de" x-text="t('studio.name_language_de')">German</option>
+                                <option value="it" x-text="t('studio.name_language_it')">Italian</option>
+                                <option value="fr" x-text="t('studio.name_language_fr')">French</option>
+                                <option value="ar" x-text="t('studio.name_language_ar')">Arabic</option>
+                                <option value="ku" x-text="t('studio.name_language_ku')">Kurdish</option>
+                                <option value="fa" x-text="t('studio.name_language_fa')">Persian</option>
+                                <option value="zh" x-text="t('studio.name_language_zh')">Chinese</option>
+                                <option value="ru" x-text="t('studio.name_language_ru')">Russian</option>
+                            </select>
+                        </div>
+
+                        <div class="studio-field">
                             <label for="studio-name-style" x-text="t('studio.style')">Style</label>
                             <select id="studio-name-style" class="studio-input">
                                 <option value="modern" x-text="t('studio.style_modern')">Modern</option>
@@ -110,7 +164,9 @@
                             <div class="studio-result-skeleton"><div class="skeleton h-5 w-3/4"></div><div class="skeleton h-3 w-1/3"></div><div class="skeleton h-3 w-1/2"></div></div>
                             <div class="studio-result-skeleton"><div class="skeleton h-5 w-3/5"></div><div class="skeleton h-3 w-2/5"></div><div class="skeleton h-3 w-3/4"></div></div>
                         </div>
-                        <p class="studio-state-note" x-text="t('studio.name_loading')">AI is generating safe name alternatives...</p>
+                        <p class="studio-state-note studio-loading-note">
+                            <span x-text="t('studio.name_loading')">AI is generating safe name alternatives</span><span class="studio-loading-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
+                        </p>
                     </div>
 
                     <div id="studio-name-results" class="hidden studio-results-area">
@@ -236,7 +292,9 @@
                             <div class="studio-logo-skeleton"><div class="skeleton aspect-square"></div><div class="p-4 space-y-2"><div class="skeleton h-4 w-1/2"></div><div class="skeleton h-3 w-2/3"></div></div></div>
                             <div class="studio-logo-skeleton"><div class="skeleton aspect-square"></div><div class="p-4 space-y-2"><div class="skeleton h-4 w-3/5"></div><div class="skeleton h-3 w-3/4"></div></div></div>
                         </div>
-                        <p class="studio-state-note" x-text="t('studio.logo_loading')">AI is generating logo variations...</p>
+                        <p class="studio-state-note studio-loading-note">
+                            <span x-text="t('studio.logo_loading')">AI is generating logo variations</span><span class="studio-loading-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
+                        </p>
                     </div>
 
                     <div id="studio-logo-results" class="hidden studio-results-area">
@@ -306,4 +364,48 @@
             </aside>
         </div>
     </section>
+    </div> <!-- end marka registry (x-show='trademark') -->
+
+    <!-- ============================================ -->
+    <!-- TASARIM REGISTRY — placeholder                -->
+    <!-- ============================================ -->
+    <div x-show="studioView === 'tasarim'" x-cloak class="py-16">
+        <div class="rounded-2xl p-8 max-w-lg mx-auto shadow-sm text-center"
+             style="background:var(--color-bg-card);border:1px solid var(--color-border)">
+            <div class="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"
+                 style="background:var(--color-bg-muted)">
+                <svg class="h-8 w-8" style="color:var(--color-text-muted)" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+                </svg>
+            </div>
+            <h3 class="text-xl font-semibold mb-2"
+                style="color:var(--color-text-primary)"
+                x-text="t('studio.coming_soon_title')">Yakında</h3>
+            <p class="text-sm" style="color:var(--color-text-muted)"
+               x-text="t('studio.coming_soon_tasarim')">Tasarım Stüdyosu yol haritamızda.</p>
+        </div>
+    </div>
+
+    <!-- ============================================ -->
+    <!-- PATENT REGISTRY — placeholder                 -->
+    <!-- ============================================ -->
+    <div x-show="studioView === 'patent'" x-cloak class="py-16">
+        <div class="rounded-2xl p-8 max-w-lg mx-auto shadow-sm text-center"
+             style="background:var(--color-bg-card);border:1px solid var(--color-border)">
+            <div class="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"
+                 style="background:var(--color-bg-muted)">
+                <svg class="h-8 w-8" style="color:var(--color-text-muted)" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                </svg>
+            </div>
+            <h3 class="text-xl font-semibold mb-2"
+                style="color:var(--color-text-primary)"
+                x-text="t('studio.coming_soon_title')">Yakında</h3>
+            <p class="text-sm" style="color:var(--color-text-muted)"
+               x-text="t('studio.coming_soon_patent')">Patent Stüdyosu yol haritamızda.</p>
+        </div>
+    </div>
+
 </div>

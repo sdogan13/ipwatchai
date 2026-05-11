@@ -11,7 +11,6 @@ LOCALES_DIR = Path(__file__).resolve().parent.parent / "static" / "locales"
 SUPPORTED_LANGUAGES = ("en", "tr", "ar")
 EXPECTED_KEYS = (
     "mode_patent", "title", "subtitle",
-    "category_label",
     "cat_lapse", "cat_transfer", "cat_license", "cat_rejected",
     "scope_watchlist", "holder_placeholder", "refresh",
     "loading", "empty", "error", "upgrade_required",

@@ -1,0 +1,236 @@
+<!-- ====================================================================
+     Applications: Coğrafi (Geographical Indication) sub-view
+     GI applications differ from TM / design / patent: there's no
+     classification system equivalent (no NICE / Locarno / IPC). Each
+     GI is tied to a region and a specific production method.
+     Shape:
+       - title   = gi_name (stored in brand_name column)
+       - classification_codes = []  (intentionally empty for GI)
+       - details.gi_type         = 'mense' | 'mahrec' (origin / designation)
+       - details.region          = geographic region name
+       - details.product_type    = product category (e.g. cheese, olive oil)
+       - details.production_method = traditional production description
+     All IDs prefixed with `ca-` to keep namespaces isolated.
+     ==================================================================== -->
+
+<!-- ====== LIST VIEW ====== -->
+<div id="ca-list-view">
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6">
+        <div>
+            <h2 class="text-2xl font-bold flex items-center gap-3" style="color:var(--color-text-primary)"
+                x-text="t('applications.title')">Coğrafi İşaret Başvuruları</h2>
+            <p class="mt-1" style="color:var(--color-text-muted)"
+               x-text="t('applications.cografi_subtitle')">Coğrafi işaret tescil başvurularınızı yönetin</p>
+        </div>
+        <button onclick="showCografiApplicationForm()"
+                class="px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center gap-2 text-sm font-medium transition-colors btn-press min-h-[44px]">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+            </svg>
+            <span x-text="t('applications.new_application')">Yeni Başvuru</span>
+        </button>
+    </div>
+
+    <!-- Type Filter Tabs -->
+    <div class="flex items-center gap-2 mb-4 overflow-x-auto pb-1">
+        <span class="text-xs font-medium shrink-0" style="color:var(--color-text-muted)" x-text="t('applications.type_label')">Tip:</span>
+        <button onclick="filterCografiApplicationsByType(null)" id="ca-type-filter-all"
+                class="ca-type-filter-btn px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors bg-indigo-600 text-white">
+            <span x-text="t('applications.filter_all')">Tümü</span>
+        </button>
+        <button onclick="filterCografiApplicationsByType('registration')" id="ca-type-filter-registration"
+                class="ca-type-filter-btn px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors"
+                style="color:var(--color-text-muted);background:var(--color-bg-muted)">
+            <span x-text="t('applications.type_registration')">Tescil</span>
+        </button>
+        <button onclick="filterCografiApplicationsByType('appeal')" id="ca-type-filter-appeal"
+                class="ca-type-filter-btn px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors"
+                style="color:var(--color-text-muted);background:var(--color-bg-muted)">
+            <span x-text="t('applications.type_appeal')">İtiraz</span>
+        </button>
+        <button onclick="filterCografiApplicationsByType('renewal')" id="ca-type-filter-renewal"
+                class="ca-type-filter-btn px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors"
+                style="color:var(--color-text-muted);background:var(--color-bg-muted)">
+            <span x-text="t('applications.type_renewal')">Yenileme</span>
+        </button>
+    </div>
+
+    <!-- Status Filter Tabs -->
+    <div class="flex items-center gap-2 mb-4 overflow-x-auto pb-1">
+        <span class="text-xs font-medium shrink-0" style="color:var(--color-text-muted)" x-text="t('applications.status_label')">Durum:</span>
+        <button onclick="filterCografiApplications(null)" id="ca-filter-all"
+                class="ca-filter-btn px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors bg-indigo-600 text-white">
+            <span x-text="t('applications.filter_all')">Tümü</span>
+        </button>
+        <button onclick="filterCografiApplications('draft')" id="ca-filter-draft"
+                class="ca-filter-btn px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors"
+                style="color:var(--color-text-muted);background:var(--color-bg-muted)">
+            <span x-text="t('applications.status_draft')">Taslak</span>
+        </button>
+        <button onclick="filterCografiApplications('submitted')" id="ca-filter-submitted"
+                class="ca-filter-btn px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors"
+                style="color:var(--color-text-muted);background:var(--color-bg-muted)">
+            <span x-text="t('applications.status_submitted')">Gönderildi</span>
+        </button>
+        <button onclick="filterCografiApplications('under_review')" id="ca-filter-under_review"
+                class="ca-filter-btn px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors"
+                style="color:var(--color-text-muted);background:var(--color-bg-muted)">
+            <span x-text="t('applications.status_under_review')">İnceleniyor</span>
+        </button>
+        <button onclick="filterCografiApplications('completed')" id="ca-filter-completed"
+                class="ca-filter-btn px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors"
+                style="color:var(--color-text-muted);background:var(--color-bg-muted)">
+            <span x-text="t('applications.status_completed')">Tamamlandı</span>
+        </button>
+    </div>
+
+    <!-- Loading -->
+    <div id="ca-list-loading" class="text-center py-16 hidden">
+        <div class="space-y-3 max-w-2xl mx-auto mb-6">
+            <div class="skeleton h-20 rounded-xl"></div>
+            <div class="skeleton h-20 rounded-xl"></div>
+        </div>
+        <p style="color:var(--color-text-faint)" x-text="t('applications.loading')">Başvurular yükleniyor...</p>
+    </div>
+
+    <!-- Empty State -->
+    <div id="ca-list-empty" class="hidden text-center py-16">
+        <svg class="mx-auto h-12 w-12 mb-4" style="color:var(--color-text-faint)" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        <p class="mb-1" style="color:var(--color-text-faint)" x-text="t('applications.cografi_empty')">Henüz coğrafi işaret başvurusu oluşturulmadı.</p>
+        <p class="text-sm mb-4" style="color:var(--color-text-faint)" x-text="t('applications.cografi_empty_hint')">Yeni başvuru için butonu kullanın.</p>
+        <button onclick="showCografiApplicationForm()"
+                class="px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg inline-flex items-center gap-2 text-sm font-medium transition-colors btn-press">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+            </svg>
+            <span x-text="t('applications.new_application')">Yeni Başvuru</span>
+        </button>
+    </div>
+
+    <div id="ca-list" class="space-y-3"></div>
+    <div id="ca-pagination" class="hidden flex items-center justify-center gap-4 mt-6"></div>
+</div>
+
+<!-- ====== FORM VIEW ====== -->
+<div id="ca-form-view" class="hidden">
+    <button onclick="showCografiApplicationsList()" class="flex items-center gap-2 mb-4 text-sm font-medium btn-press" style="color:var(--color-text-muted)">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+        <span x-text="t('applications.back_to_list')">Listeye Dön</span>
+    </button>
+
+    <div class="rounded-xl p-6 sm:p-8 space-y-8" style="background:var(--color-bg-card);border:1px solid var(--color-border)">
+        <div>
+            <h3 id="ca-form-title" class="text-xl font-bold mb-1" style="color:var(--color-text-primary)"
+                x-text="t('applications.cografi_form_title')">Yeni Coğrafi İşaret Tescil Başvurusu</h3>
+            <p id="ca-form-subtitle" class="text-sm" style="color:var(--color-text-muted)"
+               x-text="t('applications.cografi_form_subtitle')">Bilgileri doldurun — uzmanlarımız TURKPATENT'e coğrafi işaret başvurusu yapacaktır.</p>
+        </div>
+
+        <input type="hidden" id="ca-form-id" value="">
+
+        <!-- Section 1: Applicant Info -->
+        <div>
+            <h4 class="text-sm font-semibold uppercase tracking-wider mb-4 flex items-center gap-2" style="color:var(--color-text-muted)">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                <span x-text="t('applications.section_applicant')">Başvuru Sahibi Bilgileri</span>
+            </h4>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('applications.full_name')">Ad Soyad / Ünvan</label>
+                    <input type="text" id="ca-applicant-name" class="w-full rounded-lg px-3 py-2.5 text-sm" style="background:var(--color-bg-input);border:1px solid var(--color-border);color:var(--color-text-primary)" :placeholder="t('applications.full_name_ph')">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('applications.id_type')">Kimlik Tipi</label>
+                    <select id="ca-applicant-id-type" class="w-full rounded-lg px-3 py-2.5 text-sm" style="background:var(--color-bg-input);border:1px solid var(--color-border);color:var(--color-text-primary)">
+                        <option value="tc_kimlik" x-text="t('applications.tc_kimlik')">TC Kimlik No</option>
+                        <option value="vergi_no" x-text="t('applications.vergi_no')">Vergi No</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('applications.id_no')">TC Kimlik / Vergi No</label>
+                    <input type="text" id="ca-applicant-id-no" class="w-full rounded-lg px-3 py-2.5 text-sm" style="background:var(--color-bg-input);border:1px solid var(--color-border);color:var(--color-text-primary)" :placeholder="t('applications.id_no_ph')">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('applications.phone')">Telefon</label>
+                    <input type="tel" id="ca-applicant-phone" class="w-full rounded-lg px-3 py-2.5 text-sm" style="background:var(--color-bg-input);border:1px solid var(--color-border);color:var(--color-text-primary)" placeholder="+90 5XX XXX XXXX">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('applications.email')">E-posta</label>
+                    <input type="email" id="ca-applicant-email" class="w-full rounded-lg px-3 py-2.5 text-sm" style="background:var(--color-bg-input);border:1px solid var(--color-border);color:var(--color-text-primary)" :placeholder="t('applications.email_ph')">
+                </div>
+                <div class="sm:col-span-2">
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('applications.address')">Adres</label>
+                    <textarea id="ca-applicant-address" rows="2" class="w-full rounded-lg px-3 py-2.5 text-sm" style="background:var(--color-bg-input);border:1px solid var(--color-border);color:var(--color-text-primary)" :placeholder="t('applications.address_ph')"></textarea>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 2: GI Info -->
+        <div>
+            <h4 class="text-sm font-semibold uppercase tracking-wider mb-4 flex items-center gap-2" style="color:var(--color-text-muted)">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <span x-text="t('applications.section_cografi_info')">Coğrafi İşaret Bilgileri</span>
+            </h4>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('applications.gi_name')">Coğrafi İşaret Adı</label>
+                    <input type="text" id="ca-gi-name" class="w-full rounded-lg px-3 py-2.5 text-sm" style="background:var(--color-bg-input);border:1px solid var(--color-border);color:var(--color-text-primary)" :placeholder="t('applications.gi_name_ph')" required>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('applications.gi_type')">CI Türü</label>
+                    <select id="ca-gi-type" class="w-full rounded-lg px-3 py-2.5 text-sm" style="background:var(--color-bg-input);border:1px solid var(--color-border);color:var(--color-text-primary)">
+                        <option value="mense" x-text="t('applications.gi_type_mense')">Menşe Adı</option>
+                        <option value="mahrec" x-text="t('applications.gi_type_mahrec')">Mahreç İşareti</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('applications.application_type')">Başvuru Tipi</label>
+                    <select id="ca-application-type" class="w-full rounded-lg px-3 py-2.5 text-sm" style="background:var(--color-bg-input);border:1px solid var(--color-border);color:var(--color-text-primary)">
+                        <option value="registration" x-text="t('applications.type_registration')">Tescil</option>
+                        <option value="appeal" x-text="t('applications.type_appeal')">İtiraz</option>
+                        <option value="renewal" x-text="t('applications.type_renewal')">Yenileme</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('applications.gi_region')">Coğrafi Bölge</label>
+                    <input type="text" id="ca-region" class="w-full rounded-lg px-3 py-2.5 text-sm" style="background:var(--color-bg-input);border:1px solid var(--color-border);color:var(--color-text-primary)" :placeholder="t('applications.gi_region_ph')">
+                </div>
+                <div class="sm:col-span-2">
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('applications.gi_product_type')">Ürün Türü</label>
+                    <input type="text" id="ca-product-type" class="w-full rounded-lg px-3 py-2.5 text-sm" style="background:var(--color-bg-input);border:1px solid var(--color-border);color:var(--color-text-primary)" :placeholder="t('applications.gi_product_type_ph')">
+                </div>
+                <div class="sm:col-span-2">
+                    <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)" x-text="t('applications.gi_production_method')">Üretim Yöntemi / Geleneksel Yöntem</label>
+                    <textarea id="ca-production-method" rows="4" class="w-full rounded-lg px-3 py-2.5 text-sm" style="background:var(--color-bg-input);border:1px solid var(--color-border);color:var(--color-text-primary)" :placeholder="t('applications.gi_production_method_ph')"></textarea>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 3: Notes -->
+        <div>
+            <h4 class="text-sm font-semibold uppercase tracking-wider mb-4 flex items-center gap-2" style="color:var(--color-text-muted)">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                <span x-text="t('applications.section_notes')">Notlar</span>
+            </h4>
+            <textarea id="ca-notes" rows="3" class="w-full rounded-lg px-3 py-2.5 text-sm" style="background:var(--color-bg-input);border:1px solid var(--color-border);color:var(--color-text-primary)" :placeholder="t('applications.notes_ph')"></textarea>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="flex items-center justify-end gap-3 pt-4" style="border-top:1px solid var(--color-border)">
+            <button onclick="showCografiApplicationsList()" class="px-4 py-2.5 rounded-lg text-sm font-medium btn-press" style="color:var(--color-text-secondary);background:var(--color-bg-muted)" x-text="t('applications.cancel')">İptal</button>
+            <button onclick="saveCografiApplication('draft')" id="ca-btn-save-draft"
+                    class="px-4 py-2.5 rounded-lg text-sm font-medium text-indigo-600 btn-press flex items-center gap-2" style="background:rgba(99,102,241,0.1)">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>
+                <span x-text="t('applications.save_draft')">Taslak Kaydet</span>
+            </button>
+            <button onclick="submitCografiApplication()" id="ca-btn-submit"
+                    class="px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium btn-press flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
+                <span x-text="t('applications.submit')">Başvuruyu Gönder</span>
+            </button>
+        </div>
+    </div>
+</div>

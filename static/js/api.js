@@ -330,6 +330,8 @@ var currentTransferPage = 1;
 var currentBankruptcyPage = 1;
 var currentRadarMode = 'conflicts';
 
+// Sub-mode switcher within the Marka registry. Patent is now a registry-level
+// view handled by the Alpine x-data on #tab-content-opposition-radar.
 window.AppAPI.switchRadarMode = function (mode) {
     currentRadarMode = mode;
     var modes = {
@@ -337,8 +339,7 @@ window.AppAPI.switchRadarMode = function (mode) {
         renewals: { btn: 'radar-mode-renewals', section: 'radar-renewals-section' },
         cancellations: { btn: 'radar-mode-cancellations', section: 'radar-cancellations-section' },
         transfers: { btn: 'radar-mode-transfers', section: 'radar-transfers-section' },
-        bankruptcies: { btn: 'radar-mode-bankruptcies', section: 'radar-bankruptcies-section' },
-        patent: { btn: 'radar-mode-patent', section: 'radar-patent-section' }
+        bankruptcies: { btn: 'radar-mode-bankruptcies', section: 'radar-bankruptcies-section' }
     };
     Object.keys(modes).forEach(function (key) {
         var btn = document.getElementById(modes[key].btn);
@@ -364,10 +365,6 @@ window.AppAPI.switchRadarMode = function (mode) {
         loadTransferFeed(1);
     } else if (mode === 'bankruptcies') {
         loadBankruptcyFeed(1);
-    } else if (mode === 'patent') {
-        if (typeof window.loadPatentLeadsFeed === 'function') {
-            window.loadPatentLeadsFeed(1);
-        }
     }
 };
 
