@@ -1,0 +1,262 @@
+[
+  {
+    "index": 0,
+    "quizTitle": "Marka",
+    "question": "Menfaat sahiplerinin, bir markanın tescilinin başından itibaren hükümsüz sayılması için açtığı davada yetkili yer neresidir?",
+    "rightAnswer": {
+      "id": "C",
+      "text": "Fikri ve Sınai Haklar Hukuk Mahkemesi"
+    },
+    "existingDistractors": [
+      "Valilik tescil birimleri",
+      "Türk Patent ve Marka Kurumu",
+      "Tahkim Kurulu"
+    ],
+    "newOptionE": {
+      "id": "E",
+      "text": "Asliye Hukuk Mahkemesi",
+      "status": "unchecked",
+      "shortFeedback": "Genel görevli mahkeme asliye hukuk mahkemesi olsa da Kanunun 156. maddesi sınai mülkiyet uyuşmazlıkları için özel olarak Fikri ve Sınai Haklar Hukuk Mahkemesini görevli kılmıştır."
+    },
+    "verification": {
+      "whyEIsWrong": "Article 156 of Law 6769 explicitly designates the Fikri ve Sınai Haklar Hukuk Mahkemesi (FSHHM) as the competent court for industrial property disputes. Asliye Hukuk Mahkemesi is the general civil court, not the specialized IP court named by the statute.",
+      "devilsAdvocate": "Strongest defense: in judicial districts without a dedicated FSHHM, an Asliye Hukuk court is designated to hear FSHHM cases. Why this still fails: it hears them 'FSHHM sıfatıyla' (acting as FSHHM); the formal answer named by Art. 156 remains FSHHM, not Asliye Hukuk. The question asks for the named competent venue.",
+      "archetype": "wrong court (general vs. specialized)",
+      "confidence": "high"
+    }
+  },
+  {
+    "index": 706,
+    "quizTitle": "Marka",
+    "question": "Tescil ettiren, denetime ilişkin masrafları kimden talep edebilir?",
+    "rightAnswer": {
+      "id": "B",
+      "text": "Denetlenenlerden."
+    },
+    "existingDistractors": [
+      "Bağış toplama yoluyla halktan.",
+      "Sadece devlet bütçesinden.",
+      "Kurum'a yatırılan başvuru ücretlerinden."
+    ],
+    "newOptionE": {
+      "id": "E",
+      "text": "Tescil ettiren bu masrafları kendi bütçesinden karşılamak zorundadır, kimseden talep edemez.",
+      "status": "unchecked",
+      "shortFeedback": "Yönetmelik tescil ettirene denetim masraflarını denetlenenlerden talep etme hakkı tanımıştır; masrafları kendi bütçesinden karşılama zorunluluğu yoktur."
+    },
+    "verification": {
+      "whyEIsWrong": "The regulation expressly grants the registrant the right to recover audit costs from those being audited. Saying the registrant must cover costs themselves and cannot demand from anyone directly denies that legal right.",
+      "devilsAdvocate": "Strongest defense: in practice a registrant may pay first and recover later. Why this still fails: the question asks 'from whom can the registrant demand,' which is a legal-right question, not a cash-flow question. The right to demand exists.",
+      "archetype": "denies existence of a legal right",
+      "confidence": "high"
+    }
+  },
+  {
+    "index": 1,
+    "quizTitle": "Patent",
+    "question": "Patent başvurusu yayımlanmadan önce üçüncü kişiler tarafından incelenebilir mi?",
+    "rightAnswer": {
+      "id": "C",
+      "text": "Hayır, kural olarak yayımlanmamış başvurular sahibinin izni olmadan incelenemez."
+    },
+    "existingDistractors": [
+      "Evet, tüm başvurular Kuruma verildiği andan itibaren herkesin incelemesine açıktır.",
+      "Sadece yabancı patent ofisleri inceleyebilir.",
+      "Sadece üniversite öğretim üyeleri inceleyebilir."
+    ],
+    "newOptionE": {
+      "id": "E",
+      "text": "Evet, başvurudan itibaren 6 ay içinde Bültende kısa özet halinde yayımlanır ve herkes inceleyebilir.",
+      "status": "unchecked",
+      "shortFeedback": "Patent başvurularının kamuya duyurulması başvurudan itibaren ortalama 18 ay sonra yapılır; daha erken bir 6 aylık özet yayımı söz konusu değildir ve dosya bu süre içinde başvuru sahibinin yazılı izni olmaksızın incelenemez."
+    },
+    "verification": {
+      "whyEIsWrong": "Patent applications under Law 6769 are kept confidential and published in the Bulletin after roughly 18 months from filing (or priority date). There is no 6-month 'short summary' early publication mechanism. Until publication, third-party inspection requires written consent per Art. 102.",
+      "devilsAdvocate": "Strongest defense: the applicant may request early publication. Why this still fails: early publication is at the applicant's request, not an automatic 6-month rule; and it makes the application public, after which the question's premise ('yayımlanmadan önce') no longer applies. The option as written claims an automatic 6-month rule that doesn't exist.",
+      "archetype": "fabricated time window",
+      "confidence": "high"
+    }
+  },
+  {
+    "index": 361,
+    "quizTitle": "Patent",
+    "question": "Tasarım başvurusu kapsamında yer alan \"tarifname\" ile ilgili hangi ifade doğrudur?",
+    "rightAnswer": {
+      "id": "C",
+      "text": "İsteğe bağlı olarak sunulabilir."
+    },
+    "existingDistractors": [
+      "Görsel anlatımın yerini tutar.",
+      "En az 500 kelime olmalıdır.",
+      "Hazırlanması zorunlu bir belgedir."
+    ],
+    "newOptionE": {
+      "id": "E",
+      "text": "Yalnızca yetkili tasarım vekili tarafından hazırlanabilir.",
+      "status": "unchecked",
+      "shortFeedback": "Tarifname zaten isteğe bağlı bir belgedir; mevzuatta hazırlanmasını yalnızca vekile özgüleyen bir hüküm bulunmamaktadır, başvuru sahibi de hazırlayabilir."
+    },
+    "verification": {
+      "whyEIsWrong": "The regulation makes tarifname optional and imposes no restriction on who may author it. The applicant themselves may prepare it. Limiting authorship to a vekil is not in the rules.",
+      "devilsAdvocate": "Strongest defense: in practice, applicants often delegate to vekiller. Why this still fails: practice ≠ law. The option uses 'yalnızca' (only), which is an exclusivity claim with no statutory basis.",
+      "archetype": "false exclusivity claim",
+      "confidence": "high"
+    }
+  },
+  {
+    "index": 8,
+    "quizTitle": "Tasarım",
+    "question": "Bir tasarımın 'yeni' kabul edilebilmesi için hangi şartın gerçekleşmesi gerekir?",
+    "rightAnswer": {
+      "id": "B",
+      "text": "Başvuru tarihinden önce dünyanın herhangi bir yerinde kamuya sunulmamış olması."
+    },
+    "existingDistractors": [
+      "Diğer tasarımlardan çok farklı bir sanatsal değere sahip olması.",
+      "Bir bilgisayar programı tarafından üretilmiş olması.",
+      "Sadece Türkiye sınırları içinde daha önce görülmemiş olması."
+    ],
+    "newOptionE": {
+      "id": "E",
+      "text": "Başvurudan önceki son 5 yıl içinde dünyanın hiçbir yerinde kamuya sunulmamış olması.",
+      "status": "unchecked",
+      "shortFeedback": "Yenilik kriteri 5 yıl gibi belirli bir zaman penceresine değil, mutlak olarak değerlendirilir (Madde 56); tasarımın aynısının daha önce hiçbir zaman kamuya sunulmamış olması gerekir."
+    },
+    "verification": {
+      "whyEIsWrong": "Art. 56 of Law 6769 imposes an absolute (mutlak) novelty standard — the design must never have been disclosed anywhere, ever, prior to the filing/priority date. There is no rolling 5-year window.",
+      "devilsAdvocate": "Strongest defense: confusion with the 12-month grace period (m. 57) for the designer's own disclosure. Why this still fails: (a) the grace period is 12 months, not 5 years; (b) it covers only the designer's own disclosure, not all disclosures; (c) the option claims a 5-year window as the novelty standard itself, which is fabricated.",
+      "archetype": "fabricated time window (novelty)",
+      "confidence": "high"
+    }
+  },
+  {
+    "index": 461,
+    "quizTitle": "Tasarım",
+    "question": "Tasarımın gaspı durumunda, gerçek hak sahibi olduğunu iddia eden kişi tescilli tasarımın ilanından itibaren kaç yıl içinde dava açmalıdır?",
+    "rightAnswer": {
+      "id": "B",
+      "text": "3 yıl"
+    },
+    "existingDistractors": [
+      "10 yıl",
+      "2 yıl",
+      "1 yıl"
+    ],
+    "newOptionE": {
+      "id": "E",
+      "text": "5 yıl",
+      "status": "unchecked",
+      "shortFeedback": "Kanunun 71/3 maddesi gasp davasında hak düşürücü süreyi tescilli tasarımın yayımından itibaren 5 yıl değil 3 yıl olarak belirlemiştir."
+    },
+    "verification": {
+      "whyEIsWrong": "Art. 71/3 of Law 6769 sets the period as three years. Five years is not the statutory limit for this action.",
+      "devilsAdvocate": "Strongest defense: confusion with general civil zamanaşımı periods or with the 5-year period in some other IP contexts. Why this still fails: 71/3 is lex specialis and unambiguous — 3 years from publication of the registered design or from public disclosure of the unregistered design.",
+      "archetype": "numeric distractor (different year)",
+      "confidence": "high"
+    }
+  },
+  {
+    "index": 9,
+    "quizTitle": "Coğrafi İşaret",
+    "question": "Geleneksel bir adın 'geleneksel ürün adı' olarak tescil edilebilmesi için ilgili piyasada en az ne kadar süreyle kullanıldığının kanıtlanması gerekir?",
+    "rightAnswer": {
+      "id": "A",
+      "text": "30 yıl"
+    },
+    "existingDistractors": [
+      "Süre sınırı yoktur.",
+      "50 yıl",
+      "10 yıl"
+    ],
+    "newOptionE": {
+      "id": "E",
+      "text": "20 yıl",
+      "status": "unchecked",
+      "shortFeedback": "Kanunun 34/3 maddesi geleneksel ürün adı için asgari kullanım süresini 20 yıl değil en az 30 yıl olarak belirlemiştir."
+    },
+    "verification": {
+      "whyEIsWrong": "Art. 34/3 of Law 6769 requires at least thirty years of use for a name to be eligible as a 'geleneksel ürün adı.' Twenty years is below the statutory threshold.",
+      "devilsAdvocate": "Strongest defense: 20 years is the patent protection term — a student might cross-pollinate that figure. Why this still fails: patent protection term has nothing to do with geleneksel ürün adı; Art. 34/3 names 30 years specifically.",
+      "archetype": "numeric distractor (different duration)",
+      "confidence": "high"
+    }
+  },
+  {
+    "index": 427,
+    "quizTitle": "Coğrafi İşaret",
+    "question": "Geleneksel ürün adı başvurularında, coğrafi işaret başvurularından farklı olarak hangi bilgi genellikle aranmaz?",
+    "rightAnswer": {
+      "id": "C",
+      "text": "Coğrafi alanın sınırlarını tanımlayan harita."
+    },
+    "existingDistractors": [
+      "Üretim metodu.",
+      "Ürün tanımı.",
+      "Denetim biçimi."
+    ],
+    "newOptionE": {
+      "id": "E",
+      "text": "Ürünün hammadde özellikleri ve içeriği.",
+      "status": "unchecked",
+      "shortFeedback": "Ürünün hammadde özellikleri ve içeriği her iki başvuru türünde de aranan ortak bir gerekliliktir; iki başvuru arasındaki ayırt edici fark coğrafi sınırı gösteren haritadır."
+    },
+    "verification": {
+      "whyEIsWrong": "Both CI and geleneksel ürün adı applications require product specification including raw materials and content. This is shared, not CI-exclusive. Therefore it cannot be the thing 'not required' for geleneksel ürün adı.",
+      "devilsAdvocate": "Strongest defense: the level of detail required may differ. Why this still fails: differences in detail don't make hammadde/içerik info 'not generally required.' Both regulations expressly require product spec including these elements.",
+      "archetype": "shared requirement misframed as exclusive",
+      "confidence": "medium-high"
+    }
+  },
+  {
+    "index": 2,
+    "quizTitle": "Genel",
+    "question": "Marka vekili ile patent vekili arasındaki temel fark nedir?",
+    "rightAnswer": {
+      "id": "A",
+      "text": "Marka vekili marka ve tasarımla ilgilenirken, patent vekili patent ve faydalı modelle ilgilenir; tasarım her ikisinin yetki alanındadır."
+    },
+    "existingDistractors": [
+      "Marka vekili avukattır, patent vekili mühendistir.",
+      "Aralarında hiçbir fark yoktur, her iki unvan aynıdır.",
+      "Patent vekili sadece yabancı başvurulara bakar."
+    ],
+    "newOptionE": {
+      "id": "E",
+      "text": "Marka vekili sadece bireysel, patent vekili sadece kurumsal başvurulara bakabilir.",
+      "status": "unchecked",
+      "shortFeedback": "Vekil yetki ayrımı başvurunun bireysel veya kurumsal olmasına göre değil, ilgili sınai mülkiyet hakkının türüne göre belirlenir (Madde 2)."
+    },
+    "verification": {
+      "whyEIsWrong": "Law 6769 Art. 2 separates marka vekili and patent vekili by the type of right they handle, not by client type. Neither category is limited to individual or corporate clients.",
+      "devilsAdvocate": "Strongest defense: none — this is a fabricated distinction with no basis in any provision of Law 6769 or its regulations.",
+      "archetype": "fabricated client-type distinction",
+      "confidence": "high"
+    }
+  },
+  {
+    "index": 409,
+    "quizTitle": "Genel",
+    "question": "Başvuru yapanın kimliğine ilişkin bilgilerin hatalı olması durumunda eksikliklerin giderilmesi için Kurum ne kadar süre verir?",
+    "rightAnswer": {
+      "id": "C",
+      "text": "Bir ay"
+    },
+    "existingDistractors": [
+      "Üç ay",
+      "İki hafta",
+      "On beş iş günü"
+    ],
+    "newOptionE": {
+      "id": "E",
+      "text": "Kırk beş gün",
+      "status": "unchecked",
+      "shortFeedback": "Yönetmelik kimlik bilgilerindeki eksiklikler için 45 gün değil bir ay süre öngörmüştür (Madde 36/2)."
+    },
+    "verification": {
+      "whyEIsWrong": "Art. 36/2 sets the period as one month for identity-information deficiencies. Forty-five days is not a period used in this regulation for this purpose.",
+      "devilsAdvocate": "Strongest defense: 45 days appears in other administrative law contexts. Why this still fails: it does not appear in Art. 36/2 for kimlik deficiencies; the one-month rule is explicit.",
+      "archetype": "numeric distractor (different period)",
+      "confidence": "high"
+    }
+  }
+]
