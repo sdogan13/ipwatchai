@@ -411,3 +411,233 @@ def search_designs(
             "public": public,
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Public design portfolio lookup (mirrors run_public_portfolio_lookup in
+# services/search_service.py but for the `designs` table, joined to
+# `holders` via holder_id). Used by the dashboard design result card's
+# "Sahip" portfolio link.
+# ---------------------------------------------------------------------------
+
+# Mirror PUBLIC_PORTFOLIO_RESULT_CAP from the trademark portfolio so the
+# anonymous design portfolio surface stays consistent with trademark.
+_DESIGN_PORTFOLIO_PUBLIC_CAP = 10
+
+
+async def run_public_design_portfolio_lookup(
+    *,
+    holder_id: Optional[str] = None,
+    logger=None,
+) -> Dict[str, Any]:
+    """Return up to 10 designs for a given holder.
+
+    Response shape matches the trademark public portfolio so the
+    dashboard's existing portfolio modal can render either registry.
+    """
+    from fastapi import HTTPException
+
+    from database.crud import Database
+
+    if not holder_id:
+        raise HTTPException(
+            status_code=422,
+            detail="holder_id is required",
+        )
+
+    holder_id = str(holder_id).strip()
+    if not holder_id:
+        raise HTTPException(status_code=422, detail="holder_id is required")
+
+    with Database() as db:
+        cur = db.cursor()
+
+        cur.execute(
+            "SELECT id, name, tpe_client_id FROM holders WHERE tpe_client_id = %s LIMIT 1",
+            (holder_id,),
+        )
+        holder_row = cur.fetchone()
+        if not holder_row:
+            raise HTTPException(status_code=404, detail="Holder not found")
+        holder_name = holder_row["name"] or holder_id
+
+        cur.execute(
+            "SELECT COUNT(*) AS cnt FROM designs WHERE holder_id = %s",
+            (holder_row["id"],),
+        )
+        total_count = int(cur.fetchone()["cnt"] or 0)
+
+        cur.execute(
+            """
+            SELECT d.id::text AS id,
+                   d.application_no, d.design_index, d.registration_no,
+                   d.product_name_tr, d.product_name_en,
+                   d.locarno_classes, d.current_status,
+                   d.application_date, d.registration_date,
+                   d.bulletin_no, d.bulletin_date,
+                   d.designers, d.source_issue_folder,
+                   (SELECT image_path FROM design_views dv
+                    WHERE dv.design_id = d.id AND dv.image_path IS NOT NULL
+                    ORDER BY dv.view_index ASC LIMIT 1) AS first_image_path
+            FROM designs d
+            WHERE d.holder_id = %s
+            ORDER BY d.application_date DESC NULLS LAST, d.application_no DESC
+            LIMIT %s
+            """,
+            (holder_row["id"], _DESIGN_PORTFOLIO_PUBLIC_CAP),
+        )
+        rows = cur.fetchall()
+
+    results: List[Dict[str, Any]] = []
+    for d in rows:
+        bulletin_date = d.get("bulletin_date")
+        application_date = d.get("application_date")
+        registration_date = d.get("registration_date")
+        image_url = design_image_url(
+            d.get("first_image_path"),
+            d.get("source_issue_folder"),
+        )
+        title = d.get("product_name_tr") or d.get("product_name_en") or d.get("application_no")
+        results.append({
+            "id": d["id"],
+            "registry_type": "design",
+            "application_no": d.get("application_no"),
+            "design_index": d.get("design_index"),
+            "registration_no": d.get("registration_no"),
+            "name": title,
+            "product_name_tr": d.get("product_name_tr"),
+            "product_name_en": d.get("product_name_en"),
+            "locarno_classes": list(d.get("locarno_classes") or []),
+            "current_status": d.get("current_status"),
+            "application_date": application_date.isoformat() if application_date else None,
+            "registration_date": registration_date.isoformat() if registration_date else None,
+            "bulletin_no": d.get("bulletin_no"),
+            "bulletin_date": bulletin_date.isoformat() if bulletin_date else None,
+            "designers": list(d.get("designers") or []),
+            "image_url": image_url,
+        })
+
+    return {
+        "entity_type": "design-holder",
+        "entity_id": holder_id,
+        "entity_name": holder_name,
+        "results": results,
+        "total_count": total_count,
+    }
+
+
+async def build_public_design_portfolio_csv(
+    *,
+    holder_id: Optional[str] = None,
+    logger=None,
+    current_user=None,
+):
+    """Stream a CSV of every design for the given holder.
+
+    Mirrors build_public_portfolio_csv (search_service.py:455) and is
+    gated by ``can_download_portfolio`` on the current user's plan.
+    """
+    import csv
+    import io
+
+    from fastapi import HTTPException
+    from fastapi.responses import StreamingResponse
+
+    from database.crud import Database
+
+    if not holder_id:
+        raise HTTPException(status_code=422, detail="holder_id is required")
+
+    holder_id = str(holder_id).strip()
+    if not holder_id:
+        raise HTTPException(status_code=422, detail="holder_id is required")
+
+    if current_user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    from utils.subscription import get_plan_limit, get_user_plan
+
+    with Database() as db:
+        plan = get_user_plan(db, str(current_user.id))
+        if not get_plan_limit(plan["plan_name"], "can_download_portfolio"):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "upgrade_required",
+                    "message": "CSV export is available on paid plans.",
+                    "current_plan": plan["plan_name"],
+                    "upgrade_context": "portfolio_download",
+                },
+            )
+
+        cur = db.cursor()
+        cur.execute(
+            "SELECT id, name FROM holders WHERE tpe_client_id = %s LIMIT 1",
+            (holder_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Holder not found")
+        holder_internal_id = row["id"]
+        holder_name = row["name"] or holder_id
+
+        cur.execute(
+            """
+            SELECT d.application_no, d.registration_no,
+                   d.product_name_tr, d.product_name_en,
+                   d.current_status, d.locarno_classes,
+                   d.application_date, d.registration_date,
+                   d.bulletin_no, d.designers,
+                   d.attorney_name, d.attorney_firm
+            FROM designs d
+            WHERE d.holder_id = %s
+            ORDER BY d.application_date DESC NULLS LAST, d.application_no DESC
+            """,
+            (holder_internal_id,),
+        )
+        rows = cur.fetchall()
+
+    buf = io.StringIO()
+    buf.write("﻿")
+    writer = csv.writer(buf)
+    writer.writerow([
+        "Tasarim Adi (TR)",
+        "Tasarim Adi (EN)",
+        "Basvuru No",
+        "Tescil No",
+        "Durum",
+        "Locarno Siniflari",
+        "Basvuru Tarihi",
+        "Tescil Tarihi",
+        "Bulten No",
+        "Tasarimcilar",
+        "Vekil",
+        "Vekil Firmasi",
+    ])
+    for d in rows:
+        writer.writerow([
+            d.get("product_name_tr") or "",
+            d.get("product_name_en") or "",
+            d.get("application_no") or "",
+            d.get("registration_no") or "",
+            d.get("current_status") or "",
+            "; ".join(str(c) for c in (d.get("locarno_classes") or [])),
+            d["application_date"].isoformat() if d.get("application_date") else "",
+            d["registration_date"].isoformat() if d.get("registration_date") else "",
+            d.get("bulletin_no") or "",
+            "; ".join(str(p) for p in (d.get("designers") or [])),
+            d.get("attorney_name") or "",
+            d.get("attorney_firm") or "",
+        ])
+
+    safe_name = "".join(
+        c if c.isascii() and (c.isalnum() or c in " _-") else "_" for c in holder_name
+    )[:50]
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_name}_design_portfolio.csv"',
+        },
+    )

@@ -961,3 +961,126 @@ def import_design_csv_with_mapping(
         "plan_limit": plan_limit,
         "current_count": current_count,
     }
+
+
+# ---------------------------------------------------------------------------
+# Bulk import from a holder's design portfolio. Mirrors the trademark
+# watchlist /bulk-from-portfolio endpoint: pulls the holder's full
+# design list, calls create_design_watchlist_item per row (which
+# handles dedupe, plan quota, and reference-design embedding clone),
+# and returns the {added/skipped/errors/scan_item_ids} shape.
+# ---------------------------------------------------------------------------
+
+async def import_design_watchlist_from_portfolio(
+    *,
+    holder_id: str,
+    current_user,
+    db_factory=Database,
+) -> Dict[str, Any]:
+    if not holder_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="holder_id is required",
+        )
+
+    # PRO gate (mirrors trademark portfolio access policy).
+    from utils.subscription import get_plan_limit, get_user_plan
+
+    with db_factory() as db:
+        plan = get_user_plan(db, str(current_user.id))
+        if not get_plan_limit(plan["plan_name"], "can_view_holder_portfolio"):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "pro_feature",
+                    "message": "Sahip portföyü PRO özelliğidir",
+                    "upgrade_url": "/pricing",
+                },
+            )
+
+        cur = db.cursor()
+        cur.execute(
+            "SELECT id, name FROM holders WHERE tpe_client_id = %s LIMIT 1",
+            (str(holder_id).strip(),),
+        )
+        h = cur.fetchone()
+        if not h:
+            raise HTTPException(status_code=404, detail="Holder not found")
+
+        cur.execute(
+            """
+            SELECT d.id::text AS design_id,
+                   d.application_no,
+                   d.product_name_tr, d.product_name_en,
+                   d.locarno_classes
+            FROM designs d
+            WHERE d.holder_id = %s
+            ORDER BY d.application_date DESC NULLS LAST, d.application_no DESC
+            """,
+            (h["id"],),
+        )
+        rows = cur.fetchall()
+
+    if not rows:
+        return {
+            "added": 0, "skipped": 0, "errors": 0, "total": 0,
+            "limit_reached": False, "errors_detail": [], "scan_item_ids": [],
+        }
+
+    added = 0
+    skipped = 0
+    errors_detail: List[Dict[str, Any]] = []
+    limit_reached = False
+    scan_item_ids: List[str] = []
+
+    for d in rows:
+        product_name = (
+            d.get("product_name_tr") or d.get("product_name_en")
+            or d.get("application_no") or ""
+        )
+        if not product_name:
+            errors_detail.append({"application_no": d.get("application_no"), "reason": "missing_product_name"})
+            continue
+
+        payload = {
+            "product_name": product_name,
+            "customer_application_no": d.get("application_no"),
+            "locarno_classes": list(d.get("locarno_classes") or []),
+            "reference_design_id": d["design_id"],
+        }
+        try:
+            item = create_design_watchlist_item(
+                data=payload, current_user=current_user, db_factory=db_factory,
+            )
+            new_id = item.get("id") if isinstance(item, dict) else None
+            if new_id:
+                scan_item_ids.append(str(new_id))
+                added += 1
+        except HTTPException as exc:
+            # 409 = duplicate (already watching); 402/403 = plan/quota
+            # limit reached → stop trying further inserts so the caller
+            # can surface "limit reached" to the user.
+            if exc.status_code == status.HTTP_409_CONFLICT:
+                skipped += 1
+            elif exc.status_code in (402, 403):
+                limit_reached = True
+                errors_detail.append({
+                    "application_no": d.get("application_no"),
+                    "reason": "plan_limit_reached",
+                })
+                break
+            else:
+                errors_detail.append({
+                    "application_no": d.get("application_no"),
+                    "reason": str(exc.detail)[:200],
+                })
+
+    return {
+        "added": added,
+        "skipped": skipped,
+        "errors": len(errors_detail),
+        "total": len(rows),
+        "limit_reached": limit_reached,
+        "errors_detail": errors_detail[:25],
+        "scan_item_ids": scan_item_ids,
+    }

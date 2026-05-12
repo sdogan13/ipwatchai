@@ -226,6 +226,33 @@ def register_design_watchlist_routes(app, limiter):
         )
 
     # ---------------------------------------------------------------
+    # Bulk import from a holder's design portfolio. Mirrors the
+    # trademark /api/v1/watchlist/bulk-from-portfolio endpoint so the
+    # dashboard portfolio modal can "Add all to watchlist" with one
+    # click. Queues background scans for each newly created item.
+    # ---------------------------------------------------------------
+
+    @app.post("/api/v1/design-watchlist/bulk-from-portfolio", tags=["Design Watchlist"])
+    @limiter.limit("5/minute")
+    async def design_watchlist_bulk_from_portfolio(
+        request: Request,
+        body: dict,
+        background_tasks: BackgroundTasks,
+        current_user=Depends(get_current_user),
+    ):
+        holder_id = (body or {}).get("holder_id") or (body or {}).get("id")
+        if not holder_id:
+            raise HTTPException(status_code=422, detail="holder_id is required")
+        result = await svc.import_design_watchlist_from_portfolio(
+            holder_id=str(holder_id),
+            current_user=current_user,
+        )
+        for item_id_str in result.get("scan_item_ids", []):
+            background_tasks.add_task(_run_single_scan_safe, UUID(item_id_str))
+        result["queued_scans"] = len(result.get("scan_item_ids", []))
+        return result
+
+    # ---------------------------------------------------------------
     # Phase 3 — CSV bulk upload
     # ---------------------------------------------------------------
 
