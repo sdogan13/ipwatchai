@@ -236,7 +236,7 @@
 <!-- ============================================ -->
 <!-- WATCHLIST EDIT MODAL                         -->
 <!-- ============================================ -->
-<div id="watchlist-edit-modal" class="hidden fixed inset-0 flex items-center justify-center p-4" style="background:var(--color-bg-overlay);z-index:var(--z-modal)" onclick="if(event.target===this)closeEditWatchlistModal()">
+<div id="watchlist-edit-modal" class="hidden fixed inset-0 flex items-center justify-center p-4 modal-mobile-fullscreen" style="background:var(--color-bg-overlay);z-index:var(--z-modal)" onclick="if(event.target===this)closeEditWatchlistModal()">
     <div class="rounded-xl shadow-xl max-w-md w-full overflow-hidden" style="background:var(--color-bg-card);border:1px solid var(--color-border)" onclick="event.stopPropagation()">
         <div class="px-6 py-4 flex items-center justify-between" style="border-bottom:1px solid var(--color-border)">
             <h3 class="text-lg font-semibold" style="color:var(--color-text-primary)" x-text="t('watchlist.edit_title')">Duzenle</h3>
@@ -301,7 +301,7 @@
 <!-- ============================================ -->
 <!-- WATCHLIST BULK UPLOAD MODAL                  -->
 <!-- ============================================ -->
-<div id="watchlist-upload-modal" class="hidden fixed inset-0 flex items-center justify-center p-4" style="background:var(--color-bg-overlay);z-index:var(--z-modal)" onclick="if(event.target===this)closeBulkUploadModal()">
+<div id="watchlist-upload-modal" class="hidden fixed inset-0 flex items-center justify-center p-4 modal-mobile-fullscreen" style="background:var(--color-bg-overlay);z-index:var(--z-modal)" onclick="if(event.target===this)closeBulkUploadModal()">
     <div id="watchlist-upload-modal-card" class="rounded-xl shadow-xl max-w-lg w-full overflow-hidden" style="background:var(--color-bg-card);border:1px solid var(--color-border)" onclick="event.stopPropagation()">
         <div class="px-6 py-4 flex items-center justify-between" style="border-bottom:1px solid var(--color-border)">
             <h3 class="text-lg font-semibold" style="color:var(--color-text-primary)" x-text="t('watchlist.bulk_upload_title')">Toplu Yukle</h3>

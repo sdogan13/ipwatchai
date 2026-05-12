@@ -1,0 +1,133 @@
+{# ==========================================================
+   Design detail modal — opens from search/watchlist/alerts result
+   cards via data-dd-open. Hydrates from /api/v1/designs/{id} via
+   static/js/dashboard/design_detail.js.
+
+   Mirrors _patent_detail_modal.html but the design schema is
+   simpler (no inventors / no priorities) — fewer sections.
+   ========================================================== #}
+<div id="design-detail-modal"
+     class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-mobile-fullscreen"
+     style="background:rgba(0,0,0,0.5)">
+  <div class="rounded-xl shadow-xl border max-w-3xl w-full max-h-[90vh] overflow-y-auto"
+       style="background:var(--color-bg-card);border-color:var(--color-border)">
+
+    {# Header #}
+    <div class="flex items-start justify-between gap-3 px-5 py-4 sticky top-0 z-10"
+         style="background:var(--color-bg-card);border-bottom:1px solid var(--color-border)">
+      <div class="min-w-0 flex-1">
+        <div class="flex items-center gap-2 flex-wrap mb-1">
+          <span id="dd-status-badge"
+                class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                style="background:var(--color-bg-muted);color:var(--color-text-muted)"></span>
+          <span id="dd-section-chip"
+                class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px]"
+                style="background:var(--color-bg-muted);color:var(--color-text-muted);display:none"></span>
+          <span id="dd-app-no" class="text-xs font-mono"
+                style="color:var(--color-text-muted)"></span>
+        </div>
+        <h2 id="dd-title" class="text-lg font-semibold leading-snug"
+            style="color:var(--color-text-primary)">—</h2>
+      </div>
+      <button id="dd-close" type="button"
+              class="shrink-0 p-1 rounded hover:opacity-70"
+              style="color:var(--color-text-faint)">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+
+    {# Loading state #}
+    <div id="dd-loading" class="hidden px-5 py-12 text-center">
+      <p class="text-sm" style="color:var(--color-text-faint)"
+         x-text="t('design_detail.loading')">Loading…</p>
+    </div>
+
+    {# Body #}
+    <div id="dd-body" class="hidden p-5 space-y-5">
+
+      {# Dates row #}
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+        <div>
+          <p class="font-medium" style="color:var(--color-text-faint)"
+             x-text="t('design_detail.application_date')">Application date</p>
+          <p id="dd-application-date" class="mt-0.5" style="color:var(--color-text-primary)">—</p>
+        </div>
+        <div>
+          <p class="font-medium" style="color:var(--color-text-faint)"
+             x-text="t('design_detail.registration_date')">Registration date</p>
+          <p id="dd-registration-date" class="mt-0.5" style="color:var(--color-text-primary)">—</p>
+        </div>
+        <div>
+          <p class="font-medium" style="color:var(--color-text-faint)"
+             x-text="t('design_detail.registration_no')">Reg. no</p>
+          <p id="dd-reg-no" class="mt-0.5 font-mono" style="color:var(--color-text-primary)">—</p>
+        </div>
+        <div>
+          <p class="font-medium" style="color:var(--color-text-faint)"
+             x-text="t('design_detail.bulletin')">Bulletin</p>
+          <p id="dd-bulletin" class="mt-0.5" style="color:var(--color-text-primary)">—</p>
+        </div>
+      </div>
+
+      {# Locarno chips #}
+      <div>
+        <h3 class="text-xs font-medium mb-1" style="color:var(--color-text-faint)"
+            x-text="t('design_detail.locarno_classes')">Locarno classes</h3>
+        <div id="dd-locarno-chips" class="flex flex-wrap gap-1.5"></div>
+      </div>
+
+      {# Views (figures) — grid of thumbnails #}
+      <div id="dd-views-block" class="hidden">
+        <h3 class="text-xs font-medium mb-1.5" style="color:var(--color-text-faint)"
+            x-text="t('design_detail.views')">Views</h3>
+        <div id="dd-views" class="grid grid-cols-3 sm:grid-cols-4 gap-2"></div>
+      </div>
+
+      {# Two-column grid: holder | designers #}
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+        <div>
+          <h3 class="text-xs font-medium mb-1.5" style="color:var(--color-text-faint)"
+              x-text="t('design_detail.holder')">Holder</h3>
+          <div id="dd-holder" class="text-xs"
+               style="color:var(--color-text-primary)">—</div>
+        </div>
+        <div>
+          <h3 class="text-xs font-medium mb-1.5" style="color:var(--color-text-faint)"
+              x-text="t('design_detail.designers')">Designers</h3>
+          <div id="dd-designers" class="space-y-0.5"></div>
+        </div>
+      </div>
+
+      {# Attorney #}
+      <div>
+        <h3 class="text-xs font-medium mb-1" style="color:var(--color-text-faint)"
+            x-text="t('design_detail.attorney')">Attorney</h3>
+        <div id="dd-attorney" class="text-xs"
+             style="color:var(--color-text-primary)">—</div>
+      </div>
+
+      {# Recent events #}
+      <div>
+        <h3 class="text-xs font-medium mb-1.5" style="color:var(--color-text-faint)"
+            x-text="t('design_detail.recent_events')">Recent events</h3>
+        <div id="dd-events" class="space-y-1"></div>
+      </div>
+
+      {# Source provenance #}
+      <div class="text-[10px] pt-3"
+           style="color:var(--color-text-faint);border-top:1px solid var(--color-border)">
+        <span x-text="t('design_detail.source_folder')">Source</span>:
+        <span id="dd-source" class="font-mono">—</span>
+      </div>
+    </div>
+
+    {# Error state #}
+    <div id="dd-error" class="hidden p-5 text-center">
+      <p class="text-sm" id="dd-error-msg"
+         style="color:var(--color-text-error,#dc2626)"></p>
+    </div>
+  </div>
+</div>

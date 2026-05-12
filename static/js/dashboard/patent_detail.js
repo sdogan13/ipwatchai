@@ -60,16 +60,81 @@
   // Render sections
   // ---------------------------------------------------------------
 
+  // Colour palette for the lifecycle status pill in the detail
+  // header. Mirrors _statusColors() in static/js/dashboard/patent_search.js
+  // so the card and detail modal stay visually consistent.
+  function _statusColors(status) {
+    var ENUM = {
+      ACTIVE:             { bg: "rgba(34,197,94,0.12)", color: "#16a34a" },
+      PENDING:            { bg: "rgba(59,130,246,0.12)", color: "#2563eb" },
+      LAPSED_APPLICATION: { bg: "rgba(234,88,12,0.12)",  color: "#ea580c" },
+      LAPSED_GRANT:       { bg: "rgba(217,119,6,0.12)",  color: "#d97706" },
+      REJECTED:           { bg: "rgba(239,68,68,0.12)",  color: "#dc2626" },
+      WITHDRAWN:          { bg: "rgba(239,68,68,0.12)",  color: "#dc2626" },
+      EXPIRED:            { bg: "rgba(124,58,237,0.12)", color: "#7c3aed" },
+      INVALIDATED:        { bg: "rgba(127,29,29,0.12)",  color: "#7f1d1d" },
+      UNKNOWN:            { bg: "var(--color-bg-muted)", color: "var(--color-text-secondary)" },
+    };
+    return ENUM[status] || ENUM.UNKNOWN;
+  }
+
   function renderHeader(p) {
     var titleEl = $("pd-title");
     if (titleEl) titleEl.textContent = p.title || "—";
 
+    // Primary header badge: live lifecycle status (current_status).
+    // Falls back to record_type when no events / no derivation has
+    // run yet — same fallback the card uses.
     var rt = $("pd-record-type-badge");
     if (rt) {
-      var rtLabel = p.record_type || "";
-      rt.textContent = rtLabel ? t("patent_detail.record_type_" + rtLabel.toLowerCase(), rtLabel) : "";
-      rt.style.display = rtLabel ? "" : "none";
+      var status = p.current_status || p.record_type || "";
+      if (p.current_status) {
+        rt.textContent = t(
+          "patent_search.status_" + String(p.current_status).toLowerCase(),
+          p.current_status,
+        );
+        var colors = _statusColors(p.current_status);
+        rt.style.background = colors.bg;
+        rt.style.color = colors.color;
+      } else if (p.record_type) {
+        rt.textContent = t(
+          "patent_detail.record_type_" + String(p.record_type).toLowerCase(),
+          p.record_type,
+        );
+        // Muted neutral for the legacy record_type fallback.
+        rt.style.background = "var(--color-bg-muted)";
+        rt.style.color = "var(--color-text-muted)";
+      }
+      rt.style.display = status ? "" : "none";
     }
+
+    // Secondary chip: bulletin classification (record_type). Visible
+    // alongside the live status so users can still see what KIND of
+    // bulletin entry produced this row — useful context when
+    // current_status differs (e.g. lapsed grants whose record_type
+    // is still "Granted UM Bulletin"). Injected inline so the
+    // template stays untouched; idempotent across re-renders.
+    if (rt && p.record_type && p.current_status) {
+      var existing = $("pd-record-type-secondary");
+      if (!existing) {
+        existing = document.createElement("span");
+        existing.id = "pd-record-type-secondary";
+        existing.className = "inline-flex items-center px-1.5 py-0.5 rounded text-[10px]";
+        existing.style.background = "var(--color-bg-muted)";
+        existing.style.color = "var(--color-text-muted)";
+        rt.parentNode.insertBefore(existing, rt.nextSibling);
+      }
+      var rtLabel = t(
+        "patent_detail.record_type_" + String(p.record_type).toLowerCase(),
+        p.record_type,
+      );
+      existing.textContent = rtLabel;
+      existing.style.display = "";
+    } else {
+      var sec = $("pd-record-type-secondary");
+      if (sec) sec.style.display = "none";
+    }
+
     var kind = $("pd-kind-badge");
     if (kind) {
       kind.textContent = p.kind_code || "";
@@ -191,6 +256,75 @@
     }).join("");
   }
 
+  // Event-type → semantic bucket. Drives the coloured pill in the
+  // detail modal's "Recent events" list so a glance at the timeline
+  // reveals whether the patent is healthy, in trouble, or just being
+  // examined.
+  //
+  // Categories:
+  //   positive    — grants, successful publications, revalidations,
+  //                 lapse-cancellations, use declarations, upgrades
+  //   negative    — rejections, withdrawals, fee lapses, expirations,
+  //                 invalidations, abandonments, missing declarations
+  //   opportunity — LICENSE_OFFER (this is a third-party lead, not
+  //                 a status of the patent itself)
+  //   neutral     — search reports, amendments, system choices,
+  //                 neutral recordings (assignment / merger / division)
+  function _eventCategory(eventType) {
+    var POSITIVE = {
+      // Synthetic milestone events from the patent row's own dates —
+      // injected server-side so the timeline is complete even when
+      // bulletin extraction missed the publication/grant events.
+      APPLICATION_FILED: 1,
+      APPLICATION_PUBLISHED: 1,
+      APPLICATION_PUBLICATION_CORRECTED: 1,
+      APPLICATION_FEE_REVALIDATION: 1,
+      APPLICATION_FEE_LAPSE_CANCELLED: 1,
+      APPLICATION_ABANDONED_CANCELLED: 1,
+      GRANT_ANNOUNCED: 1,
+      GRANT_ANNOUNCED_LEGACY_551: 1,
+      GRANT_FINALIZED: 1,
+      GRANT_CORRECTED: 1,
+      GRANT_FEE_REVALIDATION: 1,
+      GRANT_FEE_LAPSE_CANCELLED: 1,
+      USE_DECLARATION_RECORDED: 1,
+      CONVERSION_TO_PATENT: 1,
+      EP_FASCICLE_ANNOUNCED: 1,
+      EP_CLAIMS_PUBLISHED: 1,
+      PCT_PHASE_II_ENTRY: 1,
+      PROCEDURAL_REVALIDATION: 1,
+    };
+    var NEGATIVE = {
+      APPLICATION_LAPSED_OR_REJECTED: 1,
+      APPLICATION_REJECTED: 1,
+      APPLICATION_WITHDRAWN: 1,
+      APPLICATION_ABANDONED: 1,
+      APPLICATION_FEE_LAPSE: 1,
+      APPLICATION_PUBLICATION_CANCELLED: 1,
+      GRANT_FEE_LAPSE: 1,
+      GRANT_PROTECTION_EXPIRED: 1,
+      GRANT_INVALIDATED_LEGACY_551: 1,
+      USE_NONUSE_DECLARATION_MISSING: 1,
+      NONUSE_DECLARATION_RECORDED: 1,
+      SEARCH_REPORT_CANCELLED: 1,
+      CONVERSION_TO_UM: 1,
+    };
+    if (eventType === "LICENSE_OFFER") return "opportunity";
+    if (POSITIVE[eventType]) return "positive";
+    if (NEGATIVE[eventType]) return "negative";
+    return "neutral";
+  }
+
+  function _eventColors(category) {
+    var map = {
+      positive:    { bg: "#dcfce7", color: "#166534" },  // green
+      negative:    { bg: "#fee2e2", color: "#991b1b" },  // red
+      opportunity: { bg: "#ede9fe", color: "#5b21b6" },  // purple
+      neutral:     { bg: "#f3f4f6", color: "#374151" },  // grey
+    };
+    return map[category] || map.neutral;
+  }
+
   function renderEvents(events) {
     var el = $("pd-events");
     if (!el) return;
@@ -202,10 +336,15 @@
       var label = e.event_type
         ? t("patent_detail.event_" + e.event_type.toLowerCase(), e.event_type)
         : "—";
+      var category = _eventCategory(e.event_type || "");
+      var colors = _eventColors(category);
       return (
         '<div class="text-xs flex items-center justify-between gap-2 py-1" ' +
         'style="border-bottom:1px solid var(--color-border-light, var(--color-border))">' +
-          '<span style="color:var(--color-text-primary)">' + escapeHtml(label) + '</span>' +
+          '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium" ' +
+            'style="background:' + colors.bg + ';color:' + colors.color + '">' +
+            escapeHtml(label) +
+          '</span>' +
           '<span class="font-mono text-[10px]" style="color:var(--color-text-faint)">' +
             escapeHtml(e.bulletin_date || e.event_date || "") + '</span>' +
         '</div>'

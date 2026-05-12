@@ -181,10 +181,14 @@
                 padding-bottom: 4.5rem;
             }
 
-            /* Full-screen modals on mobile */
+            /* Full-screen modals on mobile.
+               margin:0 overrides any `mx-4` on the inner card so the
+               viewport-pinned (`inset:0; width:100%`) box doesn't shift
+               16px right and overflow off-screen. */
             .modal-mobile-fullscreen>div:last-child {
                 position: fixed !important;
                 inset: 0 !important;
+                margin: 0 !important;
                 border-radius: 0 !important;
                 max-width: 100% !important;
                 max-height: 100% !important;
@@ -230,6 +234,8 @@
 
     {% include 'dashboard/partials/_patent_detail_modal.html' %}
 
+    {% include 'dashboard/partials/_design_detail_modal.html' %}
+
     {% include 'dashboard/partials/_cografi_detail_modal.html' %}
 
     <script>
@@ -256,15 +262,16 @@
     <script src="/static/js/api.js?v=42"></script>
 
     <!-- App init last -->
-    <script src="/static/js/dashboard/app.js?v=109"></script>
-    <script src="/static/js/dashboard/design_search.js?v=18"></script>
-    <script src="/static/js/dashboard/patent_search.js?v=6"></script>
-    <script src="/static/js/dashboard/cografi_search.js?v=2"></script>
+    <script src="/static/js/dashboard/app.js?v=112"></script>
+    <script src="/static/js/dashboard/design_search.js?v=21"></script>
+    <script src="/static/js/dashboard/patent_search.js?v=12"></script>
+    <script src="/static/js/dashboard/cografi_search.js?v=4"></script>
     <script src="/static/js/dashboard/design_watchlist.js?v=6"></script>
     <script src="/static/js/dashboard/patent_watchlist.js?v=1"></script>
     <script src="/static/js/dashboard/cografi_watchlist.js?v=1"></script>
     <script src="/static/js/dashboard/patent_leads.js?v=2"></script>
-    <script src="/static/js/dashboard/patent_detail.js?v=1"></script>
+    <script src="/static/js/dashboard/patent_detail.js?v=4"></script>
+    <script src="/static/js/dashboard/design_detail.js?v=2"></script>
     <script src="/static/js/dashboard/cografi_detail.js?v=1"></script>
     <script src="/static/js/dashboard/applications_design.js?v=1"></script>
     <script src="/static/js/dashboard/applications_patent.js?v=1"></script>

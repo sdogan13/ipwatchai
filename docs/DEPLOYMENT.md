@@ -72,6 +72,13 @@ AI Studio:
 - after changing `.env.production`, recreate the backend with `docker compose up -d --force-recreate backend`; restarting an existing container does not apply newly added environment variables
 - `GET /api/v1/tools/status` should report Name Lab and Logo Studio as available before exposing the dashboard tab to users
 
+Billing:
+- set `BILLING_REGION_CATALOG_JSON` with UK/EU Stripe Price IDs and TR display prices before enabling paid checkout
+- set `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_SUCCESS_URL`, `STRIPE_CANCEL_URL`, and keep `STRIPE_AUTOMATIC_TAX=true` for UK/EU payments
+- set Stripe webhook forwarding to `POST /api/v1/payments/stripe/webhook`
+- keep `IYZICO_API_KEY`, `IYZICO_SECRET_KEY`, `IYZICO_CALLBACK_URL`, and `IYZICO_WEBHOOK_URL` configured for Turkey payments
+- after pulling this billing change, rebuild the backend image so the `stripe` Python package is installed, then recreate the backend after env changes
+
 Start the stack:
 
 ```powershell
@@ -126,7 +133,7 @@ Additional schema evolution lives in:
 - `migrations/`
 
 Notable migration-backed areas include:
-- payments
+- payments (`migrations/payments.sql`, `migrations/credit_packs.sql`, `migrations/regional_payment_providers.sql`)
 - creative suite tables
 - trademark applications
 - trademark events

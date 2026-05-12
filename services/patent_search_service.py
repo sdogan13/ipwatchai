@@ -415,6 +415,8 @@ def patent_image_url(image_path: Optional[str], bulletin_folder: Optional[str]) 
 HYDRATE_COLS = (
     "p.id::text AS patent_id, p.registry_type, p.application_no, p.publication_no, "
     "p.kind_code, p.record_type, "
+    "p.current_status::text AS current_status, "
+    "p.last_event_type, p.last_event_date, "
     "p.application_date, p.publication_date, p.grant_date, "
     "p.bulletin_no, p.bulletin_date, p.bulletin_folder, "
     "p.title, p.abstract, p.ipc_classes, p.patent_type, "
@@ -493,6 +495,12 @@ def _result_row(
         "publication_no": record.get("publication_no"),
         "kind_code": record.get("kind_code"),
         "record_type": record_type,
+        # Live lifecycle status derived from patent_events. NULL when
+        # the patent has no events on record. See
+        # pipeline.patent_status_derivation.
+        "current_status": record.get("current_status"),
+        "last_event_type": record.get("last_event_type"),
+        "last_event_date": _isofmt(record.get("last_event_date")),
         "patent_type": record.get("patent_type"),
         "title": record.get("title"),
         "abstract": record.get("abstract"),

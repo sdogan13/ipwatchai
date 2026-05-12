@@ -47,6 +47,13 @@ def _get_public_plans():
     return {key: value for key, value in PLAN_FEATURES.items() if key != "superadmin"}
 
 
+def _get_public_billing_catalog(request: Request, region: str | None = None):
+    """Resolve the public regional catalog for server-rendered billing pages."""
+    from services.billing_catalog import get_billing_catalog
+
+    return get_billing_catalog(region=region, headers=request.headers)
+
+
 def register_asset_routes(app, templates, static_dir):
     """Register service-worker and page routes next to their asset setup."""
 
@@ -92,28 +99,37 @@ def register_asset_routes(app, templates, static_dir):
         return response
 
     @app.get("/pricing", response_class=HTMLResponse, tags=["Root"])
-    async def serve_pricing(request: Request):
+    async def serve_pricing(request: Request, region: str | None = None):
         """Serve the pricing page while rendering limits from PLAN_FEATURES."""
+        billing_catalog = _get_public_billing_catalog(request, region)
         return templates.TemplateResponse(
             request=request,
             name="billing/pricing.html",
-            context={"plans": _get_public_plans()},
+            context={"plans": _get_public_plans(), "billing_catalog": billing_catalog},
         )
 
     @app.get("/checkout", response_class=HTMLResponse, tags=["Root"])
-    async def serve_checkout(request: Request, plan: str = "free", billing: str = "monthly"):
+    async def serve_checkout(
+        request: Request,
+        plan: str = "free",
+        billing: str = "monthly",
+        region: str | None = None,
+    ):
         """Serve the checkout page with validated plan and billing selection."""
         public_plans = _get_public_plans()
         if plan not in public_plans:
             plan = "free"
         if billing not in ("monthly", "annual"):
             billing = "monthly"
+        billing_catalog = _get_public_billing_catalog(request, region)
         return templates.TemplateResponse(
             request=request,
             name="billing/checkout.html",
             context={
                 "plans": public_plans,
+                "billing_catalog": billing_catalog,
                 "selected_plan": plan,
                 "selected_billing": billing,
+                "selected_region": billing_catalog["region"],
             },
         )

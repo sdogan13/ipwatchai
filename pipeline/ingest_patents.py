@@ -556,20 +556,48 @@ def _resolve_patent_id_for_event(cur, application_no: Optional[str]) -> Optional
     """Look up a patents.id for an event by its application_no.
 
     Same application can have multiple publications in a bulletin
-    (B grant + A1 republication), so a 1:1 link isn't always
-    possible. Returns the UUID only when the lookup is unambiguous;
-    NULL otherwise. Stage 5 already has this for figures so reuse
-    the precedent: patent_events.patent_id is also nullable per the
-    Stage 0 schema (ON DELETE SET NULL).
+    (B grant + A1 republication), so a 1:1 link isn't possible
+    without a tiebreak. Pick the *canonical* row per application_no:
+
+        canonical = row with highest record_type rank
+                    (GRANTED_PATENT > GRANTED_UM > PUBLISHED_APP
+                     > PUBLISHED_UM_APP > UNKNOWN > LEGACY),
+                    tiebreak by latest bulletin_date.
+
+    Same rule as the backfill script in
+    scripts/backfill_patent_current_status.py — keeping them in sync
+    means newly ingested events land linked, not orphaned.
+
+    Returns NULL only when no patents row exists for the
+    application_no at all (event references something we haven't
+    ingested yet — the application_no fallback in query code will
+    still find it).
     """
     if not application_no:
         return None
     cur.execute(
-        "SELECT id FROM patents WHERE application_no = %s LIMIT 2",
+        """
+        SELECT id::text
+        FROM patents
+        WHERE application_no = %s
+        ORDER BY
+            CASE record_type
+                WHEN 'GRANTED_PATENT'    THEN 1
+                WHEN 'GRANTED_UM'        THEN 2
+                WHEN 'PUBLISHED_APP'    THEN 3
+                WHEN 'PUBLISHED_UM_APP' THEN 4
+                WHEN 'UNKNOWN'           THEN 5
+                WHEN 'LEGACY'            THEN 6
+                ELSE 7
+            END,
+            bulletin_date DESC NULLS LAST,
+            id
+        LIMIT 1
+        """,
         (application_no,),
     )
-    rows = cur.fetchall()
-    return rows[0][0] if len(rows) == 1 else None
+    row = cur.fetchone()
+    return row[0] if row else None
 
 
 def replace_events(cur, events_doc: Dict[str, Any]) -> int:
@@ -775,6 +803,22 @@ def ingest_bulletin(
                     json.loads(events_path.read_text(encoding="utf-8"))
                 )
                 stats["events_inserted"] = replace_events(cur, events_doc)
+                # Refresh patents.current_status for every application
+                # whose events just changed. Same transaction as the
+                # ingest, so a failed status compute rolls the bulletin
+                # back. Idempotent.
+                affected_apps = list({
+                    ev.get("application_no")
+                    for ev in events_doc.get("events", [])
+                    if ev.get("application_no")
+                })
+                if affected_apps:
+                    from pipeline.patent_status_derivation import (
+                        recompute_current_status,
+                    )
+                    stats["status_rows_updated"] = recompute_current_status(
+                        cur, affected_apps,
+                    )
         conn.commit()
     except Exception:
         if owns_connection:

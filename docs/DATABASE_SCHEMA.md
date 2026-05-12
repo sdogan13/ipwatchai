@@ -20,6 +20,7 @@ Primary bootstrap:
 Important migration add-ons:
 - `migrations/payments.sql`
 - `migrations/credit_packs.sql` — extends `payments` with `kind` (`subscription` | `credit_pack`), `pack_id`, `credits_amount`, `discount_code`; relaxes `plan_name`/`billing_period` to NULLable so credit-pack rows can store their own metadata
+- `migrations/regional_payment_providers.sql` — extends `payments` with provider/region metadata and Stripe lookup fields (`provider`, `region`, `billing_country`, `stripe_checkout_session_id`, `stripe_customer_id`, `stripe_subscription_id`, `stripe_payment_intent_id`, `stripe_raw_response`); existing rows default to `provider='iyzico'`
 - `migrations/trademark_applications.sql`
 - `migrations/trademark_events.sql`
 - `migrations/add_universal_conflicts.sql`
@@ -70,7 +71,7 @@ Settings and commercial support:
 - `app_settings`
 - `discount_codes`
 - `discount_code_usage`
-- `payments` — unified store for plan subscriptions and one-shot AI credit-pack purchases; the `kind` column ('subscription' | 'credit_pack') drives the callback branch in `services.payment_service.process_payment_result`. Credit-pack rows carry `pack_id`, `credits_amount`, and the optional `discount_code`. Successful credit-pack payments increment `organizations.ai_credits_purchased` (never-expiring pool).
+- `payments` — unified store for plan subscriptions and one-shot AI credit-pack purchases. `provider` distinguishes `iyzico` and `stripe`; `region` stores `UK`, `EU`, or `TR`; `billing_country` records the resolved organization/request country when available. The `kind` column (`subscription` | `credit_pack`) drives fulfillment. Credit-pack rows carry `pack_id`, `credits_amount`, and the optional `discount_code`. Stripe rows additionally store checkout session, customer, subscription, payment-intent, and raw webhook response IDs for idempotent lookup. Successful credit-pack payments increment `organizations.ai_credits_purchased` (never-expiring pool).
 
 ### Monitoring And Alerts
 

@@ -56,6 +56,7 @@ from app_patent_watchlist_routes import register_patent_watchlist_routes
 from app_patent_alert_routes import register_patent_alert_routes
 from app_patent_lead_routes import register_patent_lead_routes
 from app_patent_detail_routes import register_patent_detail_routes
+from app_design_detail_routes import register_design_detail_routes
 from app_cografi_search_routes import register_cografi_search_routes
 from app_cografi_watchlist_routes import register_cografi_watchlist_routes
 from app_registry_search_routes import register_registry_search_routes
@@ -228,6 +229,9 @@ register_registry_search_routes(app, limiter)
 # Design (Tasarım) watchlist + alerts — sister to the trademark watchlist+alerts.
 register_design_watchlist_routes(app, limiter)
 register_design_alert_routes(app, limiter)
+
+# Design detail modal — full record + events timeline.
+register_design_detail_routes(app, limiter)
 
 # Lazy load AI models only when needed
 _ai_models_loaded = False

@@ -1,10 +1,11 @@
 """
-Payment API endpoints - iyzico Checkout Form integration.
+Payment API endpoints - regional Stripe + iyzico checkout integration.
 
 Endpoints:
-- POST /api/v1/payments/initialize  - Create iyzico checkout session (auth required)
+- POST /api/v1/payments/initialize  - Create regional checkout session (auth required)
 - POST /api/v1/payments/callback    - iyzico redirect after payment (token-based, no auth)
 - POST /api/v1/payments/webhook     - iyzico server-to-server notification (no auth)
+- POST /api/v1/payments/stripe/webhook - Stripe server-to-server notification (no auth)
 - POST /api/v1/payments/activate-free - Activate free plan without payment (auth required)
 """
 
@@ -20,6 +21,7 @@ from services.payment_service import (
     initialize_payment_data,
     payment_callback_data,
     payment_webhook_data,
+    stripe_webhook_data,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,7 +34,7 @@ async def initialize_payment(
     payload: dict = Body(...),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    """Create an iyzico Checkout Form session."""
+    """Create a regional checkout session."""
     return await initialize_payment_data(
         request=request,
         payload=payload,
@@ -50,6 +52,12 @@ async def payment_callback(request: Request):
 async def payment_webhook(request: Request):
     """Handle iyzico server-to-server webhook notifications."""
     return await payment_webhook_data(request=request)
+
+
+@router.post("/stripe/webhook")
+async def stripe_payment_webhook(request: Request):
+    """Handle Stripe server-to-server webhook notifications."""
+    return await stripe_webhook_data(request=request)
 
 
 @router.post("/activate-free")

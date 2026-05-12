@@ -27,22 +27,22 @@
     <div class="mb-5 inline-flex rounded-xl p-1"
          style="background:var(--color-bg-muted);border:1px solid var(--color-border)">
         <button type="button" @click="radarView = 'marka'"
-                class="px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                class="px-3 sm:px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
                 :class="radarView === 'marka' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
                 :style="radarView === 'marka' ? '' : 'color:var(--color-text-muted)'"
                 x-text="t('leads.radar_registry_marka')">Marka</button>
         <button type="button" @click="radarView = 'tasarim'"
-                class="px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                class="px-3 sm:px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
                 :class="radarView === 'tasarim' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
                 :style="radarView === 'tasarim' ? '' : 'color:var(--color-text-muted)'"
                 x-text="t('leads.radar_registry_tasarim')">Tasarım</button>
         <button type="button" @click="radarView = 'patent'"
-                class="px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                class="px-3 sm:px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
                 :class="radarView === 'patent' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
                 :style="radarView === 'patent' ? '' : 'color:var(--color-text-muted)'"
                 x-text="t('leads.radar_registry_patent')">Patent</button>
         <button type="button" @click="radarView = 'cografi'"
-                class="px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                class="px-3 sm:px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
                 :class="radarView === 'cografi' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
                 :style="radarView === 'cografi' ? '' : 'color:var(--color-text-muted)'"
                 x-text="t('leads.radar_registry_cografi')">Coğrafi</button>
@@ -56,27 +56,27 @@
     <!-- Sub-mode chips (Marka lead types) -->
     <div class="mb-4 flex flex-wrap items-center gap-1 p-1 rounded-lg w-fit" style="background:var(--color-bg-muted);border:1px solid var(--color-border)">
         <button id="radar-mode-conflicts" onclick="switchRadarMode('conflicts')"
-                class="px-4 py-2 rounded-md text-sm font-medium transition-all"
+                class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-all"
                 style="background:var(--color-primary);color:white">
             <span x-text="t('leads.mode_conflicts')">Itiraz Firsatlari</span>
         </button>
         <button id="radar-mode-renewals" onclick="switchRadarMode('renewals')"
-                class="px-4 py-2 rounded-md text-sm font-medium transition-all"
+                class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-all"
                 style="color:var(--color-text-secondary)">
             <span x-text="t('leads.mode_renewals')">Yenileme Firsatlari</span>
         </button>
         <button id="radar-mode-cancellations" onclick="switchRadarMode('cancellations')"
-                class="px-4 py-2 rounded-md text-sm font-medium transition-all"
+                class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-all"
                 style="color:var(--color-text-secondary)">
             <span x-text="t('leads.mode_cancellations')">Iptal Firsatlari</span>
         </button>
         <button id="radar-mode-transfers" onclick="switchRadarMode('transfers')"
-                class="px-4 py-2 rounded-md text-sm font-medium transition-all"
+                class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-all"
                 style="color:var(--color-text-secondary)">
             <span x-text="t('leads.mode_transfers')">Devir Firsatlari</span>
         </button>
         <button id="radar-mode-bankruptcies" onclick="switchRadarMode('bankruptcies')"
-                class="px-4 py-2 rounded-md text-sm font-medium transition-all"
+                class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-all"
                 style="color:var(--color-text-secondary)">
             <span x-text="t('leads.mode_bankruptcies')">Iflas Firsatlari</span>
         </button>
@@ -687,22 +687,22 @@
         <div class="mb-4 flex flex-wrap items-center gap-1 p-1 rounded-lg w-fit"
              style="background:var(--color-bg-muted);border:1px solid var(--color-border)">
             <button id="patent-cat-lapse" onclick="switchPatentLeadsCategory('lapse')"
-                    class="px-4 py-2 rounded-md text-sm font-medium transition-all"
+                    class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-all"
                     style="background:var(--color-primary);color:white">
                 <span x-text="t('patent_leads.cat_lapse')">Düşmüş Patentler</span>
             </button>
             <button id="patent-cat-transfer" onclick="switchPatentLeadsCategory('transfer')"
-                    class="px-4 py-2 rounded-md text-sm font-medium transition-all"
+                    class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-all"
                     style="color:var(--color-text-secondary)">
                 <span x-text="t('patent_leads.cat_transfer')">Devir / Atama</span>
             </button>
             <button id="patent-cat-license" onclick="switchPatentLeadsCategory('license')"
-                    class="px-4 py-2 rounded-md text-sm font-medium transition-all"
+                    class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-all"
                     style="color:var(--color-text-secondary)">
                 <span x-text="t('patent_leads.cat_license')">Lisans Teklifi</span>
             </button>
             <button id="patent-cat-rejected" onclick="switchPatentLeadsCategory('rejected')"
-                    class="px-4 py-2 rounded-md text-sm font-medium transition-all"
+                    class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-all"
                     style="color:var(--color-text-secondary)">
                 <span x-text="t('patent_leads.cat_rejected')">Reddedilen / Lapsus Başvurular</span>
             </button>

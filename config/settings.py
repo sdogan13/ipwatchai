@@ -412,6 +412,35 @@ class IyzicoSettings(BaseSettings):
         populate_by_name = True
 
 
+class StripeSettings(BaseSettings):
+    """Stripe Payment Gateway Configuration"""
+    secret_key: str = Field(default="", alias="STRIPE_SECRET_KEY")
+    webhook_secret: str = Field(default="", alias="STRIPE_WEBHOOK_SECRET")
+    success_url: str = Field(
+        default="http://localhost:8000/dashboard?payment=success&session_id={CHECKOUT_SESSION_ID}",
+        alias="STRIPE_SUCCESS_URL",
+    )
+    cancel_url: str = Field(default="http://localhost:8000/checkout?error=payment_cancelled", alias="STRIPE_CANCEL_URL")
+    automatic_tax: bool = Field(default=True, alias="STRIPE_AUTOMATIC_TAX")
+
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+        extra = "ignore"
+        populate_by_name = True
+
+
+class BillingSettings(BaseSettings):
+    """Regional billing catalog configuration"""
+    region_catalog_json: str = Field(default="", alias="BILLING_REGION_CATALOG_JSON")
+
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+        extra = "ignore"
+        populate_by_name = True
+
+
 class Settings(BaseSettings):
     """Main Settings - Aggregates all settings"""
 
@@ -446,6 +475,8 @@ class Settings(BaseSettings):
     creative: CreativeSettings = CreativeSettings()
     pipeline: PipelineSettings = PipelineSettings()
     iyzico: IyzicoSettings = IyzicoSettings()
+    stripe: StripeSettings = StripeSettings()
+    billing: BillingSettings = BillingSettings()
 
     class Config:
         env_file = ".env"

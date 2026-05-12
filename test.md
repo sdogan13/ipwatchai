@@ -1,6 +1,6 @@
 # Test Plan
 
-Last updated: 2026-04-22
+Last updated: 2026-05-12
 Status: In progress
 
 ## Purpose
@@ -229,7 +229,7 @@ Current environment note:
 | Applications | Partial | Yes | Yes | Covered | extend only if new paid-only application workflows are added |
 | Reports | Partial | Yes | Yes | Covered | add browser download coverage when an export-eligible persona is available |
 | AI Studio | Partial | Planned | Needs browser coverage | In progress | cover status gating, unified AI credits, Name Lab generation, Logo Studio project/revision generation, asynchronous audit polling, safe-candidate selection, and history rendering |
-| Billing and checkout | Partial | Yes | Yes | Blocked | keep pre-payment and failure-path coverage current; revisit successful paid checkout only after a real payment method/provider is configured |
+| Billing and checkout | Partial | Yes | Yes | In progress | regional catalog, Stripe checkout initialization, iyzico fallback, and webhook fulfillment are covered with mocked providers; real provider success remains blocked until Stripe/iyzico credentials and webhook forwarding are configured |
 | Admin | Partial | Yes | Yes | Covered | deepen destructive admin actions only where they are product-critical |
 | Uploads and assets | Yes | Yes | Yes | Covered | extend only if new export/download asset paths are added |
 | Portfolio / holders / attorneys | Partial | Yes | Yes | Covered | deepen only if new business-only portfolio actions become product-critical |
@@ -256,6 +256,7 @@ Current environment note:
 - `tests/test_reconcile_tasarim.py`: Tasarım stage-3 PDF↔CD reconciler — JSON loaders with swap-detection, CanonicalDesignRecord/Design/View dataclasses, normalize_cd_dossier (DD.MM.YYYY → ISO, field renames, design_count int cast, CD title → canonical name), normalize_pdf_record (filing_date → application_date rename, embeddings/bbox/xref drop, hague_reference + page_range + deferred_publication preservation), merge_records (CD-wins precedence, view dedup with image_source provenance, design merge by no, attorney field union), `_normalise_registration_no` for Hague pairing, reconcile_metadata orchestrator (single-side + paired, bulletin_no None tolerance), `dedupe_images_on_disk` mop-up helper, and CLI that materializes `bulletins/Tasarim/TS_{N}_{date}/merged_metadata.json`
 - `tests/test_subscription.py`: plan eligibility and credit logic
 - `tests/test_subscription_limits.py`: subscription limit behavior
+- `tests/test_billing_regional.py`: regional catalog resolution, Stripe subscription/credit-pack checkout session creation, and Stripe webhook success/failure/idempotency behavior with provider calls mocked
 - `tests/test_scoring_engine.py`: V2 text/visual scoring behavior, common-anchor/generic/descriptor caps, descriptor-stat classifier tests, low-protectability anchor classifier and weak shared-anchor caps, short-anchor and dominant-anchor fuzzy/phonetic guardrails, short-acronym subset and short collapsed translation caps, continuous cap calibration, conservative OCR-vs-OCR visual behavior, image-only OCR staying out of the trademark-name text query, image-only visual quality calibration and strict/balanced layout-variant logo corroboration, plain-text wordmark visual profiling/guardrails, single-anchor asymmetric added-matter caps, weak/limited-text visual guardrails, OCR-disagreement diagnostics, Retrieval V2 normalization/source diagnostics, compact compound retrieval/scoring, added-matter scoring, duplicate/collapsed translation caps, compatibility fields, and combiner behavior
 - `tests/test_edge_cases.py`: scoring/search edge cases
 - `tests/test_translation.py`: translation behavior
@@ -289,6 +290,7 @@ Current environment note:
 - `tests/browser/test_alerts_browser.py`: member alert detail acknowledge, inline resolve/dismiss, and appeals filter/sort browser journeys on seeded alerts
 - `tests/browser/test_opposition_browser.py`: opposition guidance modal plus inline alert-to-appeal handoff coverage on seeded alert data
 - `tests/browser/test_billing_browser.py`: pricing/checkout locale render coverage for Turkish and Arabic RTL, mobile viewport billing coverage, checkout registration, checkout login, checkout forgot-password reset/login recovery, and paid-checkout initialization browser coverage
+- `tests/browser/test_mobile_layout_browser.py`: cross-surface mobile-friendliness regression suite at 390×844 viewport — static-template assertions that 13 modal locations (lightbox + portfolio + design/cografi/patent detail + design/marka watchlist edit & upload + patent/cografi watchlist add + events timeline + buy-credits) all carry `modal-mobile-fullscreen`, that the dashboard and landing fullscreen CSS rules both force `margin: 0 !important` (neutralizes inner-card `mx-4` so the card doesn't overflow the viewport right edge), that the dashboard registry tab toggles use responsive `px-3 sm:px-5` padding, that the lead-mode chips use responsive `px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm` padding, and that the landing risk-report grid uses `min-w-0 sm:min-w-[620px]` so it stops forcing horizontal scroll. Live mobile-viewport assertions: landing page and dashboard search tab show no horizontal overflow; six JS-toggleable modals pin to viewport at x=0 with width==viewport when made visible; the combined buy-credits + upgrade-plan modal opens via the real 402 path from `/api/v1/tools/suggest-names` for a Free persona, pins to viewport, and collapses its picker grid to single-column below the md breakpoint. Uses managed-free-smoke persona; no test data created.
 - `tests/browser/test_admin_browser.py`: admin-capable browser coverage for `/admin` navigation plus landing-page Education tester moderation controls
 - `tests/browser/test_design_dashboard_browser.py`: design (Tasarım) foundational dashboard lifecycle — search subview + result-card render (designs use <article> children of #design-search-grid; no detail modal); watchlist subview + 4-cell stats bar (total / threatened / critical / new_alerts — different metrics from patent's holder/reference split); add-form expansion + create item via UI + per-item Scan button via data-action="scan-now" + per-item Delete via data-action="delete" with confirm() auto-accept; tr/ar locale switching with html dir=rtl on AR. Supersedes the deleted test_design_search_browser.py + test_design_watchlist_browser.py (both used the stale run_browser_step signature and would AssertionError at runtime). Uses managed-professional persona (2000/day search quota — starter's 50/day exhausts under cross-registry dev runs).
 - `tests/browser/test_design_free_tier_gate_browser.py`: design free-tier watchlist quota gate — API pre-fill 5 design watch items (cross-registry 5-item cap), attempt the 6th via UI, assert HTTP 403 with structured limit_exceeded body, inline #design-watchlist-error banner visible + non-empty + contains a quota/limit word, no leakage into the rendered list. Uses managed-free-smoke persona.
@@ -534,7 +536,7 @@ Environment Notes:
 - Alert browser coverage now proves acknowledge, resolve, dismiss, appeals filter/sort behavior, inline opposition handoff, and the alert-detail opposition guidance modal on seeded alerts.
 - Higher-tier live/browser coverage still depends on seeded paid/business credentials or superadmin provisioning env vars; in this workspace the superadmin provisioning path is now exercised and green.
 - Billing valid-discount happy-path coverage depends on `TEST_VALID_DISCOUNT_CODE` unless a seeded code exists in the environment.
-- Successful paid checkout is currently blocked because no real payment method/provider is configured in this environment; the existing billing browser/live coverage stops at authenticated initialization, plan handoff, discount handling, and graceful gateway/failure handling.
+- Successful external paid checkout is currently blocked unless real Stripe/iyzico test credentials and Stripe webhook forwarding are configured; the existing billing browser/live coverage stops at authenticated initialization, plan handoff, discount handling, provider-specific redirects/forms, and graceful gateway/failure handling.
 - `api/admin_routes.py` defines org-admin IDF debug endpoints, but the live router registry does not currently mount them, so they are not covered by the admin live suite.
 - Nightly scheduling exists as an executable runner, but it is not yet wired to an external scheduler or CI job in this repository.
 
@@ -775,5 +777,5 @@ Prioritized optional testing backlog:
 - P3: destructive admin mutation coverage
 - P3: resilience / soak coverage
 - P3: accessibility checks
-- Blocked: true paid checkout success until a payment method/provider exists in the test environment
-- Blocked: external payment-provider end-to-end verification until that provider is configured
+- Blocked: true paid checkout success until Stripe/iyzico test credentials and webhook forwarding exist in the test environment
+- Blocked: external payment-provider end-to-end verification until those providers are configured

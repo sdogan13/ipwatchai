@@ -4468,7 +4468,14 @@ function showLogoCreditsExhausted(detail) {
 // ============================================
 // BUY CREDITS MODAL (one-shot AI credit packs)
 // ============================================
-var _buyCreditsState = { selectedPackId: null, packs: [], loading: false, detail: null };
+var _buyCreditsState = {
+    selectedPackId: null,
+    packs: [],
+    loading: false,
+    detail: null,
+    catalog: null,
+    region: 'UK'
+};
 
 // Plans shown in the left "Upgrade plan" column of the combined modal.
 // Prices and monthly credit allowances mirror PLAN_FEATURES on the server
@@ -4480,11 +4487,50 @@ var _BUY_CREDITS_UPGRADE_PLANS = [
     { id: 'enterprise',   price_try: 4999, monthly_ai_credits: 500 }
 ];
 
+function _normalizeBillingRegion(region) {
+    region = String(region || '').toUpperCase();
+    return ['UK', 'EU', 'TR'].indexOf(region) >= 0 ? region : 'UK';
+}
+
+function _storedBillingRegion() {
+    try {
+        var urlRegion = new URLSearchParams(window.location.search).get('region');
+        var storedRegion = window.localStorage ? window.localStorage.getItem('billing_region') : null;
+        return _normalizeBillingRegion(urlRegion || storedRegion || _buyCreditsState.region);
+    } catch (_) {
+        return _normalizeBillingRegion(_buyCreditsState.region);
+    }
+}
+
+function _formatBillingAmount(amount, currency) {
+    var locale = window.AppI18n ? window.AppI18n.getLocale() : 'tr';
+    var numberLocale = locale === 'ar' ? 'ar-SA' : (locale === 'en' ? 'en-US' : 'tr-TR');
+    var value = Number(amount || 0);
+    currency = currency || ((_buyCreditsState.catalog && _buyCreditsState.catalog.currency) || 'TRY');
+    try {
+        return new Intl.NumberFormat(numberLocale, {
+            style: 'currency',
+            currency: currency,
+            maximumFractionDigits: value % 1 === 0 ? 0 : 2
+        }).format(value);
+    } catch (_) {
+        return currency + ' ' + value.toLocaleString(numberLocale);
+    }
+}
+
+function _buyCreditsCatalogPlan(planId) {
+    var plans = (_buyCreditsState.catalog && _buyCreditsState.catalog.plans) || {};
+    return plans[planId] || {};
+}
+
 function openBuyCreditsModal(detail) {
     var modal = document.getElementById('buy-credits-modal');
     if (!modal) return;
     _buyCreditsState.selectedPackId = null;
     _buyCreditsState.detail = detail || null;
+    _buyCreditsState.region = _storedBillingRegion();
+    var regionSelect = document.getElementById('buy-credits-region');
+    if (regionSelect) regionSelect.value = _buyCreditsState.region;
     var submit = document.getElementById('buy-credits-submit');
     if (submit) submit.disabled = true;
     var err = document.getElementById('buy-credits-error');
@@ -4498,7 +4544,7 @@ function openBuyCreditsModal(detail) {
     modal.classList.remove('hidden');
     if (typeof lockBodyScroll === 'function') lockBodyScroll();
     _renderBuyCreditsPlans();
-    _loadBuyCreditsPacks();
+    _loadBuyCreditsCatalog();
 }
 
 function closeBuyCreditsModal() {
@@ -4519,18 +4565,20 @@ function _renderBuyCreditsPlans() {
         var name = t('pricing.' + plan.id + '_name');
         var creditsLine = plan.monthly_ai_credits + ' '
             + t('studio.buy_credits.monthly_credits');
-        var price = '₺' + plan.price_try + ' / '
+        var catalogPlan = _buyCreditsCatalogPlan(plan.id);
+        var currency = (_buyCreditsState.catalog && _buyCreditsState.catalog.currency) || 'TRY';
+        var price = _formatBillingAmount(catalogPlan.price_monthly || plan.price_try, currency) + ' / '
             + t('studio.buy_credits.per_month');
         return '<button type="button"'
             + ' onclick="upgradeFromBuyCredits(\'' + plan.id + '\')"'
-            + ' class="w-full text-left rounded-lg p-3 transition hover:opacity-90"'
-            + ' style="border:1px solid var(--color-border);background:var(--color-bg-card)">'
+            + ' class="w-full text-left rounded-lg px-3 py-2 bg-gray-900 border border-purple-500/20'
+            + ' hover:border-purple-400 hover:bg-gray-900/80 transition-colors">'
             + '<div class="flex items-center justify-between gap-3">'
             + '<div class="min-w-0">'
-            + '<div class="font-semibold" style="color:var(--color-text-primary)">' + name + '</div>'
-            + '<div class="text-xs mt-0.5" style="color:var(--color-text-secondary)">' + creditsLine + '</div>'
+            + '<div class="text-sm font-semibold text-white">' + name + '</div>'
+            + '<div class="text-[11px] text-gray-400">' + creditsLine + '</div>'
             + '</div>'
-            + '<div class="text-sm font-medium whitespace-nowrap" style="color:var(--color-text-primary)">' + price + '</div>'
+            + '<div class="text-xs font-medium whitespace-nowrap text-purple-300">' + price + '</div>'
             + '</div>'
             + '</button>';
     }).join('');
@@ -4538,25 +4586,40 @@ function _renderBuyCreditsPlans() {
 
 function upgradeFromBuyCredits(planId) {
     closeBuyCreditsModal();
-    window.location.href = '/checkout?plan=' + encodeURIComponent(planId) + '&billing=monthly';
+    window.location.href = '/checkout?plan=' + encodeURIComponent(planId)
+        + '&billing=monthly&region=' + encodeURIComponent(_buyCreditsState.region || 'UK');
 }
 
-async function _loadBuyCreditsPacks() {
+async function _loadBuyCreditsCatalog() {
     var container = document.getElementById('buy-credits-packs');
     if (!container) return;
-    container.innerHTML = '<div class="text-sm" style="color:var(--color-text-muted)">' + t('common.loading') + '</div>';
+    container.innerHTML = '<div class="text-sm text-gray-400">' + t('common.loading') + '</div>';
     try {
-        var res = await fetch('/api/v1/billing/credit-packs', {
-            headers: { 'Authorization': 'Bearer ' + getAuthToken() }
-        });
+        var res = await fetch('/api/v1/billing/catalog?region=' + encodeURIComponent(_buyCreditsState.region || 'UK'));
         if (!res.ok) throw new Error('failed');
         var data = await res.json();
-        _buyCreditsState.packs = data.packs || [];
+        _buyCreditsState.catalog = data;
+        _buyCreditsState.region = _normalizeBillingRegion(data.region || _buyCreditsState.region);
+        _buyCreditsState.packs = data.credit_packs || [];
+        try {
+            if (window.localStorage) window.localStorage.setItem('billing_region', _buyCreditsState.region);
+        } catch (_) {}
+        var regionSelect = document.getElementById('buy-credits-region');
+        if (regionSelect) regionSelect.value = _buyCreditsState.region;
+        _renderBuyCreditsPlans();
         _renderBuyCreditsPacks();
     } catch (_) {
-        container.innerHTML = '<div class="text-sm" style="color:#dc2626">'
+        container.innerHTML = '<div class="text-sm text-red-400">'
             + t('studio.buy_credits.load_failed') + '</div>';
     }
+}
+
+function setBuyCreditsRegion(region) {
+    _buyCreditsState.region = _normalizeBillingRegion(region);
+    _buyCreditsState.selectedPackId = null;
+    var submit = document.getElementById('buy-credits-submit');
+    if (submit) submit.disabled = true;
+    _loadBuyCreditsCatalog();
 }
 
 function _renderBuyCreditsPacks() {
@@ -4569,18 +4632,17 @@ function _renderBuyCreditsPacks() {
     }
     container.innerHTML = packs.map(function (pack) {
         var selected = _buyCreditsState.selectedPackId === pack.id;
-        var label = t(pack.label_key);
-        var priceLine = '₺' + pack.price_try + ' · ' + pack.credits + ' '
-            + t('studio.buy_credits.credits_word');
+        var creditsLabel = pack.credits + ' ' + t('studio.buy_credits.credits_word');
+        var priceLine = _formatBillingAmount(pack.price, (_buyCreditsState.catalog && _buyCreditsState.catalog.currency) || 'TRY');
+        var classes = selected
+            ? 'border-purple-400 bg-purple-500/15'
+            : 'border-purple-500/20 bg-gray-900 hover:border-purple-400 hover:bg-gray-900/80';
         return '<button type="button" data-pack-id="' + pack.id + '"'
             + ' onclick="selectBuyCreditsPack(\'' + pack.id + '\')"'
-            + ' class="w-full text-left rounded-lg p-3 transition"'
-            + ' style="border:1px solid '
-            + (selected ? 'var(--color-primary, #4f46e5)' : 'var(--color-border)')
-            + ';background:' + (selected ? 'var(--color-bg-muted)' : 'transparent') + '">'
-            + '<div class="flex items-center justify-between">'
-            + '<div class="font-semibold" style="color:var(--color-text-primary)">' + label + '</div>'
-            + '<div class="text-sm font-medium" style="color:var(--color-text-primary)">' + priceLine + '</div>'
+            + ' class="w-full text-left rounded-lg px-3 py-2 border transition-colors ' + classes + '">'
+            + '<div class="flex items-center justify-between gap-3">'
+            + '<div class="text-sm font-semibold text-white">' + creditsLabel + '</div>'
+            + '<div class="text-xs font-medium text-purple-300">' + priceLine + '</div>'
             + '</div>'
             + '</button>';
     }).join('');
@@ -4607,7 +4669,7 @@ async function submitBuyCredits() {
     if (submit) submit.disabled = true;
 
     try {
-        var body = { pack_id: packId };
+        var body = { pack_id: packId, region: _buyCreditsState.region || 'UK' };
         if (discountCode) body.discount_code = discountCode;
         var res = await fetch('/api/v1/billing/purchase-credits', {
             method: 'POST',
@@ -4622,6 +4684,10 @@ async function submitBuyCredits() {
             var msg = (data && data.detail) || t('studio.buy_credits.failure');
             if (errEl) { errEl.textContent = msg; errEl.classList.remove('hidden'); }
             if (submit) submit.disabled = false;
+            return;
+        }
+        if (data.checkout_url) {
+            window.location.href = data.checkout_url;
             return;
         }
         var html = data.checkout_form_content || '';
@@ -4667,6 +4733,11 @@ function refreshStudioDynamicTranslations() {
     updateStudioModeMeta();
     refreshStudioNameResultsText();
     refreshStudioLogoResultsText();
+    var buyCreditsModal = document.getElementById('buy-credits-modal');
+    if (buyCreditsModal && !buyCreditsModal.classList.contains('hidden')) {
+        _renderBuyCreditsPlans();
+        _renderBuyCreditsPacks();
+    }
     loadStudioHistory();
 }
 
@@ -6012,27 +6083,51 @@ function _inlineRiskColor(score) {
     return 'var(--color-risk-low-text)';
 }
 
-// Map raw Turkish DB status values (final_status column) to translated strings.
-// DB stores Turkish labels; this converts them to the active locale via landing.status_* keys.
+// Map raw Turkish DB status values (final_status column on trademarks,
+// current_status on designs) plus the enum codes used by patent and
+// cografi result rows to translated strings. DB stores fixed labels;
+// this converts them to the active locale via the listed i18n keys.
+//
+// The trademark + design block uses the shared `landing.status_*`
+// keys (they overlap with the landing-page facet labels). The patent
+// + cografi record_type enums are registry-specific concepts and
+// live under their own namespaces.
 var _STATUS_KEY_MAP = {
-    'Başvuruldu':   'landing.status_pending',
-    'Yayında':      'landing.status_published',
-    'Yayınlandı':   'landing.status_published',
-    'Tescil Edildi':'landing.status_registered',
-    'Reddedildi':   'landing.status_rejected',
-    'Geri Çekildi': 'landing.status_withdrawn',
-    'İtiraz Edildi':'landing.status_opposed',
-    'Süresi Doldu': 'landing.status_expired',
-    'Kısmi Red':    'landing.status_partial_refusal',
-    'Yenilendi':    'landing.status_renewed',
-    'Devredildi':   'landing.status_transferred',
-    'İptal Edildi': 'landing.status_cancelled',
+    // Trademark final_status + design current_status (shared shapes)
+    'Başvuruldu':       'landing.status_pending',
+    'Yayında':          'landing.status_published',
+    'Yayınlandı':       'landing.status_published',
+    'Yayım Ertelendi':  'landing.status_publication_postponed',
+    'Tescil Edildi':    'landing.status_registered',
+    'Reddedildi':       'landing.status_rejected',
+    'Geri Çekildi':     'landing.status_withdrawn',
+    'İtiraz Edildi':    'landing.status_opposed',
+    'Süresi Doldu':     'landing.status_expired',
+    'Kısmi Red':        'landing.status_partial_refusal',
+    'Yenilendi':        'landing.status_renewed',
+    'Devredildi':       'landing.status_transferred',
+    'İptal Edildi':     'landing.status_cancelled',
+    // Patent record_type enum (kind_code-derived)
+    'GRANTED_PATENT':   'patent_search.record_type_granted_patent',
+    'GRANTED_UM':       'patent_search.record_type_granted_um',
+    'PUBLISHED_APP':    'patent_search.record_type_published_app',
+    'PUBLISHED_UM_APP': 'patent_search.record_type_published_um_app',
+    // Cografi record_type enum
+    'GI':               'cografi_search.record_type_gi',
+    'TPN':              'cografi_search.record_type_tpn',
+    // Shared unknown bucket (patent + cografi both ship UNKNOWN)
+    'UNKNOWN':          'landing.status_unknown',
 };
 function translateStatus(rawStatus) {
     if (!rawStatus) return '';
     var key = _STATUS_KEY_MAP[rawStatus];
     return key ? t(key) : rawStatus;
 }
+
+// Expose the helper to the vanilla-JS registry card scripts
+// (design_search.js / patent_search.js / cografi_search.js) which
+// can't reach into the Alpine root.
+window.translateStatus = translateStatus;
 
 function toggleInlineAlertDetail(alertId) {
     var detail = document.getElementById('inline-alert-detail-' + alertId);

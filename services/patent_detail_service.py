@@ -41,7 +41,9 @@ def _fetch_patent(cur, patent_id: str) -> Optional[Dict[str, Any]]:
     cur.execute(
         """
         SELECT id::text, registry_type, application_no, publication_no, kind_code,
-               record_type, application_date, publication_date, grant_date,
+               record_type, current_status::text AS current_status,
+               last_event_type, last_event_date,
+               application_date, publication_date, grant_date,
                bulletin_no, bulletin_date, title, abstract, ipc_classes, patent_type,
                source_format, source_archive, source_pdf, bulletin_folder,
                page_range_start, page_range_end, created_at, updated_at
@@ -153,6 +155,99 @@ def _fetch_recent_events(cur, patent_id: str, app_no: Optional[str]) -> List[Dic
     return out
 
 
+# Event types that count as a "real publication" or "real grant" for
+# dedup against the synthetic milestone events. If any of these is
+# present in the real timeline, we skip emitting the corresponding
+# synthetic.
+_REAL_PUBLISHED_TYPES = {
+    "APPLICATION_PUBLISHED", "APPLICATION_PUBLICATION_CORRECTED",
+}
+_REAL_GRANTED_TYPES = {
+    "GRANT_ANNOUNCED", "GRANT_ANNOUNCED_LEGACY_551", "GRANT_FINALIZED",
+    "GRANT_CORRECTED",
+}
+
+
+def _synthetic_events(
+    patent_row: Dict[str, Any], real_events: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Synthesize milestone events from the patent row's own dates.
+
+    `patent_events` only contains *bulletin-extracted* lifecycle
+    signals. The filing date never has an event row (the patent only
+    enters the bulletin stream at publication). Publication / grant
+    sometimes have a real APPLICATION_PUBLISHED / GRANT_ANNOUNCED
+    event, sometimes don't (the 2024/007156 case had only a search-
+    report event — no APPLICATION_PUBLISHED).
+
+    Emit:
+      * APPLICATION_FILED   — always when application_date is set.
+                              No real-event equivalent exists.
+      * APPLICATION_PUBLISHED — only when no real publication event
+                              already appears in the timeline.
+      * GRANT_ANNOUNCED     — only when no real grant event appears
+                              (the dedup set covers ANNOUNCED /
+                              LEGACY_551 / FINALIZED / CORRECTED).
+
+    Synthetic rows carry `synthetic: True` so the UI can mark them
+    visually if needed.
+    """
+    out: List[Dict[str, Any]] = []
+    app_date = patent_row.get("application_date")
+    pub_date = patent_row.get("publication_date")
+    grant_date = patent_row.get("grant_date")
+
+    real_types = {e.get("event_type") for e in real_events if e.get("event_type")}
+
+    if app_date:
+        out.append({
+            "id": "synthetic:application_filed",
+            "event_type": "APPLICATION_FILED",
+            "event_date": _isofmt(app_date),
+            "bulletin_date": _isofmt(app_date),
+            "synthetic": True,
+        })
+
+    if pub_date and not (real_types & _REAL_PUBLISHED_TYPES):
+        out.append({
+            "id": "synthetic:application_published",
+            "event_type": "APPLICATION_PUBLISHED",
+            "event_date": _isofmt(pub_date),
+            "bulletin_date": _isofmt(pub_date),
+            "synthetic": True,
+        })
+
+    if grant_date and not (real_types & _REAL_GRANTED_TYPES):
+        out.append({
+            "id": "synthetic:grant_announced",
+            "event_type": "GRANT_ANNOUNCED",
+            "event_date": _isofmt(grant_date),
+            "bulletin_date": _isofmt(grant_date),
+            "synthetic": True,
+        })
+
+    return out
+
+
+def _merge_events_chronologically(
+    real_events: List[Dict[str, Any]],
+    synthetic: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Combine real + synthetic events, newest first. Real events
+    arrive pre-sorted DESC from SQL; we fold synthetics in by date
+    and re-sort. Secondary sort on event_type keeps the order stable
+    when two events share a date."""
+    combined = list(real_events) + list(synthetic)
+    combined.sort(
+        key=lambda e: (
+            e.get("bulletin_date") or e.get("event_date") or "",
+            e.get("event_type") or "",
+        ),
+        reverse=True,
+    )
+    return combined
+
+
 # ---------------------------------------------------------------------------
 # Public entry
 # ---------------------------------------------------------------------------
@@ -174,6 +269,14 @@ def get_patent_detail(*, patent_id: UUID | str, db_factory=Database) -> Dict[str
         if hasattr(record_type, "value"):
             record_type = record_type.value
 
+        # Capture raw dates BEFORE iso-formatting so the synthetic-
+        # event builder can use them as date objects.
+        raw_for_synthetic = {
+            "application_date": row.get("application_date"),
+            "publication_date": row.get("publication_date"),
+            "grant_date": row.get("grant_date"),
+        }
+
         # Normalize date fields
         for k in ("application_date", "publication_date", "grant_date",
                   "bulletin_date", "created_at", "updated_at"):
@@ -181,6 +284,14 @@ def get_patent_detail(*, patent_id: UUID | str, db_factory=Database) -> Dict[str
                 row[k] = _isofmt(row[k])
 
         app_no = row.get("application_no")
+
+        # Real bulletin-extracted events + synthetic milestone events
+        # (filing / publication / grant from the patent row itself).
+        # Dedup against real events so we never show the same
+        # publication twice.
+        real_events = _fetch_recent_events(cur, pid, app_no)
+        synthetic = _synthetic_events(raw_for_synthetic, real_events)
+        all_events = _merge_events_chronologically(real_events, synthetic)
 
         return {
             "patent": {**row, "record_type": record_type,
@@ -190,7 +301,7 @@ def get_patent_detail(*, patent_id: UUID | str, db_factory=Database) -> Dict[str
             "attorneys": _fetch_attorneys(cur, pid),
             "priorities": _fetch_priorities(cur, pid),
             "figures": _fetch_figures(cur, pid),
-            "recent_events": _fetch_recent_events(cur, pid, app_no),
+            "recent_events": all_events,
         }
 
 

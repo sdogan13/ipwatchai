@@ -15553,17 +15553,14 @@ async def test_payment_service_initialize_payment_data_creates_checkout_session(
     mock_db1.cursor.return_value = mock_cursor1
     mock_db1_cm.__enter__.return_value = mock_db1
     mock_db1_cm.__exit__.return_value = False
-    mock_cursor1.fetchone.side_effect = [
-        {
-            "tax_id": "12345678901",
-            "address": "Istanbul",
-            "city": "Istanbul",
-            "country": "Turkey",
-            "phone": "+90 555 000 0000",
-            "user_phone": None,
-        },
-        {"id": "pay-1"},
-    ]
+    mock_cursor1.fetchone.return_value = {
+        "tax_id": "12345678901",
+        "address": "Istanbul",
+        "city": "Istanbul",
+        "country": "Turkey",
+        "phone": "+90 555 000 0000",
+        "user_phone": None,
+    }
 
     mock_db2_cm = MagicMock()
     mock_db2 = MagicMock()
@@ -15571,6 +15568,14 @@ async def test_payment_service_initialize_payment_data_creates_checkout_session(
     mock_db2.cursor.return_value = mock_cursor2
     mock_db2_cm.__enter__.return_value = mock_db2
     mock_db2_cm.__exit__.return_value = False
+    mock_cursor2.fetchone.return_value = {"id": "pay-1"}
+
+    mock_db3_cm = MagicMock()
+    mock_db3 = MagicMock()
+    mock_cursor3 = MagicMock()
+    mock_db3.cursor.return_value = mock_cursor3
+    mock_db3_cm.__enter__.return_value = mock_db3
+    mock_db3_cm.__exit__.return_value = False
 
     checkout_result = MagicMock()
     checkout_result.read.return_value = (
@@ -15585,8 +15590,8 @@ async def test_payment_service_initialize_payment_data_creates_checkout_session(
         request=request,
         payload={"plan": "starter", "billing": "monthly"},
         current_user=current_user,
-        db_factory=MagicMock(side_effect=[mock_db1_cm, mock_db2_cm]),
-        db_connection_factory=MagicMock(side_effect=[object(), object()]),
+        db_factory=MagicMock(side_effect=[mock_db1_cm, mock_db2_cm, mock_db3_cm]),
+        db_connection_factory=MagicMock(side_effect=[object(), object(), object()]),
         settings_obj=settings_obj,
         plan_features={
             "starter": {
@@ -15607,9 +15612,9 @@ async def test_payment_service_initialize_payment_data_creates_checkout_session(
     assert request_data["buyer"]["ip"] == "198.51.100.9"
     assert request_data["callbackUrl"] == "https://example.com/callback"
     assert request_data["basketItems"][0]["id"] == "pay-1"
-    mock_db1.commit.assert_called_once()
     mock_db2.commit.assert_called_once()
-    assert mock_cursor2.execute.call_args.args[1] == ("tok-1", "pay-1")
+    mock_db3.commit.assert_called_once()
+    assert mock_cursor3.execute.call_args.args[1] == ("tok-1", "pay-1")
 
 
 def test_payment_service_activate_subscription_refreshes_monthly_ai_credits():

@@ -183,7 +183,7 @@
 <!-- alert_frequency, monitor_text, monitor_visual-->
 <!-- (no phonetic — designs are visual+Locarno).  -->
 <!-- ============================================ -->
-<div id="design-watchlist-edit-modal" class="hidden fixed inset-0 flex items-center justify-center p-4"
+<div id="design-watchlist-edit-modal" class="hidden fixed inset-0 flex items-center justify-center p-4 modal-mobile-fullscreen"
      style="background:var(--color-bg-overlay);z-index:var(--z-modal)"
      onclick="if(event.target===this && typeof closeEditDesignWatchlistModal === 'function') closeEditDesignWatchlistModal()">
     <div class="rounded-xl shadow-xl max-w-md w-full overflow-hidden"
@@ -272,7 +272,7 @@
 <!-- 3-step flow mirroring watchlist-upload-modal -->
 <!-- but CSV-only and with design-namespace IDs.  -->
 <!-- ============================================ -->
-<div id="design-watchlist-upload-modal" class="hidden fixed inset-0 flex items-center justify-center p-4"
+<div id="design-watchlist-upload-modal" class="hidden fixed inset-0 flex items-center justify-center p-4 modal-mobile-fullscreen"
      style="background:var(--color-bg-overlay);z-index:var(--z-modal)"
      onclick="if(event.target===this && typeof closeDesignBulkUploadModal === 'function') closeDesignBulkUploadModal()">
     <div class="rounded-xl shadow-xl max-w-lg w-full overflow-hidden"
@@ -1454,7 +1454,7 @@
 <!-- EVENTS TIMELINE MODAL                            -->
 <!-- ================================================ -->
 <div id="events-timeline-modal" role="dialog" aria-modal="true"
-     class="fixed inset-0 z-[70] flex items-center justify-center hidden"
+     class="fixed inset-0 z-[70] flex items-center justify-center hidden modal-mobile-fullscreen"
      style="background:rgba(0,0,0,0.5)">
     <div class="w-full max-w-3xl max-h-[90vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col"
          style="background:var(--color-bg-card)">

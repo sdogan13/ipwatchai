@@ -4,15 +4,26 @@ Public-facing discount code validation for pricing page / upgrade flow,
 plus one-shot AI credit pack purchases.
 """
 import logging
+from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, Request
+from fastapi import APIRouter, Body, Depends, Query, Request
 
 from auth.authentication import CurrentUser, get_current_user
+from services.billing_catalog import get_billing_catalog
 from services.payment_service import initialize_credit_pack_purchase_data
 from utils.subscription import list_credit_packs
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/billing", tags=["billing"])
+
+
+@router.get("/catalog")
+async def billing_catalog(
+    request: Request,
+    region: Optional[str] = Query(default=None),
+):
+    """Return the regional billing catalog used by pricing and checkout."""
+    return get_billing_catalog(region=region, headers=request.headers)
 
 
 @router.post("/validate-discount")
@@ -31,9 +42,19 @@ async def validate_discount_code(
 
 @router.get("/credit-packs")
 async def get_credit_packs(
+    request: Request,
+    region: Optional[str] = Query(default=None),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """List the AI credit packs available for purchase."""
+    if region:
+        catalog = get_billing_catalog(region=region, headers=request.headers)
+        return {
+            "region": catalog["region"],
+            "provider": catalog["provider"],
+            "currency": catalog["currency"],
+            "packs": catalog["credit_packs"],
+        }
     return {"packs": list_credit_packs()}
 
 

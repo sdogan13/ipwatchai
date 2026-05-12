@@ -226,30 +226,38 @@ Commercial and workflow:
 - `/api/v1/billing`
 - `/api/v1/payments`
 
-### Billing — AI credit packs
+### Billing — regional catalog, subscriptions, and AI credit packs
 
-One-shot top-ups for AI credits ($0.20 USD / credit at 40 TRY/USD). Available
-to every plan, including Free. Purchased credits never expire and are spent
-only after the monthly plan allowance is exhausted (see
-`utils.subscription.deduct_ai_credits`).
+Regional billing is resolved before provider selection. `UK` and `EU` use Stripe
+Checkout (`GBP`/`EUR`); `TR` uses iyzico Checkout Form (`TRY`). Unknown regions
+fall back to `UK`. Catalog prices and Stripe Price IDs come from
+`BILLING_REGION_CATALOG_JSON`; plan entitlements still come from
+`utils.subscription.PLAN_FEATURES`.
 
-- `GET /api/v1/billing/credit-packs` — lists available packs. Returns
-  `{"packs": [{id, credits, price_try, label_key}, ...]}`. Packs:
-  `small` (25 credits / ₺200), `medium` (100 / ₺800), `large` (500 / ₺4000).
-- `POST /api/v1/billing/purchase-credits` — initialize an iyzico checkout for
-  a pack. Body: `{"pack_id": "small"|"medium"|"large", "discount_code": "..." (optional)}`.
-  Returns the iyzico `checkout_form_content`, `token`, `conversation_id`, and
-  `payment_id`. The frontend injects the form HTML inline (re-executing
-  embedded `<script>` tags) the same way `templates/billing/checkout.html`
-  does for subscription purchases.
-- Success/failure callbacks reuse `/api/v1/payments/callback` and
-  `/api/v1/payments/webhook`. The callback branches on `payments.kind`:
+- `GET /api/v1/billing/catalog?region=UK|EU|TR` — public catalog endpoint.
+  Returns `{region, provider, currency, region_options, plans, credit_packs}`.
+  `plans` include entitlement data; `credit_packs` include `{id, label_key,
+  credits, price}` in the selected currency.
+- `POST /api/v1/payments/initialize` — initialize a plan checkout. Body:
+  `{"plan":"starter"|"professional"|"enterprise","billing":"monthly"|"annual","region":"UK"|"EU"|"TR"}`.
+  Stripe regions return `{provider:"stripe", checkout_url, session_id,
+  payment_id}`. Turkey returns `{provider:"iyzico", checkout_form_content,
+  token, conversation_id, payment_id}`.
+- `GET /api/v1/billing/credit-packs` — legacy authenticated pack list. Without
+  `region`, returns the legacy TRY shape. With `region`, returns regional
+  `{region, provider, currency, packs}`.
+- `POST /api/v1/billing/purchase-credits` — initialize a one-shot AI credit
+  pack. Body: `{"pack_id":"small"|"medium"|"large","region":"UK"|"EU"|"TR",
+  "discount_code":"..."}`. Stripe regions return `checkout_url`; Turkey returns
+  iyzico form HTML. Purchased credits never expire and are spent only after the
+  monthly plan allowance is exhausted.
+- `POST /api/v1/payments/stripe/webhook` — Stripe signed webhook endpoint.
+  Handles checkout completion/success, invoice paid, checkout expiry, and
+  payment failure. The webhook is the authoritative Stripe fulfillment path.
+- iyzico success/failure callbacks continue to use `/api/v1/payments/callback`
+  and `/api/v1/payments/webhook`. Completion branches on `payments.kind`:
   `subscription` runs `activate_subscription`; `credit_pack` runs
-  `apply_credit_pack_purchase` which increments
-  `organizations.ai_credits_purchased`. Both paths record discount-code usage
-  when a code was applied at init.
-- Successful credit-pack purchases redirect to `/dashboard?credits=success`;
-  failures redirect to `/dashboard?credits=failed`.
+  `apply_credit_pack_purchase`.
 
 ### Lead feed sub-routes (Opposition Radar modes)
 

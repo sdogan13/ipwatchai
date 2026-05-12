@@ -287,6 +287,24 @@
     return "border-color:" + (map[risk] || map.low);
   }
 
+  // Card border colour from the patent's status (record_type). The
+  // previous behaviour used the similarity-risk bucket — that paints
+  // every "medium" match amber regardless of whether the patent is
+  // alive or dead. Using the status instead lets a list of results
+  // surface health information at a glance: green = granted, blue =
+  // pending application, red = rejected/withdrawn, grey = unknown.
+  // Reuses _statusColors() so the border + the status pill stay
+  // visually consistent.
+  function _statusBorderStyle(status) {
+    var c = _statusColors(status);
+    // Pill colours come with translucent backgrounds; the border
+    // wants the solid accent (`color`) for a sharper outline. The
+    // fallback (unknown status) stays muted via the same fallback
+    // _statusColors uses.
+    var col = (c && c.color) ? c.color : "var(--color-border)";
+    return "border-color:" + col;
+  }
+
   function _scoreGridCell(label, value01) {
     var v = Math.round(Math.max(0, Math.min(1, Number(value01) || 0)) * 100);
     var colorMap = {
@@ -310,20 +328,55 @@
     return "https://www.turkpatent.gov.tr/arastirma-yap?form=patent&_q=" + encodeURIComponent(applicationNo);
   }
 
-  // Generic status pill colour map; falls back to the muted bg/text
-  // tokens for unknown statuses (legacy or future record_type values).
+  // Pill / border colours per live-status enum. The enum comes from
+  // patents.current_status (derived in pipeline/patent_status_derivation
+  // and backfilled by scripts/backfill_patent_current_status.py).
+  //
+  // Falls back to substring matching for older record_type values
+  // (UNKNOWN-status rows that pre-date the backfill or have no events).
   function _statusColors(status) {
-    var s = String(status || "").toLowerCase();
+    if (!status) {
+      return { bg: "var(--color-bg-muted)", color: "var(--color-text-secondary)" };
+    }
+    // Live lifecycle enum — exact match first.
+    var ENUM = {
+      ACTIVE:             { bg: "rgba(34,197,94,0.12)", color: "#16a34a" },   // green
+      PENDING:            { bg: "rgba(59,130,246,0.12)", color: "#2563eb" },  // blue
+      LAPSED_APPLICATION: { bg: "rgba(234,88,12,0.12)",  color: "#ea580c" },  // orange
+      LAPSED_GRANT:       { bg: "rgba(217,119,6,0.12)",  color: "#d97706" },  // amber
+      REJECTED:           { bg: "rgba(239,68,68,0.12)",  color: "#dc2626" },  // red
+      WITHDRAWN:          { bg: "rgba(239,68,68,0.12)",  color: "#dc2626" },  // red
+      EXPIRED:            { bg: "rgba(124,58,237,0.12)", color: "#7c3aed" },  // purple
+      INVALIDATED:        { bg: "rgba(127,29,29,0.12)",  color: "#7f1d1d" },  // dark red
+      UNKNOWN:            { bg: "var(--color-bg-muted)", color: "var(--color-text-secondary)" },
+    };
+    if (ENUM[status]) return ENUM[status];
+
+    // Legacy fallback for raw record_type strings.
+    var s = String(status).toLowerCase();
     if (s.indexOf("tescil") !== -1 || s.indexOf("granted") !== -1) {
-      return { bg: "rgba(34,197,94,0.12)", color: "#16a34a" };
+      return ENUM.ACTIVE;
     }
     if (s.indexOf("yay") !== -1 || s.indexOf("publish") !== -1) {
-      return { bg: "rgba(59,130,246,0.12)", color: "#2563eb" };
+      return ENUM.PENDING;
     }
     if (s.indexOf("ret") !== -1 || s.indexOf("refus") !== -1 || s.indexOf("withdraw") !== -1) {
-      return { bg: "rgba(239,68,68,0.12)", color: "#dc2626" };
+      return ENUM.REJECTED;
     }
-    return { bg: "var(--color-bg-muted)", color: "var(--color-text-secondary)" };
+    return ENUM.UNKNOWN;
+  }
+
+  // Pick the lifecycle status display value. Prefers
+  // patents.current_status (live, derived from events). Falls back to
+  // record_type when current_status is NULL — happens for patents
+  // that have no events on file. Returns the *translation key root*
+  // so the card uses the right i18n entry; the actual translation
+  // happens via t().
+  function _statusLabelKey(item) {
+    if (item.current_status) {
+      return "patent_search.status_" + String(item.current_status).toLowerCase();
+    }
+    return null; // signal: use the existing record_type/translateStatus path
   }
 
   function _abstractBlock(rawAbstract, cardId) {
@@ -372,8 +425,17 @@
     var simPct = Math.round(simNum);
     var risk = _riskBucket(simPct);
     var imgUrl = item.image_url || "";
-    var status = item.record_type || item.status || "";
+    // Status pill: prefer current_status (live, derived from events).
+    // Fall back to record_type when the patent has no events. The
+    // pill text comes from patent_search.status_<value> when live,
+    // else from window.translateStatus (which knows the record_type
+    // enum). The raw enum drives the colour either way.
+    var status = item.current_status || item.record_type || item.status || "";
     var statusColors = _statusColors(status);
+    var statusKey = _statusLabelKey(item);
+    var statusLabel = statusKey
+      ? t(statusKey, item.current_status)
+      : (window.translateStatus ? window.translateStatus(status) : status);
     var tpUrl = _turkpatentPatentUrl(item.application_no || item.publication_no);
 
     // Image (large, header-prominent, like the design card)
@@ -432,7 +494,7 @@
           (status
             ? '<span class="text-[10px] px-2 py-0.5 rounded-full font-medium" ' +
               'style="background:' + statusColors.bg + ';color:' + statusColors.color + '">' +
-              escapeHtml(status) + '</span>'
+              escapeHtml(statusLabel) + '</span>'
             : '') +
           bulletinHtml +
         '</div>' +
@@ -479,8 +541,8 @@
       ? ('<button type="button" data-portfolio-trigger="patent-holder" ' +
          'data-holder-id="' + escapeHtml(holderId) + '" ' +
          'data-holder-name-raw="' + escapeHtml(holderNameRaw) + '" ' +
-         'class="text-left underline decoration-dotted underline-offset-2 hover:decoration-solid cursor-pointer" ' +
-         'style="color:var(--color-text-secondary);background:transparent;border:0;padding:0;">' +
+         'class="text-left hover:underline cursor-pointer" ' +
+         'style="color:var(--color-primary);background:transparent;border:0;padding:0;">' +
            escapeHtml(holderName) +
          '</button>')
       : ('<span style="color:var(--color-text-secondary)">' + escapeHtml(holderName) + '</span>');
@@ -501,8 +563,8 @@
         if (!nmRaw) return escapeHtml(disp);
         return '<button type="button" data-portfolio-trigger="patent-inventor" ' +
                'data-inventor-name="' + escapeHtml(nmRaw) + '" ' +
-               'class="underline decoration-dotted underline-offset-2 hover:decoration-solid cursor-pointer" ' +
-               'style="color:var(--color-text-secondary);background:transparent;border:0;padding:0;">' +
+               'class="hover:underline cursor-pointer" ' +
+               'style="color:var(--color-primary);background:transparent;border:0;padding:0;">' +
                escapeHtml(disp) + '</button>';
       }).join(", ");
       var extra = inventors.length > 3
@@ -519,14 +581,25 @@
     if (attorney && (attorney.name || attorney.firm)) {
       var aName = String(attorney.name || "").trim();
       var aFirm = String(attorney.firm || "").trim();
-      var firmInName = aFirm && aName.toLowerCase().indexOf(aFirm.toLowerCase()) !== -1;
-      var aText = (aFirm && !firmInName) ? (aName + " — " + aFirm) : aName;
+      // Some ingest rows have the postal address concatenated to the
+      // attorney name (e.g. "AYŞE DEMİR (XYZ PATENT LTD. ŞTİ.) MEHMET
+      // AKİF ERSOY MAH. ... ANKARA"). Strip for display only — the
+      // raw name still goes through to the portfolio click so the
+      // backend's normalize_designer_name match finds the right
+      // record on either form.
+      var aNameDisplay = window._stripTurkishAddress
+        ? window._stripTurkishAddress(aName)
+        : aName;
+      // Recompute firm-in-name against the stripped display string so
+      // we don't dash-join when the firm is already inside it.
+      var firmInName = aFirm && aNameDisplay.toLowerCase().indexOf(aFirm.toLowerCase()) !== -1;
+      var aText = (aFirm && !firmInName) ? (aNameDisplay + " — " + aFirm) : aNameDisplay;
       var attorneyInner = aName
         ? ('<button type="button" data-portfolio-trigger="patent-attorney" ' +
            'data-attorney-name="' + escapeHtml(aName) + '" ' +
            'data-attorney-firm="' + escapeHtml(aFirm) + '" ' +
-           'class="text-left underline decoration-dotted underline-offset-2 hover:decoration-solid cursor-pointer" ' +
-           'style="color:var(--color-text-secondary);background:transparent;border:0;padding:0;">' +
+           'class="text-left hover:underline cursor-pointer" ' +
+           'style="color:var(--color-primary);background:transparent;border:0;padding:0;">' +
            escapeHtml(aText) + '</button>')
         : ('<span style="color:var(--color-text-secondary)">' + escapeHtml(aText) + '</span>');
       attorneyHtml = '<div class="text-xs"><span style="color:var(--color-text-faint)">' +
@@ -543,11 +616,26 @@
           '</div>'
         : '';
 
-    // Action row — TÜRKPATENT external link (Phase 1) + Patent detail
-    // button. Watchlist add is intentionally absent: the patent
-    // watchlist API only supports holder-based or query-based watches
-    // (not "watch this specific patent"), so adding from a result row
-    // doesn't have a clean payload.
+    // Action row — Watchlist add (reference-watch — clones embeddings
+    // to watch for similar new patents, same semantics design uses),
+    // TÜRKPATENT external link, Patent detail button.
+    var watchlistBtn = "";
+    if (item.id) {
+      var wlPayload = JSON.stringify({
+        watch_type: "reference",
+        reference_patent_id: item.id,
+        label: (titleStr || "").slice(0, 200),
+      }).replace(/"/g, '&quot;');
+      watchlistBtn = '<button type="button" data-patent-add-watchlist ' +
+        'data-payload="' + wlPayload + '" ' +
+        'class="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors" ' +
+        'style="color:var(--color-risk-high-text);background:var(--color-risk-high-bg)">' +
+        '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+          '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>' +
+          '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>' +
+        '</svg>' +
+        escapeHtml(t("watchlist.add_to_watchlist", "Add to watchlist")) + '</button>';
+    }
     var tpBtn = tpUrl
       ? '<a href="' + tpUrl + '" target="_blank" rel="noopener" ' +
         'class="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors cursor-pointer" ' +
@@ -569,9 +657,27 @@
           escapeHtml(t("patent_search.view_detail", "Patent detayları")) +
         '</button>'
       : "";
-    var actionRow = (tpBtn || detailBtn)
-      ? '<div class="mt-3 flex flex-wrap items-center gap-2">' + detailBtn + tpBtn + '</div>'
+    var actionRow = (watchlistBtn || tpBtn || detailBtn)
+      ? '<div class="mt-3 flex flex-wrap items-center gap-2">' + watchlistBtn + detailBtn + tpBtn + '</div>'
       : "";
+
+    // Record-type chip — the bulletin-classification frozen at ingest
+    // (e.g. "Granted UM bulletin"). Kept in the detail body as
+    // secondary context: useful for explaining where the row came
+    // from when current_status (live lifecycle) differs from the
+    // bulletin classification (which it always will for lapsed /
+    // expired / etc. patents).
+    var recordTypeChip = "";
+    if (item.record_type) {
+      var rtLabel = window.translateStatus
+        ? window.translateStatus(item.record_type)
+        : item.record_type;
+      recordTypeChip = '<div class="text-xs"><span style="color:var(--color-text-faint)">' +
+        escapeHtml(t("patent_search.record_type_label", "Bulletin type")) + ':</span> ' +
+        '<span class="inline-block ml-1 px-1.5 py-0.5 rounded text-[10px]" ' +
+        'style="background:var(--color-bg-muted);color:var(--color-text-muted)">' +
+        escapeHtml(rtLabel) + '</span></div>';
+    }
 
     // Details: score grid + remaining fields + abstract + actions.
     // Hidden by default; toggled by the header click handler.
@@ -581,6 +687,7 @@
         bdHtml +
         '<div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5 mb-2">' +
           datesHtml +
+          recordTypeChip +
           holderHtml +
           inventorsHtml +
           attorneyHtml +
@@ -592,7 +699,7 @@
 
     return (
       '<article class="rounded-lg border-2 overflow-hidden transition-shadow hover:shadow" ' +
-      'style="' + _riskBorderStyle(risk) + ';background:var(--color-bg-card)" ' +
+      'style="' + _statusBorderStyle(status) + ';background:var(--color-bg-card)" ' +
       'data-patent-card-id="' + cardId + '" ' +
       'data-patent-card-expanded="false">' +
         headerHtml +
@@ -718,6 +825,59 @@
   // Wire-up (document-level delegation)
   // ---------------------------------------------------------------
 
+  // -----------------------------------------------------------------
+  // Add to patent watchlist (called from result card delegation).
+  // POSTs a watch_type=reference watch — the server clones the patent's
+  // embeddings into reference_embedding so the scanner has something to
+  // cosine-against. Mirrors the design search "Add to watchlist" flow.
+  // -----------------------------------------------------------------
+  async function addPatentToWatchlist(btn, payload) {
+    if (!payload || !payload.reference_patent_id) return;
+    var originalLabel = btn.innerHTML;
+    btn.disabled = true;
+    btn.style.opacity = "0.6";
+    try {
+      var headers = { "Content-Type": "application/json" };
+      var token = getAuthToken();
+      if (token) headers["Authorization"] = "Bearer " + token;
+      var resp = await fetch("/api/v1/patent-watchlist", {
+        method: "POST", headers: headers, body: JSON.stringify(payload),
+      });
+      if (resp.ok) {
+        btn.outerHTML = '<span class="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg" ' +
+          'style="background:#dcfce7;color:#166534">' +
+          '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>' +
+          escapeHtml(t("watchlist.already_watching", "Already watching")) + '</span>';
+        if (window.AppToast && typeof window.AppToast.success === "function") {
+          window.AppToast.success(t("watchlist.add_to_watchlist", "Added to watchlist"));
+        }
+        if (typeof window.showDashboardTab === "function") {
+          window.showDashboardTab("patent-watchlist");
+        }
+      } else if (resp.status === 401) {
+        btn.innerHTML = originalLabel;
+        btn.disabled = false;
+        btn.style.opacity = "";
+        if (window.AppAuth && typeof window.AppAuth.requireLogin === "function") {
+          window.AppAuth.requireLogin();
+        }
+      } else {
+        var detail = null;
+        try { detail = (await resp.json()).detail; } catch (e) {}
+        var msg = (typeof detail === "string" ? detail : (detail && (detail.message || detail.message_en))) || "Failed";
+        btn.innerHTML = originalLabel;
+        btn.disabled = false;
+        btn.style.opacity = "";
+        if (window.AppToast) window.AppToast.error(msg);
+      }
+    } catch (e) {
+      btn.innerHTML = originalLabel;
+      btn.disabled = false;
+      btn.style.opacity = "";
+      if (window.AppToast) window.AppToast.error(t("design_search.error_network", "Network error"));
+    }
+  }
+
   function wire() {
     document.addEventListener("click", function (ev) {
       var t = ev.target;
@@ -772,6 +932,18 @@
         removeIpc(t.getAttribute("data-ipc-remove") || "");
         return;
       }
+      // Add to patent watchlist (reference-watch on this row's id).
+      var wlBtn = t.closest && t.closest("[data-patent-add-watchlist]");
+      if (wlBtn) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        var raw = wlBtn.getAttribute("data-payload") || "";
+        var payload = null;
+        try { payload = JSON.parse(raw); } catch (_) { payload = null; }
+        if (payload) addPatentToWatchlist(wlBtn, payload);
+        return;
+      }
+
       // Portfolio click-through (holder / inventor / attorney). Stop
       // propagation so the result-card header doesn't also collapse.
       var portTrig = t.closest && t.closest("[data-portfolio-trigger]");

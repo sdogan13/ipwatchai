@@ -129,6 +129,13 @@ Common local values when PostgreSQL and Redis are running through Docker Compose
 - `REDIS_PORT=6379`
 - `AI_DEVICE=cpu` if you are not running with CUDA
 
+Billing/payment setup:
+- UK and Europe route to Stripe Checkout; Turkey routes to iyzico Checkout Form.
+- Configure `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_SUCCESS_URL`, `STRIPE_CANCEL_URL`, and `STRIPE_AUTOMATIC_TAX=true` for Stripe.
+- Configure `IYZICO_*` values for Turkey payments.
+- Set `BILLING_REGION_CATALOG_JSON` with UK/EU display prices and Stripe Price IDs plus TR display prices. Unknown regions fall back to UK.
+- Apply `migrations/regional_payment_providers.sql` after the existing payments and credit-pack migrations.
+
 Start the backing services if needed:
 
 ```powershell
@@ -159,6 +166,12 @@ Core API regression:
 
 ```powershell
 python -m pytest tests/test_api_endpoints.py -s
+```
+
+Regional billing regression:
+
+```powershell
+python -m pytest tests/test_billing_regional.py -s
 ```
 
 ## Scoring Engine

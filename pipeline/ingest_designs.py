@@ -561,9 +561,38 @@ def ingest_issue(conn, issue_folder: Path, *, skip_events: bool = False,
             if events_path.is_file():
                 events_payload = json.loads(events_path.read_text(encoding="utf-8"))
                 events_seen = len(events_payload.get("events") or [])
+                affected_app_nos: set = set()
+                affected_reg_nos: set = set()
                 for event in events_payload.get("events") or []:
                     if upsert_event(cur, event, bulletin_no=bulletin_no, bulletin_date=bulletin_date):
                         events_inserted += 1
+                        if event.get("application_no"):
+                            affected_app_nos.add(event["application_no"])
+                        if event.get("registration_no"):
+                            affected_reg_nos.add(event["registration_no"])
+                # Recompute current_status for every design touched by
+                # this bulletin: the designs we just inserted PLUS any
+                # older design that an event referenced. Same
+                # transaction so a failed recompute rolls the whole
+                # ingest back. Idempotent.
+                affected_ids: set = {*inserted_design_ids}
+                if affected_app_nos:
+                    cur.execute(
+                        "SELECT id::text FROM designs WHERE application_no = ANY(%s)",
+                        (list(affected_app_nos),),
+                    )
+                    affected_ids.update(row[0] for row in cur.fetchall())
+                if affected_reg_nos:
+                    cur.execute(
+                        "SELECT id::text FROM designs WHERE registration_no = ANY(%s)",
+                        (list(affected_reg_nos),),
+                    )
+                    affected_ids.update(row[0] for row in cur.fetchall())
+                if affected_ids:
+                    from pipeline.design_status_derivation import (
+                        recompute_design_current_status,
+                    )
+                    recompute_design_current_status(cur, list(affected_ids))
     conn.commit()
 
     if run_watchlist_scan and inserted_design_ids:

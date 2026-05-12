@@ -19,22 +19,22 @@
     <div class="mb-5 inline-flex rounded-xl p-1"
          style="background:var(--color-bg-muted);border:1px solid var(--color-border)">
         <button type="button" @click="searchView = 'trademark'"
-                class="px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                class="px-3 sm:px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
                 :class="searchView === 'trademark' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
                 :style="searchView === 'trademark' ? '' : 'color:var(--color-text-muted)'"
                 x-text="t('search.view_trademark')">Marka</button>
         <button type="button" @click="searchView = 'design'"
-                class="px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                class="px-3 sm:px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
                 :class="searchView === 'design' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
                 :style="searchView === 'design' ? '' : 'color:var(--color-text-muted)'"
                 x-text="t('search.view_design')">Tasarım</button>
         <button type="button" @click="searchView = 'patent'"
-                class="px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                class="px-3 sm:px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
                 :class="searchView === 'patent' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
                 :style="searchView === 'patent' ? '' : 'color:var(--color-text-muted)'"
                 x-text="t('search.view_patent')">Patent</button>
         <button type="button" @click="searchView = 'cografi'"
-                class="px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                class="px-3 sm:px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
                 :class="searchView === 'cografi' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
                 :style="searchView === 'cografi' ? '' : 'color:var(--color-text-muted)'"
                 x-text="t('search.view_cografi')">Coğrafi</button>
@@ -1491,7 +1491,7 @@
 
 <!-- Image Lightbox -->
 <div x-show="lightboxImage" x-cloak x-transition.opacity
-    class="fixed inset-0 z-[60] flex items-center justify-center p-4" style="background:rgba(0,0,0,0.7)"
+    class="fixed inset-0 z-[60] flex items-center justify-center p-4 modal-mobile-fullscreen" style="background:rgba(0,0,0,0.7)"
     @click="lightboxImage = ''">
     <img :src="lightboxImage" class="max-w-full max-h-[80vh] rounded-xl shadow-2xl object-contain"
         style="background:white" @click.stop>
@@ -1504,7 +1504,7 @@
 </div>
 
 <!-- Portfolio Modal (authenticated) -->
-<div x-show="showPortfolio" x-cloak x-transition.opacity class="fixed inset-0 z-[70] flex items-center justify-center p-4"
+<div x-show="showPortfolio" x-cloak x-transition.opacity class="fixed inset-0 z-[70] flex items-center justify-center p-4 modal-mobile-fullscreen"
     style="background:rgba(0,0,0,0.5)" @click.self="closePortfolio()">
     <div class="w-full max-w-2xl rounded-2xl shadow-2xl max-h-[80vh] flex flex-col"
         style="background:var(--color-bg-card)" @click.stop>
@@ -1563,7 +1563,7 @@
                                 x-text="getTrademarkDisplayName(tm)"></span>
                             <span x-show="tm.status || tm.current_status" class="text-[10px] px-1.5 py-0.5 rounded-full shrink-0"
                                 :style="'color:' + getStatusColor(tm.status || tm.current_status) + ';background:' + getStatusBg(tm.status || tm.current_status)"
-                                x-text="tm.status || tm.current_status"></span>
+                                x-text="(window.translateStatus ? window.translateStatus(tm.status || tm.current_status) : (tm.status || tm.current_status))"></span>
                         </div>
                         <div x-html="renderEventDerivedBadges(tm)"></div>
                         <div x-html="renderLastEventLine(tm)"></div>

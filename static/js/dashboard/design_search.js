@@ -426,13 +426,20 @@
     var attName = (row.attorney_name || "").trim();
     var attFirm = (row.attorney_firm || "").trim();
     if (attName) {
+      // Some ingest rows have the postal address concatenated to the
+      // attorney name. Strip for display only — the raw name still
+      // goes through to openAttorneyPortfolio so the backend's
+      // normalize_designer_name match finds the right record.
+      var attNameDisplay = window._stripTurkishAddress
+        ? window._stripTurkishAddress(attName)
+        : attName;
       // Most design rows have the firm baked into the attorney_name
       // already (e.g. "ALPER AKSU (SEMBOL PATENT ... LTD. ŞTİ.)") and
       // ALSO carry it on attorney_firm — concatenating with " — "
-      // would duplicate the firm. Skip the join when the name already
-      // contains the firm string (case-insensitive substring).
-      var attFirmInName = attFirm && attName.toLowerCase().indexOf(attFirm.toLowerCase()) !== -1;
-      var attDisplay = (attFirm && !attFirmInName) ? (attName + " — " + attFirm) : attName;
+      // would duplicate the firm. Skip the join when the (stripped)
+      // name already contains the firm string.
+      var attFirmInName = attFirm && attNameDisplay.toLowerCase().indexOf(attFirm.toLowerCase()) !== -1;
+      var attDisplay = (attFirm && !attFirmInName) ? (attNameDisplay + " — " + attFirm) : attNameDisplay;
       var attInner = '<span style="color:var(--color-text-secondary)">' + escapeHtml(attDisplay) + '</span>';
       if (typeof window.openAttorneyPortfolio === "function") {
         attInner = '<button type="button" onclick="window.openAttorneyPortfolio(' +
@@ -512,8 +519,21 @@
         '</a>'
       : "";
 
-    var actionRow = (tpBtn || watchlistBtn)
-      ? '<div class="mt-3 flex flex-wrap items-center gap-2">' + watchlistBtn + tpBtn + '</div>'
+    // Detail button — opens the design detail modal (events timeline,
+    // holder, designers, views grid). Mirrors the Patent details button.
+    var detailBtn = row.id
+      ? '<button type="button" data-dd-open="' + escapeHtml(row.id) + '" ' +
+        'class="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors" ' +
+        'style="color:var(--color-text-primary);background:var(--color-bg-muted)">' +
+          '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>' +
+          '</svg>' +
+          escapeHtml(t("design_search.view_detail", "Tasarım detayları")) +
+        '</button>'
+      : "";
+
+    var actionRow = (tpBtn || watchlistBtn || detailBtn)
+      ? '<div class="mt-3 flex flex-wrap items-center gap-2">' + watchlistBtn + detailBtn + tpBtn + '</div>'
       : "";
 
     // App-no identity row (always visible inside the collapsed header)
@@ -540,7 +560,7 @@
           (row.current_status
             ? '<span class="text-[10px] px-2 py-0.5 rounded-full font-medium" ' +
               'style="background:' + statusColors.bg + ';color:' + statusColors.color + '">' +
-              escapeHtml(row.current_status) + '</span>'
+              escapeHtml(window.translateStatus ? window.translateStatus(row.current_status) : row.current_status) + '</span>'
             : '') +
           bulletinHtml +
         '</div>' +

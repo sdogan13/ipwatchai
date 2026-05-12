@@ -118,6 +118,7 @@ services:
       - ./app_admin_scoring_routes.py:/app/app_admin_scoring_routes.py:ro
       - ./app_assets.py:/app/app_assets.py:ro
       - ./app_design_alert_routes.py:/app/app_design_alert_routes.py:ro
+      - ./app_design_detail_routes.py:/app/app_design_detail_routes.py:ro
       - ./app_design_search_routes.py:/app/app_design_search_routes.py:ro
       - ./app_design_watchlist_routes.py:/app/app_design_watchlist_routes.py:ro
       - ./app_patent_search_routes.py:/app/app_patent_search_routes.py:ro

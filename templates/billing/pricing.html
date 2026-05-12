@@ -143,6 +143,18 @@
                             <span id="pricing-annual-discount-badge" class="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold leading-none text-emerald-700" x-text="t('pricing.annual_save_inline')">-20%</span>
                         </span>
                     </div>
+                    <div class="mt-5 border-t border-slate-200/80 pt-4">
+                        <label for="billing-region" class="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500" x-text="t('pricing.region_label')">Billing region</label>
+                        <select id="billing-region"
+                                x-model="region"
+                                @change="setRegion(region)"
+                                class="mt-2 min-h-[44px] w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100">
+                            <option value="UK" x-text="t('pricing.region_uk')">United Kingdom</option>
+                            <option value="EU" x-text="t('pricing.region_eu')">Europe</option>
+                            <option value="TR" x-text="t('pricing.region_tr')">Turkey</option>
+                        </select>
+                        <p class="mt-2 text-xs leading-5 text-slate-500" x-text="t('pricing.region_help')">Prices update by billing region.</p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -158,7 +170,7 @@
                 <div class="mb-5">
                     <h2 class="text-xl font-bold text-slate-950" x-text="t('pricing.free_name')">Ucretsiz</h2>
                     <div class="mt-2">
-                        <span class="text-3xl font-bold text-slate-950 sm:text-4xl">&#8378;0</span>
+                        <span class="text-3xl font-bold text-slate-950 sm:text-4xl" x-text="formatPrice(0)">&#8378;0</span>
                         <span class="text-slate-500" x-text="'/' + t('pricing.per_month')">/ay</span>
                     </div>
                     <p class="text-sm text-slate-500 mt-3" x-text="t('pricing.free_desc')">Platformu kesfetmek icin</p>
@@ -178,6 +190,7 @@
                 </ul>
                 <div class="mt-5">
                     <a href="/checkout?plan=free&billing=monthly"
+                       :href="checkoutHref('free')"
                        class="block text-center px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl text-sm font-semibold transition-colors no-underline"
                        x-text="t('pricing.cta_start')">
                         Basla
@@ -190,11 +203,11 @@
                 <div class="mb-5">
                     <h2 id="pricing-plan-starter-name" class="text-xl font-bold text-slate-950" x-text="t('pricing.starter_name')">Starter</h2>
                     <div class="mt-2">
-                        <span class="text-3xl font-bold text-slate-950 sm:text-4xl" x-text="formatPrice(annual ? '{{ plans.starter.price_annual_monthly }}' : '{{ plans.starter.price_monthly }}')">&#8378;{{ plans.starter.price_monthly }}</span>
+                        <span class="text-3xl font-bold text-slate-950 sm:text-4xl" x-text="formatPrice(planMonthlyPrice('starter'))">&#8378;{{ plans.starter.price_monthly }}</span>
                         <span class="text-slate-500" x-text="'/' + t('pricing.per_month')">/ay</span>
                     </div>
                     <template x-if="annual">
-                        <p id="pricing-starter-billed-annually" class="text-xs text-emerald-700 mt-2" x-text="t('pricing.billed_annually', {total: formatPrice({{ plans.starter.price_annual_monthly * 12 }})})">Yillik faturalandirilir</p>
+                        <p id="pricing-starter-billed-annually" class="text-xs text-emerald-700 mt-2" x-text="t('pricing.billed_annually', {total: formatPrice(planAnnualTotal('starter'))})">Yillik faturalandirilir</p>
                     </template>
                     <p class="text-sm text-slate-500 mt-3" x-text="t('pricing.starter_desc')">Bireysel vekiller icin</p>
                     <p class="text-xs text-indigo-600 font-semibold mt-3 flex items-center gap-1"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.includes_free')">Ucretsiz+</span></p>
@@ -213,7 +226,7 @@
                     <li class="flex items-start gap-2">{{ cross|safe }} <span class="text-gray-400" x-text="t('pricing.f_leads_daily', {n: 0})">Opposition Radar</span></li>
                 </ul>
                 <div class="mt-5">
-                    <a :href="'/checkout?plan=starter&billing=' + (annual ? 'annual' : 'monthly')"
+                    <a :href="checkoutHref('starter')"
                        class="block text-center px-4 py-3 bg-slate-950 hover:bg-slate-800 text-white rounded-2xl text-sm font-semibold transition-colors no-underline"
                        x-text="t('pricing.cta_start')">
                         Basla
@@ -227,11 +240,11 @@
                 <div class="mb-5">
                     <h2 id="pricing-plan-professional-name" class="text-xl font-bold text-slate-950" x-text="t('pricing.professional_name')">Professional</h2>
                     <div class="mt-2">
-                        <span class="text-3xl font-bold text-slate-950 sm:text-4xl" x-text="formatPrice(annual ? '{{ plans.professional.price_annual_monthly }}' : '{{ plans.professional.price_monthly }}')">&#8378;{{ plans.professional.price_monthly }}</span>
+                        <span class="text-3xl font-bold text-slate-950 sm:text-4xl" x-text="formatPrice(planMonthlyPrice('professional'))">&#8378;{{ plans.professional.price_monthly }}</span>
                         <span class="text-slate-500" x-text="'/' + t('pricing.per_month')">/ay</span>
                     </div>
                     <template x-if="annual">
-                        <p class="text-xs text-emerald-700 mt-2" x-text="t('pricing.billed_annually', {total: formatPrice({{ plans.professional.price_annual_monthly * 12 }})})">Yillik faturalandirilir</p>
+                        <p class="text-xs text-emerald-700 mt-2" x-text="t('pricing.billed_annually', {total: formatPrice(planAnnualTotal('professional'))})">Yillik faturalandirilir</p>
                     </template>
                     <p class="text-sm text-slate-500 mt-3" x-text="t('pricing.professional_desc')">Marka vekilleri icin</p>
                     <p class="text-xs text-indigo-600 font-semibold mt-3 flex items-center gap-1"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.includes_starter')">Baslangic+</span></p>
@@ -250,7 +263,7 @@
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_leads_daily', {n: {{ plans.professional.daily_lead_views }}})">Opposition Radar ({{ plans.professional.daily_lead_views }} lead/gun)</span></li>
                 </ul>
                 <div class="mt-5">
-                    <a :href="'/checkout?plan=professional&billing=' + (annual ? 'annual' : 'monthly')"
+                    <a :href="checkoutHref('professional')"
                        class="block text-center px-4 py-3 bg-gradient-to-r from-indigo-600 to-sky-500 hover:opacity-95 text-white rounded-2xl text-sm font-semibold transition-colors no-underline shadow-lg shadow-indigo-500/20"
                        x-text="t('pricing.cta_start')">
                         Basla
@@ -263,11 +276,11 @@
                 <div class="mb-5">
                     <h2 id="pricing-plan-enterprise-name" class="text-xl font-bold text-slate-950" x-text="t('pricing.enterprise_name')">Enterprise</h2>
                     <div class="mt-2">
-                        <span class="text-3xl font-bold text-slate-950 sm:text-4xl" x-text="formatPrice(annual ? '{{ plans.enterprise.price_annual_monthly }}' : '{{ plans.enterprise.price_monthly }}')">&#8378;{{ plans.enterprise.price_monthly }}</span>
+                        <span class="text-3xl font-bold text-slate-950 sm:text-4xl" x-text="formatPrice(planMonthlyPrice('enterprise'))">&#8378;{{ plans.enterprise.price_monthly }}</span>
                         <span class="text-slate-500" x-text="'/' + t('pricing.per_month')">/ay</span>
                     </div>
                     <template x-if="annual">
-                        <p class="text-xs text-emerald-700 mt-2" x-text="t('pricing.billed_annually', {total: formatPrice({{ plans.enterprise.price_annual_monthly * 12 }})})">Yillik faturalandirilir</p>
+                        <p class="text-xs text-emerald-700 mt-2" x-text="t('pricing.billed_annually', {total: formatPrice(planAnnualTotal('enterprise'))})">Yillik faturalandirilir</p>
                     </template>
                     <p class="text-sm text-slate-500 mt-3" x-text="t('pricing.enterprise_desc')">Buyuk firmalar icin</p>
                     <p class="text-xs text-indigo-600 font-semibold mt-3 flex items-center gap-1"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.includes_professional')">Professional+</span></p>
@@ -286,7 +299,7 @@
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_unlimited_leads')">Opposition Radar (sinirsiz)</span></li>
                 </ul>
                 <div class="mt-5">
-                    <a :href="'/checkout?plan=enterprise&billing=' + (annual ? 'annual' : 'monthly')"
+                    <a :href="checkoutHref('enterprise')"
                        class="block text-center px-4 py-3 bg-slate-950 hover:bg-slate-800 text-white rounded-2xl text-sm font-semibold transition-colors no-underline"
                        x-text="t('pricing.cta_start')">
                         Basla
@@ -341,11 +354,15 @@
     <!-- i18n + Alpine setup -->
 <script src="/static/js/utils/i18n.js?v=63"></script>
     <script>
+    window.SERVER_BILLING_CATALOG = {{ billing_catalog | tojson }};
     function pricingPage() {
         return {
             lang_code: window.AppI18n ? window.AppI18n.getLocale() : 'tr',
             locale_nonce: 0,
             annual: false,
+            billingCatalog: window.SERVER_BILLING_CATALOG || {},
+            region: (window.SERVER_BILLING_CATALOG && window.SERVER_BILLING_CATALOG.region) || 'UK',
+            catalogLoading: false,
             refreshLocale() {
                 var locale = window.AppI18n ? window.AppI18n.getLocale() : 'tr';
                 this.lang_code = locale;
@@ -363,16 +380,83 @@
                     });
                 }
                 this.refreshLocale();
+                try {
+                    var storedRegion = window.localStorage ? window.localStorage.getItem('billing_region') : null;
+                    var urlRegion = new URLSearchParams(window.location.search).get('region');
+                    var requestedRegion = urlRegion || storedRegion;
+                    if (requestedRegion && requestedRegion !== this.region) {
+                        this.region = requestedRegion;
+                        this.loadCatalog(requestedRegion);
+                    }
+                } catch (err) {}
             },
             t(key, params) {
                 void this.locale_nonce;
                 return window.AppI18n ? window.AppI18n.t(key, params) : key;
             },
+            catalogPlan(planId) {
+                var plans = (this.billingCatalog && this.billingCatalog.plans) || {};
+                return plans[planId] || {};
+            },
+            planMonthlyPrice(planId) {
+                var plan = this.catalogPlan(planId);
+                return this.annual ? plan.price_annual_monthly : plan.price_monthly;
+            },
+            planAnnualTotal(planId) {
+                var plan = this.catalogPlan(planId);
+                return Number(plan.price_annual_monthly || 0) * 12;
+            },
+            checkoutHref(planId) {
+                var billing = planId === 'free' ? 'monthly' : (this.annual ? 'annual' : 'monthly');
+                var params = new URLSearchParams({ plan: planId, billing: billing, region: this.region || 'UK' });
+                return '/checkout?' + params.toString();
+            },
+            setRegion(region) {
+                this.region = ['UK', 'EU', 'TR'].indexOf(region) >= 0 ? region : 'UK';
+                try {
+                    if (window.localStorage) {
+                        window.localStorage.setItem('billing_region', this.region);
+                    }
+                    var url = new URL(window.location.href);
+                    url.searchParams.set('region', this.region);
+                    window.history.replaceState({}, '', url.toString());
+                } catch (err) {}
+                this.loadCatalog(this.region);
+            },
+            loadCatalog(region) {
+                var self = this;
+                self.catalogLoading = true;
+                return fetch('/api/v1/billing/catalog?region=' + encodeURIComponent(region), { credentials: 'same-origin' })
+                    .then(function (response) {
+                        if (!response.ok) {
+                            throw new Error('catalog');
+                        }
+                        return response.json();
+                    })
+                    .then(function (catalog) {
+                        self.billingCatalog = catalog || self.billingCatalog;
+                        self.region = (catalog && catalog.region) || self.region;
+                    })
+                    .catch(function () {})
+                    .finally(function () {
+                        self.catalogLoading = false;
+                    });
+            },
             formatPrice(amount) {
                 void this.locale_nonce;
                 var locale = window.AppI18n ? window.AppI18n.getLocale() : 'tr';
                 var numberLocale = locale === 'ar' ? 'ar-SA' : (locale === 'en' ? 'en-US' : 'tr-TR');
-                return '\u20BA' + Number(amount || 0).toLocaleString(numberLocale);
+                var value = Number(amount || 0);
+                var currency = (this.billingCatalog && this.billingCatalog.currency) || 'TRY';
+                try {
+                    return new Intl.NumberFormat(numberLocale, {
+                        style: 'currency',
+                        currency: currency,
+                        maximumFractionDigits: value % 1 === 0 ? 0 : 2
+                    }).format(value);
+                } catch (err) {
+                    return currency + ' ' + value.toLocaleString(numberLocale);
+                }
             }
         };
     }

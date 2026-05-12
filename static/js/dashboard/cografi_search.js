@@ -441,9 +441,9 @@
               escapeHtml(t("cografi_search." + _sectionLocaleKey(sectionKey), sectionKey)) + '</span>'
             : '') +
           (recordType
-            ? '<span class="text-[10px] px-2 py-0.5 rounded font-mono" ' +
+            ? '<span class="text-[10px] px-2 py-0.5 rounded font-medium" ' +
               'style="background:var(--color-bg-muted);color:var(--color-text-muted)">' +
-              escapeHtml(recordType) + '</span>'
+              escapeHtml(window.translateStatus ? window.translateStatus(recordType) : recordType) + '</span>'
             : '') +
           bulletinHtml +
         '</div>' +
@@ -499,8 +499,8 @@
     var applicantInner = applicantId
       ? ('<button type="button" data-portfolio-trigger="cografi-applicant" ' +
          'data-holder-id="' + escapeHtml(applicantId) + '" ' +
-         'class="text-left underline decoration-dotted underline-offset-2 hover:decoration-solid cursor-pointer" ' +
-         'style="color:var(--color-text-secondary);background:transparent;border:0;padding:0;">' +
+         'class="text-left hover:underline cursor-pointer" ' +
+         'style="color:var(--color-primary);background:transparent;border:0;padding:0;">' +
          escapeHtml(applicantName) + '</button>')
       : ('<span style="color:var(--color-text-secondary)">' + escapeHtml(applicantName) + '</span>');
     var applicantHtml = applicantName
@@ -514,8 +514,8 @@
     var agentInner = agentRaw
       ? ('<button type="button" data-portfolio-trigger="cografi-agent" ' +
          'data-agent-name="' + escapeHtml(agentRaw) + '" ' +
-         'class="text-left underline decoration-dotted underline-offset-2 hover:decoration-solid cursor-pointer" ' +
-         'style="color:var(--color-text-secondary);background:transparent;border:0;padding:0;">' +
+         'class="text-left hover:underline cursor-pointer" ' +
+         'style="color:var(--color-primary);background:transparent;border:0;padding:0;">' +
          escapeHtml(window._stripTurkishAddress ? window._stripTurkishAddress(agentRaw) : agentRaw) + '</button>')
       : "";
     var agentHtml = agentRaw
@@ -533,6 +533,27 @@
           '</div>'
         : '';
 
+    // Watchlist add (reference-watch on this row's id — clones the
+    // record's text_embedding into reference_embedding so the scanner
+    // has something to cosine-against). Same pattern design + patent
+    // cards use.
+    var watchlistBtn = "";
+    if (item.id) {
+      var wlPayload = JSON.stringify({
+        watch_type: "reference",
+        reference_record_id: item.id,
+        label: (titleStr || "").slice(0, 200),
+      }).replace(/"/g, '&quot;');
+      watchlistBtn = '<button type="button" data-cografi-add-watchlist ' +
+        'data-payload="' + wlPayload + '" ' +
+        'class="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors" ' +
+        'style="color:var(--color-risk-high-text);background:var(--color-risk-high-bg)">' +
+        '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+          '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>' +
+          '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>' +
+        '</svg>' +
+        escapeHtml(t("watchlist.add_to_watchlist", "Add to watchlist")) + '</button>';
+    }
     var detailBtn = item.id
       ? '<button type="button" data-cd-open="' + escapeHtml(item.id) + '" ' +
         'class="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors" ' +
@@ -543,8 +564,8 @@
           escapeHtml(t("cografi_search.view_detail", "Detaylar")) +
         '</button>'
       : "";
-    var actionRow = detailBtn
-      ? '<div class="mt-3 flex flex-wrap items-center gap-2">' + detailBtn + '</div>'
+    var actionRow = (watchlistBtn || detailBtn)
+      ? '<div class="mt-3 flex flex-wrap items-center gap-2">' + watchlistBtn + detailBtn + '</div>'
       : "";
 
     var detailsHtml =
@@ -693,6 +714,60 @@
   // Wire-up (document-level delegation)
   // ---------------------------------------------------------------
 
+  // -----------------------------------------------------------------
+  // Add to cografi watchlist (called from result card delegation).
+  // POSTs a watch_type=reference watch — the server clones the
+  // record's text_embedding into reference_embedding so the scanner
+  // has something to cosine-against. Mirrors the design + patent
+  // search "Add to watchlist" flow.
+  // -----------------------------------------------------------------
+  async function addCografiToWatchlist(btn, payload) {
+    if (!payload || !payload.reference_record_id) return;
+    var originalLabel = btn.innerHTML;
+    btn.disabled = true;
+    btn.style.opacity = "0.6";
+    try {
+      var headers = { "Content-Type": "application/json" };
+      var token = getAuthToken();
+      if (token) headers["Authorization"] = "Bearer " + token;
+      var resp = await fetch("/api/v1/cografi-watchlist", {
+        method: "POST", headers: headers, body: JSON.stringify(payload),
+      });
+      if (resp.ok) {
+        btn.outerHTML = '<span class="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg" ' +
+          'style="background:#dcfce7;color:#166534">' +
+          '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>' +
+          escapeHtml(t("watchlist.already_watching", "Already watching")) + '</span>';
+        if (window.AppToast && typeof window.AppToast.success === "function") {
+          window.AppToast.success(t("watchlist.add_to_watchlist", "Added to watchlist"));
+        }
+        if (typeof window.showDashboardTab === "function") {
+          window.showDashboardTab("cografi-watchlist");
+        }
+      } else if (resp.status === 401) {
+        btn.innerHTML = originalLabel;
+        btn.disabled = false;
+        btn.style.opacity = "";
+        if (window.AppAuth && typeof window.AppAuth.requireLogin === "function") {
+          window.AppAuth.requireLogin();
+        }
+      } else {
+        var detail = null;
+        try { detail = (await resp.json()).detail; } catch (e) {}
+        var msg = (typeof detail === "string" ? detail : (detail && (detail.message || detail.message_en))) || "Failed";
+        btn.innerHTML = originalLabel;
+        btn.disabled = false;
+        btn.style.opacity = "";
+        if (window.AppToast) window.AppToast.error(msg);
+      }
+    } catch (e) {
+      btn.innerHTML = originalLabel;
+      btn.disabled = false;
+      btn.style.opacity = "";
+      if (window.AppToast) window.AppToast.error(t("cografi_search.error_network", "Network error"));
+    }
+  }
+
   function wire() {
     document.addEventListener("click", function (ev) {
       var t_ = ev.target;
@@ -750,6 +825,18 @@
         renderDropdown();
         return;
       }
+      // Add to cografi watchlist (reference-watch on this row's id).
+      var wlBtn = t_.closest && t_.closest("[data-cografi-add-watchlist]");
+      if (wlBtn) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        var raw = wlBtn.getAttribute("data-payload") || "";
+        var payload = null;
+        try { payload = JSON.parse(raw); } catch (_) { payload = null; }
+        if (payload) addCografiToWatchlist(wlBtn, payload);
+        return;
+      }
+
       // Portfolio click-through (applicant / agent). Stop propagation
       // so the card header doesn't also collapse.
       var portTrig = t_.closest && t_.closest("[data-portfolio-trigger]");
