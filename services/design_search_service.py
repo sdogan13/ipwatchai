@@ -769,6 +769,246 @@ async def build_public_designer_portfolio_csv(
     )
 
 
+async def run_public_attorney_portfolio_lookup(
+    *,
+    attorney_name: Optional[str] = None,
+    attorney_firm: Optional[str] = None,
+    logger=None,
+) -> Dict[str, Any]:
+    """Return up to 10 designs for a given (attorney_name, attorney_firm)
+    pair. Matches on conservative normalization of both columns —
+    designs whose normalized firm matches the normalized lookup firm
+    AND normalized name matches normalized lookup name. NULL firms
+    match other NULL firms via COALESCE(...,'').
+    """
+    from fastapi import HTTPException
+
+    from database.crud import Database
+
+    if not attorney_name:
+        raise HTTPException(status_code=422, detail="name is required")
+
+    name_in = str(attorney_name).strip()
+    if not name_in:
+        raise HTTPException(status_code=422, detail="name is required")
+    firm_in = (attorney_firm or "").strip()
+
+    with Database() as db:
+        cur = db.cursor()
+
+        cur.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM designs
+            WHERE attorney_name IS NOT NULL
+              AND normalize_designer_name(attorney_name)
+                  = normalize_designer_name(%s)
+              AND COALESCE(normalize_designer_name(attorney_firm), '')
+                  = COALESCE(normalize_designer_name(%s), '')
+            """,
+            (name_in, firm_in or None),
+        )
+        total_count = int(cur.fetchone()["cnt"] or 0)
+
+        if total_count == 0:
+            raise HTTPException(status_code=404, detail="Attorney not found")
+
+        cur.execute(
+            """
+            SELECT d.id::text AS id,
+                   d.application_no, d.design_index, d.registration_no,
+                   d.product_name_tr, d.product_name_en,
+                   d.locarno_classes, d.current_status,
+                   d.application_date, d.registration_date,
+                   d.bulletin_no, d.bulletin_date,
+                   d.designers, d.source_issue_folder,
+                   d.attorney_name, d.attorney_firm,
+                   (SELECT image_path FROM design_views dv
+                    WHERE dv.design_id = d.id AND dv.image_path IS NOT NULL
+                    ORDER BY dv.view_index ASC LIMIT 1) AS first_image_path
+            FROM designs d
+            WHERE d.attorney_name IS NOT NULL
+              AND normalize_designer_name(d.attorney_name)
+                  = normalize_designer_name(%s)
+              AND COALESCE(normalize_designer_name(d.attorney_firm), '')
+                  = COALESCE(normalize_designer_name(%s), '')
+            ORDER BY d.application_date DESC NULLS LAST, d.application_no DESC
+            LIMIT %s
+            """,
+            (name_in, firm_in or None, _DESIGN_PORTFOLIO_PUBLIC_CAP),
+        )
+        rows = cur.fetchall()
+
+    results: List[Dict[str, Any]] = []
+    for d in rows:
+        bulletin_date = d.get("bulletin_date")
+        application_date = d.get("application_date")
+        registration_date = d.get("registration_date")
+        image_url = design_image_url(
+            d.get("first_image_path"),
+            d.get("source_issue_folder"),
+        )
+        title = d.get("product_name_tr") or d.get("product_name_en") or d.get("application_no")
+        results.append({
+            "id": d["id"],
+            "registry_type": "design",
+            "application_no": d.get("application_no"),
+            "design_index": d.get("design_index"),
+            "registration_no": d.get("registration_no"),
+            "name": title,
+            "product_name_tr": d.get("product_name_tr"),
+            "product_name_en": d.get("product_name_en"),
+            "locarno_classes": list(d.get("locarno_classes") or []),
+            "current_status": d.get("current_status"),
+            "application_date": application_date.isoformat() if application_date else None,
+            "registration_date": registration_date.isoformat() if registration_date else None,
+            "bulletin_no": d.get("bulletin_no"),
+            "bulletin_date": bulletin_date.isoformat() if bulletin_date else None,
+            "designers": list(d.get("designers") or []),
+            "attorney_name": d.get("attorney_name"),
+            "attorney_firm": d.get("attorney_firm"),
+            "image_url": image_url,
+        })
+
+    display_name = (
+        f"{name_in} — {firm_in}" if firm_in else name_in
+    )
+    return {
+        "entity_type": "design-attorney",
+        # entity_id must round-trip BOTH name + firm so the CSV +
+        # bulk-add buttons can reissue the same lookup. JSON-encoded.
+        "entity_id": _encode_attorney_id(name_in, firm_in),
+        "entity_name": display_name,
+        "results": results,
+        "total_count": total_count,
+    }
+
+
+def _encode_attorney_id(name: str, firm: str) -> str:
+    """Round-trip (name, firm) as a single JSON-encoded string so the
+    portfolio modal's existing single-id state can carry both values
+    through to the CSV download + bulk-add steps."""
+    import json
+    return json.dumps({"name": name, "firm": firm or ""}, ensure_ascii=False)
+
+
+def _decode_attorney_id(encoded: str):
+    """Reverse of _encode_attorney_id; returns (name, firm) or None
+    if the input isn't a valid encoded attorney id."""
+    import json
+    try:
+        obj = json.loads(encoded)
+        if isinstance(obj, dict) and "name" in obj:
+            return (str(obj.get("name") or "").strip(), str(obj.get("firm") or "").strip())
+    except (ValueError, TypeError):
+        return None
+    return None
+
+
+async def build_public_attorney_portfolio_csv(
+    *,
+    attorney_name: Optional[str] = None,
+    attorney_firm: Optional[str] = None,
+    logger=None,
+    current_user=None,
+):
+    """Stream a CSV of every design representing this (name, firm)
+    attorney pair. Plan-gated by can_download_portfolio."""
+    import csv
+    import io
+
+    from fastapi import HTTPException
+    from fastapi.responses import StreamingResponse
+
+    from database.crud import Database
+
+    if not attorney_name:
+        raise HTTPException(status_code=422, detail="name is required")
+    name_in = str(attorney_name).strip()
+    if not name_in:
+        raise HTTPException(status_code=422, detail="name is required")
+    firm_in = (attorney_firm or "").strip()
+
+    if current_user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    from utils.subscription import get_plan_limit, get_user_plan
+
+    with Database() as db:
+        plan = get_user_plan(db, str(current_user.id))
+        if not get_plan_limit(plan["plan_name"], "can_download_portfolio"):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "upgrade_required",
+                    "message": "CSV export is available on paid plans.",
+                    "current_plan": plan["plan_name"],
+                    "upgrade_context": "portfolio_download",
+                },
+            )
+
+        cur = db.cursor()
+        cur.execute(
+            """
+            SELECT d.application_no, d.registration_no,
+                   d.product_name_tr, d.product_name_en,
+                   d.current_status, d.locarno_classes,
+                   d.application_date, d.registration_date,
+                   d.bulletin_no, d.designers,
+                   d.attorney_name, d.attorney_firm
+            FROM designs d
+            WHERE d.attorney_name IS NOT NULL
+              AND normalize_designer_name(d.attorney_name)
+                  = normalize_designer_name(%s)
+              AND COALESCE(normalize_designer_name(d.attorney_firm), '')
+                  = COALESCE(normalize_designer_name(%s), '')
+            ORDER BY d.application_date DESC NULLS LAST, d.application_no DESC
+            """,
+            (name_in, firm_in or None),
+        )
+        rows = cur.fetchall()
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="Attorney not found")
+
+    buf = io.StringIO()
+    buf.write("﻿")
+    writer = csv.writer(buf)
+    writer.writerow([
+        "Tasarim Adi (TR)", "Tasarim Adi (EN)",
+        "Basvuru No", "Tescil No", "Durum",
+        "Locarno Siniflari", "Basvuru Tarihi", "Tescil Tarihi",
+        "Bulten No", "Tasarimcilar", "Vekil", "Vekil Firmasi",
+    ])
+    for d in rows:
+        writer.writerow([
+            d.get("product_name_tr") or "",
+            d.get("product_name_en") or "",
+            d.get("application_no") or "",
+            d.get("registration_no") or "",
+            d.get("current_status") or "",
+            "; ".join(str(c) for c in (d.get("locarno_classes") or [])),
+            d["application_date"].isoformat() if d.get("application_date") else "",
+            d["registration_date"].isoformat() if d.get("registration_date") else "",
+            d.get("bulletin_no") or "",
+            "; ".join(str(p) for p in (d.get("designers") or [])),
+            d.get("attorney_name") or "",
+            d.get("attorney_firm") or "",
+        ])
+
+    safe_name = "".join(
+        c if c.isascii() and (c.isalnum() or c in " _-") else "_" for c in name_in
+    )[:50]
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_name}_attorney_portfolio.csv"',
+        },
+    )
+
+
 async def build_public_design_portfolio_csv(
     *,
     holder_id: Optional[str] = None,

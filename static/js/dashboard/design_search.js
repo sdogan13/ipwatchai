@@ -405,6 +405,28 @@
         holderInner + '</div>';
     }
 
+    // Attorney row — name + firm pair, clickable via
+    // window.openAttorneyPortfolio (defined in app.js). When the firm
+    // is missing the click still works; the backend uses
+    // COALESCE(...,'') to match NULL-firm rows.
+    var attorneyHtml = "";
+    var attName = (row.attorney_name || "").trim();
+    var attFirm = (row.attorney_firm || "").trim();
+    if (attName) {
+      var attDisplay = attFirm ? (attName + " — " + attFirm) : attName;
+      var attInner = '<span style="color:var(--color-text-secondary)">' + escapeHtml(attDisplay) + '</span>';
+      if (typeof window.openAttorneyPortfolio === "function") {
+        attInner = '<button type="button" onclick="window.openAttorneyPortfolio(' +
+          JSON.stringify(attName).replace(/"/g, '&quot;') + ', ' +
+          JSON.stringify(attFirm).replace(/"/g, '&quot;') + ', this)" ' +
+          'class="text-left hover:underline" style="color:var(--color-primary)">' +
+          escapeHtml(attDisplay) + '</button>';
+      }
+      attorneyHtml = '<div class="text-xs"><span style="color:var(--color-text-faint)">' +
+        escapeHtml(t("design_search.attorney_label", "Attorney")) + ':</span> ' +
+        attInner + '</div>';
+    }
+
     // Bulletin chip
     var bulletinHtml = "";
     if (row.bulletin_no) {
@@ -528,6 +550,7 @@
           appDateHtml +
           holderHtml +
           designerChips +
+          attorneyHtml +
         '</div>' +
         locarnoChips +
         actionRow +

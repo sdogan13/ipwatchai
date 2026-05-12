@@ -242,14 +242,18 @@ def register_design_watchlist_routes(app, limiter):
     ):
         holder_id = (body or {}).get("holder_id") or (body or {}).get("id")
         designer_name = (body or {}).get("designer_name")
-        if not holder_id and not designer_name:
+        attorney_name = (body or {}).get("attorney_name")
+        attorney_firm = (body or {}).get("attorney_firm")
+        if not (holder_id or designer_name or attorney_name):
             raise HTTPException(
                 status_code=422,
-                detail="holder_id or designer_name is required",
+                detail="holder_id, designer_name, or attorney_name is required",
             )
         result = await svc.import_design_watchlist_from_portfolio(
             holder_id=str(holder_id) if holder_id else None,
             designer_name=str(designer_name) if designer_name else None,
+            attorney_name=str(attorney_name) if attorney_name else None,
+            attorney_firm=str(attorney_firm) if attorney_firm else None,
             current_user=current_user,
         )
         for item_id_str in result.get("scan_item_ids", []):

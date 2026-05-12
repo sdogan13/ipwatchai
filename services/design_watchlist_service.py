@@ -975,18 +975,21 @@ async def import_design_watchlist_from_portfolio(
     *,
     holder_id: Optional[str] = None,
     designer_name: Optional[str] = None,
+    attorney_name: Optional[str] = None,
+    attorney_firm: Optional[str] = None,
     current_user,
     db_factory=Database,
 ) -> Dict[str, Any]:
-    if not holder_id and not designer_name:
+    provided = sum(1 for v in (holder_id, designer_name, attorney_name) if v)
+    if provided == 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="holder_id or designer_name is required",
+            detail="holder_id, designer_name, or attorney_name is required",
         )
-    if holder_id and designer_name:
+    if provided > 1:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="pass exactly one of holder_id or designer_name",
+            detail="pass exactly one of holder_id, designer_name, or attorney_name",
         )
 
     # PRO gate (mirrors trademark portfolio access policy).
@@ -1027,7 +1030,7 @@ async def import_design_watchlist_from_portfolio(
                 """,
                 (h["id"],),
             )
-        else:
+        elif designer_name:
             # Designer path: match the conservative-normalization GIN
             # index on designs.designers (idx_des_designers_normalized_gin).
             cur.execute(
@@ -1043,6 +1046,26 @@ async def import_design_watchlist_from_portfolio(
                 ORDER BY d.application_date DESC NULLS LAST, d.application_no DESC
                 """,
                 (str(designer_name).strip(),),
+            )
+        else:
+            # Attorney path: match (attorney_name, attorney_firm) pair
+            # via idx_des_attorney_normalized. Empty firm matches NULL.
+            attorney_firm_in = (attorney_firm or "").strip() or None
+            cur.execute(
+                """
+                SELECT d.id::text AS design_id,
+                       d.application_no,
+                       d.product_name_tr, d.product_name_en,
+                       d.locarno_classes
+                FROM designs d
+                WHERE d.attorney_name IS NOT NULL
+                  AND normalize_designer_name(d.attorney_name)
+                      = normalize_designer_name(%s)
+                  AND COALESCE(normalize_designer_name(d.attorney_firm), '')
+                      = COALESCE(normalize_designer_name(%s), '')
+                ORDER BY d.application_date DESC NULLS LAST, d.application_no DESC
+                """,
+                (str(attorney_name).strip(), attorney_firm_in),
             )
         rows = cur.fetchall()
 

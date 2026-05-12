@@ -958,6 +958,16 @@ function dashboard() {
                 url = '/api/v1/portfolio/public/designs?holder_id=' + encodeURIComponent(id);
             } else if (type === 'design-designer') {
                 url = '/api/v1/portfolio/public/designers?name=' + encodeURIComponent(id);
+            } else if (type === 'design-attorney') {
+                // id is a JSON blob {name, firm} — unpack into separate
+                // query params so the backend can match the pair.
+                var parsed = (function () {
+                    try { return JSON.parse(id); } catch (_) { return null; }
+                })();
+                var nm = parsed && parsed.name ? String(parsed.name) : '';
+                var fm = parsed && parsed.firm ? String(parsed.firm) : '';
+                url = '/api/v1/portfolio/public/attorneys?name=' + encodeURIComponent(nm);
+                if (fm) url += '&firm=' + encodeURIComponent(fm);
             } else {
                 var param = type === 'holder' ? 'holder_id' : 'attorney_no';
                 url = '/api/v1/portfolio/public?' + param + '=' + encodeURIComponent(id);
@@ -1027,6 +1037,15 @@ function dashboard() {
             } else if (type === 'design-designer') {
                 csvUrl = '/api/v1/portfolio/public/designers/csv?name=' + encodeURIComponent(id);
                 fileLabel = 'tasarimci';
+            } else if (type === 'design-attorney') {
+                var parsed = (function () {
+                    try { return JSON.parse(id); } catch (_) { return null; }
+                })();
+                var nm = parsed && parsed.name ? String(parsed.name) : '';
+                var fm = parsed && parsed.firm ? String(parsed.firm) : '';
+                csvUrl = '/api/v1/portfolio/public/attorneys/csv?name=' + encodeURIComponent(nm);
+                if (fm) csvUrl += '&firm=' + encodeURIComponent(fm);
+                fileLabel = 'tasarim_vekili';
             } else {
                 var param = type === 'holder' ? 'holder_id' : 'attorney_no';
                 csvUrl = '/api/v1/portfolio/public/csv?' + param + '=' + encodeURIComponent(id);
@@ -8457,6 +8476,30 @@ window.openDesignerPortfolio = function (designerName, _button) {
             var dash = window.Alpine.$data(root);
             if (dash && typeof dash.loadPortfolio === 'function') {
                 dash.loadPortfolio('design-designer', name, name);
+                return;
+            }
+        }
+    } catch (_) { /* swallow — modal is best-effort */ }
+};
+
+// Attorney click: the lookup needs (name, firm) together to match
+// the backend's stricter name+firm rule. The portfolio modal's
+// _portfolioEntityId state holds a single string, so we JSON-encode
+// both fields and the URL-builder + bulk-confirm modal decode it.
+// Firm may be empty — backend matches NULL-firm rows then.
+window.openAttorneyPortfolio = function (attorneyName, attorneyFirm, _button) {
+    if (!attorneyName) return;
+    var nm = String(attorneyName || '').trim();
+    if (!nm) return;
+    var fm = String(attorneyFirm || '').trim();
+    var encoded = JSON.stringify({ name: nm, firm: fm });
+    var display = fm ? (nm + ' — ' + fm) : nm;
+    try {
+        var root = document.querySelector('[x-data="dashboard()"]') || document.body;
+        if (root && window.Alpine && typeof window.Alpine.$data === 'function') {
+            var dash = window.Alpine.$data(root);
+            if (dash && typeof dash.loadPortfolio === 'function') {
+                dash.loadPortfolio('design-attorney', encoded, display);
                 return;
             }
         }

@@ -145,6 +145,57 @@ async def public_designer_portfolio_csv_impl(
         raise HTTPException(status_code=500, detail="CSV export temporarily unavailable")
 
 
+async def public_attorney_portfolio_impl(
+    name=None,
+    firm=None,
+    logger=None,
+):
+    """Lookup designs by (attorney_name, attorney_firm) pair under
+    conservative normalization. firm is optional — empty firm matches
+    rows where attorney_firm is also empty/NULL."""
+    from services.design_search_service import run_public_attorney_portfolio_lookup
+
+    try:
+        return await run_public_attorney_portfolio_lookup(
+            attorney_name=name,
+            attorney_firm=firm,
+            logger=logger,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        if logger:
+            logger.error(f"Public attorney portfolio failed: {exc}")
+        raise HTTPException(
+            status_code=500, detail="Attorney portfolio lookup temporarily unavailable",
+        )
+
+
+async def public_attorney_portfolio_csv_impl(
+    name=None,
+    firm=None,
+    logger=None,
+    current_user=None,
+):
+    """CSV export for every design representing this (name, firm) pair.
+    Plan-gated by can_download_portfolio."""
+    from services.design_search_service import build_public_attorney_portfolio_csv
+
+    try:
+        return await build_public_attorney_portfolio_csv(
+            attorney_name=name,
+            attorney_firm=firm,
+            logger=logger,
+            current_user=current_user,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        if logger:
+            logger.error(f"Public attorney portfolio CSV failed: {exc}")
+        raise HTTPException(status_code=500, detail="CSV export temporarily unavailable")
+
+
 def register_public_portfolio_routes(app, limiter, logger):
     """Register the extracted public portfolio endpoints on the app."""
 
@@ -260,6 +311,43 @@ def register_public_portfolio_routes(app, limiter, logger):
     app.add_api_route(
         "/api/v1/portfolio/public/designers/csv",
         public_designer_portfolio_csv,
+        methods=["GET"],
+        tags=["Design Search"],
+    )
+
+    @limiter.limit("5/minute")
+    async def public_attorney_portfolio(
+        request: Request,
+        name: str = Query(None, max_length=255, description="Attorney name"),
+        firm: str = Query(None, max_length=255, description="Attorney firm (optional)"),
+    ):
+        """Lookup designs by (attorney_name, attorney_firm) pair.
+        Match uses the conservative-normalization helpers from the
+        designer index migration (functions are name-agnostic)."""
+        return await public_attorney_portfolio_impl(
+            name=name, firm=firm, logger=logger,
+        )
+
+    @limiter.limit("3/minute")
+    async def public_attorney_portfolio_csv(
+        request: Request,
+        name: str = Query(None, max_length=255),
+        firm: str = Query(None, max_length=255),
+        current_user: CurrentUser = Depends(get_current_user),
+    ):
+        return await public_attorney_portfolio_csv_impl(
+            name=name, firm=firm, logger=logger, current_user=current_user,
+        )
+
+    app.add_api_route(
+        "/api/v1/portfolio/public/attorneys",
+        public_attorney_portfolio,
+        methods=["GET"],
+        tags=["Design Search"],
+    )
+    app.add_api_route(
+        "/api/v1/portfolio/public/attorneys/csv",
+        public_attorney_portfolio_csv,
         methods=["GET"],
         tags=["Design Search"],
     )

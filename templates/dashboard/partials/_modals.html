@@ -688,6 +688,15 @@
                 } else if (this.portfolioType === 'design-designer') {
                     endpoint = '/api/v1/design-watchlist/bulk-from-portfolio';
                     payload = { designer_name: this.entityId };
+                } else if (this.portfolioType === 'design-attorney') {
+                    endpoint = '/api/v1/design-watchlist/bulk-from-portfolio';
+                    // entityId is JSON {name, firm} — unpack for the API.
+                    var parsed;
+                    try { parsed = JSON.parse(this.entityId); } catch (_) { parsed = {}; }
+                    payload = {
+                        attorney_name: parsed && parsed.name ? String(parsed.name) : '',
+                        attorney_firm: parsed && parsed.firm ? String(parsed.firm) : '',
+                    };
                 } else if (this.portfolioType === 'holder') {
                     endpoint = '/api/v1/watchlist/bulk-from-portfolio';
                     payload = { holder_id: this.entityId };

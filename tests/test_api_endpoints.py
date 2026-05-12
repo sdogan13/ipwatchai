@@ -1438,6 +1438,73 @@ class TestPublicEndpoints:
         assert resp.status_code == 422
         assert mock_svc.await_count == 0
 
+    def test_public_attorney_portfolio_route_delegates_to_extracted_impl(self, client):
+        """GET /api/v1/portfolio/public/attorneys threads name + firm
+        into the impl. The lookup is stricter than holder/designer
+        because attorneys have no canonical id."""
+        with patch(
+            "app_public_portfolio_routes.public_attorney_portfolio_impl",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = {
+                "entity_type": "design-attorney",
+                "entity_id": '{"name": "Ali Demir", "firm": "ABC Patent"}',
+                "entity_name": "Ali Demir — ABC Patent",
+                "results": [],
+                "total_count": 0,
+            }
+            resp = client.get(
+                "/api/v1/portfolio/public/attorneys?name=Ali%20Demir&firm=ABC%20Patent"
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["entity_type"] == "design-attorney"
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["name"] == "Ali Demir"
+        assert mock_impl.await_args.kwargs["firm"] == "ABC Patent"
+
+    def test_public_attorney_portfolio_csv_route_delegates(self, client):
+        """CSV variant forwards name + firm + current_user."""
+        with patch(
+            "app_public_portfolio_routes.public_attorney_portfolio_csv_impl",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = JSONResponse(
+                content={"ok": True},
+                headers={"Content-Disposition": 'attachment; filename="x.csv"'},
+            )
+            resp = client.get(
+                "/api/v1/portfolio/public/attorneys/csv?name=Ali&firm=ABC"
+            )
+        assert resp.status_code == 200
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["name"] == "Ali"
+        assert mock_impl.await_args.kwargs["firm"] == "ABC"
+        assert mock_impl.await_args.kwargs["current_user"].email == "test@example.com"
+
+    def test_design_watchlist_bulk_accepts_attorney_pair(self, client):
+        """Bulk endpoint now accepts {attorney_name, attorney_firm} too."""
+        with patch(
+            "services.design_watchlist_service.import_design_watchlist_from_portfolio",
+            new_callable=AsyncMock,
+        ) as mock_svc:
+            mock_svc.return_value = {
+                "created": 4, "skipped": 0, "errors": 0, "total": 4,
+                "limit_reached": False, "errors_detail": [], "scan_item_ids": [],
+            }
+            resp = client.post(
+                "/api/v1/design-watchlist/bulk-from-portfolio",
+                json={"attorney_name": "Ali Demir", "attorney_firm": "ABC Patent"},
+            )
+        assert resp.status_code == 200
+        assert mock_svc.await_count == 1
+        kw = mock_svc.await_args.kwargs
+        assert kw["attorney_name"] == "Ali Demir"
+        assert kw["attorney_firm"] == "ABC Patent"
+        assert kw["holder_id"] is None
+        assert kw["designer_name"] is None
+
     def test_education_catalog_route_delegates_to_service(self, client):
         payload = {
             "stats": {
