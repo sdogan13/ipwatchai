@@ -265,8 +265,15 @@ def _hydrate_designs(cur, design_ids: Sequence[str]) -> Dict[str, Dict[str, Any]
 def _result_row(record: Dict[str, Any], *, similarity: float, breakdown: Dict[str, float]) -> Dict[str, Any]:
     holder = None
     if record.get("holder_name"):
+        # Expose both the public TPE client ID (when available) and the
+        # internal holders.id UUID. The dashboard design card prefers
+        # tpe_client_id for the portfolio click and falls back to the
+        # UUID when TPE never issued one — see openHolderPortfolio
+        # in static/js/dashboard/app.js.
+        holder_internal_id = record.get("holder_id")
         holder = {
             "name": record["holder_name"],
+            "id": str(holder_internal_id) if holder_internal_id else None,
             "tpe_client_id": record.get("tpe_client_id"),
             "country": record.get("holder_country"),
         }
@@ -424,6 +431,36 @@ def search_designs(
 # anonymous design portfolio surface stays consistent with trademark.
 _DESIGN_PORTFOLIO_PUBLIC_CAP = 10
 
+# Matches a canonical 36-char hyphenated UUID. Used to decide whether
+# the ``holder_id`` query param is a public TPE client ID (the usual
+# case) or an internal ``holders.id`` UUID — the latter happens when
+# the design card's holder has no TPE-assigned ID (~10% of designs).
+import re as _re
+_HOLDER_UUID_RE = _re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+
+def _resolve_holder_row(cur, holder_id: str):
+    """Look up a holders row by either internal ``holders.id`` UUID or
+    public ``tpe_client_id``. Returns the row dict (with ``id``,
+    ``name``, ``tpe_client_id``) or ``None``. The dual-lookup is what
+    makes the design-card "Sahip" click work for the ~10% of designs
+    whose holder lacks a TPE client ID — the card passes whichever
+    identifier is present and the backend resolves either."""
+    if _HOLDER_UUID_RE.match(holder_id):
+        cur.execute(
+            "SELECT id, name, tpe_client_id FROM holders WHERE id = %s::uuid LIMIT 1",
+            (holder_id,),
+        )
+    else:
+        cur.execute(
+            "SELECT id, name, tpe_client_id FROM holders WHERE tpe_client_id = %s LIMIT 1",
+            (holder_id,),
+        )
+    return cur.fetchone()
+
 
 async def run_public_design_portfolio_lookup(
     *,
@@ -452,11 +489,7 @@ async def run_public_design_portfolio_lookup(
     with Database() as db:
         cur = db.cursor()
 
-        cur.execute(
-            "SELECT id, name, tpe_client_id FROM holders WHERE tpe_client_id = %s LIMIT 1",
-            (holder_id,),
-        )
-        holder_row = cur.fetchone()
+        holder_row = _resolve_holder_row(cur, holder_id)
         if not holder_row:
             raise HTTPException(status_code=404, detail="Holder not found")
         holder_name = holder_row["name"] or holder_id
@@ -571,11 +604,7 @@ async def build_public_design_portfolio_csv(
             )
 
         cur = db.cursor()
-        cur.execute(
-            "SELECT id, name FROM holders WHERE tpe_client_id = %s LIMIT 1",
-            (holder_id,),
-        )
-        row = cur.fetchone()
+        row = _resolve_holder_row(cur, holder_id)
         if not row:
             raise HTTPException(status_code=404, detail="Holder not found")
         holder_internal_id = row["id"]

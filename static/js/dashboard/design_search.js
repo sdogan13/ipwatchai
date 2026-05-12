@@ -284,7 +284,14 @@
     var title = row.product_name_tr || row.product_name_en
               || row.application_no || row.registration_no || "—";
     var holder = (row.holder && row.holder.name) ? row.holder.name : "";
-    var holderTpe = (row.holder && row.holder.tpe_client_id) ? row.holder.tpe_client_id : "";
+    // Prefer the public TPE client ID; fall back to the internal
+    // holders.id UUID when this holder was never assigned a TPE ID
+    // (foreign entities + legacy records — ~10% of designs).
+    // Backend resolves either via _resolve_holder_row.
+    var holderRef = (row.holder
+        && (row.holder.tpe_client_id || row.holder.id))
+        ? (row.holder.tpe_client_id || row.holder.id)
+        : "";
     var locarno = row.locarno_classes || [];
     var designers = row.designers || [];
     var simNum = typeof row.similarity === "number" ? Number(row.similarity) : 0;
@@ -367,9 +374,9 @@
     var holderHtml = "";
     if (holder) {
       var holderInner = '<span style="color:var(--color-text-secondary)">' + escapeHtml(holder) + '</span>';
-      if (holderTpe && typeof window.openHolderPortfolio === "function") {
+      if (holderRef && typeof window.openHolderPortfolio === "function") {
         holderInner = '<button type="button" onclick="window.openHolderPortfolio(' +
-          JSON.stringify(holderTpe).replace(/"/g, '&quot;') + ', this)" ' +
+          JSON.stringify(holderRef).replace(/"/g, '&quot;') + ', this)" ' +
           'class="text-left hover:underline" style="color:var(--color-primary)">' +
           escapeHtml(holder) + '</button>';
       }

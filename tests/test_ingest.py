@@ -2646,3 +2646,48 @@ def test_find_holder_returns_row_id_when_match_found():
     fake_uuid = "11111111-1111-1111-1111-111111111111"
     cur = _CursorStub(fetchone_value=(fake_uuid,))
     assert find_holder_id_by_normalized_name(cur, "ARKEMA INC.") == fake_uuid
+
+
+# ============================================================
+# services.design_search_service._resolve_holder_row
+# Asserts the dual-lookup picks the right WHERE clause based on
+# whether the parameter is a 36-char hyphenated UUID. Without this
+# branch, the ~10% of designs whose holders have no TPE client ID
+# would not be clickable from the dashboard "Sahip" link.
+# ============================================================
+
+
+def test_resolve_holder_uses_tpe_client_id_for_short_param():
+    """A short non-UUID string is treated as a public TPE client ID."""
+    from services.design_search_service import _resolve_holder_row
+    cur = _CursorStub(fetchone_value=None)
+    _resolve_holder_row(cur, "1234567")
+    assert "WHERE tpe_client_id = %s" in cur.last_sql
+    assert "::uuid" not in cur.last_sql
+    assert cur.last_params == ("1234567",)
+
+
+def test_resolve_holder_uses_internal_id_for_uuid_param():
+    """A canonical UUID is treated as an internal holders.id and cast
+    to ::uuid in the WHERE clause so Postgres uses the PK index."""
+    from services.design_search_service import _resolve_holder_row
+    cur = _CursorStub(fetchone_value=None)
+    _resolve_holder_row(cur, "a8f72b3c-7e91-4d2a-8e6b-1234567890ab")
+    assert "WHERE id = %s::uuid" in cur.last_sql
+    assert "tpe_client_id" not in cur.last_sql.split("WHERE")[1]
+    assert cur.last_params == ("a8f72b3c-7e91-4d2a-8e6b-1234567890ab",)
+
+
+def test_resolve_holder_rejects_uuid_lookalikes():
+    """A string that looks vaguely like a UUID but isn't 8-4-4-4-12 hex
+    must fall back to tpe_client_id (don't risk passing it to ::uuid
+    which would raise InvalidTextRepresentation)."""
+    from services.design_search_service import _resolve_holder_row
+    cur = _CursorStub(fetchone_value=None)
+    # Wrong group lengths
+    _resolve_holder_row(cur, "abc-def-ghi-jkl-mno")
+    assert "WHERE tpe_client_id = %s" in cur.last_sql
+    # Non-hex character inside the right shape
+    cur2 = _CursorStub(fetchone_value=None)
+    _resolve_holder_row(cur2, "zzzzzzzz-7e91-4d2a-8e6b-1234567890ab")
+    assert "WHERE tpe_client_id = %s" in cur2.last_sql

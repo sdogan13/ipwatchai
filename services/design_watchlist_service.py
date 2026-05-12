@@ -999,11 +999,13 @@ async def import_design_watchlist_from_portfolio(
             )
 
         cur = db.cursor()
-        cur.execute(
-            "SELECT id, name FROM holders WHERE tpe_client_id = %s LIMIT 1",
-            (str(holder_id).strip(),),
-        )
-        h = cur.fetchone()
+        # Resolve by either internal UUID or public tpe_client_id —
+        # matches the public design portfolio endpoint so the bulk-add
+        # flow works for holders without a TPE client ID (~10% of
+        # designs, mostly foreign-corporate). See
+        # services.design_search_service._resolve_holder_row.
+        from services.design_search_service import _resolve_holder_row
+        h = _resolve_holder_row(cur, str(holder_id).strip())
         if not h:
             raise HTTPException(status_code=404, detail="Holder not found")
 
