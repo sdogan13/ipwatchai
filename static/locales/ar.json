@@ -1991,7 +1991,10 @@
     "score_figure": "الرسم",
     "filters_toggle": "المرشحات",
     "stats_db_records": "براءة يتم تحليلها في قاعدة البيانات المباشرة",
-    "no_image": "لا توجد صورة"
+    "no_image": "لا توجد صورة",
+    "expand_details": "عرض التفاصيل",
+    "hide_details": "إخفاء التفاصيل",
+    "view_detail": "تفاصيل البراءة"
   },
   "design_search": {
     "panel_title": "بحث التصاميم",

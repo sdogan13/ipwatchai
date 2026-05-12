@@ -1989,7 +1989,10 @@
     "score_figure": "Figure",
     "filters_toggle": "Filters",
     "stats_db_records": "patents analyzed in live database",
-    "no_image": "No image"
+    "no_image": "No image",
+    "expand_details": "Show details",
+    "hide_details": "Hide details",
+    "view_detail": "Patent details"
   },
   "design_search": {
     "panel_title": "Design Search",

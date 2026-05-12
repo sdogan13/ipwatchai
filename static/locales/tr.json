@@ -1994,7 +1994,10 @@
     "score_figure": "Şekil",
     "filters_toggle": "Filtreler",
     "stats_db_records": "patent canlı veritabanında analiz ediliyor",
-    "no_image": "Görsel yok"
+    "no_image": "Görsel yok",
+    "expand_details": "Detayları göster",
+    "hide_details": "Detayları gizle",
+    "view_detail": "Patent detayları"
   },
   "design_search": {
     "panel_title": "Tasarım Arama",
