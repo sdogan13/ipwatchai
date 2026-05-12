@@ -99,3 +99,6 @@ pgsql/
 
 # Chisel tunnel binary
 scripts/chisel*
+
+# DB backups taken before destructive migrations — do not commit
+backups/

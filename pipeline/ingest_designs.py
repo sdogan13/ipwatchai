@@ -162,13 +162,13 @@ def resolve_holder_id(cur, applicant: Optional[Dict[str, Any]]) -> Optional[str]
         )
         return cur.fetchone()[0]
 
-    cur.execute(
-        "SELECT id FROM holders WHERE LOWER(name) = LOWER(%s) AND tpe_client_id IS NULL LIMIT 1",
-        (name,),
-    )
-    row = cur.fetchone()
-    if row:
-        return row[0]
+    # Conservative-normalization dedup (lower + strip punct + collapse
+    # spaces). Plain LOWER(name)=LOWER(%s) used to leak duplicates for
+    # "CO. LTD." vs "CO.  LTD." etc. — see holders_consolidate_dups_no_tpe.
+    from pipeline.holder_helpers import find_holder_id_by_normalized_name
+    existing_id = find_holder_id_by_normalized_name(cur, name)
+    if existing_id:
+        return existing_id
 
     cur.execute(
         "INSERT INTO holders (name, address, country) VALUES (%s, %s, %s) RETURNING id",
