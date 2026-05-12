@@ -1,6 +1,6 @@
 # IP Watch AI API Reference
 
-Last updated: 2026-05-11
+Last updated: 2026-05-12
 Status: Current high-level map
 
 ## Purpose
@@ -71,6 +71,8 @@ Public search and portfolio:
 - `POST /api/v1/cografi-search/public`
 - `GET /api/v1/portfolio/public`
 - `GET /api/v1/portfolio/public/csv`
+- `GET /api/v1/portfolio/public/designs`
+- `GET /api/v1/portfolio/public/designs/csv`
 
 All four public search endpoints share a single anonymous daily quota — 5 searches/day per visitor, tracked by the long-lived `public_search_client_id` cookie. Switching registries does not reset the count; one bucket covers trademark + patent + design + cografi. Quota enforcement lives in `app_public_search_quota.py` (`enforce_public_search_quota` / `record_public_search_usage`), wired in front of each public route. Failed searches are not counted — the usage increment runs only after a successful retrieval.
 
@@ -120,7 +122,7 @@ Search scoring response note:
 - `POST /api/v1/search/risk-report/claim` is authenticated and accepts `{ "claim_token": "..." }`; it validates the pending report, applies the user's monthly risk-report quota, moves the PDF into the normal dashboard Reports list, and returns the saved `report_id`/download URL
 - `POST /api/v1/search/intelligent-risk-report` is authenticated, runs an agentic TurkPatent search and an LLM risk report in one call, accepts `multipart/form-data` with `query`, optional `image`, `classes`, `attorney_no`, `language`; charges only the `monthly_reports` quota (the bundled agentic search does not consume a live-search credit); returns the standard `SearchRiskReportResponse` shape with an extra `search` field carrying the agentic search response so the dashboard can render the result list; falls back to a DB-only assessment if the scrape fails or returns no records; the bundled search emits the existing Redis-backed progress events under the user_id, and the existing `/api/v1/search/cancel` endpoint cancels the in-flight agentic search (cancellation returns `{cancelled: true, search: ...}` with no quota consumed)
 - `POST /api/v1/search/intelligent-risk-report/public` is the unauthenticated landing-page variant of the above, rate-limited tighter (default `1/minute` per IP via the `rate_limit.public_intelligent_risk_report` setting); returns a pending report with a `claim_token` (no quota consumed until claimed via `/risk-report/claim`); does not emit Redis progress events
-- search routes continue to expose the existing scoring fields such as `total`, `text_similarity`, `text_idf_score`, `semantic_similarity`, `phonetic_similarity`, `visual_similarity`, `translation_similarity`, `path_a_score`, `path_b_score`, `scoring_path_source`, `dynamic_weights`, and `matched_words`
+- search routes continue to expose the existing scoring fields such as `total`, `text_similarity`, `text_idf_score`, `semantic_similarity`, `phonetic_similarity`, `visual_similarity`, `translation_similarity`, `path_a_score`, `path_b_score`, `scoring_path_source`, `dynamic_weights`, and `matched_words`; `semantic_similarity` remains a compatibility field for trademark responses and is not backed by trademark text embeddings or used for ranking/scoring
 - `text_idf_score` is the selected V2 textual path used by the overall combiner; score-card display should use `path_a_score` for original-name text and `translation_similarity` for translated-name text
 - the canonical scorer now also returns `score_version: "v2_text_visual"`, `textual_breakdown`, `visual_breakdown`, and `decision_reason`
 - `translation_similarity` is the translated-name textual path score from `name_tr`; it is not an additional overall combiner signal
@@ -128,7 +130,7 @@ Search scoring response note:
 - `/api/v1/alerts` and watchlist conflict summaries expose active similarity conflicts only when the conflicting trademark is still published and its opposition deadline has not passed; historical registered, renewed, refused, or withdrawn marks may remain stored as old alert rows but are not returned as active conflicts
 - textual diagnostics may include `token_role` for matched words, `descriptor_terms` for corpus-derived descriptor-like terms that cannot become anchors, compatibility alias `non_protectable_terms`, `descriptor_stats` evidence when available, `low_protectability_terms` and `low_protectability_stats` for corpus-distinctive weak modifier-like anchors, `weak_shared_anchor_guard` when shared weak-anchor-only evidence is capped, `short_acronym_subset_guard` when an exact short acronym is copied but material matter is missing on either side, `compound_expansions` for compact generic-suffix compounds, `short_anchor_guard` for blocked non-exact acronym-style phonetic/fuzzy matches, `anchor_quality_guard` for weak dominant-anchor fuzzy or phonetic matches, compatibility alias `fuzzy_anchor_guard`, `added_matter_breakdown` for dominant-core/additional-word scoring, and `translation_quality_flags` when `name_tr` is capped for dropping material from the original candidate name, short collapsed translated tokens, or weak translated non-exact-anchor evidence
 - textual diagnostics may include `calibration_breakdown` when a guarded cap is applied; these diagnostics show the evidence-weighted score under the cap ceiling so similarly capped cases do not all return the same value
-- result diagnostics may include `text_visual_guard` when weak text such as generic-only, missing-anchor, dominant-anchor-missing, semantic/phonetic-only evidence, weak fuzzy/phonetic-anchor evidence, weak shared low-protectability-anchor evidence, short-acronym subset evidence, limited one-anchor changed-matter/asymmetric-added-matter evidence, or plain-text-wordmark visual evidence prevents visual similarity from dominating the final score; OCR disagreement is diagnostic only and no longer suppresses agreement boosts
+- result diagnostics may include `text_visual_guard` when weak text such as generic-only, missing-anchor, dominant-anchor-missing, phonetic-only evidence, weak fuzzy/phonetic-anchor evidence, weak shared low-protectability-anchor evidence, short-acronym subset evidence, limited one-anchor changed-matter/asymmetric-added-matter evidence, or plain-text-wordmark visual evidence prevents visual similarity from dominating the final score; OCR disagreement is diagnostic only and no longer suppresses agreement boosts
 - translated-path diagnostics may include `translation_duplicate_original` when `name_tr` normalizes to the same candidate text and `short_collapsed_candidate_translation` when a one-token short `name_tr` collapses from a longer original candidate; both cap translated Path B so translated IDF flags cannot inflate risk
 - result diagnostics may include internal retrieval context such as `retrieval_sources`, `retrieval_matched_fields`, `retrieval_matched_stages`, and `retrieval_query_variants`; these explain how the candidate entered the scoring pool and do not change scoring math
 - retrieval uses exact token-boundary matching for short anchor tokens across `name` and `name_tr`, while broad substring token retrieval is limited to longer anchors; this keeps short-query recall consistent with watchlist scoring without admitting unrelated fragments as anchor-token matches
@@ -164,6 +166,9 @@ Design search:
 - `GET /api/v1/locarno-classes` is public and lists the 32 top-level Locarno classes with localized names for the design search filter UI; rate-limited at 60/min
 - `POST /api/v1/tools/suggest-locarno-classes` is authenticated and returns AI-suggested Locarno classes for a free-text product description; rate-limited at 20/min
 - `GET /api/v1/design-image/{path:path}` serves design view JPEGs from `bulletins/Tasarim/` with a directory-traversal guard; resolves both pre-CD-refactor paths (no `cd_images/`/`images/` prefix) and post-refactor paths, cached for 24h
+- `GET /api/v1/portfolio/public/designs?holder_id=X` is anonymous, returns up to 10 designs for a holder (joined to `holders` via `designs.holder_id`) with the same response shape as the trademark `/portfolio/public` so the dashboard portfolio modal can render either registry; rate-limited at 5/min
+- `GET /api/v1/portfolio/public/designs/csv?holder_id=X` is authenticated, returns a CSV export of every design for the holder, plan-gated by `can_download_portfolio` (paid plans only); rate-limited at 3/min
+- `POST /api/v1/design-watchlist/bulk-from-portfolio` is authenticated, accepts `{holder_id}` and bulk-adds every design in the holder's portfolio to the user's design watchlist (mirrors `/api/v1/watchlist/bulk-from-portfolio` for trademark). Reuses `create_design_watchlist_item` so each insert clones DINOv2/CLIP/color embeddings from the source design via `reference_design_id`, dedups against existing rows, and respects the combined `max_watchlist_items` plan quota; gated by `can_view_holder_portfolio`; rate-limited at 5/min; returns `{added, skipped, errors, total, limit_reached, scan_item_ids, queued_scans}` and queues a background scan for each newly created row
 
 Cografi search (Geographical Indications + Traditional Specialties):
 - `POST /api/v1/cografi-search/quick` is authenticated and runs a hybrid retrieval against `cografi_records` (trigram on name plus cosine on `text_embedding` from e5-large, fused with DINOv2 figure embedding when an image is supplied); accepts `query`, optional `image`, `section_keys` (comma-separated), `record_types` (comma-separated), `gi_type` (`mensei` / `mahreç` / `geleneksel`), `region` (free-text trigram on `geographical_boundary`), `date_from`/`date_to`, `application_no`, `registration_no`, `include_admin`, and `limit` (default 20); shares the daily `max_daily_quick_searches` quota
@@ -196,6 +201,31 @@ Commercial and workflow:
 - `/api/v1/applications`
 - `/api/v1/billing`
 - `/api/v1/payments`
+
+### Billing — AI credit packs
+
+One-shot top-ups for AI credits ($0.20 USD / credit at 40 TRY/USD). Available
+to every plan, including Free. Purchased credits never expire and are spent
+only after the monthly plan allowance is exhausted (see
+`utils.subscription.deduct_ai_credits`).
+
+- `GET /api/v1/billing/credit-packs` — lists available packs. Returns
+  `{"packs": [{id, credits, price_try, label_key}, ...]}`. Packs:
+  `small` (25 credits / ₺200), `medium` (100 / ₺800), `large` (500 / ₺4000).
+- `POST /api/v1/billing/purchase-credits` — initialize an iyzico checkout for
+  a pack. Body: `{"pack_id": "small"|"medium"|"large", "discount_code": "..." (optional)}`.
+  Returns the iyzico `checkout_form_content`, `token`, `conversation_id`, and
+  `payment_id`. The frontend injects the form HTML inline (re-executing
+  embedded `<script>` tags) the same way `templates/billing/checkout.html`
+  does for subscription purchases.
+- Success/failure callbacks reuse `/api/v1/payments/callback` and
+  `/api/v1/payments/webhook`. The callback branches on `payments.kind`:
+  `subscription` runs `activate_subscription`; `credit_pack` runs
+  `apply_credit_pack_purchase` which increments
+  `organizations.ai_credits_purchased`. Both paths record discount-code usage
+  when a code was applied at init.
+- Successful credit-pack purchases redirect to `/dashboard?credits=success`;
+  failures redirect to `/dashboard?credits=failed`.
 
 ### Lead feed sub-routes (Opposition Radar modes)
 
@@ -266,8 +296,8 @@ Admin, tooling, and pipeline:
 
 AI Studio lives under `/api/v1/tools`:
 - `GET /api/v1/tools/status` is public and reports per-tool availability, disabled reason, AI credit cost, Logo Studio audit readiness, and non-breaking Logo Studio provider diagnostics for OpenAI/Gemini
-- `POST /api/v1/tools/suggest-names` is authenticated, costs 1 unified AI credit only when usable safe names are returned, and validates Nice classes as `1..45`
-- `POST /api/v1/tools/generate-logo` is authenticated, costs 5 unified AI credits, generates four logo candidates with `audit_status="pending"`, creates or appends to a Logo Studio project thread, queues visual trademark audits in the request background task, and uses OpenAI GPT Image 2 before falling back to Gemini Nano Banana Pro
+- `POST /api/v1/tools/suggest-names` is authenticated, costs 2 unified AI credits only when usable safe names are returned, requires a non-empty concept, at least one Nice class, a non-empty sector/description, style, and language, validates Nice classes as `1..45`, retrieves the top 10 shared `RiskEngine` name candidates for the submitted concept as forbidden pre-generation context including `name_tr`, generates 10 names, retrieves 10 factual trademark candidates per generated name through the same shared name path, and sends those candidates to the internal score-only risk-report LLM flow without deterministic scores or monthly report quota usage
+- `POST /api/v1/tools/generate-logo` is authenticated, costs 5 unified AI credits, generates four logo candidates with `audit_status="pending"`, creates or appends to a Logo Studio project thread, queues visual trademark audits in the request background task, and uses OpenAI GPT Image 2 before falling back to Gemini Nano Banana Pro; Logo Studio retrieval uses the shared `RiskEngine` image/OCR path, but OCR and trademark facts stay retrieval-only and the multimodal LLM receives only generated/candidate images for visual risk scoring
 - `GET /api/v1/tools/logo-projects/{project_id}` is authenticated and returns an organization-scoped Logo Studio project with all initial and revision candidates
 - `POST /api/v1/tools/logo-projects/{project_id}/select` is authenticated and selects only candidates whose audit is completed and safe
 - `POST /api/v1/tools/generated-image/{image_id}/audit-retry` is authenticated and queues another audit for a failed completed image
