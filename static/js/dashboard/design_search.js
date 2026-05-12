@@ -403,23 +403,18 @@
         escapeHtml(row.registration_no) + '</span></div>'
       : "";
 
-    // Action row: TÜRKPATENT external link + Add to design watchlist
-    var tpBtn = tpUrl
-      ? '<a href="' + tpUrl + '" target="_blank" rel="noopener" ' +
-        'class="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded hover:opacity-80 transition-opacity" ' +
-        'style="background:var(--color-bg-muted);color:var(--color-text-secondary);border:1px solid var(--color-border)" ' +
-        'onclick="event.stopPropagation()">' +
-          '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>' +
-          'TÜRKPATENT' +
-        '</a>'
-      : "";
-
+    // Action row — styles + order match the trademark card
+    // (_search_panel.html:885-912): watchlist FIRST in risk-high
+    // (red) theme with the "eye" icon, Türkpatent SECOND in the
+    // primary (indigo) theme with the external-link icon. Both
+    // use the same px-3 py-1.5 / text-xs / rounded-lg / gap-1.5
+    // sizing as trademark for visual parity.
     var watchlistBtn = "";
     if (row.application_no) {
       if (isAlreadyWatched) {
-        watchlistBtn = '<span class="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded" ' +
+        watchlistBtn = '<span class="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg" ' +
           'style="background:#dcfce7;color:#166534">' +
-          '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>' +
+          '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>' +
           escapeHtml(t("watchlist.already_watching", "Already watching")) + '</span>';
       } else {
         var wlPayload = JSON.stringify({
@@ -429,15 +424,28 @@
         }).replace(/"/g, '&quot;');
         watchlistBtn = '<button type="button" data-design-add-watchlist ' +
           'data-payload="' + wlPayload + '" ' +
-          'class="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded hover:opacity-80 transition-opacity" ' +
-          'style="background:#dbeafe;color:#1e40af">' +
-          '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>' +
+          'class="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors" ' +
+          'style="color:var(--color-risk-high-text);background:var(--color-risk-high-bg)">' +
+          '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>' +
+            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>' +
+          '</svg>' +
           escapeHtml(t("watchlist.add_to_watchlist", "Add to watchlist")) + '</button>';
       }
     }
 
+    var tpBtn = tpUrl
+      ? '<a href="' + tpUrl + '" target="_blank" rel="noopener" ' +
+        'class="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors cursor-pointer" ' +
+        'style="color:var(--color-primary);background:var(--color-primary-light)" ' +
+        'onclick="event.stopPropagation()">' +
+          '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>' +
+          escapeHtml(t("landing.view_on_turkpatent", "Türkpatent'te Gör")) +
+        '</a>'
+      : "";
+
     var actionRow = (tpBtn || watchlistBtn)
-      ? '<div class="mt-2 flex flex-wrap items-center gap-1.5">' + tpBtn + watchlistBtn + '</div>'
+      ? '<div class="mt-3 flex flex-wrap items-center gap-2">' + watchlistBtn + tpBtn + '</div>'
       : "";
 
     // App-no identity row (always visible inside the collapsed header)
