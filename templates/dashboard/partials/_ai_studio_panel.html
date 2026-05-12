@@ -84,13 +84,15 @@
                             <label for="studio-name-query" x-text="t('studio.brand_concept')">Brand Name / Concept</label>
                             <input id="studio-name-query" type="text" :placeholder="t('studio.concept_placeholder')"
                                    class="studio-input"
+                                   required
+                                   oninput="updateStudioNameButtonState()"
                                    onkeydown="if(event.key==='Enter') generateNames()">
                         </div>
 
                         <div class="studio-class-selector">
                             <div class="studio-field-row">
                                 <div class="min-w-0">
-                                    <label x-text="t('studio.nice_class_optional')">Nice Class (Optional)</label>
+                                    <label x-text="t('studio.nice_class_required')">Nice Class</label>
                                     <div id="studio-name-classes-summary" class="studio-class-summary">No classes selected</div>
                                 </div>
                                 <button type="button" id="studio-name-classes-toggle"
@@ -102,18 +104,20 @@
                             <div id="studio-name-classes"
                                  class="studio-class-picker hidden"
                                  role="group"
-                                 :aria-label="t('studio.nice_class_optional')"></div>
+                                 :aria-label="t('studio.nice_class_required')"></div>
                         </div>
 
                         <div class="studio-field">
                             <label for="studio-name-industry" x-text="t('studio.sector_desc')">Sector / Description</label>
                             <input id="studio-name-industry" type="text" :placeholder="t('studio.sector_placeholder')"
-                                   class="studio-input">
+                                   class="studio-input"
+                                   required
+                                   oninput="updateStudioNameButtonState()">
                         </div>
 
                         <div class="studio-field">
                             <label for="studio-name-language" x-text="t('studio.name_language')">Name Language</label>
-                            <select id="studio-name-language" class="studio-input">
+                            <select id="studio-name-language" class="studio-input" required onchange="updateStudioNameButtonState()">
                                 <option value="mixed" selected x-text="t('studio.name_language_mixed')">Turkish + English</option>
                                 <option value="tr" x-text="t('studio.name_language_tr')">Turkish</option>
                                 <option value="en" x-text="t('studio.name_language_en')">English</option>
@@ -130,7 +134,7 @@
 
                         <div class="studio-field">
                             <label for="studio-name-style" x-text="t('studio.style')">Style</label>
-                            <select id="studio-name-style" class="studio-input">
+                            <select id="studio-name-style" class="studio-input" required onchange="updateStudioNameButtonState()">
                                 <option value="modern" x-text="t('studio.style_modern')">Modern</option>
                                 <option value="classic" x-text="t('studio.style_classic')">Classic</option>
                                 <option value="playful" x-text="t('studio.style_playful')">Playful</option>
@@ -140,7 +144,9 @@
 
                         <div class="studio-action-cell">
                             <div class="studio-brush-divider" aria-hidden="true"></div>
-                            <button onclick="generateNames()" id="studio-name-btn" class="studio-primary-button">
+                            <button onclick="generateNames()" id="studio-name-btn"
+                                    class="studio-primary-button"
+                                    :title="t('studio.complete_required_fields')">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
                                 <span x-text="t('studio.generate_safe')">Generate Safe Alternatives</span>
                             </button>
@@ -405,6 +411,78 @@
                 x-text="t('studio.coming_soon_title')">Yakında</h3>
             <p class="text-sm" style="color:var(--color-text-muted)"
                x-text="t('studio.coming_soon_patent')">Patent Stüdyosu yol haritamızda.</p>
+        </div>
+    </div>
+
+    <!-- ============================================ -->
+    <!-- BUY CREDITS MODAL                            -->
+    <!-- Triggered by JS when AI credit purchase is   -->
+    <!-- needed (credits_exhausted error or manual).  -->
+    <!-- ============================================ -->
+    <div id="buy-credits-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4"
+         style="background:rgba(0,0,0,0.5)"
+         role="dialog" aria-modal="true" :aria-label="t('studio.buy_credits.title')">
+        <div class="rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto"
+             style="background:var(--color-bg-card);border:1px solid var(--color-border)">
+            <div class="flex items-start justify-between p-6 pb-4">
+                <div>
+                    <h3 class="text-xl font-semibold" style="color:var(--color-text-primary)"
+                        x-text="t('studio.buy_credits.title')">Get more AI credits</h3>
+                    <p class="text-sm mt-1" style="color:var(--color-text-secondary)"
+                       x-text="t('studio.buy_credits.subtitle')">Upgrade your plan for recurring credits, or top up with a one-shot pack.</p>
+                </div>
+                <button type="button" onclick="closeBuyCreditsModal()"
+                        class="studio-icon-button"
+                        :aria-label="t('common.close')">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+
+            <div id="buy-credits-picker" class="grid grid-cols-1 md:grid-cols-2 gap-6 px-6 pb-6">
+                <!-- LEFT: plan upgrade -->
+                <section class="rounded-xl p-4"
+                         style="background:var(--color-bg-muted);border:1px solid var(--color-border)">
+                    <div class="text-xs font-semibold uppercase tracking-wider mb-1"
+                         style="color:var(--color-text-muted)"
+                         x-text="t('studio.buy_credits.upgrade_column_title')">Upgrade plan</div>
+                    <p class="text-sm mb-3" style="color:var(--color-text-secondary)"
+                       x-text="t('studio.buy_credits.upgrade_column_subtitle')">Monthly AI credits plus extra features.</p>
+                    <div id="buy-credits-plans" class="space-y-2">
+                        <!-- Plan cards injected by JS -->
+                    </div>
+                </section>
+
+                <!-- RIGHT: credit packs -->
+                <section class="rounded-xl p-4"
+                         style="background:var(--color-bg-muted);border:1px solid var(--color-border)">
+                    <div class="text-xs font-semibold uppercase tracking-wider mb-1"
+                         style="color:var(--color-text-muted)"
+                         x-text="t('studio.buy_credits.topup_column_title')">Top up credits</div>
+                    <p class="text-sm mb-3" style="color:var(--color-text-secondary)"
+                       x-text="t('studio.buy_credits.topup_column_subtitle')">One-shot purchase. Never expires.</p>
+
+                    <div id="buy-credits-packs" class="space-y-2 mb-3">
+                        <!-- Pack options injected by JS -->
+                    </div>
+
+                    <div class="studio-field mb-3">
+                        <label for="buy-credits-discount" x-text="t('studio.buy_credits.discount_label')">Discount code (optional)</label>
+                        <input id="buy-credits-discount" type="text" class="studio-input"
+                               :placeholder="t('studio.buy_credits.discount_placeholder')">
+                    </div>
+
+                    <div id="buy-credits-error" class="hidden mb-3 text-sm" style="color:#dc2626"></div>
+
+                    <button type="button" onclick="submitBuyCredits()" id="buy-credits-submit"
+                            class="studio-primary-button w-full" disabled>
+                        <span x-text="t('studio.buy_credits.pay_button')">Pay with iyzico</span>
+                    </button>
+                </section>
+            </div>
+
+            <div id="buy-credits-iyzico" class="hidden p-6">
+                <!-- iyzico checkout form HTML injected here -->
+            </div>
         </div>
     </div>
 

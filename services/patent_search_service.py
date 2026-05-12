@@ -425,6 +425,8 @@ HYDRATE_COLS = (
     "(SELECT h.tpe_client_id FROM patent_holders ph "
     " LEFT JOIN holders h ON h.id = ph.holder_id "
     " WHERE ph.patent_id = p.id ORDER BY ph.seq ASC LIMIT 1) AS first_holder_tpe_id, "
+    "(SELECT ph.holder_id::text FROM patent_holders ph "
+    " WHERE ph.patent_id = p.id ORDER BY ph.seq ASC LIMIT 1) AS first_holder_internal_id, "
     "(SELECT ARRAY_AGG(pi.name ORDER BY pi.seq) FROM patent_inventors pi "
     " WHERE pi.patent_id = p.id) AS inventors, "
     "(SELECT pa.name FROM patent_attorneys pa "
@@ -464,10 +466,15 @@ def _result_row(
 ) -> Dict[str, Any]:
     holder = None
     if record.get("first_holder_name"):
+        # Expose both the public TPE client ID (when available) and the
+        # internal holders.id UUID. The dashboard patent card prefers
+        # tpe_client_id for the portfolio click and falls back to the
+        # UUID when TPE never issued one (same pattern as design cards).
         holder = {
             "name": record["first_holder_name"],
             "country": record.get("first_holder_country"),
             "tpe_client_id": record.get("first_holder_tpe_id"),
+            "id": record.get("first_holder_internal_id"),
         }
     attorney = None
     if record.get("first_attorney_name") or record.get("first_attorney_firm"):

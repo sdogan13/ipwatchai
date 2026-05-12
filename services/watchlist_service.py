@@ -626,7 +626,7 @@ async def create_watchlist_item_record(
                     """
                     SELECT image_path,
                            image_embedding::text, dinov2_embedding::text,
-                           color_histogram::text, logo_ocr_text, text_embedding::text
+                           color_histogram::text, logo_ocr_text
                     FROM trademarks
                     WHERE application_no = %s
                     LIMIT 1
@@ -649,7 +649,6 @@ async def create_watchlist_item_record(
                         tm_ai.get("color_histogram")
                     ),
                     logo_ocr_text=tm_ai.get("logo_ocr_text"),
-                    text_embedding=_parse_embedding_vector(tm_ai.get("text_embedding")),
                 )
             else:
                 item = watchlist_crud.create(
@@ -1184,7 +1183,7 @@ async def import_watchlist_items_from_portfolio(
                 """
             SELECT application_no, name, nice_class_numbers, image_path,
                    image_embedding::text, dinov2_embedding::text,
-                   color_histogram::text, logo_ocr_text, text_embedding::text
+                   color_histogram::text, logo_ocr_text
             FROM trademarks
             WHERE {} = %s
             ORDER BY application_date DESC NULLS LAST
@@ -1269,7 +1268,6 @@ async def import_watchlist_items_from_portfolio(
                         trademark.get("color_histogram")
                     ),
                     logo_ocr_text=trademark.get("logo_ocr_text"),
-                    text_embedding=_parse_embedding_vector(trademark.get("text_embedding")),
                     auto_commit=False,
                 )
                 cur.execute("RELEASE SAVEPOINT sp_bulk")

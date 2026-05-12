@@ -74,7 +74,6 @@ _build_update_sql = _rules._build_update_sql
 check_and_migrate_schema = _bootstrap.check_and_migrate_schema
 load_nice_classes = _bootstrap.load_nice_classes
 
-_TEXT_EMBEDDING_SOURCE_NAME_KEY = "text_embedding_source_name"
 _TRANSLATION_SOURCE_NAME_KEY = "name_tr_source_name"
 
 
@@ -88,10 +87,7 @@ def _raw_name_was_materially_cleaned(raw_name, cleaned_name) -> bool:
 def _metadata_text_features_are_from_clean_name(rec: dict, cleaned_name: str | None) -> bool:
     if not cleaned_name:
         return False
-    return (
-        rec.get(_TEXT_EMBEDDING_SOURCE_NAME_KEY) == cleaned_name
-        and rec.get(_TRANSLATION_SOURCE_NAME_KEY) == cleaned_name
-    )
+    return rec.get(_TRANSLATION_SOURCE_NAME_KEY) == cleaned_name
 
 
 def _incoming_status_can_replace_existing(
@@ -140,7 +136,6 @@ _INSERT_COLUMNS = [
     "image_path",
     "image_embedding",
     "dinov2_embedding",
-    "text_embedding",
     "color_histogram",
     "logo_ocr_text",
     "name_tr",
@@ -180,7 +175,6 @@ def _build_insert_sql():
                     appeal_deadline = COALESCE(EXCLUDED.appeal_deadline, trademarks.appeal_deadline),
                     image_embedding = COALESCE(EXCLUDED.image_embedding, trademarks.image_embedding),
                     dinov2_embedding = COALESCE(EXCLUDED.dinov2_embedding, trademarks.dinov2_embedding),
-                    text_embedding = COALESCE(EXCLUDED.text_embedding, trademarks.text_embedding),
                     color_histogram = COALESCE(EXCLUDED.color_histogram, trademarks.color_histogram),
                     logo_ocr_text = COALESCE(EXCLUDED.logo_ocr_text, trademarks.logo_ocr_text),
                     name_tr = COALESCE(EXCLUDED.name_tr, trademarks.name_tr),
@@ -411,7 +405,6 @@ def process_file_batch(conn, file_path, force=False, *, records=None):
                     and not _metadata_text_features_are_from_clean_name(rec, tm_name)
                 )
             )
-            txt_emb = None if name_features_are_stale else embedding_to_halfvec(rec.get("text_embedding"), 384)
             color_emb = embedding_to_halfvec(rec.get("color_histogram"), 512)
             img_path = _resolve_image_path(folder_name, rec.get("IMAGE"), ROOT_DIR)
             ocr_text = rec.get("logo_ocr_text")
@@ -480,7 +473,6 @@ def process_file_batch(conn, file_path, force=False, *, records=None):
                         img_path,
                         img_emb,
                         dino_emb,
-                        txt_emb,
                         color_emb,
                         sanitize(ocr_text),
                         name_tr,
@@ -569,7 +561,6 @@ def process_file_batch(conn, file_path, force=False, *, records=None):
                     reg_date,
                     img_emb,
                     dino_emb,
-                    txt_emb,
                     color_emb,
                     sanitize(ocr_text),
                     name_tr,
@@ -756,8 +747,7 @@ def cleanup_sekil_names(conn, batch_size: int = 5000) -> int:
         OR (
             COALESCE(NULLIF(BTRIM(name), ''), NULLIF(BTRIM(name_tr), '')) IS NULL
             AND (
-                text_embedding IS NOT NULL
-                OR detected_lang IS NOT NULL
+                detected_lang IS NOT NULL
                 OR name_tr_backend IS NOT NULL
                 OR name_tr_model IS NOT NULL
                 OR name_tr_updated_at IS NOT NULL
@@ -783,7 +773,6 @@ def cleanup_sekil_names(conn, batch_size: int = 5000) -> int:
                         str(tm_id),
                         sanitize(cleaned_name),
                         None if clear_translation else sanitize(cleaned_name_tr),
-                        name_changed or logo_only_after_cleanup,
                         clear_translation,
                     )
                 )
@@ -794,14 +783,13 @@ def cleanup_sekil_names(conn, batch_size: int = 5000) -> int:
                 """
                 UPDATE trademarks AS tm
                 SET name = v.name::text,
-                    text_embedding = CASE WHEN v.clear_text_embedding THEN NULL ELSE tm.text_embedding END,
                     name_tr = v.name_tr::text,
                     detected_lang = CASE WHEN v.clear_translation THEN NULL ELSE tm.detected_lang END,
                     name_tr_backend = CASE WHEN v.clear_translation THEN NULL ELSE tm.name_tr_backend END,
                     name_tr_model = CASE WHEN v.clear_translation THEN NULL ELSE tm.name_tr_model END,
                     name_tr_updated_at = CASE WHEN v.clear_translation THEN NULL ELSE tm.name_tr_updated_at END,
                     updated_at = NOW()
-                FROM (VALUES %s) AS v(id, name, name_tr, clear_text_embedding, clear_translation)
+                FROM (VALUES %s) AS v(id, name, name_tr, clear_translation)
                 WHERE tm.id = v.id::uuid
                 """,
                 updates,

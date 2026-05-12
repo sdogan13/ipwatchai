@@ -179,7 +179,6 @@ CREATE TABLE IF NOT EXISTS trademarks (
     gazette_date DATE,
     -- AI Vectors
     image_embedding halfvec(512),
-    text_embedding halfvec(384),
     dinov2_embedding halfvec(768),
     color_histogram halfvec(512),
     -- Translation fields
@@ -228,8 +227,6 @@ CREATE INDEX IF NOT EXISTS idx_tm_nice_classes_arr ON trademarks USING GIN (nice
 CREATE INDEX IF NOT EXISTS idx_tm_extracted_goods ON trademarks USING GIN (extracted_goods);
 CREATE INDEX IF NOT EXISTS idx_tm_image_vec ON trademarks USING hnsw (image_embedding halfvec_cosine_ops)
     WITH (m = 16, ef_construction = 200) WHERE image_embedding IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_tm_text_vec ON trademarks USING hnsw (text_embedding halfvec_cosine_ops)
-    WITH (m = 16, ef_construction = 200);
 CREATE INDEX IF NOT EXISTS idx_tm_dinov2_vec ON trademarks USING hnsw (dinov2_embedding halfvec_cosine_ops)
     WITH (m = 16, ef_construction = 200) WHERE dinov2_embedding IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_tm_color_vec ON trademarks USING hnsw (color_histogram halfvec_cosine_ops)

@@ -347,7 +347,6 @@ _SHARED_FIELDS = [
     ("image_path", "v.img_path"),
     ("image_embedding", "v.img_emb::halfvec(512)"),
     ("dinov2_embedding", "v.dino_emb::halfvec(768)"),
-    ("text_embedding", "v.txt_emb::halfvec(384)"),
     ("color_histogram", "v.color_emb::halfvec(512)"),
     ("logo_ocr_text", "v.ocr_text"),
 ]
@@ -372,7 +371,6 @@ _GZ_OWNED_FIELDS = [
 ]
 
 _NAME_DERIVED_TEXT_FIELDS = {
-    "text_embedding",
     "name_tr",
     "detected_lang",
     "name_tr_backend",
@@ -482,7 +480,7 @@ def _build_update_sql(source):
                 FROM (VALUES %s) AS v(
                     name, clear_name, clear_text_features, status, nice_classes, goods, last_date, appeal, expiry,
                     b_no, b_date, g_no, g_date, img_path,
-                    app_date, reg_date, img_emb, dino_emb, txt_emb, color_emb,
+                    app_date, reg_date, img_emb, dino_emb, color_emb,
                     ocr_text,
                     name_tr, detected_lang, name_tr_backend, name_tr_model, name_tr_updated_at,
                     holder_name, holder_tpe_client_id,

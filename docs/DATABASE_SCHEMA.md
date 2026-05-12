@@ -19,6 +19,7 @@ Primary bootstrap:
 
 Important migration add-ons:
 - `migrations/payments.sql`
+- `migrations/credit_packs.sql` — extends `payments` with `kind` (`subscription` | `credit_pack`), `pack_id`, `credits_amount`, `discount_code`; relaxes `plan_name`/`billing_period` to NULLable so credit-pack rows can store their own metadata
 - `migrations/trademark_applications.sql`
 - `migrations/trademark_events.sql`
 - `migrations/add_universal_conflicts.sql`
@@ -45,6 +46,7 @@ Notes:
 - `trademarks` is the main search corpus
 - translation-side fields on `trademarks` now include `name_tr`, `detected_lang`, and provenance fields `name_tr_backend`, `name_tr_model`, and `name_tr_updated_at`
 - scoring engine V2 uses `word_idf`, `word_idf_tr`, and `trademarks.name_tr`; the IDF tables include corpus-derived descriptor columns `descriptor_like`, `descriptor_score`, and `descriptor_stats` populated by `compute_idf.py --source both`
+- trademark text-semantic embeddings are no longer part of the trademark retrieval/scoring source of truth; `migrations/remove_trademark_text_embedding.sql` drops the stale `trademarks.text_embedding` column and vector indexes while name retrieval stays on normalized lexical, fuzzy, phonetic, and translation-aware paths
 - V2 scores are similarity-risk diagnostics only and intentionally exclude legal factors such as status, Nice-class relatedness, seniority, and enforceability
 - historical MADLAD refresh runs now consume `trademarks` newest-first by `application_date DESC NULLS LAST, id DESC`, backed by an `application_date/id` btree index so campaign reruns can skip already-watermarked rows efficiently
 - `trademark_history` is partitioned by date range in the bootstrap schema
@@ -68,7 +70,7 @@ Settings and commercial support:
 - `app_settings`
 - `discount_codes`
 - `discount_code_usage`
-- `payments`
+- `payments` — unified store for plan subscriptions and one-shot AI credit-pack purchases; the `kind` column ('subscription' | 'credit_pack') drives the callback branch in `services.payment_service.process_payment_result`. Credit-pack rows carry `pack_id`, `credits_amount`, and the optional `discount_code`. Successful credit-pack payments increment `organizations.ai_credits_purchased` (never-expiring pool).
 
 ### Monitoring And Alerts
 

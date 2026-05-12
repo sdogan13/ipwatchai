@@ -1516,6 +1516,11 @@
                           : portfolioType === 'design-attorney' ? t('landing.detail_design_attorney')
                           : portfolioType === 'design-holder' ? t('landing.detail_design_holder')
                           : portfolioType === 'design-designer' ? t('landing.detail_designer')
+                          : portfolioType === 'patent-holder' ? t('landing.detail_patent_holder')
+                          : portfolioType === 'patent-inventor' ? t('landing.detail_inventor')
+                          : portfolioType === 'patent-attorney' ? t('landing.detail_patent_attorney')
+                          : portfolioType === 'cografi-applicant' ? t('landing.detail_cografi_applicant')
+                          : portfolioType === 'cografi-agent' ? t('landing.detail_cografi_agent')
                           : t('landing.detail_holder')">
                 </div>
                 <h3 class="text-base font-semibold truncate" style="color:var(--color-text-primary)"
@@ -1586,9 +1591,16 @@
         <div x-show="!portfolioLoading && portfolioResults.length > 0"
             class="p-3 border-t flex items-center justify-between gap-2" style="border-color:var(--color-border)">
             <span class="text-xs shrink-0" style="color:var(--color-text-muted)"
-                x-text="t('holder.total_trademarks_label', { count: portfolioTotalCount })"></span>
+                x-text="(portfolioType && portfolioType.indexOf('patent-') === 0)
+                    ? t('holder.total_patents_label', { count: portfolioTotalCount })
+                    : (portfolioType && portfolioType.indexOf('cografi-') === 0)
+                        ? t('holder.total_cografi_label', { count: portfolioTotalCount })
+                        : (portfolioType && portfolioType.indexOf('design-') === 0)
+                            ? t('holder.total_designs_label', { count: portfolioTotalCount })
+                            : t('holder.total_trademarks_label', { count: portfolioTotalCount })"></span>
             <div class="flex items-center gap-2">
                 <button @click="addPortfolioToWatchlist()" :disabled="portfolioBulkAdding"
+                    x-show="!portfolioType || (portfolioType.indexOf('patent-') !== 0 && portfolioType.indexOf('cografi-') !== 0)"
                     class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
                     style="background:var(--color-primary);color:white">
                     <svg x-show="!portfolioBulkAdding" class="w-3.5 h-3.5" fill="none" stroke="currentColor"

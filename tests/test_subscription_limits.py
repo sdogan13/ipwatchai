@@ -402,7 +402,7 @@ class TestApplicationLimits:
 # ===========================================================================
 
 class TestAICreditLimits:
-    """Verify AI credit enforcement for name gen (cost=1) and logo gen (cost=5)."""
+    """Verify AI credit enforcement for name gen (cost=2) and logo gen (cost=5)."""
 
     def test_free_no_ai_credits(self):
         assert PLAN_FEATURES["free"]["monthly_ai_credits"] == 0

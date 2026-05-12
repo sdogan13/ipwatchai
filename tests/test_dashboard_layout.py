@@ -330,6 +330,8 @@ class TestAppJS:
         assert "loadStudioUsageSummary()" in self.js
         assert "loadStudioHistory()" in self.js
         assert "applyStudioAvailability" in self.js
+        assert "getStudioRunCost" in self.js
+        assert "fallback = mode === 'logo' ? 5 : 2" in self.js
         assert "toggleStudioClassPicker" in self.js
         assert "setStudioHistoryFilter" in self.js
         assert "selectStudioColorPalette" in self.js
@@ -434,6 +436,8 @@ class TestLocaleFiles:
             "classes_selected",
             "edit_classes",
             "done_classes",
+            "nice_class_required",
+            "complete_required_fields",
             "name_language",
             "name_language_mixed",
             "name_language_tr",
@@ -526,6 +530,33 @@ class TestLocaleFiles:
         assert "document.getElementById('studio-name-language')" in generate_names_source
         assert "language: language" in generate_names_source
         assert "language: 'tr'" not in generate_names_source
+
+    def test_name_lab_generate_button_is_clickable_and_validates_missing_fields(self):
+        html = (PARTIALS / "_ai_studio_panel.html").read_text(encoding="utf-8")
+        dashboard_app = (STATIC / "js" / "dashboard" / "app.js").read_text(encoding="utf-8")
+        generate_names_source = dashboard_app.split("async function generateNames()")[1].split("function renderStudioNameResults")[0]
+        button_chunk = html[html.index('id="studio-name-btn"'):html.index('id="studio-name-btn"') + 300]
+
+        assert 'disabled' not in button_chunk
+        assert 'cursor-not-allowed' not in button_chunk
+        assert "t('studio.nice_class_required')" in html
+        assert "t('studio.complete_required_fields')" in html
+        assert 'id="studio-name-query" type="text"' in html
+        assert 'id="studio-name-industry" type="text"' in html
+        assert 'id="studio-name-language" class="studio-input" required' in html
+        assert 'id="studio-name-style" class="studio-input" required' in html
+        assert "function getStudioNameRequiredMissingFields()" in dashboard_app
+        assert "function updateStudioNameButtonState()" in dashboard_app
+        assert "getStudioNiceClasses('studio-name-classes').length" in dashboard_app
+        assert "var disabled = studioNameLoading || !available;" in dashboard_app
+        assert "|| !formComplete" not in dashboard_app
+        assert "showToast(t('studio.complete_required_fields'), 'error')" in generate_names_source
+
+    def test_dashboard_assets_bust_name_lab_validation_cache(self):
+        html = DASHBOARD_TEMPLATE.read_text(encoding="utf-8")
+
+        assert "/static/js/dashboard/app.js?v=100" in html
+        assert "/static/js/utils/i18n.js?v=63" in html
 
     def test_studio_loading_status_uses_animated_dots(self):
         import json

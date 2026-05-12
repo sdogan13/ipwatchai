@@ -1016,11 +1016,17 @@ class EducationModerationItem(BaseModel):
 class NameSuggestionRequest(BaseModel):
     """Request for AI-powered name suggestions"""
     query: str = Field(..., min_length=1, max_length=200, description="Original brand name or concept")
-    nice_classes: List[int] = Field(default=[], description="Nice classes to check against")
-    industry: str = Field(default="", max_length=200, description="Industry description for context")
-    style: Literal["modern", "classic", "playful", "technical"] = Field(default="modern", description="Naming style")
-    language: Literal["mixed", "tr", "en", "de", "it", "fr", "ar", "ku", "fa", "zh", "ru"] = Field(default="mixed", description="Name suggestion language preference")
+    nice_classes: List[int] = Field(..., min_length=1, description="Nice classes to check against")
+    industry: str = Field(..., min_length=1, max_length=200, description="Industry description for context")
+    style: Literal["modern", "classic", "playful", "technical"] = Field(..., description="Naming style")
+    language: Literal["mixed", "tr", "en", "de", "it", "fr", "ar", "ku", "fa", "zh", "ru"] = Field(..., description="Name suggestion language preference")
     avoid_names: List[str] = Field(default=[], description="Names to explicitly avoid")
+
+    @validator("query", "industry")
+    def validate_required_text(cls, v):
+        if not str(v or "").strip():
+            raise ValueError("Field is required")
+        return str(v).strip()
 
     @validator("nice_classes", each_item=True)
     def validate_nice_classes(cls, v):

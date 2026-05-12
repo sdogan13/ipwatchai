@@ -1243,7 +1243,15 @@ window.AppAPI.generateNames = async function (params) {
         throw new Error('upgrade_required');
     }
     if (res.status === 402) {
-        showUpgradeModal(data.detail || data, 'ai_credits');
+        // Single combined modal: left column lets the user upgrade their
+        // plan (recurring monthly credits + features), right column lets
+        // them buy a one-shot credit pack. Fall back to the upgrade modal
+        // only if the combined modal isn't loaded yet (cold-cache).
+        if (typeof openBuyCreditsModal === 'function') {
+            openBuyCreditsModal(data.detail || data);
+        } else {
+            showUpgradeModal(data.detail || data, 'ai_credits');
+        }
         throw new Error('credits_exhausted');
     }
     if (res.status === 401) {
@@ -1278,7 +1286,15 @@ window.AppAPI.generateLogos = async function (params) {
         throw new Error('upgrade_required');
     }
     if (res.status === 402) {
-        showUpgradeModal(data.detail || data, 'ai_credits');
+        // Single combined modal: left column lets the user upgrade their
+        // plan (recurring monthly credits + features), right column lets
+        // them buy a one-shot credit pack. Fall back to the upgrade modal
+        // only if the combined modal isn't loaded yet (cold-cache).
+        if (typeof openBuyCreditsModal === 'function') {
+            openBuyCreditsModal(data.detail || data);
+        } else {
+            showUpgradeModal(data.detail || data, 'ai_credits');
+        }
         throw new Error('credits_exhausted');
     }
     if (res.status === 401) {

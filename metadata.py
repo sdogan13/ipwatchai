@@ -43,7 +43,6 @@ OUTPUT_NAME = "metadata.json"
 SCRAPED_OUTPUT_NAME = "scraped_metadata.json"
 DEBUG_LIMIT = 0                  # Set to > 0 (e.g. 1000) to test on small data chunks
 AI_TEXT_FIELDS = (
-    "text_embedding",
     "name_tr",
     "detected_lang",
     "name_tr_backend",
@@ -58,7 +57,6 @@ AI_IMAGE_FIELDS = (
 )
 AI_FIELDS = AI_TEXT_FIELDS + AI_IMAGE_FIELDS
 VECTOR_AI_FIELDS = {
-    "text_embedding",
     "image_embedding",
     "dinov2_embedding",
     "color_histogram",
@@ -286,7 +284,6 @@ def db_image_matches_folder(image_path, folder_name: str, image_key: str) -> boo
 
 def db_row_to_ai_source(row: dict) -> dict:
     return {
-        "text_embedding": row.get("text_embedding"),
         "image_embedding": row.get("image_embedding"),
         "dinov2_embedding": row.get("dinov2_embedding"),
         "color_histogram": row.get("color_histogram"),
@@ -345,7 +342,6 @@ def restore_ai_fields_from_database(
             application_no,
             name,
             image_path,
-            text_embedding::text AS text_embedding,
             image_embedding::text AS image_embedding,
             dinov2_embedding::text AS dinov2_embedding,
             color_histogram::text AS color_histogram,

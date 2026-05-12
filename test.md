@@ -91,13 +91,13 @@ Existing suites:
 - `tests/test_zip.py`
 
 Ingest/repair coverage note:
-- `tests/test_repair.py` and `tests/test_ingest.py` cover logo-only `SEKIL/ŞEKİL` cleanup so stored names, translations, and text embeddings are removed together while visual/OCR evidence remains available for image search.
+- `tests/test_repair.py` and `tests/test_ingest.py` cover logo-only `SEKIL/ŞEKİL` cleanup so stored names and translations are cleared together while visual/OCR evidence remains available for image search.
 
 Scoring coverage note:
 - `tests/test_scoring_engine.py` covers the V2 text/visual scorer, including descriptor-like token caps, low-protectability shared-anchor guards, compact compounds, short-token boundary retrieval source checks, short-anchor phonetic guards, bidirectional short-acronym subset caps, short collapsed translation caps, dominant-anchor fuzzy/phonetic quality guards, conservative OCR-vs-OCR visual behavior, image-only OCR staying out of the trademark-name text query, image-only visual quality calibration and strict/balanced layout-variant logo corroboration, plain-text wordmark visual guards, dominant-core added matter, bidirectional and single-anchor asymmetric changed-matter caps, continuous guardrail calibration, weak/limited-text visual guards, OCR disagreement diagnostics, and search/watchlist wiring into `score_pair()`.
 - `tests/test_search_risk_report.py` covers the advisory search risk report route, public pending-report generation, authenticated pending-report claiming, request validation, monthly report-quota handling, Qwen-first text provider selection with DeepSeek/Gemini fallbacks, Qwen-first multimodal provider selection with Gemini fallback, invalid-output usage refund behavior, factual-only prompt trimming without deterministic score anchoring, provider-score result ordering, saved PDF report persistence, and Unicode PDF rendering for Turkish text; `tests/test_api_endpoints.py`, `tests/test_page_smoke.py`, and `tests/test_dashboard_layout.py` cover report deletion routes, safe file cleanup, landing/dashboard report button wiring, multipart logo upload wiring, login-to-view handoff, and the compact ready-card handoff to the saved PDF.
 - `tests/test_api_endpoints.py` covers `/api/search` service wiring so unified enhanced search maps canonical `RiskEngine.assess_brand_risk()` results into the existing response shape.
-- `tests/test_page_smoke.py` covers search and watchlist score-card wiring so visible text score cards use the original-name `path_a_score`, while translated-name evidence remains in the translation card; inline watchlist conflicts keep semantic/phonetic evidence as sub-rows instead of folding semantic into the main text score.
+- `tests/test_page_smoke.py` covers search and watchlist score-card wiring so visible text score cards use the original-name `path_a_score`, while translated-name evidence remains in the translation card; inline watchlist conflicts keep phonetic evidence as sub-rows instead of folding it into the main text score.
 
 ### Layer 2: App API Integration
 

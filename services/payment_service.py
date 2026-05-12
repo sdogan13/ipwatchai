@@ -4,6 +4,7 @@ import json
 import logging
 import uuid
 from datetime import datetime
+from typing import Optional
 
 import iyzipay
 from dateutil.relativedelta import relativedelta
@@ -12,7 +13,12 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 from config.settings import settings
 from database.crud import Database, get_db_connection
-from utils.subscription import PLAN_FEATURES, get_plan_limit
+from utils.subscription import (
+    PLAN_FEATURES,
+    add_purchased_ai_credits,
+    get_credit_pack,
+    get_plan_limit,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -142,14 +148,73 @@ def retrieve_iyzico_payment(
         return None
 
 
+def apply_credit_pack_purchase(
+    db,
+    payment: dict,
+    *,
+    credit_adder=add_purchased_ai_credits,
+    pack_getter=get_credit_pack,
+):
+    """Credit purchased AI credits to the organization after a successful pack payment.
+
+    Idempotent: relies on the caller to gate by payment status so this function
+    is only invoked once per completed payment row.
+    """
+    pack = pack_getter(payment.get("pack_id"))
+    credits = int(payment.get("credits_amount") or 0)
+    if pack is None and credits <= 0:
+        logger.error(
+            "Credit pack purchase missing pack_id and credits_amount for payment %s",
+            payment.get("id"),
+        )
+        return False
+
+    # Trust the pack definition over the stored amount when both exist.
+    if pack is not None:
+        credits = pack["credits"]
+
+    return credit_adder(db, str(payment["organization_id"]), credits)
+
+
+def _record_discount_usage(db, payment: dict) -> None:
+    """Record discount code usage on the discount_codes + discount_code_usage tables."""
+    code = (payment.get("discount_code") or "").strip().upper()
+    if not code:
+        return
+    cur = db.cursor()
+    cur.execute(
+        "SELECT id, discount_type, discount_value FROM discount_codes WHERE code = %s",
+        (code,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return
+    discount_id = row["id"]
+    amount = payment.get("amount") or 0
+    cur.execute(
+        """
+        INSERT INTO discount_code_usage
+            (discount_code_id, organization_id, discount_amount, plan_name)
+        VALUES (%s, %s, %s, %s)
+        """,
+        (discount_id, str(payment["organization_id"]), amount, payment.get("plan_name")),
+    )
+    cur.execute(
+        "UPDATE discount_codes SET current_uses = COALESCE(current_uses, 0) + 1 WHERE id = %s",
+        (discount_id,),
+    )
+    db.commit()
+
+
 def process_payment_result(
     db,
     payment: dict,
     result_json: dict,
     *,
     subscription_activator=activate_subscription,
+    credit_pack_applier=apply_credit_pack_purchase,
 ):
-    """Persist a gateway result and activate the subscription when paid."""
+    """Persist a gateway result and activate the subscription / credits when paid."""
     payment_status = result_json.get("paymentStatus", "")
     iyzico_status = result_json.get("status", "")
     payment_id_iyzico = result_json.get("paymentId", "")
@@ -170,12 +235,18 @@ def process_payment_result(
         )
         db.commit()
 
-        subscription_activator(
-            db,
-            str(payment["organization_id"]),
-            payment["plan_name"],
-            payment["billing_period"],
-        )
+        kind = (payment.get("kind") or "subscription").strip().lower()
+        if kind == "credit_pack":
+            credit_pack_applier(db, payment)
+        else:
+            subscription_activator(
+                db,
+                str(payment["organization_id"]),
+                payment["plan_name"],
+                payment["billing_period"],
+            )
+
+        _record_discount_usage(db, payment)
         return True
 
     cur.execute(
@@ -345,6 +416,208 @@ async def initialize_payment_data(
     }
 
 
+def _apply_discount(amount: float, discount: Optional[dict]) -> float:
+    """Apply a validated discount to a TRY amount. Returns the discounted price (>=1)."""
+    if not discount:
+        return amount
+    dtype = (discount.get("discount_type") or "").strip().lower()
+    value = float(discount.get("discount_value") or 0)
+    if dtype == "percentage":
+        amount = amount * (1 - value / 100.0)
+    elif dtype == "fixed":
+        amount = amount - value
+    return max(round(amount, 2), 1.0)
+
+
+def _lookup_discount(db, code: str, plan_or_context: Optional[str]) -> Optional[dict]:
+    """Look up an active discount code. Returns dict or None.
+
+    Credit-pack discounts use applies_to_plan='credit_pack' or NULL (universal).
+    """
+    code = (code or "").strip().upper()
+    if not code:
+        return None
+    cur = db.cursor()
+    cur.execute(
+        """
+        SELECT id, code, discount_type, discount_value, applies_to_plan
+        FROM discount_codes
+        WHERE code = %s
+          AND is_active = TRUE
+          AND (valid_from IS NULL OR valid_from <= NOW())
+          AND (valid_until IS NULL OR valid_until >= NOW())
+          AND (max_uses IS NULL OR current_uses < max_uses)
+        """,
+        (code,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+    applies = (row.get("applies_to_plan") or "").strip().lower()
+    if applies and plan_or_context and applies != plan_or_context:
+        return None
+    return dict(row)
+
+
+async def initialize_credit_pack_purchase_data(
+    *,
+    request: Request,
+    payload: dict,
+    current_user,
+    db_factory=Database,
+    db_connection_factory=get_db_connection,
+    settings_obj=settings,
+    client_ip_getter=get_client_ip,
+    options_getter=get_iyzico_options,
+    checkout_form_initialize_factory=None,
+    pack_getter=get_credit_pack,
+):
+    """Create an iyzico checkout session for a one-shot AI credit pack."""
+    initializer_factory = checkout_form_initialize_factory or iyzipay.CheckoutFormInitialize
+
+    pack = pack_getter(payload.get("pack_id"))
+    if pack is None:
+        raise HTTPException(status_code=400, detail="Invalid credit pack")
+
+    discount_code = (payload.get("discount_code") or "").strip().upper() or None
+    base_amount = float(pack["price_try"])
+
+    with db_factory(db_connection_factory()) as db:
+        discount = _lookup_discount(db, discount_code, "credit_pack") if discount_code else None
+        if discount_code and discount is None:
+            raise HTTPException(status_code=400, detail="Invalid or expired discount code")
+
+        amount = _apply_discount(base_amount, discount)
+        conversation_id = str(uuid.uuid4()).replace("-", "")[:20]
+        amount_str = f"{amount:.2f}"
+
+        cur = db.cursor()
+        cur.execute(
+            """
+            SELECT o.tax_id, o.address, o.city, o.country, o.phone,
+                   u.phone as user_phone
+            FROM organizations o
+            LEFT JOIN users u ON u.id = %s
+            WHERE o.id = %s
+            """,
+            (str(current_user.id), str(current_user.organization_id)),
+        )
+        org_data = cur.fetchone() or {}
+
+        cur.execute(
+            """
+            INSERT INTO payments (
+                organization_id, user_id, plan_name, billing_period,
+                amount, currency, iyzico_conversation_id, status,
+                kind, pack_id, credits_amount, discount_code
+            )
+            VALUES (%s, %s, NULL, NULL, %s, 'TRY', %s, 'pending',
+                    'credit_pack', %s, %s, %s)
+            RETURNING id
+            """,
+            (
+                str(current_user.organization_id),
+                str(current_user.id),
+                amount,
+                conversation_id,
+                pack["id"],
+                pack["credits"],
+                discount["code"] if discount else None,
+            ),
+        )
+        payment_row = cur.fetchone()
+        payment_id = str(payment_row["id"])
+        db.commit()
+
+    identity_number = (org_data.get("tax_id") or "11111111111").strip()
+    buyer_address = org_data.get("address") or "Turkey"
+    buyer_city = org_data.get("city") or "Istanbul"
+    buyer_country = org_data.get("country") or "Turkey"
+    buyer_phone = org_data.get("phone") or org_data.get("user_phone") or ""
+
+    buyer = {
+        "id": str(current_user.id),
+        "name": current_user.first_name or "User",
+        "surname": current_user.last_name or "User",
+        "email": current_user.email,
+        "identityNumber": identity_number,
+        "registrationAddress": buyer_address,
+        "city": buyer_city,
+        "country": buyer_country,
+        "ip": client_ip_getter(request),
+    }
+    if buyer_phone:
+        buyer["gsmNumber"] = buyer_phone
+
+    contact_name = f"{current_user.first_name or 'User'} {current_user.last_name or 'User'}"
+    billing_address = {
+        "contactName": contact_name,
+        "city": buyer_city,
+        "country": buyer_country,
+        "address": buyer_address,
+    }
+
+    request_data = {
+        "locale": "tr",
+        "conversationId": conversation_id,
+        "price": amount_str,
+        "paidPrice": amount_str,
+        "currency": "TRY",
+        "basketId": payment_id,
+        "paymentGroup": "PRODUCT",
+        "callbackUrl": settings_obj.iyzico.callback_url,
+        "enabledInstallments": [1],
+        "buyer": buyer,
+        "shippingAddress": billing_address,
+        "billingAddress": billing_address,
+        "basketItems": [
+            {
+                "id": payment_id,
+                "name": f"IP Watch AI - {pack['credits']} AI Credits",
+                "category1": "AI Credits",
+                "itemType": "VIRTUAL",
+                "price": amount_str,
+            }
+        ],
+    }
+
+    try:
+        checkout_form = initializer_factory().create(request_data, options_getter(settings_obj))
+        result = checkout_form.read().decode("utf-8")
+        result_json = json.loads(result)
+    except Exception as exc:
+        logger.error("iyzico credit-pack initialize failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Payment gateway error")
+
+    if result_json.get("status") != "success":
+        error_msg = result_json.get("errorMessage", "Unknown error")
+        logger.error("iyzico credit-pack init error: %s", error_msg)
+        raise HTTPException(status_code=502, detail=f"Payment init failed: {error_msg}")
+
+    token = result_json.get("token", "")
+
+    with db_factory(db_connection_factory()) as db:
+        cur = db.cursor()
+        cur.execute(
+            """
+            UPDATE payments SET iyzico_token = %s, updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+            """,
+            (token, payment_id),
+        )
+        db.commit()
+
+    return {
+        "checkout_form_content": result_json.get("checkoutFormContent", ""),
+        "token": token,
+        "conversation_id": conversation_id,
+        "payment_id": payment_id,
+        "pack_id": pack["id"],
+        "credits": pack["credits"],
+        "amount_try": amount,
+    }
+
+
 async def payment_callback_data(
     *,
     request: Request,
@@ -369,8 +642,11 @@ async def payment_callback_data(
             logger.error("Payment not found for token: %s...", token[:20])
             return RedirectResponse(url="/checkout?error=payment_not_found", status_code=303)
 
+        kind = (payment.get("kind") or "subscription").strip().lower()
+
         if payment["status"] == "completed":
-            return RedirectResponse(url="/dashboard?payment=success", status_code=303)
+            success_url = "/dashboard?credits=success" if kind == "credit_pack" else "/dashboard?payment=success"
+            return RedirectResponse(url=success_url, status_code=303)
 
         plan_name = payment["plan_name"]
         billing_period = payment["billing_period"]
@@ -381,7 +657,11 @@ async def payment_callback_data(
 
         success = payment_processor(db, payment, result_json)
         if success:
-            return RedirectResponse(url="/dashboard?payment=success", status_code=303)
+            success_url = "/dashboard?credits=success" if kind == "credit_pack" else "/dashboard?payment=success"
+            return RedirectResponse(url=success_url, status_code=303)
+
+        if kind == "credit_pack":
+            return RedirectResponse(url="/dashboard?credits=failed", status_code=303)
 
         return RedirectResponse(
             url=f"/checkout?plan={plan_name}&billing={billing_period}&error=payment_failed",

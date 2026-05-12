@@ -174,7 +174,7 @@ Current version: `v2_text_visual`.
 - short acronym-style anchors require exact normalized copying; non-exact fuzzy/phonetic matches such as a two-character acronym against a longer translated word are capped as weak evidence
 - exact short-acronym subset matches with missing matter on either side are capped as limited text, and short collapsed `name_tr` values cannot turn a longer original candidate into a high translated match
 - compact compounds with true-generic suffixes, such as `doganpatent`, are scored through their anchor plus generic components
-- Retrieval V2 pre-screening searches normalized, compact, containment, token, fuzzy, OCR, semantic, visual, and phonetic candidate paths before V2 scoring
+- Retrieval V2 pre-screening searches normalized, compact, containment, token, fuzzy, OCR, visual, and phonetic candidate paths before V2 scoring; trademark text-semantic embeddings are no longer used
 - short anchor tokens use exact token-boundary retrieval across `name` and `name_tr`; broad substring token retrieval is reserved for longer anchors so short queries are not flooded by unrelated fragments
 - textual retrieval runs symmetrically across `trademarks.name` and `trademarks.name_tr`, so translated-name candidates enter the same scoring flow as original-name candidates
 - retrieval diagnostics record which internal stage and field found a candidate; scoring still decides Path A (`name`) versus Path B (`name_tr`)
@@ -183,7 +183,7 @@ Current version: `v2_text_visual`.
 - visual scoring normalizes across active CLIP, DINOv2, and OCR components only; OCR is compared logo-to-logo with conservative exact/character evidence, can drive plain text wordmark visual matches when both images are text-on-blank, and cannot cap or drag down neural CLIP/DINO evidence; color vectors may still be present in retrieval data but do not contribute to visual risk
 - blank-background plain-text wordmark images are profiled from image geometry and OCR presence; when those logo texts or names do not agree, their CLIP/DINO visual score is capped so typography-on-white false positives do not dominate
 - image-only searches do not promote uploaded-logo OCR into the trademark-name text query; OCR stays inside `visual_breakdown`, is compared only against candidate `logo_ocr_text`, and has low weight in the image-only visual quality guard because EasyOCR can be noisy on logo crops; graphic/mixed logo layout variants can escape the moderate cap when CLIP and DINOv2 corroborate the same visual identity through strict high-component evidence or balanced close-component evidence
-- weak textual evidence, including generic-only, missing-anchor, dominant-anchor-missing, or semantic/phonetic-only support, prevents moderate visual similarity from creating a high conflict score
+- weak textual evidence, including generic-only, missing-anchor, dominant-anchor-missing, or phonetic-only support, prevents moderate visual similarity from creating a high conflict score
 - partial multi-anchor matches with changed matter on both sides are capped as limited text evidence, so one shared token cannot be boosted into high risk by moderate visual similarity
 - single-anchor matches with generic/service query matter and different target identity matter are treated as limited text evidence unless the full core is copied
 - weak non-exact dominant-anchor matches, including fuzzy and phonetic anchors, are calibrated by length ratio, edit distance, and anchor coverage; full-length one-edit variants can remain meaningful while fragment-like or weak translated matches are capped as limited text evidence
@@ -192,7 +192,7 @@ Current version: `v2_text_visual`.
 - `name_tr` values that normalize to the original candidate name cannot beat Path A solely because translated IDF flags classify tokens differently
 - final text/visual combining is max-plus, so a strong text or logo match is not diluted when the other signal is missing
 - search and watchlist score cards display original-name text from `path_a_score` and translated-name text from `translation_similarity`; `text_idf_score` remains the selected textual path used by the overall combiner
-- new watchlist similarity alerts persist the full V2 score diagnostics in `alerts_mt.score_details`, so conflict cards can show original-name, translated-name, semantic, and visual components without collapsing translated Path B into the direct text card; existing alert rows remain score snapshots until rescanned
+- new watchlist similarity alerts persist the full V2 score diagnostics in `alerts_mt.score_details`, so conflict cards can show original-name, translated-name, phonetic, and visual components without collapsing translated Path B into the direct text card; existing alert rows remain score snapshots until rescanned
 - watchlist conflict lists, counters, scanner pools, and alert feeds treat a similarity conflict as active only when the conflicting mark is published and its opposition deadline has not passed; older registered, renewed, refused, or withdrawn rows are not shown as active conflicts even if stale deadline data exists
 - the score remains a `0.0-1.0` similarity-risk score; legal factors such as status, class relatedness, seniority, and enforceability are handled outside this scoring slice
 

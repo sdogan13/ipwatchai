@@ -414,6 +414,13 @@ HYDRATE_COLS = (
     "(SELECT ch.name FROM cografi_holders ch "
     " WHERE ch.record_id = r.id AND ch.role = 'APPLICANT' "
     " ORDER BY ch.seq ASC LIMIT 1) AS applicant_name, "
+    "(SELECT h.tpe_client_id FROM cografi_holders ch "
+    " LEFT JOIN holders h ON h.id = ch.holder_id "
+    " WHERE ch.record_id = r.id AND ch.role = 'APPLICANT' "
+    " ORDER BY ch.seq ASC LIMIT 1) AS applicant_tpe_id, "
+    "(SELECT ch.holder_id::text FROM cografi_holders ch "
+    " WHERE ch.record_id = r.id AND ch.role = 'APPLICANT' "
+    " ORDER BY ch.seq ASC LIMIT 1) AS applicant_internal_id, "
     "(SELECT ch.name FROM cografi_holders ch "
     " WHERE ch.record_id = r.id AND ch.role = 'REGISTRANT' "
     " ORDER BY ch.seq ASC LIMIT 1) AS registrant_name, "
@@ -465,6 +472,15 @@ def _result_row(
         "usage_description": record.get("usage_description"),
         "agent": record.get("agent"),
         "applicant_name": record.get("applicant_name") or record.get("registrant_name"),
+        # Expose both the public TPE id (when available) and the
+        # internal holders.id UUID so the result-card click-through
+        # can match the design/patent fallback pattern: prefer the
+        # TPE id, fall back to UUID.
+        "applicant": {
+            "name": record.get("applicant_name") or record.get("registrant_name"),
+            "tpe_client_id": record.get("applicant_tpe_id"),
+            "id": record.get("applicant_internal_id"),
+        } if (record.get("applicant_name") or record.get("registrant_name")) else None,
         "bulletin_no": record.get("bulletin_no"),
         "bulletin_date": _isofmt(record.get("bulletin_date")),
         "application_date": _isofmt(record.get("application_date")),

@@ -583,7 +583,7 @@ class AgenticTrademarkSearch:
         return formatted
 
     def _generate_embeddings(self, records: List[Dict]) -> int:
-        """Generate AI embeddings + translations for scraped records using pipeline.ai."""
+        """Generate translations for scraped records using pipeline.ai."""
         try:
             from pipeline import ai
 
@@ -593,28 +593,20 @@ class AgenticTrademarkSearch:
 
                 if name:
                     try:
-                        # Generate text embedding
-                        text_emb = ai.get_text_embedding_cached(name)
-                        if text_emb:
-                            record["text_embedding"] = text_emb
-                            enriched_count += 1
-                    except Exception as e:
-                        logger.debug(f"Failed to generate embedding for {name}: {e}")
-
-                    try:
                         # Generate Turkish translation + language detection
                         trans = ai.get_translations(name)
                         if trans.get("name_tr"):
                             record["name_tr"] = trans["name_tr"]
                         if trans.get("detected_lang"):
                             record["detected_lang"] = trans["detected_lang"]
+                        enriched_count += 1
                     except Exception as e:
                         logger.debug(f"Failed to translate {name}: {e}")
 
             return enriched_count
 
         except ImportError:
-            logger.warning("pipeline.ai not available, skipping embedding generation")
+            logger.warning("pipeline.ai not available, skipping translation generation")
             return 0
 
     def _ingest_to_database(self, records: List[Dict], query: str) -> int:

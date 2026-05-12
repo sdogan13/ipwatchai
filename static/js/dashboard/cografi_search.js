@@ -277,6 +277,65 @@
     );
   }
 
+  // Risk bucket + 3-column score grid + status pill helpers — match
+  // the patent + design card visual language so the dashboard reads
+  // consistently across registries.
+  function _riskBucket(pct) {
+    if (pct >= 85) return "critical";
+    if (pct >= 70) return "high";
+    if (pct >= 50) return "medium";
+    return "low";
+  }
+  function _riskBorderStyle(risk) {
+    var map = {
+      critical: "border-color:#dc2626",
+      high: "border-color:#ea580c",
+      medium: "border-color:#d97706",
+      low: "border-color:var(--color-border)",
+    };
+    return map[risk] || map.low;
+  }
+  function _scoreGridCell(label, value) {
+    var pct = value != null ? Math.round(Math.max(0, Math.min(1, Number(value))) * 100) : 0;
+    return (
+      '<div class="text-center p-2 rounded-md" style="background:var(--color-bg-muted)">' +
+        '<div class="text-[10px] mb-0.5" style="color:var(--color-text-faint)">' + label + '</div>' +
+        '<div class="text-sm font-semibold" style="color:var(--color-text-primary)">' + pct + '%</div>' +
+      '</div>'
+    );
+  }
+  // The cografi_records.section_key enum uses long names
+  // ("article_40_modified") but the existing locale keys are
+  // abbreviated ("section_art40_modified"). Map between them so the
+  // header pill text stays localized.
+  function _sectionLocaleKey(key) {
+    var map = {
+      article_40_modified:        "section_art40_modified",
+      article_42_change_requests: "section_art42_change_requests",
+      article_42_finalized:       "section_art42_finalized",
+      article_43_modified:        "section_art43_modified",
+      gazette_only_announcements: "section_gazette_only",
+    };
+    return map[key] || ("section_" + key);
+  }
+
+  // Section_key colours — registered + finalized lean green (live
+  // records), modifications/corrections lean amber, examined lean
+  // grey. Used both for the header pill and the section-aware label.
+  function _sectionColors(key) {
+    var map = {
+      registered:                { bg: "#dcfce7", color: "#166534" },
+      article_42_finalized:      { bg: "#dcfce7", color: "#166534" },
+      examined:                  { bg: "#f3f4f6", color: "#374151" },
+      article_40_modified:       { bg: "#fef3c7", color: "#92400e" },
+      article_42_change_requests:{ bg: "#fef3c7", color: "#92400e" },
+      article_43_modified:       { bg: "#fef3c7", color: "#92400e" },
+      corrections:               { bg: "#fef3c7", color: "#92400e" },
+      gazette_only_announcements:{ bg: "#e0e7ff", color: "#3730a3" },
+    };
+    return map[key] || { bg: "var(--color-bg-muted)", color: "var(--color-text-muted)" };
+  }
+
   function _usageBlock(rawText, cardId) {
     if (!rawText) return "";
     var safe = escapeHtml(rawText);
@@ -300,105 +359,218 @@
 
   function renderResultCard(item) {
     var cardId = "cs-" + (item.id || Math.random().toString(36).slice(2, 9));
-    var name = escapeHtml(item.name || t("cografi_search.untitled", "Unnamed"));
-    var giType = escapeHtml(item.gi_type || "");
-    var region = escapeHtml(item.geographical_boundary || "");
-    var productGroup = escapeHtml(item.product_group || "");
-    var appNo = escapeHtml(item.application_no || "");
-    var regNo = item.registration_no != null ? escapeHtml(String(item.registration_no)) : "";
-    var applicant = escapeHtml(item.applicant_name || "");
-    var bulletinNo = escapeHtml(item.bulletin_no || "");
-    var bulletinDate = escapeHtml(item.bulletin_date || "");
-    var sim = item.similarity != null ? Number(item.similarity).toFixed(0) : "";
+    var titleStr = item.name || t("cografi_search.untitled", "Unnamed");
+    var giType = item.gi_type || "";
+    var region = item.geographical_boundary || "";
+    var productGroup = item.product_group || "";
+    var appNo = item.application_no || "";
+    var regNo = item.registration_no != null ? String(item.registration_no) : "";
+    var appDate = item.application_date || "";
+    var regDate = item.registration_date || "";
+    var bulletinNo = item.bulletin_no || "";
+    var bulletinDate = item.bulletin_date || "";
+    var sectionKey = item.section_key || "";
+    var recordType = item.record_type || "";
     var imgUrl = item.image_url || "";
     var bd = item.similarity_breakdown || {};
+    var simNum = item.similarity != null ? Number(item.similarity) : 0;
+    var simPct = Math.round(simNum);
+    var risk = _riskBucket(simPct);
+    var sectionColors = _sectionColors(sectionKey);
 
+    // Image (header-prominent, like the design/patent cards)
     var noImgLabel = escapeHtml(t("cografi_search.no_image", "No image"));
     var imgHtml = imgUrl
       ? '<img src="' + escapeHtml(imgUrl) +
-        '" alt="' + escapeHtml(item.name || "") +
-        '" loading="lazy" class="w-full h-40 object-contain rounded-md mb-3" ' +
+        '" alt="' + escapeHtml(titleStr) +
+        '" loading="lazy" class="w-full h-40 object-contain rounded-md" ' +
         'style="background:var(--color-bg-muted)" ' +
-        'onerror="this.onerror=null;this.replaceWith(Object.assign(document.createElement(\'div\'),{className:\'w-full h-40 flex items-center justify-center text-xs rounded-md mb-3\',style:\'background:var(--color-bg-muted);color:var(--color-text-faint)\',textContent:\'' +
+        'onerror="this.onerror=null;this.replaceWith(Object.assign(document.createElement(\'div\'),{className:\'w-full h-40 flex items-center justify-center text-xs rounded-md\',style:\'background:var(--color-bg-muted);color:var(--color-text-faint)\',textContent:\'' +
         noImgLabel + '\'}));" />'
-      : '<div class="w-full h-40 flex items-center justify-center text-xs rounded-md mb-3" ' +
+      : '<div class="w-full h-40 flex items-center justify-center text-xs rounded-md" ' +
         'style="background:var(--color-bg-muted);color:var(--color-text-faint)">' +
         noImgLabel + "</div>";
 
-    var idChip = "";
-    if (appNo) {
-      idChip += '<span class="inline-block px-2 py-0.5 rounded text-xs font-mono" ' +
-                'style="background:var(--color-bg-muted);color:var(--color-text-muted)">' + appNo + '</span>';
-    }
-    if (regNo) {
-      idChip += '<span class="inline-block px-2 py-0.5 rounded text-xs font-mono" ' +
-                'style="background:var(--color-bg-muted);color:var(--color-text-muted)">#' + regNo + '</span>';
-    }
+    // Similarity badge (risk-coloured)
+    var simBadgeBgMap = {
+      critical: "#dc2626", high: "#ea580c",
+      medium: "#d97706", low: "#0891b2",
+    };
+    var simBadge = simPct
+      ? '<span class="px-2 py-0.5 rounded-full text-xs font-semibold shrink-0" ' +
+          'style="background:' + simBadgeBgMap[risk] + ';color:white">' + simPct + '%</span>'
+      : '';
 
-    var giTypeChip = giType
-      ? '<span class="inline-block px-2 py-0.5 rounded text-[10px]" ' +
-        'style="background:var(--color-primary-light);color:var(--color-primary)">' + giType + '</span>'
-      : "";
-
-    var regionHtml = region
-      ? '<p class="text-xs mb-1" style="color:var(--color-text-secondary)">' +
-        '<span style="color:var(--color-text-faint)">' +
-        escapeHtml(t("cografi_search.region_label_card", "Region")) + ':</span> ' +
-        region + '</p>'
-      : "";
-
-    var productHtml = productGroup
-      ? '<p class="text-xs mb-1" style="color:var(--color-text-faint)">' + productGroup + '</p>'
-      : "";
-
-    var applicantHtml = applicant
-      ? '<div class="text-xs mt-1.5"><span style="color:var(--color-text-faint)">' +
-        escapeHtml(t("cografi_search.applicant_label", "Applicant")) + ':</span> ' +
-        '<span style="color:var(--color-text-secondary)">' + applicant + '</span></div>'
-      : "";
-
+    // Bulletin chip (header-visible meta)
     var bulletinHtml = "";
     if (bulletinNo) {
       bulletinHtml = '<span class="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded" ' +
         'style="background:var(--color-bg-muted);color:var(--color-text-faint)">' +
-        escapeHtml(t("cografi_search.bulletin_label", "Bulletin")) + ' ' + bulletinNo +
-        (bulletinDate ? ' · ' + bulletinDate : '') + '</span>';
+        escapeHtml(t("cografi_search.bulletin_label", "Bulletin")) + ' ' + escapeHtml(bulletinNo) +
+        (bulletinDate ? ' · ' + escapeHtml(bulletinDate) : '') + '</span>';
     }
 
-    var bdHtml = "";
-    if (bd && (bd.text != null || bd.embedding != null || bd.image != null)) {
-      bdHtml =
-        '<div class="mt-2 space-y-1 pt-2" style="border-top:1px solid var(--color-border)">' +
-          (bd.text != null ? _signalBar(t("cografi_search.score_text", "Text"), bd.text) : "") +
-          (bd.embedding != null ? _signalBar(t("cografi_search.score_embedding", "Semantic"), bd.embedding) : "") +
-          (bd.image != null ? _signalBar(t("cografi_search.score_image", "Image"), bd.image) : "") +
-        '</div>';
+    // App-no / reg-no line (always visible identifier)
+    var idLine = "";
+    if (appNo || regNo) {
+      var bits = [];
+      if (appNo) {
+        bits.push('<span class="font-mono" style="color:var(--color-text-secondary)">' + escapeHtml(appNo) + '</span>');
+      }
+      if (regNo) {
+        bits.push('<span class="font-mono" style="color:var(--color-text-secondary)">#' + escapeHtml(regNo) + '</span>');
+      }
+      idLine = '<div class="text-xs"><span style="color:var(--color-text-faint)">' +
+               escapeHtml(t("cografi_search.id_label", "No")) + ':</span> ' +
+               bits.join(' · ') + '</div>';
     }
 
-    return (
-      '<div class="rounded-lg border p-4 transition-all hover:shadow-md cursor-pointer" ' +
-      'data-cografi-card-id="' + cardId + '" ' +
-      'data-cd-open="' + escapeHtml(item.id || "") + '" ' +
-      'style="background:var(--color-bg-card);border-color:var(--color-border)">' +
+    var headerHtml =
+      '<div data-cografi-card-header class="p-3 cursor-pointer">' +
         imgHtml +
-        '<div class="flex items-start justify-between gap-2 mb-2">' +
-          '<h4 class="text-sm font-semibold leading-snug" style="color:var(--color-text-primary)">' +
-            name +
-          '</h4>' +
-          (sim ? ('<span class="shrink-0 text-xs font-medium px-2 py-0.5 rounded-full" ' +
-                  'style="background:var(--color-primary);color:white">' + sim + '%</span>') : '') +
+        '<div class="mt-2 flex items-start justify-between gap-2">' +
+          '<h4 class="text-sm font-semibold leading-snug min-w-0 truncate" ' +
+            'style="color:var(--color-text-primary)" title="' + escapeHtml(titleStr) + '">' +
+            escapeHtml(titleStr) + '</h4>' +
+          simBadge +
         '</div>' +
-        (idChip ? ('<div class="flex flex-wrap gap-1 mb-2">' + idChip + '</div>') : '') +
-        regionHtml +
-        productHtml +
-        (giTypeChip ? ('<div class="mb-1">' + giTypeChip + '</div>') : '') +
-        _usageBlock(item.usage_description, cardId) +
-        applicantHtml +
-        '<div class="flex flex-wrap items-center gap-2 mt-2 text-xs" style="color:var(--color-text-faint)">' +
+        '<div class="mt-1 flex flex-wrap items-center gap-1.5">' +
+          (sectionKey
+            ? '<span class="text-[10px] px-2 py-0.5 rounded-full font-medium" ' +
+              'style="background:' + sectionColors.bg + ';color:' + sectionColors.color + '">' +
+              escapeHtml(t("cografi_search." + _sectionLocaleKey(sectionKey), sectionKey)) + '</span>'
+            : '') +
+          (recordType
+            ? '<span class="text-[10px] px-2 py-0.5 rounded font-mono" ' +
+              'style="background:var(--color-bg-muted);color:var(--color-text-muted)">' +
+              escapeHtml(recordType) + '</span>'
+            : '') +
           bulletinHtml +
         '</div>' +
+        (idLine ? '<div class="mt-1.5">' + idLine + '</div>' : '') +
+        '<div class="mt-2 flex items-center justify-center gap-1 text-[11px]" ' +
+          'style="color:var(--color-text-faint)">' +
+          '<span data-cografi-card-expand-label>' +
+            escapeHtml(t("cografi_search.expand_details", "Show details")) +
+          '</span>' +
+          '<svg data-cografi-card-chevron class="w-3.5 h-3.5 transition-transform" ' +
+            'fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>' +
+          '</svg>' +
+        '</div>' +
+      '</div>';
+
+    // 3-column score grid — Text / Semantic / Image. The image cell
+    // shows 0% when no figure is in play (matches the design card).
+    var bdHtml =
+      '<div class="grid grid-cols-3 gap-2 mb-3">' +
+        _scoreGridCell(t("cografi_search.score_text", "Metin"), bd.text) +
+        _scoreGridCell(t("cografi_search.score_embedding", "Anlam"), bd.embedding) +
+        _scoreGridCell(t("cografi_search.score_image", "Görsel"), bd.image) +
+      '</div>';
+
+    var giTypeHtml = giType
+      ? '<div class="text-xs"><span style="color:var(--color-text-faint)">' +
+        escapeHtml(t("cografi_search.gi_type_label", "GI Type")) + ':</span> ' +
+        '<span class="inline-block px-2 py-0.5 rounded text-[10px] ml-1" ' +
+        'style="background:var(--color-primary-light);color:var(--color-primary)">' +
+        escapeHtml(giType) + '</span></div>'
+      : '';
+
+    var regionHtml = region
+      ? '<div class="text-xs"><span style="color:var(--color-text-faint)">' +
+        escapeHtml(t("cografi_search.region_label_card", "Region")) + ':</span> ' +
+        '<span style="color:var(--color-text-secondary)">' + escapeHtml(region) + '</span></div>'
+      : '';
+
+    var productHtml = productGroup
+      ? '<div class="text-xs"><span style="color:var(--color-text-faint)">' +
+        escapeHtml(t("cografi_search.product_group_label", "Product")) + ':</span> ' +
+        '<span style="color:var(--color-text-secondary)">' + escapeHtml(productGroup) + '</span></div>'
+      : '';
+
+    // Applicant: clickable when an id is available (TPE id or internal
+    // UUID). Falls back to plain text for ingest rows missing both.
+    var applicantObj = item.applicant || null;
+    var applicantName = applicantObj && applicantObj.name
+      ? (window._stripTurkishAddress ? window._stripTurkishAddress(applicantObj.name) : applicantObj.name)
+      : (item.applicant_name || "");
+    var applicantId = (applicantObj && (applicantObj.tpe_client_id || applicantObj.id)) || "";
+    var applicantInner = applicantId
+      ? ('<button type="button" data-portfolio-trigger="cografi-applicant" ' +
+         'data-holder-id="' + escapeHtml(applicantId) + '" ' +
+         'class="text-left underline decoration-dotted underline-offset-2 hover:decoration-solid cursor-pointer" ' +
+         'style="color:var(--color-text-secondary);background:transparent;border:0;padding:0;">' +
+         escapeHtml(applicantName) + '</button>')
+      : ('<span style="color:var(--color-text-secondary)">' + escapeHtml(applicantName) + '</span>');
+    var applicantHtml = applicantName
+      ? '<div class="text-xs"><span style="color:var(--color-text-faint)">' +
+        escapeHtml(t("cografi_search.applicant_label", "Applicant")) + ':</span> ' +
+        applicantInner + '</div>'
+      : '';
+
+    // Agent: text-only column, clickable via normalized name match.
+    var agentRaw = String(item.agent || "").trim();
+    var agentInner = agentRaw
+      ? ('<button type="button" data-portfolio-trigger="cografi-agent" ' +
+         'data-agent-name="' + escapeHtml(agentRaw) + '" ' +
+         'class="text-left underline decoration-dotted underline-offset-2 hover:decoration-solid cursor-pointer" ' +
+         'style="color:var(--color-text-secondary);background:transparent;border:0;padding:0;">' +
+         escapeHtml(window._stripTurkishAddress ? window._stripTurkishAddress(agentRaw) : agentRaw) + '</button>')
+      : "";
+    var agentHtml = agentRaw
+      ? '<div class="text-xs"><span style="color:var(--color-text-faint)">' +
+        escapeHtml(t("cografi_search.agent_label", "Agent")) + ':</span> ' +
+        agentInner + '</div>'
+      : '';
+
+    // Filed / Reg dates row
+    var datesHtml =
+      (appDate || regDate)
+        ? '<div class="flex flex-wrap items-center gap-3 text-xs" style="color:var(--color-text-faint)">' +
+            (appDate ? '<span>' + escapeHtml(t("cografi_search.filed", "Filed")) + ': ' + escapeHtml(appDate) + '</span>' : '') +
+            (regDate ? '<span>' + escapeHtml(t("cografi_search.registered", "Reg.")) + ': ' + escapeHtml(regDate) + '</span>' : '') +
+          '</div>'
+        : '';
+
+    var detailBtn = item.id
+      ? '<button type="button" data-cd-open="' + escapeHtml(item.id) + '" ' +
+        'class="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors" ' +
+        'style="color:var(--color-text-primary);background:var(--color-bg-muted)">' +
+          '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>' +
+          '</svg>' +
+          escapeHtml(t("cografi_search.view_detail", "Detaylar")) +
+        '</button>'
+      : "";
+    var actionRow = detailBtn
+      ? '<div class="mt-3 flex flex-wrap items-center gap-2">' + detailBtn + '</div>'
+      : "";
+
+    var detailsHtml =
+      '<div data-cografi-card-details hidden class="px-3 pb-3 pt-2" ' +
+        'style="border-top:1px solid var(--color-border)">' +
         bdHtml +
-      '</div>'
+        '<div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5 mb-2">' +
+          datesHtml +
+          giTypeHtml +
+          regionHtml +
+          productHtml +
+          applicantHtml +
+          agentHtml +
+        '</div>' +
+        _usageBlock(item.usage_description, cardId) +
+        actionRow +
+      '</div>';
+
+    return (
+      '<article class="rounded-lg border-2 overflow-hidden transition-shadow hover:shadow" ' +
+      'data-cografi-card-id="' + cardId + '" ' +
+      'data-cografi-card-expanded="false" ' +
+      'style="' + _riskBorderStyle(risk) + ';background:var(--color-bg-card)">' +
+        headerHtml +
+        detailsHtml +
+      '</article>'
     );
   }
 
@@ -578,6 +750,55 @@
         renderDropdown();
         return;
       }
+      // Portfolio click-through (applicant / agent). Stop propagation
+      // so the card header doesn't also collapse.
+      var portTrig = t_.closest && t_.closest("[data-portfolio-trigger]");
+      if (portTrig) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        var pkind = portTrig.getAttribute("data-portfolio-trigger");
+        try {
+          if (pkind === "cografi-applicant" && typeof window.openCografiApplicantPortfolio === "function") {
+            window.openCografiApplicantPortfolio(
+              portTrig.getAttribute("data-holder-id") || "",
+              portTrig,
+            );
+          } else if (pkind === "cografi-agent" && typeof window.openCografiAgentPortfolio === "function") {
+            window.openCografiAgentPortfolio(
+              portTrig.getAttribute("data-agent-name") || "",
+              portTrig,
+            );
+          }
+        } catch (_) { /* swallow — best-effort */ }
+        return;
+      }
+
+      // Result card: toggle expand/collapse on header click. Skip if
+      // the click was on a button/link/inner-toggle so action buttons
+      // still work as expected.
+      var hdr = t_.closest && t_.closest("[data-cografi-card-header]");
+      if (hdr && !t_.closest("button, a, [data-usage-toggle], [data-cd-open]")) {
+        var card = hdr.closest("article[data-cografi-card-expanded]");
+        if (card) {
+          var details = card.querySelector("[data-cografi-card-details]");
+          var chevron = card.querySelector("[data-cografi-card-chevron]");
+          var label = card.querySelector("[data-cografi-card-expand-label]");
+          var nowExpanded = card.getAttribute("data-cografi-card-expanded") !== "true";
+          card.setAttribute("data-cografi-card-expanded", nowExpanded ? "true" : "false");
+          if (details) {
+            if (nowExpanded) details.removeAttribute("hidden");
+            else details.setAttribute("hidden", "");
+          }
+          if (chevron) chevron.style.transform = nowExpanded ? "rotate(180deg)" : "";
+          if (label) {
+            label.textContent = nowExpanded
+              ? t("cografi_search.hide_details", "Hide details")
+              : t("cografi_search.expand_details", "Show details");
+          }
+        }
+        return;
+      }
+
       // Usage description show-more / show-less toggle
       var usageToggle = t_.closest && t_.closest("[data-usage-toggle]");
       if (usageToggle) {

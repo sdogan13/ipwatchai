@@ -470,42 +470,68 @@
         '<span class="inline-flex flex-wrap gap-1 align-middle">' + ipcChips + '</span></div>'
       : '';
 
-    // Holder line — uses stripped name for display. Stays as plain
-    // text in Phase 1; portfolio click-through ships in Phase 2.
+    // Holder line — clickable when we have any holder id (TPE or
+    // internal UUID). Prefer the public TPE client id; fall back to
+    // the internal holders.id UUID. The backend resolver accepts
+    // either via _resolve_holder_row.
+    var holderId = (item.holder && (item.holder.tpe_client_id || item.holder.id)) || "";
+    var holderInner = holderId
+      ? ('<button type="button" data-portfolio-trigger="patent-holder" ' +
+         'data-holder-id="' + escapeHtml(holderId) + '" ' +
+         'data-holder-name-raw="' + escapeHtml(holderNameRaw) + '" ' +
+         'class="text-left underline decoration-dotted underline-offset-2 hover:decoration-solid cursor-pointer" ' +
+         'style="color:var(--color-text-secondary);background:transparent;border:0;padding:0;">' +
+           escapeHtml(holderName) +
+         '</button>')
+      : ('<span style="color:var(--color-text-secondary)">' + escapeHtml(holderName) + '</span>');
     var holderHtml = holderName
       ? '<div class="text-xs"><span style="color:var(--color-text-faint)">' +
         escapeHtml(t("patent_search.holder_label", "Holder")) + ':</span> ' +
-        '<span style="color:var(--color-text-secondary)">' + escapeHtml(holderName) +
+        holderInner +
         (holderCountry ? (' <span style="color:var(--color-text-faint)">(' + escapeHtml(holderCountry) + ')</span>') : '') +
-        '</span></div>'
+        '</div>'
       : '';
 
-    // Inventors (first 3 + "+N") — plain text in Phase 1.
+    // Inventors (first 3 + "+N") — each chip is a portfolio trigger.
     var inventorsHtml = "";
     if (inventors.length > 0) {
       var visible = inventors.slice(0, 3).map(function (n) {
-        var nm = String(n || "").trim();
-        var disp = window._stripTurkishAddress ? window._stripTurkishAddress(nm) : nm;
-        return escapeHtml(disp);
+        var nmRaw = String(n || "").trim();
+        var disp = window._stripTurkishAddress ? window._stripTurkishAddress(nmRaw) : nmRaw;
+        if (!nmRaw) return escapeHtml(disp);
+        return '<button type="button" data-portfolio-trigger="patent-inventor" ' +
+               'data-inventor-name="' + escapeHtml(nmRaw) + '" ' +
+               'class="underline decoration-dotted underline-offset-2 hover:decoration-solid cursor-pointer" ' +
+               'style="color:var(--color-text-secondary);background:transparent;border:0;padding:0;">' +
+               escapeHtml(disp) + '</button>';
       }).join(", ");
       var extra = inventors.length > 3
         ? ' <span style="color:var(--color-text-faint)">+' + (inventors.length - 3) + '</span>'
         : '';
       inventorsHtml = '<div class="text-xs"><span style="color:var(--color-text-faint)">' +
         escapeHtml(t("patent_search.inventors_label", "Inventors")) + ':</span> ' +
-        '<span style="color:var(--color-text-secondary)">' + visible + extra + '</span></div>';
+        '<span>' + visible + extra + '</span></div>';
     }
 
-    // Attorney (name + firm, dedup'd if firm already in name).
+    // Attorney (name + firm, dedup'd if firm already in name). One
+    // clickable button — the (name, firm) pair is the lookup key.
     var attorneyHtml = "";
     if (attorney && (attorney.name || attorney.firm)) {
       var aName = String(attorney.name || "").trim();
       var aFirm = String(attorney.firm || "").trim();
       var firmInName = aFirm && aName.toLowerCase().indexOf(aFirm.toLowerCase()) !== -1;
       var aText = (aFirm && !firmInName) ? (aName + " — " + aFirm) : aName;
+      var attorneyInner = aName
+        ? ('<button type="button" data-portfolio-trigger="patent-attorney" ' +
+           'data-attorney-name="' + escapeHtml(aName) + '" ' +
+           'data-attorney-firm="' + escapeHtml(aFirm) + '" ' +
+           'class="text-left underline decoration-dotted underline-offset-2 hover:decoration-solid cursor-pointer" ' +
+           'style="color:var(--color-text-secondary);background:transparent;border:0;padding:0;">' +
+           escapeHtml(aText) + '</button>')
+        : ('<span style="color:var(--color-text-secondary)">' + escapeHtml(aText) + '</span>');
       attorneyHtml = '<div class="text-xs"><span style="color:var(--color-text-faint)">' +
         escapeHtml(t("patent_search.attorney_label", "Attorney")) + ':</span> ' +
-        '<span style="color:var(--color-text-secondary)">' + escapeHtml(aText) + '</span></div>';
+        attorneyInner + '</div>';
     }
 
     // Filed / Pub dates row
@@ -746,6 +772,35 @@
         removeIpc(t.getAttribute("data-ipc-remove") || "");
         return;
       }
+      // Portfolio click-through (holder / inventor / attorney). Stop
+      // propagation so the result-card header doesn't also collapse.
+      var portTrig = t.closest && t.closest("[data-portfolio-trigger]");
+      if (portTrig) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        var pkind = portTrig.getAttribute("data-portfolio-trigger");
+        try {
+          if (pkind === "patent-holder" && typeof window.openPatentHolderPortfolio === "function") {
+            window.openPatentHolderPortfolio(
+              portTrig.getAttribute("data-holder-id") || "",
+              portTrig,
+            );
+          } else if (pkind === "patent-inventor" && typeof window.openInventorPortfolio === "function") {
+            window.openInventorPortfolio(
+              portTrig.getAttribute("data-inventor-name") || "",
+              portTrig,
+            );
+          } else if (pkind === "patent-attorney" && typeof window.openPatentAttorneyPortfolio === "function") {
+            window.openPatentAttorneyPortfolio(
+              portTrig.getAttribute("data-attorney-name") || "",
+              portTrig.getAttribute("data-attorney-firm") || "",
+              portTrig,
+            );
+          }
+        } catch (_) { /* swallow — best-effort */ }
+        return;
+      }
+
       // Result card: toggle expand/collapse on header click. Skip if
       // the click was on a button/link/inner-toggle so action buttons
       // and the patent-detail data-pd-open inside the details body

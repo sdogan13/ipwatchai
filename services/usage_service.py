@@ -1,6 +1,7 @@
 """Usage summary service helpers used by HTTP route modules."""
 
 from database.crud import Database
+from utils.subscription import NAME_GENERATION_AI_CREDIT_COST
 
 
 async def get_usage_summary_data(
@@ -98,7 +99,7 @@ async def get_usage_summary_data(
             """
             SELECT COALESCE(SUM(
                 CASE
-                    WHEN feature_type = 'NAME' THEN 1
+                    WHEN feature_type = 'NAME' THEN %s
                     WHEN feature_type = 'LOGO' THEN 5
                     ELSE COALESCE(credits_used, 0)
                 END
@@ -107,7 +108,7 @@ async def get_usage_summary_data(
             WHERE org_id = %s
               AND created_at >= DATE_TRUNC('month', CURRENT_DATE)
             """,
-            (org_id,),
+            (NAME_GENERATION_AI_CREDIT_COST, org_id),
         )
         ai_used_row = cur.fetchone()
         ai_used = int(ai_used_row["ai_used"]) if ai_used_row else 0

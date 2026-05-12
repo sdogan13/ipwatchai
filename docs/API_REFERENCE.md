@@ -73,6 +73,20 @@ Public search and portfolio:
 - `GET /api/v1/portfolio/public/csv`
 - `GET /api/v1/portfolio/public/designs`
 - `GET /api/v1/portfolio/public/designs/csv`
+- `GET /api/v1/portfolio/public/designers`
+- `GET /api/v1/portfolio/public/designers/csv`
+- `GET /api/v1/portfolio/public/attorneys`
+- `GET /api/v1/portfolio/public/attorneys/csv`
+- `GET /api/v1/portfolio/public/patents`
+- `GET /api/v1/portfolio/public/patents/csv`
+- `GET /api/v1/portfolio/public/patent-inventors`
+- `GET /api/v1/portfolio/public/patent-inventors/csv`
+- `GET /api/v1/portfolio/public/patent-attorneys`
+- `GET /api/v1/portfolio/public/patent-attorneys/csv`
+- `GET /api/v1/portfolio/public/cografi-applicants`
+- `GET /api/v1/portfolio/public/cografi-applicants/csv`
+- `GET /api/v1/portfolio/public/cografi-agents`
+- `GET /api/v1/portfolio/public/cografi-agents/csv`
 
 All four public search endpoints share a single anonymous daily quota — 5 searches/day per visitor, tracked by the long-lived `public_search_client_id` cookie. Switching registries does not reset the count; one bucket covers trademark + patent + design + cografi. Quota enforcement lives in `app_public_search_quota.py` (`enforce_public_search_quota` / `record_public_search_usage`), wired in front of each public route. Failed searches are not counted — the usage increment runs only after a successful retrieval.
 
@@ -169,6 +183,16 @@ Design search:
 - `GET /api/v1/portfolio/public/designs?holder_id=X` is anonymous, returns up to 10 designs for a holder (joined to `holders` via `designs.holder_id`) with the same response shape as the trademark `/portfolio/public` so the dashboard portfolio modal can render either registry; rate-limited at 5/min
 - `GET /api/v1/portfolio/public/designs/csv?holder_id=X` is authenticated, returns a CSV export of every design for the holder, plan-gated by `can_download_portfolio` (paid plans only); rate-limited at 3/min
 - `POST /api/v1/design-watchlist/bulk-from-portfolio` is authenticated, accepts `{holder_id}` and bulk-adds every design in the holder's portfolio to the user's design watchlist (mirrors `/api/v1/watchlist/bulk-from-portfolio` for trademark). Reuses `create_design_watchlist_item` so each insert clones DINOv2/CLIP/color embeddings from the source design via `reference_design_id`, dedups against existing rows, and respects the combined `max_watchlist_items` plan quota; gated by `can_view_holder_portfolio`; rate-limited at 5/min; returns `{added, skipped, errors, total, limit_reached, scan_item_ids, queued_scans}` and queues a background scan for each newly created row
+- `GET /api/v1/portfolio/public/patents?holder_id=X` is anonymous, returns up to 10 patents for a holder (joined to `holders` via `patent_holders.holder_id`); accepts either a TPE client id or the internal `holders.id` UUID (resolved by `_resolve_holder_row`); same response shape as the design/trademark portfolios; rate-limited at 5/min
+- `GET /api/v1/portfolio/public/patents/csv?holder_id=X` is authenticated, returns a CSV export of every patent for the holder, plan-gated by `can_download_portfolio`; rate-limited at 3/min
+- `GET /api/v1/portfolio/public/patent-inventors?name=X` is anonymous, returns up to 10 patents whose `patent_inventors.name` matches under conservative normalization (`normalize_designer_name`), backed by `idx_pinv_normalized_name`; rate-limited at 5/min
+- `GET /api/v1/portfolio/public/patent-inventors/csv?name=X` is authenticated, plan-gated CSV variant of the inventor lookup; rate-limited at 3/min
+- `GET /api/v1/portfolio/public/patent-attorneys?name=X&firm=Y` is anonymous, matches the `(name, firm)` pair under conservative normalization (firm optional — empty matches NULL-firm rows via `COALESCE(...,'')`), backed by `idx_patt_normalized_pair`; rate-limited at 5/min
+- `GET /api/v1/portfolio/public/patent-attorneys/csv?name=X&firm=Y` is authenticated, plan-gated CSV variant; rate-limited at 3/min
+- `GET /api/v1/portfolio/public/cografi-applicants?holder_id=X` is anonymous, returns up to 10 cografi records joined to `cografi_holders` filtered by `role='APPLICANT'`; accepts TPE client id or internal `holders.id` UUID; rate-limited at 5/min
+- `GET /api/v1/portfolio/public/cografi-applicants/csv?holder_id=X` is authenticated, plan-gated CSV variant; rate-limited at 3/min
+- `GET /api/v1/portfolio/public/cografi-agents?name=X` is anonymous, matches the sparse `cografi_records.agent` text column under conservative normalization (`normalize_designer_name`), backed by `idx_cog_agent_normalized`; rate-limited at 5/min
+- `GET /api/v1/portfolio/public/cografi-agents/csv?name=X` is authenticated, plan-gated CSV variant; rate-limited at 3/min
 
 Cografi search (Geographical Indications + Traditional Specialties):
 - `POST /api/v1/cografi-search/quick` is authenticated and runs a hybrid retrieval against `cografi_records` (trigram on name plus cosine on `text_embedding` from e5-large, fused with DINOv2 figure embedding when an image is supplied); accepts `query`, optional `image`, `section_keys` (comma-separated), `record_types` (comma-separated), `gi_type` (`mensei` / `mahreç` / `geleneksel`), `region` (free-text trigram on `geographical_boundary`), `date_from`/`date_to`, `application_no`, `registration_no`, `include_admin`, and `limit` (default 20); shares the daily `max_daily_quick_searches` quota

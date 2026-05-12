@@ -352,4 +352,299 @@ def register_public_portfolio_routes(app, limiter, logger):
         tags=["Design Search"],
     )
 
+    # ---- Patent portfolios (Phase 2 of actor click-through work) ----
+
+    @limiter.limit("5/minute")
+    async def public_patent_portfolio(
+        request: Request,
+        holder_id: str = Query(None, max_length=64, description="Holder TPE Client ID or internal UUID"),
+    ):
+        """Public lookup for the first 10 patents by a holder. Same
+        response shape as the design + trademark variants so the
+        dashboard portfolio modal renders patent rows identically."""
+        from services.patent_portfolio_service import (
+            run_public_patent_portfolio_lookup,
+        )
+
+        try:
+            return await run_public_patent_portfolio_lookup(
+                holder_id=holder_id, logger=logger,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            if logger:
+                logger.error(f"Public patent portfolio failed: {exc}")
+            raise HTTPException(
+                status_code=500, detail="Patent portfolio lookup temporarily unavailable",
+            )
+
+    @limiter.limit("3/minute")
+    async def public_patent_portfolio_csv(
+        request: Request,
+        holder_id: str = Query(None, max_length=64),
+        current_user: CurrentUser = Depends(get_current_user),
+    ):
+        from services.patent_portfolio_service import (
+            build_public_patent_portfolio_csv,
+        )
+
+        try:
+            return await build_public_patent_portfolio_csv(
+                holder_id=holder_id, logger=logger, current_user=current_user,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            if logger:
+                logger.error(f"Public patent portfolio CSV failed: {exc}")
+            raise HTTPException(status_code=500, detail="CSV export temporarily unavailable")
+
+    @limiter.limit("5/minute")
+    async def public_inventor_portfolio(
+        request: Request,
+        name: str = Query(None, max_length=255, description="Inventor name (conservative-normalization match)"),
+    ):
+        """Lookup patents by inventor name under conservative
+        normalization. Backed by idx_pinv_normalized_name."""
+        from services.patent_portfolio_service import (
+            run_public_inventor_portfolio_lookup,
+        )
+
+        try:
+            return await run_public_inventor_portfolio_lookup(
+                inventor_name=name, logger=logger,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            if logger:
+                logger.error(f"Public inventor portfolio failed: {exc}")
+            raise HTTPException(
+                status_code=500, detail="Inventor portfolio lookup temporarily unavailable",
+            )
+
+    @limiter.limit("3/minute")
+    async def public_inventor_portfolio_csv(
+        request: Request,
+        name: str = Query(None, max_length=255),
+        current_user: CurrentUser = Depends(get_current_user),
+    ):
+        from services.patent_portfolio_service import (
+            build_public_inventor_portfolio_csv,
+        )
+
+        try:
+            return await build_public_inventor_portfolio_csv(
+                inventor_name=name, logger=logger, current_user=current_user,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            if logger:
+                logger.error(f"Public inventor portfolio CSV failed: {exc}")
+            raise HTTPException(status_code=500, detail="CSV export temporarily unavailable")
+
+    @limiter.limit("5/minute")
+    async def public_patent_attorney_portfolio(
+        request: Request,
+        name: str = Query(None, max_length=255, description="Attorney name"),
+        firm: str = Query(None, max_length=255, description="Attorney firm (optional)"),
+    ):
+        """Lookup patents by (attorney_name, attorney_firm) pair under
+        conservative normalization. Backed by idx_patt_normalized_pair."""
+        from services.patent_portfolio_service import (
+            run_public_patent_attorney_portfolio_lookup,
+        )
+
+        try:
+            return await run_public_patent_attorney_portfolio_lookup(
+                attorney_name=name, attorney_firm=firm, logger=logger,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            if logger:
+                logger.error(f"Public patent attorney portfolio failed: {exc}")
+            raise HTTPException(
+                status_code=500, detail="Attorney portfolio lookup temporarily unavailable",
+            )
+
+    @limiter.limit("3/minute")
+    async def public_patent_attorney_portfolio_csv(
+        request: Request,
+        name: str = Query(None, max_length=255),
+        firm: str = Query(None, max_length=255),
+        current_user: CurrentUser = Depends(get_current_user),
+    ):
+        from services.patent_portfolio_service import (
+            build_public_patent_attorney_portfolio_csv,
+        )
+
+        try:
+            return await build_public_patent_attorney_portfolio_csv(
+                attorney_name=name, attorney_firm=firm,
+                logger=logger, current_user=current_user,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            if logger:
+                logger.error(f"Public patent attorney portfolio CSV failed: {exc}")
+            raise HTTPException(status_code=500, detail="CSV export temporarily unavailable")
+
+    app.add_api_route(
+        "/api/v1/portfolio/public/patents",
+        public_patent_portfolio,
+        methods=["GET"],
+        tags=["Patent Search"],
+    )
+    app.add_api_route(
+        "/api/v1/portfolio/public/patents/csv",
+        public_patent_portfolio_csv,
+        methods=["GET"],
+        tags=["Patent Search"],
+    )
+    app.add_api_route(
+        "/api/v1/portfolio/public/patent-inventors",
+        public_inventor_portfolio,
+        methods=["GET"],
+        tags=["Patent Search"],
+    )
+    app.add_api_route(
+        "/api/v1/portfolio/public/patent-inventors/csv",
+        public_inventor_portfolio_csv,
+        methods=["GET"],
+        tags=["Patent Search"],
+    )
+    app.add_api_route(
+        "/api/v1/portfolio/public/patent-attorneys",
+        public_patent_attorney_portfolio,
+        methods=["GET"],
+        tags=["Patent Search"],
+    )
+    app.add_api_route(
+        "/api/v1/portfolio/public/patent-attorneys/csv",
+        public_patent_attorney_portfolio_csv,
+        methods=["GET"],
+        tags=["Patent Search"],
+    )
+
+    # ---- Cografi (GI) portfolios (Phase 3 of actor click-through) ----
+
+    @limiter.limit("5/minute")
+    async def public_cografi_applicant_portfolio(
+        request: Request,
+        holder_id: str = Query(None, max_length=64, description="Applicant TPE Client ID or internal UUID"),
+    ):
+        """Public lookup for the first 10 cografi records by applicant.
+        Filtered to cografi_holders.role = 'APPLICANT'."""
+        from services.cografi_portfolio_service import (
+            run_public_cografi_applicant_portfolio_lookup,
+        )
+
+        try:
+            return await run_public_cografi_applicant_portfolio_lookup(
+                holder_id=holder_id, logger=logger,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            if logger:
+                logger.error(f"Public cografi applicant portfolio failed: {exc}")
+            raise HTTPException(
+                status_code=500, detail="Applicant portfolio lookup temporarily unavailable",
+            )
+
+    @limiter.limit("3/minute")
+    async def public_cografi_applicant_portfolio_csv(
+        request: Request,
+        holder_id: str = Query(None, max_length=64),
+        current_user: CurrentUser = Depends(get_current_user),
+    ):
+        from services.cografi_portfolio_service import (
+            build_public_cografi_applicant_portfolio_csv,
+        )
+
+        try:
+            return await build_public_cografi_applicant_portfolio_csv(
+                holder_id=holder_id, logger=logger, current_user=current_user,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            if logger:
+                logger.error(f"Public cografi applicant portfolio CSV failed: {exc}")
+            raise HTTPException(status_code=500, detail="CSV export temporarily unavailable")
+
+    @limiter.limit("5/minute")
+    async def public_cografi_agent_portfolio(
+        request: Request,
+        name: str = Query(None, max_length=255, description="Agent name (conservative-normalization match)"),
+    ):
+        """Lookup cografi records by agent name under conservative
+        normalization. Backed by idx_cog_agent_normalized."""
+        from services.cografi_portfolio_service import (
+            run_public_cografi_agent_portfolio_lookup,
+        )
+
+        try:
+            return await run_public_cografi_agent_portfolio_lookup(
+                agent_name=name, logger=logger,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            if logger:
+                logger.error(f"Public cografi agent portfolio failed: {exc}")
+            raise HTTPException(
+                status_code=500, detail="Agent portfolio lookup temporarily unavailable",
+            )
+
+    @limiter.limit("3/minute")
+    async def public_cografi_agent_portfolio_csv(
+        request: Request,
+        name: str = Query(None, max_length=255),
+        current_user: CurrentUser = Depends(get_current_user),
+    ):
+        from services.cografi_portfolio_service import (
+            build_public_cografi_agent_portfolio_csv,
+        )
+
+        try:
+            return await build_public_cografi_agent_portfolio_csv(
+                agent_name=name, logger=logger, current_user=current_user,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            if logger:
+                logger.error(f"Public cografi agent portfolio CSV failed: {exc}")
+            raise HTTPException(status_code=500, detail="CSV export temporarily unavailable")
+
+    app.add_api_route(
+        "/api/v1/portfolio/public/cografi-applicants",
+        public_cografi_applicant_portfolio,
+        methods=["GET"],
+        tags=["Cografi Search"],
+    )
+    app.add_api_route(
+        "/api/v1/portfolio/public/cografi-applicants/csv",
+        public_cografi_applicant_portfolio_csv,
+        methods=["GET"],
+        tags=["Cografi Search"],
+    )
+    app.add_api_route(
+        "/api/v1/portfolio/public/cografi-agents",
+        public_cografi_agent_portfolio,
+        methods=["GET"],
+        tags=["Cografi Search"],
+    )
+    app.add_api_route(
+        "/api/v1/portfolio/public/cografi-agents/csv",
+        public_cografi_agent_portfolio_csv,
+        methods=["GET"],
+        tags=["Cografi Search"],
+    )
+
     return public_portfolio, public_portfolio_csv

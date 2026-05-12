@@ -968,6 +968,22 @@ function dashboard() {
                 var fm = parsed && parsed.firm ? String(parsed.firm) : '';
                 url = '/api/v1/portfolio/public/attorneys?name=' + encodeURIComponent(nm);
                 if (fm) url += '&firm=' + encodeURIComponent(fm);
+            } else if (type === 'patent-holder') {
+                url = '/api/v1/portfolio/public/patents?holder_id=' + encodeURIComponent(id);
+            } else if (type === 'patent-inventor') {
+                url = '/api/v1/portfolio/public/patent-inventors?name=' + encodeURIComponent(id);
+            } else if (type === 'patent-attorney') {
+                var parsedP = (function () {
+                    try { return JSON.parse(id); } catch (_) { return null; }
+                })();
+                var nmP = parsedP && parsedP.name ? String(parsedP.name) : '';
+                var fmP = parsedP && parsedP.firm ? String(parsedP.firm) : '';
+                url = '/api/v1/portfolio/public/patent-attorneys?name=' + encodeURIComponent(nmP);
+                if (fmP) url += '&firm=' + encodeURIComponent(fmP);
+            } else if (type === 'cografi-applicant') {
+                url = '/api/v1/portfolio/public/cografi-applicants?holder_id=' + encodeURIComponent(id);
+            } else if (type === 'cografi-agent') {
+                url = '/api/v1/portfolio/public/cografi-agents?name=' + encodeURIComponent(id);
             } else {
                 var param = type === 'holder' ? 'holder_id' : 'attorney_no';
                 url = '/api/v1/portfolio/public?' + param + '=' + encodeURIComponent(id);
@@ -989,10 +1005,19 @@ function dashboard() {
                         self.portfolioTotalCount = (data.total_count != null) ? data.total_count : all.length;
                         self.portfolioResults = all.slice(0, 5);
                         var rawName = data.entity_name || name || id;
-                        // For design holder + designer entity names,
-                        // strip any address that was concatenated at
-                        // ingest. Trademark/attorney sides are clean.
-                        self.portfolioName = (type === 'design-holder' || type === 'design-designer')
+                        // For design + patent holder/designer/inventor
+                        // entity names, strip any address that was
+                        // concatenated at ingest. Trademark + attorney
+                        // sides are clean.
+                        var stripAddr = (
+                            type === 'design-holder' ||
+                            type === 'design-designer' ||
+                            type === 'patent-holder' ||
+                            type === 'patent-inventor' ||
+                            type === 'cografi-applicant' ||
+                            type === 'cografi-agent'
+                        );
+                        self.portfolioName = stripAddr
                             ? (window._stripTurkishAddress
                                 ? window._stripTurkishAddress(rawName)
                                 : rawName)
@@ -1054,6 +1079,27 @@ function dashboard() {
                 csvUrl = '/api/v1/portfolio/public/attorneys/csv?name=' + encodeURIComponent(nm);
                 if (fm) csvUrl += '&firm=' + encodeURIComponent(fm);
                 fileLabel = 'tasarim_vekili';
+            } else if (type === 'patent-holder') {
+                csvUrl = '/api/v1/portfolio/public/patents/csv?holder_id=' + encodeURIComponent(id);
+                fileLabel = 'patent_sahibi';
+            } else if (type === 'patent-inventor') {
+                csvUrl = '/api/v1/portfolio/public/patent-inventors/csv?name=' + encodeURIComponent(id);
+                fileLabel = 'bulus_sahibi';
+            } else if (type === 'patent-attorney') {
+                var parsedP = (function () {
+                    try { return JSON.parse(id); } catch (_) { return null; }
+                })();
+                var nmP = parsedP && parsedP.name ? String(parsedP.name) : '';
+                var fmP = parsedP && parsedP.firm ? String(parsedP.firm) : '';
+                csvUrl = '/api/v1/portfolio/public/patent-attorneys/csv?name=' + encodeURIComponent(nmP);
+                if (fmP) csvUrl += '&firm=' + encodeURIComponent(fmP);
+                fileLabel = 'patent_vekili';
+            } else if (type === 'cografi-applicant') {
+                csvUrl = '/api/v1/portfolio/public/cografi-applicants/csv?holder_id=' + encodeURIComponent(id);
+                fileLabel = 'cografi_basvuru_sahibi';
+            } else if (type === 'cografi-agent') {
+                csvUrl = '/api/v1/portfolio/public/cografi-agents/csv?name=' + encodeURIComponent(id);
+                fileLabel = 'cografi_vekili';
             } else {
                 var param = type === 'holder' ? 'holder_id' : 'attorney_no';
                 csvUrl = '/api/v1/portfolio/public/csv?' + param + '=' + encodeURIComponent(id);
@@ -8534,6 +8580,107 @@ window.openAttorneyPortfolio = function (attorneyName, attorneyFirm, _button) {
             var dash = window.Alpine.$data(root);
             if (dash && typeof dash.loadPortfolio === 'function') {
                 dash.loadPortfolio('design-attorney', encoded, display);
+                return;
+            }
+        }
+    } catch (_) { /* swallow — modal is best-effort */ }
+};
+
+// ===== Patent click-through shims (Phase 2) =====
+// Holder: same shape as design-holder, but uses /portfolio/public/patents
+// behind the scenes. Accepts either a TPE client id or the internal
+// holders.id UUID (backend resolver handles both).
+window.openPatentHolderPortfolio = function (holderId, button) {
+    if (!holderId) return;
+    var holderName = '';
+    if (button && button.textContent) {
+        holderName = String(button.textContent || '').trim();
+    }
+    try {
+        var root = document.querySelector('[x-data="dashboard()"]') || document.body;
+        if (root && window.Alpine && typeof window.Alpine.$data === 'function') {
+            var dash = window.Alpine.$data(root);
+            if (dash && typeof dash.loadPortfolio === 'function') {
+                dash.loadPortfolio('patent-holder', String(holderId), holderName);
+                return;
+            }
+        }
+    } catch (_) { /* swallow — modal is best-effort */ }
+};
+
+// Inventor: name only. Backend resolves via normalize_designer_name +
+// idx_pinv_normalized_name.
+window.openInventorPortfolio = function (inventorName, _button) {
+    if (!inventorName) return;
+    var name = String(inventorName || '').trim();
+    if (!name) return;
+    try {
+        var root = document.querySelector('[x-data="dashboard()"]') || document.body;
+        if (root && window.Alpine && typeof window.Alpine.$data === 'function') {
+            var dash = window.Alpine.$data(root);
+            if (dash && typeof dash.loadPortfolio === 'function') {
+                dash.loadPortfolio('patent-inventor', name, name);
+                return;
+            }
+        }
+    } catch (_) { /* swallow — modal is best-effort */ }
+};
+
+// ===== Cografi click-through shims (Phase 3) =====
+// Applicant: same shape as patent-holder. Accepts TPE id or
+// internal holders.id UUID; backend resolver handles both.
+window.openCografiApplicantPortfolio = function (holderId, button) {
+    if (!holderId) return;
+    var applicantName = '';
+    if (button && button.textContent) {
+        applicantName = String(button.textContent || '').trim();
+    }
+    try {
+        var root = document.querySelector('[x-data="dashboard()"]') || document.body;
+        if (root && window.Alpine && typeof window.Alpine.$data === 'function') {
+            var dash = window.Alpine.$data(root);
+            if (dash && typeof dash.loadPortfolio === 'function') {
+                dash.loadPortfolio('cografi-applicant', String(holderId), applicantName);
+                return;
+            }
+        }
+    } catch (_) { /* swallow — modal is best-effort */ }
+};
+
+// Cografi agent: name-only (sparse text column on cografi_records).
+// Backend resolves via normalize_designer_name + idx_cog_agent_normalized.
+window.openCografiAgentPortfolio = function (agentName, _button) {
+    if (!agentName) return;
+    var name = String(agentName || '').trim();
+    if (!name) return;
+    try {
+        var root = document.querySelector('[x-data="dashboard()"]') || document.body;
+        if (root && window.Alpine && typeof window.Alpine.$data === 'function') {
+            var dash = window.Alpine.$data(root);
+            if (dash && typeof dash.loadPortfolio === 'function') {
+                dash.loadPortfolio('cografi-agent', name, name);
+                return;
+            }
+        }
+    } catch (_) { /* swallow — modal is best-effort */ }
+};
+
+// Patent attorney: (name, firm) pair. Same JSON-blob round-trip the
+// design attorney shim uses.
+window.openPatentAttorneyPortfolio = function (attorneyName, attorneyFirm, _button) {
+    if (!attorneyName) return;
+    var nm = String(attorneyName || '').trim();
+    if (!nm) return;
+    var fm = String(attorneyFirm || '').trim();
+    var encoded = JSON.stringify({ name: nm, firm: fm });
+    var firmInName = fm && nm.toLowerCase().indexOf(fm.toLowerCase()) !== -1;
+    var display = (fm && !firmInName) ? (nm + ' — ' + fm) : nm;
+    try {
+        var root = document.querySelector('[x-data="dashboard()"]') || document.body;
+        if (root && window.Alpine && typeof window.Alpine.$data === 'function') {
+            var dash = window.Alpine.$data(root);
+            if (dash && typeof dash.loadPortfolio === 'function') {
+                dash.loadPortfolio('patent-attorney', encoded, display);
                 return;
             }
         }

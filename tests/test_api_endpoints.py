@@ -1505,6 +1505,194 @@ class TestPublicEndpoints:
         assert kw["holder_id"] is None
         assert kw["designer_name"] is None
 
+    # ---- Patent portfolio (Phase 2 of actor click-through work) ----
+
+    def test_public_patent_portfolio_route_delegates(self, client):
+        """GET /api/v1/portfolio/public/patents threads holder_id into
+        run_public_patent_portfolio_lookup. The route closure calls the
+        service directly so we patch at the service layer."""
+        with patch(
+            "services.patent_portfolio_service.run_public_patent_portfolio_lookup",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = {
+                "entity_type": "patent-holder",
+                "entity_id": "TPE-PT-1",
+                "entity_name": "Mock Patent A.Ş.",
+                "results": [],
+                "total_count": 0,
+            }
+            resp = client.get("/api/v1/portfolio/public/patents?holder_id=TPE-PT-1")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["entity_type"] == "patent-holder"
+        assert body["entity_id"] == "TPE-PT-1"
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["holder_id"] == "TPE-PT-1"
+
+    def test_public_patent_portfolio_csv_route_delegates(self, client):
+        with patch(
+            "services.patent_portfolio_service.build_public_patent_portfolio_csv",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = JSONResponse(
+                content={"ok": True},
+                headers={"Content-Disposition": 'attachment; filename="x.csv"'},
+            )
+            resp = client.get("/api/v1/portfolio/public/patents/csv?holder_id=TPE-PT-1")
+
+        assert resp.status_code == 200
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["holder_id"] == "TPE-PT-1"
+        assert mock_impl.await_args.kwargs["current_user"].email == "test@example.com"
+
+    def test_public_inventor_portfolio_route_delegates(self, client):
+        """GET /api/v1/portfolio/public/patent-inventors threads name
+        into run_public_inventor_portfolio_lookup."""
+        with patch(
+            "services.patent_portfolio_service.run_public_inventor_portfolio_lookup",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = {
+                "entity_type": "patent-inventor",
+                "entity_id": "Ada Lovelace",
+                "entity_name": "Ada Lovelace",
+                "results": [],
+                "total_count": 0,
+            }
+            resp = client.get("/api/v1/portfolio/public/patent-inventors?name=Ada%20Lovelace")
+
+        assert resp.status_code == 200
+        assert resp.json()["entity_type"] == "patent-inventor"
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["inventor_name"] == "Ada Lovelace"
+
+    def test_public_inventor_portfolio_csv_route_delegates(self, client):
+        with patch(
+            "services.patent_portfolio_service.build_public_inventor_portfolio_csv",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = JSONResponse(content={"ok": True})
+            resp = client.get("/api/v1/portfolio/public/patent-inventors/csv?name=Ada")
+
+        assert resp.status_code == 200
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["inventor_name"] == "Ada"
+        assert mock_impl.await_args.kwargs["current_user"].email == "test@example.com"
+
+    def test_public_patent_attorney_portfolio_route_delegates(self, client):
+        """GET /api/v1/portfolio/public/patent-attorneys threads
+        name + firm into run_public_patent_attorney_portfolio_lookup."""
+        with patch(
+            "services.patent_portfolio_service.run_public_patent_attorney_portfolio_lookup",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = {
+                "entity_type": "patent-attorney",
+                "entity_id": '{"name": "Ali Demir", "firm": "ABC Patent"}',
+                "entity_name": "Ali Demir - ABC Patent",
+                "results": [],
+                "total_count": 0,
+            }
+            resp = client.get(
+                "/api/v1/portfolio/public/patent-attorneys?name=Ali%20Demir&firm=ABC%20Patent"
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["entity_type"] == "patent-attorney"
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["attorney_name"] == "Ali Demir"
+        assert mock_impl.await_args.kwargs["attorney_firm"] == "ABC Patent"
+
+    def test_public_patent_attorney_portfolio_csv_route_delegates(self, client):
+        with patch(
+            "services.patent_portfolio_service.build_public_patent_attorney_portfolio_csv",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = JSONResponse(content={"ok": True})
+            resp = client.get(
+                "/api/v1/portfolio/public/patent-attorneys/csv?name=Ali&firm=ABC"
+            )
+
+        assert resp.status_code == 200
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["attorney_name"] == "Ali"
+        assert mock_impl.await_args.kwargs["attorney_firm"] == "ABC"
+        assert mock_impl.await_args.kwargs["current_user"].email == "test@example.com"
+
+    # ---- Cografi (GI) portfolio (Phase 3 of actor click-through) ----
+
+    def test_public_cografi_applicant_portfolio_route_delegates(self, client):
+        """GET /api/v1/portfolio/public/cografi-applicants threads
+        holder_id into run_public_cografi_applicant_portfolio_lookup."""
+        with patch(
+            "services.cografi_portfolio_service.run_public_cografi_applicant_portfolio_lookup",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = {
+                "entity_type": "cografi-applicant",
+                "entity_id": "TPE-CG-1",
+                "entity_name": "Mock GI Org",
+                "results": [],
+                "total_count": 0,
+            }
+            resp = client.get("/api/v1/portfolio/public/cografi-applicants?holder_id=TPE-CG-1")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["entity_type"] == "cografi-applicant"
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["holder_id"] == "TPE-CG-1"
+
+    def test_public_cografi_applicant_portfolio_csv_route_delegates(self, client):
+        with patch(
+            "services.cografi_portfolio_service.build_public_cografi_applicant_portfolio_csv",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = JSONResponse(content={"ok": True})
+            resp = client.get("/api/v1/portfolio/public/cografi-applicants/csv?holder_id=TPE-CG-1")
+
+        assert resp.status_code == 200
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["holder_id"] == "TPE-CG-1"
+        assert mock_impl.await_args.kwargs["current_user"].email == "test@example.com"
+
+    def test_public_cografi_agent_portfolio_route_delegates(self, client):
+        """GET /api/v1/portfolio/public/cografi-agents threads name into
+        run_public_cografi_agent_portfolio_lookup."""
+        with patch(
+            "services.cografi_portfolio_service.run_public_cografi_agent_portfolio_lookup",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = {
+                "entity_type": "cografi-agent",
+                "entity_id": "Mock Agent",
+                "entity_name": "Mock Agent",
+                "results": [],
+                "total_count": 0,
+            }
+            resp = client.get("/api/v1/portfolio/public/cografi-agents?name=Mock%20Agent")
+
+        assert resp.status_code == 200
+        assert resp.json()["entity_type"] == "cografi-agent"
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["agent_name"] == "Mock Agent"
+
+    def test_public_cografi_agent_portfolio_csv_route_delegates(self, client):
+        with patch(
+            "services.cografi_portfolio_service.build_public_cografi_agent_portfolio_csv",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = JSONResponse(content={"ok": True})
+            resp = client.get("/api/v1/portfolio/public/cografi-agents/csv?name=Mock")
+
+        assert resp.status_code == 200
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["agent_name"] == "Mock"
+        assert mock_impl.await_args.kwargs["current_user"].email == "test@example.com"
+
     def test_education_catalog_route_delegates_to_service(self, client):
         payload = {
             "stats": {

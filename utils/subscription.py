@@ -4,7 +4,7 @@ Subscription Plan Gating & Usage Credits
 Checks user's subscription plan and tracks usage for:
 - Agentic Search credits
 - Lead access credits
-- Creative Suite: Unified AI credits (1 credit = name gen, 5 credits = logo gen)
+- Creative Suite: Unified AI credits (2 credits = name gen, 5 credits = logo gen)
 - Trademark application limits
 
 Usage:
@@ -25,6 +25,9 @@ from typing import Tuple, Optional
 from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger(__name__)
+
+NAME_GENERATION_AI_CREDIT_COST = 2
+LOGO_GENERATION_AI_CREDIT_COST = 5
 
 # ===========================================================================
 # Single source of truth for ALL plan limits
@@ -157,6 +160,43 @@ PLAN_ALIASES = {
     "business": "professional",
 }
 
+# ===========================================================================
+# AI Credit Packs (one-shot top-ups, never expire, available to every plan)
+# Pricing: $0.20 per credit @ 40 TRY/USD.
+# ===========================================================================
+CREDIT_PACKS = {
+    "small": {
+        "id": "small",
+        "credits": 25,
+        "price_try": 200,
+        "label_key": "studio.buy_credits.pack_small",
+    },
+    "medium": {
+        "id": "medium",
+        "credits": 100,
+        "price_try": 800,
+        "label_key": "studio.buy_credits.pack_medium",
+    },
+    "large": {
+        "id": "large",
+        "credits": 500,
+        "price_try": 4000,
+        "label_key": "studio.buy_credits.pack_large",
+    },
+}
+
+
+def get_credit_pack(pack_id: Optional[str]) -> Optional[dict]:
+    """Return the credit pack definition or None if pack_id is unknown."""
+    if not pack_id:
+        return None
+    return CREDIT_PACKS.get(str(pack_id).strip().lower())
+
+
+def list_credit_packs() -> list:
+    """Return credit packs in display order (smallest → largest)."""
+    return [CREDIT_PACKS[k] for k in ("small", "medium", "large")]
+
 
 def _canonical_plan_name(plan_name: Optional[str]) -> str:
     normalized = (plan_name or "free").strip().lower()
@@ -204,10 +244,10 @@ def _credit_balances_from_row(row, cost: int) -> tuple[int, int]:
     monthly_keys = ["ai_credits_monthly", "monthly"]
     purchased_keys = ["ai_credits_purchased", "purchased"]
 
-    if cost == 5:
+    if cost == LOGO_GENERATION_AI_CREDIT_COST:
         monthly_keys.append("logo_credits_monthly")
         purchased_keys.append("logo_credits_purchased")
-    elif cost == 1:
+    elif cost in (1, NAME_GENERATION_AI_CREDIT_COST):
         purchased_keys.append("name_credits_purchased")
 
     monthly = _int_value(_row_value(row, *monthly_keys, default=0))
@@ -579,7 +619,7 @@ def get_org_plan(db, org_id: str) -> dict:
 
 
 # ============================================================
-# Unified AI Credits (1 credit = name gen, 5 credits = logo gen)
+# Unified AI Credits (2 credits = name gen, 5 credits = logo gen)
 # ============================================================
 
 def _reset_monthly_ai_credits_if_needed(db, org_id: str) -> None:
@@ -626,7 +666,7 @@ def check_ai_credit_eligibility(db, org_id: str, cost: int) -> Tuple[bool, str, 
     Args:
         db: Database context manager instance
         org_id: Organization UUID string
-        cost: Number of credits required (1 for name gen, 5 for logo gen)
+        cost: Number of credits required (2 for name gen, 5 for logo gen)
 
     Returns:
         (can_use, reason, details)
@@ -743,6 +783,34 @@ def deduct_ai_credits(db, org_id: str, cost: int) -> bool:
     return False
 
 
+def add_purchased_ai_credits(db, org_id: str, credits: int) -> bool:
+    """
+    Add credits to the organization's purchased AI credit pool.
+    Called after a successful credit-pack purchase. Never expires.
+
+    Returns:
+        True if credits were added, False on bad input or missing org.
+    """
+    credits = _int_value(credits, default=0)
+    if credits <= 0:
+        return False
+
+    cur = db.cursor(cursor_factory=RealDictCursor)
+    cur.execute("""
+        UPDATE organizations
+        SET ai_credits_purchased = COALESCE(ai_credits_purchased, 0) + %s,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = %s
+        RETURNING ai_credits_purchased
+    """, (credits, org_id))
+    db.commit()
+    row = cur.fetchone()
+    if row is None:
+        return False
+    logger.info(f"Added {credits} purchased AI credits for org {org_id}")
+    return True
+
+
 def refund_ai_credits(db, org_id: str, cost: int) -> bool:
     """
     Refund AI credits to the organization's monthly pool.
@@ -772,7 +840,7 @@ def refund_ai_credits(db, org_id: str, cost: int) -> bool:
 
 
 # ============================================================
-# Creative Suite: Name Generation (uses AI credits, cost=1)
+# Creative Suite: Name Generation (uses AI credits, cost=2)
 # ============================================================
 
 def get_monthly_name_generations(db, org_id: str) -> int:
@@ -823,7 +891,7 @@ def increment_name_generation_usage(db, user_id: str, org_id: str) -> int:
 def check_name_generation_eligibility(db, org_id: str, session_count: int) -> Tuple[bool, str, dict]:
     """
     Check if an organization can generate more name suggestions.
-    Enforces per-session cap first, then checks unified AI credits (cost=1).
+    Enforces per-session cap first, then checks unified AI credits (cost=2).
 
     Args:
         db: Database context manager instance
@@ -862,8 +930,12 @@ def check_name_generation_eligibility(db, org_id: str, session_count: int) -> Tu
                 "message_en": f"You've used all {session_limit} name suggestions for this session. Upgrade for more.",
             }
 
-    # --- Check unified AI credits (cost=1 per name generation) ---
-    can_use, reason, details = check_ai_credit_eligibility(db, org_id, cost=1)
+    # --- Check unified AI credits (cost=2 per name generation) ---
+    can_use, reason, details = check_ai_credit_eligibility(
+        db,
+        org_id,
+        cost=NAME_GENERATION_AI_CREDIT_COST,
+    )
     if not can_use:
         return False, "monthly_limit_exceeded", {
             "error": "credits_exhausted",
@@ -884,25 +956,25 @@ def check_name_generation_eligibility(db, org_id: str, session_count: int) -> Tu
     }
 
 
-def deduct_name_credit(db, org_id: str) -> bool:
+def deduct_name_credit(db, org_id: str, cost: int = 1) -> bool:
     """
-    Deduct one AI credit for name generation (cost=1).
+    Deduct AI credits for name-like generation.
     Falls back to purchased name credits if AI credits insufficient.
 
     Returns:
-        True if a credit was deducted
+        True if credits were deducted
     """
-    if deduct_ai_credits(db, org_id, cost=1):
+    if deduct_ai_credits(db, org_id, cost=cost):
         return True
 
     # Fall back to legacy purchased name credits
     cur = db.cursor(cursor_factory=RealDictCursor)
     cur.execute("""
         UPDATE organizations
-        SET name_credits_purchased = name_credits_purchased - 1
-        WHERE id = %s AND name_credits_purchased > 0
+        SET name_credits_purchased = name_credits_purchased - %s
+        WHERE id = %s AND name_credits_purchased >= %s
         RETURNING name_credits_purchased
-    """, (org_id,))
+    """, (cost, org_id, cost))
     db.commit()
     row = cur.fetchone()
     return row is not None
@@ -968,13 +1040,20 @@ def check_name_generation_eligibility(db, org_id: str, session_count: int) -> Tu
     if session_limit < 999999 and session_count >= session_limit:
         cur = db.cursor(cursor_factory=RealDictCursor)
         cur.execute("""
-            SELECT COALESCE(name_credits_purchased, 0) as name_credits_purchased
+            SELECT
+                COALESCE(name_credits_purchased, 0) as name_credits_purchased,
+                COALESCE(ai_credits_purchased, 0) as ai_credits_purchased
             FROM organizations WHERE id = %s
         """, (org_id,))
         row = cur.fetchone()
         legacy_purchased = _int_value(_row_value(row, 'name_credits_purchased', default=0))
+        ai_purchased = _int_value(_row_value(row, 'ai_credits_purchased', default=0))
 
-        if legacy_purchased <= 0:
+        # Users who have paid for credits (either legacy name credits or new
+        # unified AI credits) should be able to keep generating past the
+        # per-session cap — the cap is a Free-tier UX nudge, not a hard limit
+        # for paying users.
+        if legacy_purchased < NAME_GENERATION_AI_CREDIT_COST and ai_purchased < NAME_GENERATION_AI_CREDIT_COST:
             return False, "upgrade_required", {
                 "error": "upgrade_required",
                 "upgrade_context": "name_suggestions",
@@ -989,24 +1068,18 @@ def check_name_generation_eligibility(db, org_id: str, session_count: int) -> Tu
                 "message_en": f"You've used all {session_limit} name suggestions for this session. Upgrade for more.",
             }
 
-    if monthly_limit < 999999 and monthly_used >= monthly_limit and legacy_purchased <= 0:
-        return False, "monthly_limit_exceeded", {
-            "error": "credits_exhausted",
-            "upgrade_context": "ai_credits",
-            "required_feature": "monthly_ai_credits",
-            "required_feature_value": 1,
-            "current_plan": plan_name,
-            "display_name": plan['display_name'],
-            "monthly_limit": monthly_limit,
-            "monthly_used": monthly_used,
-            "remaining": 0,
-            "message": "Bu ayki isim onerisi limitinize ulastiniz.",
-            "message_en": "You have reached your monthly name generation limit.",
-        }
-
-    can_use, _, details = check_ai_credit_eligibility(db, org_id, cost=1)
+    # The historic monthly_used / monthly_limit pre-check used to short-circuit
+    # here, but it ignored `ai_credits_purchased` and would block users who had
+    # bought a credit pack but had 0 monthly allowance (e.g. Free tier). The
+    # canonical eligibility decision lives in `check_ai_credit_eligibility`,
+    # which already considers monthly + purchased credits together.
+    can_use, _, details = check_ai_credit_eligibility(
+        db,
+        org_id,
+        cost=NAME_GENERATION_AI_CREDIT_COST,
+    )
     if not can_use:
-        if legacy_purchased <= 0:
+        if legacy_purchased < NAME_GENERATION_AI_CREDIT_COST:
             cur = db.cursor(cursor_factory=RealDictCursor)
             cur.execute("""
                 SELECT COALESCE(name_credits_purchased, 0) as name_credits_purchased
@@ -1015,12 +1088,12 @@ def check_name_generation_eligibility(db, org_id: str, session_count: int) -> Tu
             row = cur.fetchone()
             legacy_purchased = _int_value(_row_value(row, 'name_credits_purchased', default=0))
 
-        if legacy_purchased <= 0:
+        if legacy_purchased < NAME_GENERATION_AI_CREDIT_COST:
             return False, "monthly_limit_exceeded", {
                 "error": "credits_exhausted",
                 "upgrade_context": "ai_credits",
                 "required_feature": "monthly_ai_credits",
-                "required_feature_value": 1,
+                "required_feature_value": NAME_GENERATION_AI_CREDIT_COST,
                 "current_plan": plan_name,
                 "display_name": plan['display_name'],
                 "remaining": 0,

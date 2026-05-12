@@ -187,6 +187,7 @@ class TestCheckNameGenerationEligibility:
         can, reason, details = check_name_generation_eligibility(db, "org1", session_count=0)
         assert can is True
         assert reason == "ok"
+        mock_ai.assert_called_once_with(db, "org1", cost=2)
 
     @patch("utils.subscription.get_monthly_name_generations", return_value=200)
     @patch("utils.subscription.get_org_plan")
@@ -243,6 +244,50 @@ class TestCheckNameGenerationEligibility:
         db = MagicMock()
         can, reason, details = check_name_generation_eligibility(db, "org1", session_count=500)
         assert can is True
+
+    # ----- Regression: Free user with purchased AI credits must not be -----
+    # ----- blocked by the historic monthly-limit short-circuit (Block 2). --
+    @patch("utils.subscription.check_ai_credit_eligibility",
+           return_value=(True, "ok", {"monthly_limit": 0, "total_remaining": 25}))
+    @patch("utils.subscription.get_monthly_name_generations", return_value=0)
+    @patch("utils.subscription.get_org_plan")
+    def test_free_user_with_purchased_ai_credits_can_generate(self, mock_plan, mock_monthly, mock_ai):
+        mock_plan.return_value = {
+            "plan_name": "free",
+            "display_name": "Free Trial",
+            "name_suggestions_per_session": 3,
+            "logo_runs_per_month": 0,
+        }
+        db = MagicMock()
+        can, reason, details = check_name_generation_eligibility(db, "org1", session_count=0)
+        # Before fix: Block 2 returned monthly_limit_exceeded because
+        # monthly_used (0) >= monthly_limit (0) and legacy_purchased < 2,
+        # ignoring ai_credits_purchased entirely.
+        assert can is True
+        assert reason == "ok"
+
+    # ----- Regression: Free user past the per-session cap can keep -----
+    # ----- generating when they hold purchased AI credits (Block 1). ------
+    @patch("utils.subscription.check_ai_credit_eligibility",
+           return_value=(True, "ok", {"monthly_limit": 0, "total_remaining": 23}))
+    @patch("utils.subscription.get_monthly_name_generations", return_value=0)
+    @patch("utils.subscription.get_org_plan")
+    def test_session_cap_bypassed_by_purchased_ai_credits(self, mock_plan, mock_monthly, mock_ai):
+        mock_plan.return_value = {
+            "plan_name": "free",
+            "display_name": "Free Trial",
+            "name_suggestions_per_session": 3,
+            "logo_runs_per_month": 0,
+        }
+        db, cursor = _make_db({
+            "name_credits_purchased": 0,
+            "ai_credits_purchased": 23,
+        })
+        can, reason, details = check_name_generation_eligibility(db, "org1", session_count=3)
+        # Before fix: Block 1 returned upgrade_required because the per-
+        # session-cap check only looked at name_credits_purchased.
+        assert can is True
+        assert reason == "ok"
 
 
 # ============================================================
@@ -349,6 +394,17 @@ class TestCreditDeduction:
         result = deduct_name_credit(db, "org1")
         assert result is True
 
+    def test_deduct_name_credit_custom_cost(self):
+        db = MagicMock()
+        cursor = MagicMock()
+        cursor.fetchone.side_effect = [None, None, {"name_credits_purchased": 7}]
+        db.cursor.return_value = cursor
+
+        result = deduct_name_credit(db, "org1", cost=2)
+
+        assert result is True
+        assert cursor.execute.call_args.args[1] == (2, "org1", 2)
+
     def test_deduct_name_credit_none(self):
         db, cursor = _make_db(None)
         result = deduct_name_credit(db, "org1")
@@ -390,3 +446,72 @@ class TestCreditDeduction:
         db, cursor = _make_db(None)
         result = refund_logo_credit(db, "org1")
         assert result is False
+
+
+# ============================================================
+# Credit Packs (one-shot AI credit top-ups)
+# ============================================================
+
+class TestCreditPacks:
+    def test_get_credit_pack_small(self):
+        from utils.subscription import get_credit_pack
+        pack = get_credit_pack("small")
+        assert pack is not None
+        assert pack["credits"] == 25
+        assert pack["price_try"] == 200
+
+    def test_get_credit_pack_medium(self):
+        from utils.subscription import get_credit_pack
+        pack = get_credit_pack("medium")
+        assert pack["credits"] == 100
+        assert pack["price_try"] == 800
+
+    def test_get_credit_pack_large(self):
+        from utils.subscription import get_credit_pack
+        pack = get_credit_pack("large")
+        assert pack["credits"] == 500
+        assert pack["price_try"] == 4000
+
+    def test_get_credit_pack_unknown_returns_none(self):
+        from utils.subscription import get_credit_pack
+        assert get_credit_pack("xl") is None
+        assert get_credit_pack(None) is None
+        assert get_credit_pack("") is None
+
+    def test_get_credit_pack_case_insensitive(self):
+        from utils.subscription import get_credit_pack
+        assert get_credit_pack("SMALL")["credits"] == 25
+        assert get_credit_pack(" Medium ")["credits"] == 100
+
+    def test_list_credit_packs_order(self):
+        from utils.subscription import list_credit_packs
+        packs = list_credit_packs()
+        assert [p["id"] for p in packs] == ["small", "medium", "large"]
+
+    def test_pack_price_matches_usd_at_40_try(self):
+        """Sanity: $0.20/credit * pack_credits * 40 TRY/USD == price_try."""
+        from utils.subscription import list_credit_packs
+        for pack in list_credit_packs():
+            expected = pack["credits"] * 0.20 * 40
+            assert pack["price_try"] == expected, (
+                f"Pack {pack['id']}: expected {expected} TRY, got {pack['price_try']}"
+            )
+
+    def test_add_purchased_ai_credits_increments(self):
+        from utils.subscription import add_purchased_ai_credits
+        db, cursor = _make_db({"ai_credits_purchased": 125})
+        result = add_purchased_ai_credits(db, "org1", 100)
+        assert result is True
+        # Verify the UPDATE SQL was called with the right credits arg
+        assert cursor.execute.called
+
+    def test_add_purchased_ai_credits_rejects_zero(self):
+        from utils.subscription import add_purchased_ai_credits
+        db, cursor = _make_db({"ai_credits_purchased": 0})
+        assert add_purchased_ai_credits(db, "org1", 0) is False
+        assert add_purchased_ai_credits(db, "org1", -5) is False
+
+    def test_add_purchased_ai_credits_missing_org(self):
+        from utils.subscription import add_purchased_ai_credits
+        db, cursor = _make_db(None)
+        assert add_purchased_ai_credits(db, "org1", 50) is False

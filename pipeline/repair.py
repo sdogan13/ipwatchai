@@ -177,8 +177,7 @@ def _logo_only_text_feature_candidates(
     filters = [
         "COALESCE(NULLIF(BTRIM(name), ''), NULLIF(BTRIM(name_tr), '')) IS NULL",
         """(
-            text_embedding IS NOT NULL
-            OR detected_lang IS NOT NULL
+            detected_lang IS NOT NULL
             OR name_tr_backend IS NOT NULL
             OR name_tr_model IS NOT NULL
             OR name_tr_updated_at IS NOT NULL
@@ -244,7 +243,6 @@ def _run_name_field_repair(
                     "application_no": row["application_no"],
                     "from": current_value,
                     "to": repaired_value,
-                    "clear_text_embedding": field_name == "name" or logo_only_after_repair,
                     "clear_translation_features": True,
                 }
             )
@@ -255,27 +253,25 @@ def _run_name_field_repair(
             update_sql = """
             UPDATE trademarks AS tm
             SET name = v.value::text,
-                text_embedding = CASE WHEN v.clear_text_embedding THEN NULL ELSE tm.text_embedding END,
                 name_tr = CASE WHEN v.clear_translation_features THEN NULL ELSE tm.name_tr END,
                 detected_lang = CASE WHEN v.clear_translation_features THEN NULL ELSE tm.detected_lang END,
                 name_tr_backend = CASE WHEN v.clear_translation_features THEN NULL ELSE tm.name_tr_backend END,
                 name_tr_model = CASE WHEN v.clear_translation_features THEN NULL ELSE tm.name_tr_model END,
                 name_tr_updated_at = CASE WHEN v.clear_translation_features THEN NULL ELSE tm.name_tr_updated_at END,
                 updated_at = NOW()
-            FROM (VALUES %s) AS v(id, value, clear_text_embedding, clear_translation_features)
+            FROM (VALUES %s) AS v(id, value, clear_translation_features)
             WHERE tm.id = v.id::uuid
             """
         else:
             update_sql = """
             UPDATE trademarks AS tm
             SET name_tr = v.value::text,
-                text_embedding = CASE WHEN v.clear_text_embedding THEN NULL ELSE tm.text_embedding END,
                 detected_lang = CASE WHEN v.clear_translation_features THEN NULL ELSE tm.detected_lang END,
                 name_tr_backend = CASE WHEN v.clear_translation_features THEN NULL ELSE tm.name_tr_backend END,
                 name_tr_model = CASE WHEN v.clear_translation_features THEN NULL ELSE tm.name_tr_model END,
                 name_tr_updated_at = CASE WHEN v.clear_translation_features THEN NULL ELSE tm.name_tr_updated_at END,
                 updated_at = NOW()
-            FROM (VALUES %s) AS v(id, value, clear_text_embedding, clear_translation_features)
+            FROM (VALUES %s) AS v(id, value, clear_translation_features)
             WHERE tm.id = v.id::uuid
             """
         execute_values(
@@ -285,7 +281,6 @@ def _run_name_field_repair(
                 (
                     decision["id"],
                     decision["to"],
-                    decision["clear_text_embedding"],
                     decision["clear_translation_features"],
                 )
                 for decision in decisions
@@ -310,10 +305,8 @@ def _run_name_field_repair(
         "decisions": len(decisions),
         "repaired": 0 if dry_run else len(decisions),
         "would_repair": len(decisions) if dry_run else 0,
-        "text_embeddings_cleared": 0 if dry_run else sum(1 for decision in decisions if decision["clear_text_embedding"]),
-        "would_clear_text_embeddings": (
-            sum(1 for decision in decisions if decision["clear_text_embedding"]) if dry_run else 0
-        ),
+        "text_embeddings_cleared": 0,
+        "would_clear_text_embeddings": 0,
         "samples": samples,
     }
 
@@ -364,7 +357,6 @@ def run_logo_only_text_feature_repair(
         {
             "id": str(row["id"]),
             "application_no": row["application_no"],
-            "clear_text_embedding": True,
             "clear_translation_features": True,
         }
         for row in candidates
@@ -376,8 +368,7 @@ def run_logo_only_text_feature_repair(
             cur,
             """
             UPDATE trademarks AS tm
-            SET text_embedding = NULL,
-                name_tr = NULL,
+            SET name_tr = NULL,
                 detected_lang = NULL,
                 name_tr_backend = NULL,
                 name_tr_model = NULL,
@@ -397,8 +388,8 @@ def run_logo_only_text_feature_repair(
         "decisions": len(decisions),
         "repaired": 0 if dry_run else len(decisions),
         "would_repair": len(decisions) if dry_run else 0,
-        "text_embeddings_cleared": 0 if dry_run else len(decisions),
-        "would_clear_text_embeddings": len(decisions) if dry_run else 0,
+        "text_embeddings_cleared": 0,
+        "would_clear_text_embeddings": 0,
         "samples": decisions[:20],
     }
 
