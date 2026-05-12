@@ -988,7 +988,15 @@ function dashboard() {
                         self._portfolioAllResults = all;
                         self.portfolioTotalCount = (data.total_count != null) ? data.total_count : all.length;
                         self.portfolioResults = all.slice(0, 5);
-                        self.portfolioName = data.entity_name || name || id;
+                        var rawName = data.entity_name || name || id;
+                        // For design holder + designer entity names,
+                        // strip any address that was concatenated at
+                        // ingest. Trademark/attorney sides are clean.
+                        self.portfolioName = (type === 'design-holder' || type === 'design-designer')
+                            ? (window._stripTurkishAddress
+                                ? window._stripTurkishAddress(rawName)
+                                : rawName)
+                            : rawName;
                     }
                 })
                 .catch(function () {
@@ -8457,6 +8465,28 @@ window.openHolderPortfolio = function (holderTpe, button) {
             }
         }
     } catch (_) { /* swallow — modal is best-effort */ }
+};
+
+// Many design rows ship a name with the address concatenated:
+// e.g. "DİDEM GÖKGÖZ Merkez Mah. Perihan Sok. No:116 ... TÜRKİYE".
+// This trims everything from the first Turkish address keyword so
+// the card + modal show just the personal/company name. The full
+// string is still passed to the backend for portfolio matching —
+// the backend uses normalize_designer_name on the stored column,
+// not on this display string, so search behaviour is unaffected.
+window._stripTurkishAddress = function (name) {
+    if (!name) return '';
+    var s = String(name).trim();
+    var words = s.split(/\s+/);
+    var ADDR = /^(Mah\.|Mahallesi|Cad\.|Caddesi|Sok\.|Sokak|Bulv\.|Bulvarı|Apt\.|Apartmanı|Blok|Kat:|Daire:)$/i;
+    for (var i = 1; i < words.length; i++) {
+        if (ADDR.test(words[i]) || /^No:/i.test(words[i]) || /^D:\d/i.test(words[i])) {
+            // Address starts at the word BEFORE the keyword (e.g.
+            // "Merkez Mah." — drop "Merkez" too).
+            return words.slice(0, Math.max(1, i - 1)).join(' ').trim();
+        }
+    }
+    return s;
 };
 
 // Sister shim for designer-chip clicks on the Tasarım card.

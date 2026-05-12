@@ -372,14 +372,19 @@
       var designerBtns = shownDesigners.map(function (d) {
         var name = String(d || "").trim();
         if (!name) return "";
+        // Strip any concatenated address for display. The FULL name
+        // is still the onclick argument so backend matching works.
+        var display = (window._stripTurkishAddress
+          ? window._stripTurkishAddress(name)
+          : name);
         if (typeof window.openDesignerPortfolio === "function") {
           return '<button type="button" ' +
             'onclick="window.openDesignerPortfolio(' +
               JSON.stringify(name).replace(/"/g, '&quot;') + ', this)" ' +
             'class="text-left hover:underline" style="color:var(--color-primary)">' +
-            escapeHtml(name) + '</button>';
+            escapeHtml(display) + '</button>';
         }
-        return '<span>' + escapeHtml(name) + '</span>';
+        return '<span>' + escapeHtml(display) + '</span>';
       }).filter(function (s) { return s.length > 0; }).join(', ');
       designerChips =
         '<div class="mt-1 text-xs" style="color:var(--color-text-secondary)">' +
@@ -393,12 +398,20 @@
     // Holder line — clickable when modal helper exists
     var holderHtml = "";
     if (holder) {
-      var holderInner = '<span style="color:var(--color-text-secondary)">' + escapeHtml(holder) + '</span>';
+      // Some rows store name + address concatenated ("DİDEM GÖKGÖZ
+      // Merkez Mah. ... TÜRKİYE"). Strip the address tail for display.
+      // The portfolio lookup still uses the FULL string (via the
+      // backend's normalize_designer_name on the stored column), so
+      // clicking the link still finds the right designs.
+      var holderDisplay = (window._stripTurkishAddress
+        ? window._stripTurkishAddress(holder)
+        : holder);
+      var holderInner = '<span style="color:var(--color-text-secondary)">' + escapeHtml(holderDisplay) + '</span>';
       if (holderRef && typeof window.openHolderPortfolio === "function") {
         holderInner = '<button type="button" onclick="window.openHolderPortfolio(' +
           JSON.stringify(holderRef).replace(/"/g, '&quot;') + ', this)" ' +
           'class="text-left hover:underline" style="color:var(--color-primary)">' +
-          escapeHtml(holder) + '</button>';
+          escapeHtml(holderDisplay) + '</button>';
       }
       holderHtml = '<div class="text-xs"><span style="color:var(--color-text-faint)">' +
         escapeHtml(t("design_search.holder_label", "Holder")) + ':</span> ' +
