@@ -332,14 +332,16 @@
     // card. For design, the three meaningful dimensions are
     // Visual (max of DINOv2 + CLIP, since both encode visual
     // similarity), Color (HSV histogram), Text (product-name
-    // trigram). Anything missing renders as 0%.
+    // trigram). The backend (services/design_search_service.py
+    // line 397-399) returns breakdown as { text, dinov2, clip,
+    // color } floats in [0,1] — no `_sim` suffix.
     var bd = row.similarity_breakdown || {};
-    var visualSim = Math.max(Number(bd.dinov2_sim) || 0, Number(bd.clip_sim) || 0);
+    var visualSim = Math.max(Number(bd.dinov2) || 0, Number(bd.clip) || 0);
     var bdHtml =
       '<div class="grid grid-cols-3 gap-2 mb-3">' +
         _scoreGridCell(t("design_search.score_visual", "Görsel"), visualSim) +
-        _scoreGridCell(t("design_search.score_color", "Renk"), bd.color_sim) +
-        _scoreGridCell(t("design_search.score_text", "Metin"), bd.text_sim) +
+        _scoreGridCell(t("design_search.score_color", "Renk"), bd.color) +
+        _scoreGridCell(t("design_search.score_text", "Metin"), bd.text) +
       '</div>';
 
     // Locarno chips
