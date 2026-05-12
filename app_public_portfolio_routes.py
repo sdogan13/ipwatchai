@@ -98,6 +98,53 @@ async def public_design_portfolio_csv_impl(
         raise HTTPException(status_code=500, detail="CSV export temporarily unavailable")
 
 
+async def public_designer_portfolio_impl(
+    name=None,
+    logger=None,
+):
+    """Look up up to 10 designs whose ``designers`` array contains the
+    given name (matched via the conservative-normalization GIN index).
+    Response shape mirrors the holder portfolio endpoint."""
+    from services.design_search_service import run_public_designer_portfolio_lookup
+
+    try:
+        return await run_public_designer_portfolio_lookup(
+            designer_name=name,
+            logger=logger,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        if logger:
+            logger.error(f"Public designer portfolio failed: {exc}")
+        raise HTTPException(
+            status_code=500, detail="Designer portfolio lookup temporarily unavailable",
+        )
+
+
+async def public_designer_portfolio_csv_impl(
+    name=None,
+    logger=None,
+    current_user=None,
+):
+    """CSV export for every design that lists this designer.
+    Plan-gated by can_download_portfolio."""
+    from services.design_search_service import build_public_designer_portfolio_csv
+
+    try:
+        return await build_public_designer_portfolio_csv(
+            designer_name=name,
+            logger=logger,
+            current_user=current_user,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        if logger:
+            logger.error(f"Public designer portfolio CSV failed: {exc}")
+        raise HTTPException(status_code=500, detail="CSV export temporarily unavailable")
+
+
 def register_public_portfolio_routes(app, limiter, logger):
     """Register the extracted public portfolio endpoints on the app."""
 
@@ -180,6 +227,39 @@ def register_public_portfolio_routes(app, limiter, logger):
     app.add_api_route(
         "/api/v1/portfolio/public/designs/csv",
         public_design_portfolio_csv,
+        methods=["GET"],
+        tags=["Design Search"],
+    )
+
+    @limiter.limit("5/minute")
+    async def public_designer_portfolio(
+        request: Request,
+        name: str = Query(None, max_length=255, description="Designer name (conservative-normalization match)"),
+    ):
+        """Lookup designs by designer name. Matches on the same
+        conservative normalization used by the migration, backed by
+        idx_des_designers_normalized_gin."""
+        return await public_designer_portfolio_impl(name=name, logger=logger)
+
+    @limiter.limit("3/minute")
+    async def public_designer_portfolio_csv(
+        request: Request,
+        name: str = Query(None, max_length=255),
+        current_user: CurrentUser = Depends(get_current_user),
+    ):
+        return await public_designer_portfolio_csv_impl(
+            name=name, logger=logger, current_user=current_user,
+        )
+
+    app.add_api_route(
+        "/api/v1/portfolio/public/designers",
+        public_designer_portfolio,
+        methods=["GET"],
+        tags=["Design Search"],
+    )
+    app.add_api_route(
+        "/api/v1/portfolio/public/designers/csv",
+        public_designer_portfolio_csv,
         methods=["GET"],
         tags=["Design Search"],
     )

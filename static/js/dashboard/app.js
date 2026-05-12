@@ -949,12 +949,15 @@ function dashboard() {
 
             var self = this;
             // Pick the right backend endpoint per portfolio type. Design
-            // holders hit the new /portfolio/public/designs route added
-            // alongside this work (see docs/API_REFERENCE.md). Trademark
-            // holder + attorney keep the existing /portfolio/public.
+            // holders hit /portfolio/public/designs; design designers
+            // hit /portfolio/public/designers (matched by normalized
+            // name via the functional GIN index). Trademark holder +
+            // attorney keep the existing /portfolio/public.
             var url;
             if (type === 'design-holder') {
                 url = '/api/v1/portfolio/public/designs?holder_id=' + encodeURIComponent(id);
+            } else if (type === 'design-designer') {
+                url = '/api/v1/portfolio/public/designers?name=' + encodeURIComponent(id);
             } else {
                 var param = type === 'holder' ? 'holder_id' : 'attorney_no';
                 url = '/api/v1/portfolio/public?' + param + '=' + encodeURIComponent(id);
@@ -1013,15 +1016,17 @@ function dashboard() {
                 }, 'portfolio_download');
                 return;
             }
-            // Branch CSV endpoint per portfolio type — design holders
-            // hit the new /portfolio/public/designs/csv. The filename
-            // prefix also switches so the downloaded file is obviously
-            // a design portfolio.
+            // Branch CSV endpoint per portfolio type. Design holders +
+            // designers each have their own CSV route; trademark
+            // holder + attorney share the existing /portfolio/public/csv.
             var csvUrl;
             var fileLabel;
             if (type === 'design-holder') {
                 csvUrl = '/api/v1/portfolio/public/designs/csv?holder_id=' + encodeURIComponent(id);
                 fileLabel = 'tasarim_sahibi';
+            } else if (type === 'design-designer') {
+                csvUrl = '/api/v1/portfolio/public/designers/csv?name=' + encodeURIComponent(id);
+                fileLabel = 'tasarimci';
             } else {
                 var param = type === 'holder' ? 'holder_id' : 'attorney_no';
                 csvUrl = '/api/v1/portfolio/public/csv?' + param + '=' + encodeURIComponent(id);
@@ -4392,6 +4397,16 @@ function showLogoCreditsExhausted(detail) {
 // ============================================
 var _buyCreditsState = { selectedPackId: null, packs: [], loading: false, detail: null };
 
+// Plans shown in the left "Upgrade plan" column of the combined modal.
+// Prices and monthly credit allowances mirror PLAN_FEATURES on the server
+// (utils/subscription.py). Free is intentionally omitted — the modal only
+// opens for users who already need more credits.
+var _BUY_CREDITS_UPGRADE_PLANS = [
+    { id: 'starter',      price_try:  499, monthly_ai_credits:  10 },
+    { id: 'professional', price_try: 1999, monthly_ai_credits:  50 },
+    { id: 'enterprise',   price_try: 4999, monthly_ai_credits: 500 }
+];
+
 function openBuyCreditsModal(detail) {
     var modal = document.getElementById('buy-credits-modal');
     if (!modal) return;
@@ -4408,18 +4423,49 @@ function openBuyCreditsModal(detail) {
     var iyzico = document.getElementById('buy-credits-iyzico');
     if (iyzico) { iyzico.classList.add('hidden'); iyzico.innerHTML = ''; }
     modal.classList.remove('hidden');
-    // Sit above the upgrade modal (which uses `calc(var(--z-modal) + 20)`)
-    // so the right-side buy-credits card stays visible when both are shown
-    // together for Free-tier users. We don't lock body scroll here because
-    // this card is a non-blocking side panel, not a true modal — the
-    // upgrade modal handles scroll lock when it's open alongside.
-    modal.style.zIndex = 'calc(var(--z-modal) + 30)';
+    if (typeof lockBodyScroll === 'function') lockBodyScroll();
+    _renderBuyCreditsPlans();
     _loadBuyCreditsPacks();
 }
 
 function closeBuyCreditsModal() {
     var modal = document.getElementById('buy-credits-modal');
     if (modal) modal.classList.add('hidden');
+    if (typeof unlockBodyScroll === 'function') unlockBodyScroll();
+}
+
+function _renderBuyCreditsPlans() {
+    var container = document.getElementById('buy-credits-plans');
+    if (!container) return;
+    var detail = _buyCreditsState.detail || {};
+    var currentPlan = String(detail.current_plan || '').toLowerCase();
+    var plans = _BUY_CREDITS_UPGRADE_PLANS.filter(function (p) {
+        return p.id !== currentPlan;
+    });
+    container.innerHTML = plans.map(function (plan) {
+        var name = t('pricing.' + plan.id + '_name');
+        var creditsLine = plan.monthly_ai_credits + ' '
+            + t('studio.buy_credits.monthly_credits');
+        var price = '₺' + plan.price_try + ' / '
+            + t('studio.buy_credits.per_month');
+        return '<button type="button"'
+            + ' onclick="upgradeFromBuyCredits(\'' + plan.id + '\')"'
+            + ' class="w-full text-left rounded-lg p-3 transition hover:opacity-90"'
+            + ' style="border:1px solid var(--color-border);background:var(--color-bg-card)">'
+            + '<div class="flex items-center justify-between gap-3">'
+            + '<div class="min-w-0">'
+            + '<div class="font-semibold" style="color:var(--color-text-primary)">' + name + '</div>'
+            + '<div class="text-xs mt-0.5" style="color:var(--color-text-secondary)">' + creditsLine + '</div>'
+            + '</div>'
+            + '<div class="text-sm font-medium whitespace-nowrap" style="color:var(--color-text-primary)">' + price + '</div>'
+            + '</div>'
+            + '</button>';
+    }).join('');
+}
+
+function upgradeFromBuyCredits(planId) {
+    closeBuyCreditsModal();
+    window.location.href = '/checkout?plan=' + encodeURIComponent(planId) + '&billing=monthly';
 }
 
 async function _loadBuyCreditsPacks() {
@@ -8388,6 +8434,29 @@ window.openHolderPortfolio = function (holderTpe, button) {
             var dash = window.Alpine.$data(root);
             if (dash && typeof dash.loadPortfolio === 'function') {
                 dash.loadPortfolio('design-holder', String(holderTpe), holderName);
+                return;
+            }
+        }
+    } catch (_) { /* swallow — modal is best-effort */ }
+};
+
+// Sister shim for designer-chip clicks on the Tasarım card.
+// Designers have no canonical id in our schema, so the name itself
+// is the round-tripped identifier; the backend resolves via the
+// conservative-normalization GIN index on designs.designers.
+// portfolioType is 'design-designer' so the modal renders the right
+// label + the bulk-add modal posts {designer_name: ...} to
+// /api/v1/design-watchlist/bulk-from-portfolio.
+window.openDesignerPortfolio = function (designerName, _button) {
+    if (!designerName) return;
+    var name = String(designerName || '').trim();
+    if (!name) return;
+    try {
+        var root = document.querySelector('[x-data="dashboard()"]') || document.body;
+        if (root && window.Alpine && typeof window.Alpine.$data === 'function') {
+            var dash = window.Alpine.$data(root);
+            if (dash && typeof dash.loadPortfolio === 'function') {
+                dash.loadPortfolio('design-designer', name, name);
                 return;
             }
         }

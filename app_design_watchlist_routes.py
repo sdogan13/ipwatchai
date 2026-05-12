@@ -241,10 +241,15 @@ def register_design_watchlist_routes(app, limiter):
         current_user=Depends(get_current_user),
     ):
         holder_id = (body or {}).get("holder_id") or (body or {}).get("id")
-        if not holder_id:
-            raise HTTPException(status_code=422, detail="holder_id is required")
+        designer_name = (body or {}).get("designer_name")
+        if not holder_id and not designer_name:
+            raise HTTPException(
+                status_code=422,
+                detail="holder_id or designer_name is required",
+            )
         result = await svc.import_design_watchlist_from_portfolio(
-            holder_id=str(holder_id),
+            holder_id=str(holder_id) if holder_id else None,
+            designer_name=str(designer_name) if designer_name else None,
             current_user=current_user,
         )
         for item_id_str in result.get("scan_item_ids", []):

@@ -973,14 +973,20 @@ def import_design_csv_with_mapping(
 
 async def import_design_watchlist_from_portfolio(
     *,
-    holder_id: str,
+    holder_id: Optional[str] = None,
+    designer_name: Optional[str] = None,
     current_user,
     db_factory=Database,
 ) -> Dict[str, Any]:
-    if not holder_id:
+    if not holder_id and not designer_name:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="holder_id is required",
+            detail="holder_id or designer_name is required",
+        )
+    if holder_id and designer_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="pass exactly one of holder_id or designer_name",
         )
 
     # PRO gate (mirrors trademark portfolio access policy).
@@ -999,28 +1005,45 @@ async def import_design_watchlist_from_portfolio(
             )
 
         cur = db.cursor()
-        # Resolve by either internal UUID or public tpe_client_id —
-        # matches the public design portfolio endpoint so the bulk-add
-        # flow works for holders without a TPE client ID (~10% of
-        # designs, mostly foreign-corporate). See
-        # services.design_search_service._resolve_holder_row.
-        from services.design_search_service import _resolve_holder_row
-        h = _resolve_holder_row(cur, str(holder_id).strip())
-        if not h:
-            raise HTTPException(status_code=404, detail="Holder not found")
 
-        cur.execute(
-            """
-            SELECT d.id::text AS design_id,
-                   d.application_no,
-                   d.product_name_tr, d.product_name_en,
-                   d.locarno_classes
-            FROM designs d
-            WHERE d.holder_id = %s
-            ORDER BY d.application_date DESC NULLS LAST, d.application_no DESC
-            """,
-            (h["id"],),
-        )
+        if holder_id:
+            # Resolve by either internal UUID or public tpe_client_id
+            # — matches the public design portfolio endpoint so the
+            # bulk-add flow works for holders without a TPE client ID
+            # (~10% of designs, mostly foreign-corporate).
+            from services.design_search_service import _resolve_holder_row
+            h = _resolve_holder_row(cur, str(holder_id).strip())
+            if not h:
+                raise HTTPException(status_code=404, detail="Holder not found")
+            cur.execute(
+                """
+                SELECT d.id::text AS design_id,
+                       d.application_no,
+                       d.product_name_tr, d.product_name_en,
+                       d.locarno_classes
+                FROM designs d
+                WHERE d.holder_id = %s
+                ORDER BY d.application_date DESC NULLS LAST, d.application_no DESC
+                """,
+                (h["id"],),
+            )
+        else:
+            # Designer path: match the conservative-normalization GIN
+            # index on designs.designers (idx_des_designers_normalized_gin).
+            cur.execute(
+                """
+                SELECT d.id::text AS design_id,
+                       d.application_no,
+                       d.product_name_tr, d.product_name_en,
+                       d.locarno_classes
+                FROM designs d
+                WHERE d.designers IS NOT NULL
+                  AND normalize_designer_name_array(d.designers)
+                      @> ARRAY[normalize_designer_name(%s)]::text[]
+                ORDER BY d.application_date DESC NULLS LAST, d.application_no DESC
+                """,
+                (str(designer_name).strip(),),
+            )
         rows = cur.fetchall()
 
     if not rows:

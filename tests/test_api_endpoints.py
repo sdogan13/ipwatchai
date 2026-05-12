@@ -1365,6 +1365,79 @@ class TestPublicEndpoints:
         assert mock_svc.await_count == 1
         assert mock_svc.await_args.kwargs["holder_id"] == "TPE-999"
 
+    def test_public_designer_portfolio_route_delegates_to_extracted_impl(self, client):
+        """GET /api/v1/portfolio/public/designers threads the designer
+        name into public_designer_portfolio_impl. Response shape
+        mirrors holder/design-holder so the existing modal renders it."""
+        with patch(
+            "app_public_portfolio_routes.public_designer_portfolio_impl",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = {
+                "entity_type": "design-designer",
+                "entity_id": "Ahmet Yılmaz",
+                "entity_name": "Ahmet Yılmaz",
+                "results": [],
+                "total_count": 0,
+            }
+            resp = client.get("/api/v1/portfolio/public/designers?name=Ahmet%20Y%C4%B1lmaz")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["entity_type"] == "design-designer"
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["name"] == "Ahmet Yılmaz"
+
+    def test_public_designer_portfolio_csv_route_delegates_to_extracted_impl(self, client):
+        """CSV variant forwards name + current_user to the CSV impl."""
+        with patch(
+            "app_public_portfolio_routes.public_designer_portfolio_csv_impl",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = JSONResponse(
+                content={"ok": True},
+                headers={"Content-Disposition": 'attachment; filename="ahmet_designer_portfolio.csv"'},
+            )
+            resp = client.get("/api/v1/portfolio/public/designers/csv?name=Ahmet")
+
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["name"] == "Ahmet"
+        assert mock_impl.await_args.kwargs["current_user"].email == "test@example.com"
+
+    def test_design_watchlist_bulk_accepts_designer_name(self, client):
+        """The shared bulk endpoint now accepts {designer_name} too,
+        not just {holder_id}. Service receives designer_name verbatim."""
+        with patch(
+            "services.design_watchlist_service.import_design_watchlist_from_portfolio",
+            new_callable=AsyncMock,
+        ) as mock_svc:
+            mock_svc.return_value = {
+                "created": 2, "skipped": 0, "errors": 0, "total": 2,
+                "limit_reached": False, "errors_detail": [], "scan_item_ids": [],
+            }
+            resp = client.post(
+                "/api/v1/design-watchlist/bulk-from-portfolio",
+                json={"designer_name": "Ahmet Yılmaz"},
+            )
+        assert resp.status_code == 200
+        assert mock_svc.await_count == 1
+        assert mock_svc.await_args.kwargs["holder_id"] is None
+        assert mock_svc.await_args.kwargs["designer_name"] == "Ahmet Yılmaz"
+
+    def test_design_watchlist_bulk_requires_holder_or_designer(self, client):
+        """Empty body → 422; can't dispatch without an identifier."""
+        with patch(
+            "services.design_watchlist_service.import_design_watchlist_from_portfolio",
+            new_callable=AsyncMock,
+        ) as mock_svc:
+            resp = client.post(
+                "/api/v1/design-watchlist/bulk-from-portfolio", json={},
+            )
+        assert resp.status_code == 422
+        assert mock_svc.await_count == 0
+
     def test_education_catalog_route_delegates_to_service(self, client):
         payload = {
             "stats": {

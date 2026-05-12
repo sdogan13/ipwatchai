@@ -685,6 +685,9 @@
                 if (this.portfolioType === 'design-holder') {
                     endpoint = '/api/v1/design-watchlist/bulk-from-portfolio';
                     payload = { holder_id: this.entityId };
+                } else if (this.portfolioType === 'design-designer') {
+                    endpoint = '/api/v1/design-watchlist/bulk-from-portfolio';
+                    payload = { designer_name: this.entityId };
                 } else if (this.portfolioType === 'holder') {
                     endpoint = '/api/v1/watchlist/bulk-from-portfolio';
                     payload = { holder_id: this.entityId };

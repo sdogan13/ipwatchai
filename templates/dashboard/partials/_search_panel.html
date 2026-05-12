@@ -1512,7 +1512,10 @@
         <div class="flex items-center justify-between p-4 border-b" style="border-color:var(--color-border)">
             <div class="min-w-0 flex-1">
                 <div class="text-xs uppercase tracking-wide mb-0.5" style="color:var(--color-text-muted)"
-                    x-text="portfolioType === 'attorney' ? t('landing.detail_attorney') : (portfolioType === 'design-holder' ? t('landing.detail_design_holder') : t('landing.detail_holder'))">
+                    x-text="portfolioType === 'attorney' ? t('landing.detail_attorney')
+                          : portfolioType === 'design-holder' ? t('landing.detail_design_holder')
+                          : portfolioType === 'design-designer' ? t('landing.detail_designer')
+                          : t('landing.detail_holder')">
                 </div>
                 <h3 class="text-base font-semibold truncate" style="color:var(--color-text-primary)"
                     x-text="portfolioName"></h3>

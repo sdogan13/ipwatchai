@@ -361,14 +361,34 @@
         }).join("") +
       '</div>';
 
-    // Designer chips
-    var designerChips = designers.length === 0 ? "" :
-      '<div class="mt-1 text-xs" style="color:var(--color-text-secondary)">' +
-        '<span style="color:var(--color-text-faint)">' +
-          escapeHtml(t("design_search.designer_label", "Designer")) + ':</span> ' +
-        escapeHtml(designers.slice(0, 2).join(", ")) +
-        (designers.length > 2 ? ' <span style="color:var(--color-text-faint)">+' + (designers.length - 2) + '</span>' : '') +
-      '</div>';
+    // Designer chips — each name is a separate clickable button so
+    // the user can drill into that designer's portfolio of designs.
+    // window.openDesignerPortfolio is wired in static/js/dashboard/
+    // app.js and forwards to the same portfolio modal the holder
+    // click uses (portfolioType = 'design-designer').
+    var designerChips = "";
+    if (designers.length > 0) {
+      var shownDesigners = designers.slice(0, 2);
+      var designerBtns = shownDesigners.map(function (d) {
+        var name = String(d || "").trim();
+        if (!name) return "";
+        if (typeof window.openDesignerPortfolio === "function") {
+          return '<button type="button" ' +
+            'onclick="window.openDesignerPortfolio(' +
+              JSON.stringify(name).replace(/"/g, '&quot;') + ', this)" ' +
+            'class="text-left hover:underline" style="color:var(--color-primary)">' +
+            escapeHtml(name) + '</button>';
+        }
+        return '<span>' + escapeHtml(name) + '</span>';
+      }).filter(function (s) { return s.length > 0; }).join(', ');
+      designerChips =
+        '<div class="mt-1 text-xs" style="color:var(--color-text-secondary)">' +
+          '<span style="color:var(--color-text-faint)">' +
+            escapeHtml(t("design_search.designer_label", "Designer")) + ':</span> ' +
+          designerBtns +
+          (designers.length > 2 ? ' <span style="color:var(--color-text-faint)">+' + (designers.length - 2) + '</span>' : '') +
+        '</div>';
+    }
 
     // Holder line — clickable when modal helper exists
     var holderHtml = "";
