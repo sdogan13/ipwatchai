@@ -1023,11 +1023,11 @@ async def import_design_watchlist_from_portfolio(
 
     if not rows:
         return {
-            "added": 0, "skipped": 0, "errors": 0, "total": 0,
+            "created": 0, "skipped": 0, "errors": 0, "total": 0,
             "limit_reached": False, "errors_detail": [], "scan_item_ids": [],
         }
 
-    added = 0
+    created = 0
     skipped = 0
     errors_detail: List[Dict[str, Any]] = []
     limit_reached = False
@@ -1055,7 +1055,7 @@ async def import_design_watchlist_from_portfolio(
             new_id = item.get("id") if isinstance(item, dict) else None
             if new_id:
                 scan_item_ids.append(str(new_id))
-                added += 1
+                created += 1
         except HTTPException as exc:
             # 409 = duplicate (already watching); 402/403 = plan/quota
             # limit reached → stop trying further inserts so the caller
@@ -1076,7 +1076,10 @@ async def import_design_watchlist_from_portfolio(
                 })
 
     return {
-        "added": added,
+        # Field name mirrors the trademark watchlist bulk service so
+        # the shared bulk-confirm modal in _modals.html can read
+        # data.created without branching on registry.
+        "created": created,
         "skipped": skipped,
         "errors": len(errors_detail),
         "total": len(rows),

@@ -677,10 +677,22 @@
             this.submitting = true;
             try {
                 var token = getAuthToken();
-                var payload = this.portfolioType === 'holder'
-                    ? { holder_id: this.entityId }
-                    : { attorney_no: this.entityId };
-                var res = await fetch('/api/v1/watchlist/bulk-from-portfolio', {
+                // Branch endpoint + payload per portfolio type. Design
+                // holder hits the new /api/v1/design-watchlist/bulk-
+                // from-portfolio (mirrors the trademark route shape).
+                var endpoint;
+                var payload;
+                if (this.portfolioType === 'design-holder') {
+                    endpoint = '/api/v1/design-watchlist/bulk-from-portfolio';
+                    payload = { holder_id: this.entityId };
+                } else if (this.portfolioType === 'holder') {
+                    endpoint = '/api/v1/watchlist/bulk-from-portfolio';
+                    payload = { holder_id: this.entityId };
+                } else {
+                    endpoint = '/api/v1/watchlist/bulk-from-portfolio';
+                    payload = { attorney_no: this.entityId };
+                }
+                var res = await fetch(endpoint, {
                     method: 'POST',
                     headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)

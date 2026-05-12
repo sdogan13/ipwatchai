@@ -948,8 +948,18 @@ function dashboard() {
             this.showPortfolio = true;
 
             var self = this;
-            var param = type === 'holder' ? 'holder_id' : 'attorney_no';
-            fetch('/api/v1/portfolio/public?' + param + '=' + encodeURIComponent(id))
+            // Pick the right backend endpoint per portfolio type. Design
+            // holders hit the new /portfolio/public/designs route added
+            // alongside this work (see docs/API_REFERENCE.md). Trademark
+            // holder + attorney keep the existing /portfolio/public.
+            var url;
+            if (type === 'design-holder') {
+                url = '/api/v1/portfolio/public/designs?holder_id=' + encodeURIComponent(id);
+            } else {
+                var param = type === 'holder' ? 'holder_id' : 'attorney_no';
+                url = '/api/v1/portfolio/public?' + param + '=' + encodeURIComponent(id);
+            }
+            fetch(url)
                 .then(function (res) {
                     if (res.status === 429) {
                         self.searchError = self.t('search.rate_limited');
@@ -1003,8 +1013,20 @@ function dashboard() {
                 }, 'portfolio_download');
                 return;
             }
-            var param = type === 'holder' ? 'holder_id' : 'attorney_no';
-            var csvUrl = '/api/v1/portfolio/public/csv?' + param + '=' + encodeURIComponent(id);
+            // Branch CSV endpoint per portfolio type — design holders
+            // hit the new /portfolio/public/designs/csv. The filename
+            // prefix also switches so the downloaded file is obviously
+            // a design portfolio.
+            var csvUrl;
+            var fileLabel;
+            if (type === 'design-holder') {
+                csvUrl = '/api/v1/portfolio/public/designs/csv?holder_id=' + encodeURIComponent(id);
+                fileLabel = 'tasarim_sahibi';
+            } else {
+                var param = type === 'holder' ? 'holder_id' : 'attorney_no';
+                csvUrl = '/api/v1/portfolio/public/csv?' + param + '=' + encodeURIComponent(id);
+                fileLabel = type === 'holder' ? 'sahip' : 'vekil';
+            }
             fetch(csvUrl, { headers: { 'Authorization': 'Bearer ' + token } })
                 .then(function (res) {
                     if (res.status === 401) {
@@ -1024,7 +1046,7 @@ function dashboard() {
                     var url = URL.createObjectURL(blob);
                     var a = document.createElement('a');
                     a.href = url;
-                    a.download = (type === 'holder' ? 'sahip' : 'vekil') + '_' + id + '_portfolio.csv';
+                    a.download = fileLabel + '_' + id + '_portfolio.csv';
                     document.body.appendChild(a);
                     a.click();
                     document.body.removeChild(a);
@@ -3422,9 +3444,11 @@ function initAIStudio() {
     populateStudioNiceClasses('studio-logo-classes');
     updateStudioClassSummary('studio-name-classes');
     updateStudioClassSummary('studio-logo-classes');
+    bindStudioNameRequiredInputs();
     initStudioColorSwatches();
     updateStudioCredits();
     updateStudioModeMeta();
+    updateStudioNameButtonState();
     checkCreativeSuiteStatus();
     loadStudioUsageSummary();
     loadStudioHistory();
@@ -3453,7 +3477,9 @@ function applyStudioAvailability(mode, toolStatus) {
     var available = !toolStatus || toolStatus.available !== false;
     var translatedReason = translateStudioStatusReason(toolStatus && toolStatus.reason);
 
-    if (btn) {
+    if (mode === 'name') {
+        updateStudioNameButtonState();
+    } else if (btn) {
         btn.disabled = !available;
         btn.classList.toggle('opacity-50', !available);
         btn.classList.toggle('cursor-not-allowed', !available);
@@ -3531,6 +3557,7 @@ function populateStudioNiceClasses(selectId) {
                 var selected = this.getAttribute('aria-pressed') === 'true';
                 setStudioClassChipSelected(this, !selected);
                 updateStudioClassSummary(selectId);
+                if (selectId === 'studio-name-classes') updateStudioNameButtonState();
             };
             select.appendChild(chip);
         }
@@ -3584,11 +3611,13 @@ function updateStudioClassSummary(selectId) {
     var values = getStudioNiceClasses(selectId);
     if (!values.length) {
         summary.textContent = t('studio.no_classes_selected');
+        if (selectId === 'studio-name-classes') updateStudioNameButtonState();
         return;
     }
     var preview = values.slice(0, 4).join(', ');
     if (values.length > 4) preview += ' +' + (values.length - 4);
     summary.textContent = t('studio.classes_selected', { count: values.length }) + ' (' + preview + ')';
+    if (selectId === 'studio-name-classes') updateStudioNameButtonState();
 }
 
 function toggleStudioClassPicker(selectId) {
@@ -3644,6 +3673,49 @@ function refreshStudioColorSwatches() {
     }
 }
 
+function bindStudioNameRequiredInputs() {
+    ['studio-name-query', 'studio-name-industry', 'studio-name-language', 'studio-name-style'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (!el || el.dataset.studioRequiredBound === '1') return;
+        el.dataset.studioRequiredBound = '1';
+        el.addEventListener('input', updateStudioNameButtonState);
+        el.addEventListener('change', updateStudioNameButtonState);
+    });
+}
+
+function getStudioNameRequiredMissingFields() {
+    var queryEl = document.getElementById('studio-name-query');
+    var industryEl = document.getElementById('studio-name-industry');
+    var languageEl = document.getElementById('studio-name-language');
+    var styleEl = document.getElementById('studio-name-style');
+    var missing = [];
+    if (!queryEl || !(queryEl.value || '').trim()) missing.push('query');
+    if (!getStudioNiceClasses('studio-name-classes').length) missing.push('nice_classes');
+    if (!industryEl || !(industryEl.value || '').trim()) missing.push('industry');
+    if (!languageEl || !(languageEl.value || '').trim()) missing.push('language');
+    if (!styleEl || !(styleEl.value || '').trim()) missing.push('style');
+    return missing;
+}
+
+function updateStudioNameButtonState() {
+    var btn = document.getElementById('studio-name-btn');
+    if (!btn) return;
+    var toolStatus = studioStatus && studioStatus.name_generator;
+    var available = !toolStatus || toolStatus.available !== false;
+    var formComplete = getStudioNameRequiredMissingFields().length === 0;
+    var disabled = studioNameLoading || !available;
+    btn.disabled = disabled;
+    btn.classList.toggle('opacity-50', disabled);
+    btn.classList.toggle('cursor-not-allowed', disabled);
+    if (!available) {
+        btn.title = translateStudioStatusReason(toolStatus && toolStatus.reason) || t('studio.service_unavailable');
+    } else if (!formComplete) {
+        btn.title = t('studio.complete_required_fields');
+    } else {
+        btn.title = '';
+    }
+}
+
 function updateStudioModeMeta() {
     var statusEl = document.getElementById('studio-active-status');
     var costEl = document.getElementById('studio-run-cost');
@@ -3659,8 +3731,17 @@ function updateStudioModeMeta() {
         statusEl.title = available ? '' : (translateStudioStatusReason(toolStatus && toolStatus.reason) || t('studio.service_unavailable'));
     }
     if (costEl) {
-        costEl.textContent = t('studio.run_cost', { cost: studioActiveMode === 'logo' ? 5 : 1 });
+        costEl.textContent = t('studio.run_cost', { cost: getStudioRunCost(studioActiveMode) });
     }
+}
+
+function getStudioRunCost(mode) {
+    var toolStatus = mode === 'logo'
+        ? (studioStatus && studioStatus.logo_studio)
+        : (studioStatus && studioStatus.name_generator);
+    var fallback = mode === 'logo' ? 5 : 2;
+    var parsed = Number(toolStatus && toolStatus.cost);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function updateStudioCredits() {
@@ -3701,8 +3782,8 @@ async function loadStudioUsageSummary() {
             monthly_remaining: credits.remaining || 0,
             purchased_remaining: 0,
             monthly_limit: credits.limit || 0,
-            cost: studioActiveMode === 'logo' ? 5 : 1
-        }, studioActiveMode === 'logo' ? 5 : 1);
+            cost: getStudioRunCost(studioActiveMode)
+        }, getStudioRunCost(studioActiveMode));
         updateStudioCredits();
         updateLogoCreditsDisplay();
     } catch (e) {
@@ -3733,6 +3814,7 @@ function switchStudioMode(mode) {
     }
     updateStudioCredits();
     updateStudioModeMeta();
+    updateStudioNameButtonState();
 }
 
 // ============================================
@@ -3740,7 +3822,11 @@ function switchStudioMode(mode) {
 // ============================================
 async function generateNames() {
     var query = (document.getElementById('studio-name-query').value || '').trim();
-    if (!query) { showToast(t('search.enter_brand_name'), 'error'); return; }
+    if (getStudioNameRequiredMissingFields().length) {
+        updateStudioNameButtonState();
+        showToast(t('studio.complete_required_fields'), 'error');
+        return;
+    }
     if (studioStatus && studioStatus.name_generator && studioStatus.name_generator.available === false) {
         showToast(translateStudioStatusReason(studioStatus.name_generator.reason) || t('studio.service_unavailable'), 'error');
         return;
@@ -3748,6 +3834,7 @@ async function generateNames() {
 
     if (studioNameLoading) return;
     studioNameLoading = true;
+    updateStudioNameButtonState();
 
     var classes = getStudioNiceClasses('studio-name-classes');
     var industry = (document.getElementById('studio-name-industry').value || '').trim();
@@ -3762,10 +3849,6 @@ async function generateNames() {
     document.getElementById('studio-name-results').classList.add('hidden');
     document.getElementById('studio-name-empty').classList.add('hidden');
     document.getElementById('studio-name-error').classList.add('hidden');
-
-    // Disable button
-    var btn = document.getElementById('studio-name-btn');
-    if (btn) { btn.disabled = true; btn.classList.add('opacity-50'); }
 
     try {
         var data = await generateNamesAPI({
@@ -3797,7 +3880,7 @@ async function generateNames() {
         }
     } finally {
         studioNameLoading = false;
-        if (btn) { btn.disabled = false; btn.classList.remove('opacity-50'); }
+        updateStudioNameButtonState();
         if (studioStatus && studioStatus.name_generator) {
             applyStudioAvailability('name', studioStatus.name_generator);
         }
@@ -4297,7 +4380,161 @@ function toggleLogoDetail(imageId) {
 // LOGO CREDITS EXHAUSTED MODAL
 // ============================================
 function showLogoCreditsExhausted(detail) {
-    showUpgradeModal(detail || { error: 'credits_exhausted' }, 'ai_credits');
+    if (typeof openBuyCreditsModal === 'function') {
+        openBuyCreditsModal(detail || { error: 'credits_exhausted' });
+    } else {
+        showUpgradeModal(detail || { error: 'credits_exhausted' }, 'ai_credits');
+    }
+}
+
+// ============================================
+// BUY CREDITS MODAL (one-shot AI credit packs)
+// ============================================
+var _buyCreditsState = { selectedPackId: null, packs: [], loading: false, detail: null };
+
+function openBuyCreditsModal(detail) {
+    var modal = document.getElementById('buy-credits-modal');
+    if (!modal) return;
+    _buyCreditsState.selectedPackId = null;
+    _buyCreditsState.detail = detail || null;
+    var submit = document.getElementById('buy-credits-submit');
+    if (submit) submit.disabled = true;
+    var err = document.getElementById('buy-credits-error');
+    if (err) { err.classList.add('hidden'); err.textContent = ''; }
+    var discount = document.getElementById('buy-credits-discount');
+    if (discount) discount.value = '';
+    var picker = document.getElementById('buy-credits-picker');
+    if (picker) picker.classList.remove('hidden');
+    var iyzico = document.getElementById('buy-credits-iyzico');
+    if (iyzico) { iyzico.classList.add('hidden'); iyzico.innerHTML = ''; }
+    modal.classList.remove('hidden');
+    // Sit above the upgrade modal (which uses `calc(var(--z-modal) + 20)`)
+    // so the right-side buy-credits card stays visible when both are shown
+    // together for Free-tier users. We don't lock body scroll here because
+    // this card is a non-blocking side panel, not a true modal — the
+    // upgrade modal handles scroll lock when it's open alongside.
+    modal.style.zIndex = 'calc(var(--z-modal) + 30)';
+    _loadBuyCreditsPacks();
+}
+
+function closeBuyCreditsModal() {
+    var modal = document.getElementById('buy-credits-modal');
+    if (modal) modal.classList.add('hidden');
+}
+
+async function _loadBuyCreditsPacks() {
+    var container = document.getElementById('buy-credits-packs');
+    if (!container) return;
+    container.innerHTML = '<div class="text-sm" style="color:var(--color-text-muted)">' + t('common.loading') + '</div>';
+    try {
+        var res = await fetch('/api/v1/billing/credit-packs', {
+            headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+        });
+        if (!res.ok) throw new Error('failed');
+        var data = await res.json();
+        _buyCreditsState.packs = data.packs || [];
+        _renderBuyCreditsPacks();
+    } catch (_) {
+        container.innerHTML = '<div class="text-sm" style="color:#dc2626">'
+            + t('studio.buy_credits.load_failed') + '</div>';
+    }
+}
+
+function _renderBuyCreditsPacks() {
+    var container = document.getElementById('buy-credits-packs');
+    if (!container) return;
+    var packs = _buyCreditsState.packs;
+    if (!packs.length) {
+        container.innerHTML = '';
+        return;
+    }
+    container.innerHTML = packs.map(function (pack) {
+        var selected = _buyCreditsState.selectedPackId === pack.id;
+        var label = t(pack.label_key);
+        var priceLine = '₺' + pack.price_try + ' · ' + pack.credits + ' '
+            + t('studio.buy_credits.credits_word');
+        return '<button type="button" data-pack-id="' + pack.id + '"'
+            + ' onclick="selectBuyCreditsPack(\'' + pack.id + '\')"'
+            + ' class="w-full text-left rounded-lg p-3 transition"'
+            + ' style="border:1px solid '
+            + (selected ? 'var(--color-primary, #4f46e5)' : 'var(--color-border)')
+            + ';background:' + (selected ? 'var(--color-bg-muted)' : 'transparent') + '">'
+            + '<div class="flex items-center justify-between">'
+            + '<div class="font-semibold" style="color:var(--color-text-primary)">' + label + '</div>'
+            + '<div class="text-sm font-medium" style="color:var(--color-text-primary)">' + priceLine + '</div>'
+            + '</div>'
+            + '</button>';
+    }).join('');
+}
+
+function selectBuyCreditsPack(packId) {
+    _buyCreditsState.selectedPackId = packId;
+    _renderBuyCreditsPacks();
+    var submit = document.getElementById('buy-credits-submit');
+    if (submit) submit.disabled = false;
+}
+
+async function submitBuyCredits() {
+    if (_buyCreditsState.loading) return;
+    var packId = _buyCreditsState.selectedPackId;
+    if (!packId) return;
+    var discountEl = document.getElementById('buy-credits-discount');
+    var discountCode = (discountEl && discountEl.value || '').trim();
+    var errEl = document.getElementById('buy-credits-error');
+    if (errEl) { errEl.classList.add('hidden'); errEl.textContent = ''; }
+
+    _buyCreditsState.loading = true;
+    var submit = document.getElementById('buy-credits-submit');
+    if (submit) submit.disabled = true;
+
+    try {
+        var body = { pack_id: packId };
+        if (discountCode) body.discount_code = discountCode;
+        var res = await fetch('/api/v1/billing/purchase-credits', {
+            method: 'POST',
+            headers: {
+                'Authorization': 'Bearer ' + getAuthToken(),
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(body)
+        });
+        var data = await res.json();
+        if (!res.ok) {
+            var msg = (data && data.detail) || t('studio.buy_credits.failure');
+            if (errEl) { errEl.textContent = msg; errEl.classList.remove('hidden'); }
+            if (submit) submit.disabled = false;
+            return;
+        }
+        var html = data.checkout_form_content || '';
+        if (!html) {
+            if (errEl) { errEl.textContent = t('studio.buy_credits.failure'); errEl.classList.remove('hidden'); }
+            if (submit) submit.disabled = false;
+            return;
+        }
+        var picker = document.getElementById('buy-credits-picker');
+        var iyzico = document.getElementById('buy-credits-iyzico');
+        if (picker) picker.classList.add('hidden');
+        if (iyzico) {
+            iyzico.classList.remove('hidden');
+            iyzico.innerHTML = html;
+            // iyzico's embedded <script> tags don't auto-execute when set via
+            // innerHTML — replace each one to trigger execution.
+            iyzico.querySelectorAll('script').forEach(function (oldScript) {
+                var newScript = document.createElement('script');
+                if (oldScript.src) {
+                    newScript.src = oldScript.src;
+                } else {
+                    newScript.textContent = oldScript.textContent;
+                }
+                oldScript.parentNode.replaceChild(newScript, oldScript);
+            });
+        }
+    } catch (_) {
+        if (errEl) { errEl.textContent = t('studio.buy_credits.failure'); errEl.classList.remove('hidden'); }
+        if (submit) submit.disabled = false;
+    } finally {
+        _buyCreditsState.loading = false;
+    }
 }
 
 function refreshStudioDynamicTranslations() {
@@ -4510,7 +4747,9 @@ function applyNameHistoryToForm(item) {
     if (document.getElementById('studio-name-query')) document.getElementById('studio-name-query').value = params.query || '';
     if (document.getElementById('studio-name-industry')) document.getElementById('studio-name-industry').value = params.industry || '';
     if (document.getElementById('studio-name-style') && params.style) document.getElementById('studio-name-style').value = params.style;
+    if (document.getElementById('studio-name-language') && params.language) document.getElementById('studio-name-language').value = params.language;
     setStudioSelectValues('studio-name-classes', params.nice_classes || []);
+    updateStudioNameButtonState();
 }
 
 function applyLogoHistoryToForm(item) {
@@ -4643,6 +4882,7 @@ function openStudioWithContext(mode, context) {
         if (context.nice_classes && context.nice_classes.length > 0) {
             setStudioSelectValues('studio-name-classes', context.nice_classes);
         }
+        updateStudioNameButtonState();
     } else if (mode === 'logo' && context.query) {
         document.getElementById('studio-logo-name').value = context.query;
         if (context.nice_classes && context.nice_classes.length > 0) {
@@ -8129,3 +8369,27 @@ function openApplicationWithContext(brandName, classes) {
     showDashboardTab('applications');
     setTimeout(function () { showApplicationForm(); }, 100);
 }
+
+// Window-level shim that the design_search.js card invokes when the
+// user clicks "Sahip" on a Tasarım result. Resolves the Alpine root
+// and delegates to loadPortfolio('design-holder', ...). The button
+// element is forwarded so the shim can pull the holder display name
+// out of its visible text — keeps design_search.js (vanilla JS, no
+// Alpine access) cleanly decoupled from the modal layer.
+window.openHolderPortfolio = function (holderTpe, button) {
+    if (!holderTpe) return;
+    var holderName = '';
+    if (button && button.textContent) {
+        holderName = String(button.textContent || '').trim();
+    }
+    try {
+        var root = document.querySelector('[x-data="dashboard()"]') || document.body;
+        if (root && window.Alpine && typeof window.Alpine.$data === 'function') {
+            var dash = window.Alpine.$data(root);
+            if (dash && typeof dash.loadPortfolio === 'function') {
+                dash.loadPortfolio('design-holder', String(holderTpe), holderName);
+                return;
+            }
+        }
+    } catch (_) { /* swallow — modal is best-effort */ }
+};

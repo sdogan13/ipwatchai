@@ -1512,7 +1512,7 @@
         <div class="flex items-center justify-between p-4 border-b" style="border-color:var(--color-border)">
             <div class="min-w-0 flex-1">
                 <div class="text-xs uppercase tracking-wide mb-0.5" style="color:var(--color-text-muted)"
-                    x-text="portfolioType === 'holder' ? t('landing.detail_holder') : t('landing.detail_attorney')">
+                    x-text="portfolioType === 'attorney' ? t('landing.detail_attorney') : (portfolioType === 'design-holder' ? t('landing.detail_design_holder') : t('landing.detail_holder'))">
                 </div>
                 <h3 class="text-base font-semibold truncate" style="color:var(--color-text-primary)"
                     x-text="portfolioName"></h3>
@@ -1552,17 +1552,17 @@
                         <div class="flex items-center gap-2 flex-wrap">
                             <span class="text-sm font-semibold truncate" style="color:var(--color-text-primary)"
                                 x-text="getTrademarkDisplayName(tm)"></span>
-                            <span x-show="tm.status" class="text-[10px] px-1.5 py-0.5 rounded-full shrink-0"
-                                :style="'color:' + getStatusColor(tm.status) + ';background:' + getStatusBg(tm.status)"
-                                x-text="tm.status"></span>
+                            <span x-show="tm.status || tm.current_status" class="text-[10px] px-1.5 py-0.5 rounded-full shrink-0"
+                                :style="'color:' + getStatusColor(tm.status || tm.current_status) + ';background:' + getStatusBg(tm.status || tm.current_status)"
+                                x-text="tm.status || tm.current_status"></span>
                         </div>
                         <div x-html="renderEventDerivedBadges(tm)"></div>
                         <div x-html="renderLastEventLine(tm)"></div>
                         <div class="flex items-center gap-3 text-xs mt-0.5" style="color:var(--color-text-muted)">
                             <span x-show="tm.application_no" x-text="tm.application_no"></span>
                             <span
-                                x-show="(tm.nice_classes && tm.nice_classes.length) || (tm.classes && tm.classes.length)"
-                                x-text="'Sinif: ' + (tm.nice_classes || tm.classes || []).join(', ')"></span>
+                                x-show="(tm.nice_classes && tm.nice_classes.length) || (tm.classes && tm.classes.length) || (tm.locarno_classes && tm.locarno_classes.length)"
+                                x-text="'Sinif: ' + (tm.nice_classes || tm.classes || tm.locarno_classes || []).join(', ')"></span>
                             <span x-show="tm.application_date" x-text="tm.application_date"></span>
                         </div>
                     </div>

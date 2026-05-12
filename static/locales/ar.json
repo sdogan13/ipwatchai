@@ -784,7 +784,21 @@
     "logo_selected": "تم اختيار الشعار.",
     "select_logo_failed": "تعذر اختيار الشعار.",
     "project_load_failed": "تعذر تحميل مشروع الشعار.",
-    "project_chip": "مشروع {id}"
+    "project_chip": "مشروع {id}",
+    "buy_credits": {
+      "title": "شراء المزيد من أرصدة الذكاء الاصطناعي",
+      "subtitle": "أعد شحن رصيد أرصدة الذكاء الاصطناعي. الأرصدة المشتراة لا تنتهي صلاحيتها.",
+      "pack_small": "صغير — 25 رصيدًا",
+      "pack_medium": "متوسط — 100 رصيد",
+      "pack_large": "كبير — 500 رصيد",
+      "credits_word": "رصيد",
+      "discount_label": "رمز الخصم (اختياري)",
+      "discount_placeholder": "أدخل الرمز",
+      "pay_button": "ادفع عبر iyzico",
+      "load_failed": "تعذر تحميل حزم الأرصدة. يرجى المحاولة مرة أخرى.",
+      "failure": "تعذر بدء عملية الشراء. يرجى المحاولة مرة أخرى.",
+      "success": "تمت إضافة الأرصدة إلى حسابك."
+    }
   },
   "reports": {
     "view_trademark": "العلامة التجارية",
@@ -1344,6 +1358,7 @@
     "detail_classes": "الفئات",
     "detail_holder": "مقدم الطلب",
     "detail_attorney": "الوكيل",
+    "detail_design_holder": "صاحب التصميم",
     "detail_translation_name": "التركية",
     "detail_date": "تاريخ الطلب",
     "detail_reg_no": "رقم التسجيل",

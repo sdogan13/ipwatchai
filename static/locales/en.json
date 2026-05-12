@@ -784,7 +784,21 @@
     "logo_selected": "Logo selected.",
     "select_logo_failed": "Could not select logo.",
     "project_load_failed": "Could not load logo project.",
-    "project_chip": "Project {id}"
+    "project_chip": "Project {id}",
+    "buy_credits": {
+      "title": "Buy more AI credits",
+      "subtitle": "Top up your AI credit balance. Purchased credits never expire.",
+      "pack_small": "Small — 25 credits",
+      "pack_medium": "Medium — 100 credits",
+      "pack_large": "Large — 500 credits",
+      "credits_word": "credits",
+      "discount_label": "Discount code (optional)",
+      "discount_placeholder": "Enter code",
+      "pay_button": "Pay with iyzico",
+      "load_failed": "Could not load credit packs. Please try again.",
+      "failure": "Could not start the purchase. Please try again.",
+      "success": "Credits added to your account."
+    }
   },
   "reports": {
     "view_trademark": "Trademark",
@@ -1344,6 +1358,7 @@
     "detail_classes": "Classes",
     "detail_holder": "Applicant",
     "detail_attorney": "Attorney",
+    "detail_design_holder": "Design Holder",
     "detail_translation_name": "Turkish",
     "detail_date": "Application Date",
     "detail_reg_no": "Reg. No",

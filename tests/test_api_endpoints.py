@@ -1346,7 +1346,7 @@ class TestPublicEndpoints:
             new_callable=AsyncMock,
         ) as mock_svc:
             mock_svc.return_value = {
-                "added": 3, "skipped": 1, "errors": 0, "total": 4,
+                "created": 3, "skipped": 1, "errors": 0, "total": 4,
                 "limit_reached": False, "errors_detail": [],
                 "scan_item_ids": ["00000000-0000-0000-0000-000000000001"],
             }
@@ -1357,7 +1357,9 @@ class TestPublicEndpoints:
 
         assert resp.status_code == 200
         body = resp.json()
-        assert body["added"] == 3
+        # `created` matches the trademark watchlist bulk shape so the
+        # shared _modals.html bulk-confirm modal can read it directly.
+        assert body["created"] == 3
         assert body["skipped"] == 1
         assert body["queued_scans"] == 1
         assert mock_svc.await_count == 1

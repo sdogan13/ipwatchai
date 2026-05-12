@@ -789,7 +789,21 @@
     "logo_selected": "Logo seçildi.",
     "select_logo_failed": "Logo seçilemedi.",
     "project_load_failed": "Logo projesi yüklenemedi.",
-    "project_chip": "Proje {id}"
+    "project_chip": "Proje {id}",
+    "buy_credits": {
+      "title": "Daha fazla AI kredi satın al",
+      "subtitle": "AI kredi bakiyenizi yükleyin. Satın alınan krediler sona ermez.",
+      "pack_small": "Küçük — 25 kredi",
+      "pack_medium": "Orta — 100 kredi",
+      "pack_large": "Büyük — 500 kredi",
+      "credits_word": "kredi",
+      "discount_label": "İndirim kodu (opsiyonel)",
+      "discount_placeholder": "Kodu girin",
+      "pay_button": "iyzico ile öde",
+      "load_failed": "Kredi paketleri yüklenemedi. Lütfen tekrar deneyin.",
+      "failure": "Satın alma başlatılamadı. Lütfen tekrar deneyin.",
+      "success": "Krediler hesabınıza eklendi."
+    }
   },
   "reports": {
     "view_trademark": "Marka",
@@ -1349,6 +1363,7 @@
     "detail_classes": "Sınıflar",
     "detail_holder": "Başvuru Sahibi",
     "detail_attorney": "Vekil",
+    "detail_design_holder": "Tasarım Sahibi",
     "detail_translation_name": "Türkçe",
     "detail_date": "Başvuru Tarihi",
     "detail_reg_no": "Tescil No",
