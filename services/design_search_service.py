@@ -870,8 +870,14 @@ async def run_public_attorney_portfolio_lookup(
             "image_url": image_url,
         })
 
+    # Many design rows store the firm inside the attorney_name itself
+    # (e.g. "ALPER AKSU (SEMBOL PATENT MARKA VE DAN. HİZ. LTD. ŞTİ.)")
+    # and still populate attorney_firm separately. Joining with " — "
+    # would print the firm twice in the modal header, so skip when the
+    # firm is already a substring of the name (case-insensitive).
+    firm_in_name = bool(firm_in) and firm_in.lower() in name_in.lower()
     display_name = (
-        f"{name_in} — {firm_in}" if firm_in else name_in
+        f"{name_in} — {firm_in}" if firm_in and not firm_in_name else name_in
     )
     return {
         "entity_type": "design-attorney",

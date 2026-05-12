@@ -8493,7 +8493,11 @@ window.openAttorneyPortfolio = function (attorneyName, attorneyFirm, _button) {
     if (!nm) return;
     var fm = String(attorneyFirm || '').trim();
     var encoded = JSON.stringify({ name: nm, firm: fm });
-    var display = fm ? (nm + ' — ' + fm) : nm;
+    // Many design rows embed the firm in the attorney_name itself
+    // (e.g. "ALPER AKSU (SEMBOL PATENT ...)") and still carry it on
+    // attorney_firm — skip the dash-join when it would duplicate.
+    var firmInName = fm && nm.toLowerCase().indexOf(fm.toLowerCase()) !== -1;
+    var display = (fm && !firmInName) ? (nm + ' — ' + fm) : nm;
     try {
         var root = document.querySelector('[x-data="dashboard()"]') || document.body;
         if (root && window.Alpine && typeof window.Alpine.$data === 'function') {

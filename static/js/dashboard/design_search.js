@@ -413,7 +413,13 @@
     var attName = (row.attorney_name || "").trim();
     var attFirm = (row.attorney_firm || "").trim();
     if (attName) {
-      var attDisplay = attFirm ? (attName + " — " + attFirm) : attName;
+      // Most design rows have the firm baked into the attorney_name
+      // already (e.g. "ALPER AKSU (SEMBOL PATENT ... LTD. ŞTİ.)") and
+      // ALSO carry it on attorney_firm — concatenating with " — "
+      // would duplicate the firm. Skip the join when the name already
+      // contains the firm string (case-insensitive substring).
+      var attFirmInName = attFirm && attName.toLowerCase().indexOf(attFirm.toLowerCase()) !== -1;
+      var attDisplay = (attFirm && !attFirmInName) ? (attName + " — " + attFirm) : attName;
       var attInner = '<span style="color:var(--color-text-secondary)">' + escapeHtml(attDisplay) + '</span>';
       if (typeof window.openAttorneyPortfolio === "function") {
         attInner = '<button type="button" onclick="window.openAttorneyPortfolio(' +
