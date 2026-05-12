@@ -627,6 +627,8 @@
     "beta": "BETA",
     "palette_section_title": "Paint palette",
     "nice_class_optional": "Nice Class (Optional)",
+    "nice_class_required": "Nice Class",
+    "complete_required_fields": "Complete all required fields before generating.",
     "class_select": "Select class",
     "concept_placeholder": "Enter conflicting brand name or concept...",
     "sector_placeholder": "e.g. Technology, Food, Fashion...",
@@ -2012,7 +2014,12 @@
     "invalid_class_number": "Invalid class number (must be 01-32)",
     "description_too_short": "Please enter at least 3 characters",
     "no_class_suggestions": "No class suggestions found",
-    "class_suggestion_failed": "Could not get suggestions, please try again"
+    "class_suggestion_failed": "Could not get suggestions, please try again",
+    "expand_details": "Show details",
+    "hide_details": "Hide details",
+    "score_visual": "Visual",
+    "score_color": "Color",
+    "score_text": "Text"
   },
   "patent_detail": {
     "loading": "Loading patent details…",

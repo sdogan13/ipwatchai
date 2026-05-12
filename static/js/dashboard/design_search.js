@@ -263,6 +263,23 @@
     );
   }
 
+  // 3-column score breakdown grid cell — mirrors the trademark
+  // result card's expanded score grid. Each cell shows a label on
+  // top + the percentage in a risk-colored bold number below.
+  function _scoreGridCell(label, value01) {
+    var v = Math.round(Math.max(0, Math.min(1, Number(value01) || 0)) * 100);
+    var risk = _riskBucket(v);
+    var colorMap = { critical: "#dc2626", high: "#ea580c", medium: "#d97706", low: "#0891b2" };
+    return (
+      '<div class="text-center p-2 rounded-lg" style="background:var(--color-bg-muted)">' +
+        '<div class="text-[10px] uppercase tracking-wide mb-1" style="color:var(--color-text-muted)">' +
+          escapeHtml(label) +
+        '</div>' +
+        '<div class="text-sm font-bold" style="color:' + colorMap[risk] + '">' + v + '%</div>' +
+      '</div>'
+    );
+  }
+
   function renderResultCard(row) {
     var title = row.product_name_tr || row.product_name_en
               || row.application_no || row.registration_no || "—";
@@ -311,18 +328,19 @@
           : '') +
       '</div>';
 
-    // Score breakdown bars (per-signal: dinov2/clip/color/text)
+    // Score breakdown — 3-column grid mirroring the trademark
+    // card. For design, the three meaningful dimensions are
+    // Visual (max of DINOv2 + CLIP, since both encode visual
+    // similarity), Color (HSV histogram), Text (product-name
+    // trigram). Anything missing renders as 0%.
     var bd = row.similarity_breakdown || {};
-    var bdHtml = "";
-    if (bd && (bd.dinov2_sim || bd.clip_sim || bd.color_sim || bd.text_sim)) {
-      bdHtml =
-        '<div class="mt-2 space-y-1 pt-2" style="border-top:1px solid var(--color-border-light, var(--color-border))">' +
-          (bd.dinov2_sim ? _signalBar("DINOv2", bd.dinov2_sim) : "") +
-          (bd.clip_sim   ? _signalBar("CLIP",   bd.clip_sim)   : "") +
-          (bd.color_sim  ? _signalBar("Color",  bd.color_sim)  : "") +
-          (bd.text_sim   ? _signalBar("Text",   bd.text_sim)   : "") +
-        '</div>';
-    }
+    var visualSim = Math.max(Number(bd.dinov2_sim) || 0, Number(bd.clip_sim) || 0);
+    var bdHtml =
+      '<div class="grid grid-cols-3 gap-2 mb-3">' +
+        _scoreGridCell(t("design_search.score_visual", "Görsel"), visualSim) +
+        _scoreGridCell(t("design_search.score_color", "Renk"), bd.color_sim) +
+        _scoreGridCell(t("design_search.score_text", "Metin"), bd.text_sim) +
+      '</div>';
 
     // Locarno chips
     var locarnoChips = locarno.length === 0 ? "" :
@@ -420,21 +438,26 @@
       ? '<div class="mt-2 flex flex-wrap items-center gap-1.5">' + tpBtn + watchlistBtn + '</div>'
       : "";
 
-    return (
-      '<article class="rounded-lg border-2 p-3 transition-shadow hover:shadow" ' +
-      'style="' + _riskBorderStyle(risk) + ';background:var(--color-bg-card)" ' +
-      'data-design-id="' + escapeHtml(row.id || "") + '">' +
-        imgHtml +
+    // App-no identity row (always visible inside the collapsed header)
+    var appLineHtml = appLine
+      ? '<div class="text-xs"><span style="color:var(--color-text-faint)">' +
+        escapeHtml(t("design_search.appno_label", "App")) + ':</span> ' +
+        '<span class="font-mono" style="color:var(--color-text-secondary)">' + escapeHtml(appLine) + '</span></div>'
+      : "";
 
-        // Title + similarity badge row
+    // Header: image, title + sim badge, status pill + bulletin
+    // chip, app no, and an expand chevron. Click anywhere on the
+    // header (outside inner buttons/links) toggles the details
+    // below. Mirrors the trademark result card UX.
+    var headerHtml =
+      '<div data-design-card-header class="p-3 cursor-pointer">' +
+        imgHtml +
         '<div class="mt-2 flex items-start justify-between gap-2">' +
           '<h4 class="text-sm font-semibold leading-snug min-w-0 truncate" ' +
             'style="color:var(--color-text-primary)" title="' + escapeHtml(title) + '">' +
             escapeHtml(title) + '</h4>' +
           simBadge +
         '</div>' +
-
-        // Status badge + bulletin chip row
         '<div class="mt-1 flex flex-wrap items-center gap-1.5">' +
           (row.current_status
             ? '<span class="text-[10px] px-2 py-0.5 rounded-full font-medium" ' +
@@ -443,20 +466,43 @@
             : '') +
           bulletinHtml +
         '</div>' +
+        (appLineHtml ? '<div class="mt-1.5">' + appLineHtml + '</div>' : '') +
+        '<div class="mt-2 flex items-center justify-center gap-1 text-[11px]" ' +
+          'style="color:var(--color-text-faint)">' +
+          '<span data-design-card-expand-label>' +
+            escapeHtml(t("design_search.expand_details", "Show details")) +
+          '</span>' +
+          '<svg data-design-card-chevron class="w-3.5 h-3.5 transition-transform" ' +
+            'fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>' +
+          '</svg>' +
+        '</div>' +
+      '</div>';
 
-        // Identity rows
-        (appLine
-          ? '<div class="mt-1.5 text-xs"><span style="color:var(--color-text-faint)">' +
-            escapeHtml(t("design_search.appno_label", "App")) + ':</span> ' +
-            '<span class="font-mono" style="color:var(--color-text-secondary)">' + escapeHtml(appLine) + '</span></div>'
-          : '') +
-        regNoHtml +
-        appDateHtml +
-        holderHtml +
-        designerChips +
-        locarnoChips +
+    // Details: score grid + remaining fields + action buttons.
+    // Hidden by default; toggled by the header click handler in
+    // the document-level event delegation.
+    var detailsHtml =
+      '<div data-design-card-details hidden class="px-3 pb-3 pt-2" ' +
+        'style="border-top:1px solid var(--color-border)">' +
         bdHtml +
+        '<div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5 mb-2">' +
+          regNoHtml +
+          appDateHtml +
+          holderHtml +
+          designerChips +
+        '</div>' +
+        locarnoChips +
         actionRow +
+      '</div>';
+
+    return (
+      '<article class="rounded-lg border-2 overflow-hidden transition-shadow hover:shadow" ' +
+      'style="' + _riskBorderStyle(risk) + ';background:var(--color-bg-card)" ' +
+      'data-design-id="' + escapeHtml(row.id || "") + '" ' +
+      'data-design-card-expanded="false">' +
+        headerHtml +
+        detailsHtml +
       '</article>'
     );
   }
@@ -661,6 +707,32 @@
           addDesignToWatchlist(addBtn, payload);
         } catch (err) {
           // Fail silently — invalid payload, shouldn't happen
+        }
+        return;
+      }
+
+      // Result card: toggle expand/collapse on header click.
+      // Don't toggle if the click hit an inner button or link
+      // (so action buttons still work as expected).
+      var hdr = t.closest("[data-design-card-header]");
+      if (hdr && !t.closest("button, a")) {
+        var card = hdr.closest("article[data-design-card-expanded]");
+        if (card) {
+          var details = card.querySelector("[data-design-card-details]");
+          var chevron = card.querySelector("[data-design-card-chevron]");
+          var label = card.querySelector("[data-design-card-expand-label]");
+          var nowExpanded = card.getAttribute("data-design-card-expanded") !== "true";
+          card.setAttribute("data-design-card-expanded", nowExpanded ? "true" : "false");
+          if (details) {
+            if (nowExpanded) details.removeAttribute("hidden");
+            else details.setAttribute("hidden", "");
+          }
+          if (chevron) chevron.style.transform = nowExpanded ? "rotate(180deg)" : "";
+          if (label) {
+            label.textContent = nowExpanded
+              ? t("design_search.hide_details", "Hide details")
+              : t("design_search.expand_details", "Show details");
+          }
         }
         return;
       }

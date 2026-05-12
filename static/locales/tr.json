@@ -632,6 +632,8 @@
     "beta": "BETA",
     "palette_section_title": "Boya paleti",
     "nice_class_optional": "Nice Sınıfı (Opsiyonel)",
+    "nice_class_required": "Nice Sınıfı",
+    "complete_required_fields": "Üretmeden önce tüm zorunlu alanları doldurun.",
     "class_select": "Sınıf seçin",
     "concept_placeholder": "Çakışma olan marka adı veya konsept girin...",
     "sector_placeholder": "Örneğin: Teknoloji, Gıda, Moda...",
@@ -2017,7 +2019,12 @@
     "invalid_class_number": "Geçersiz sınıf numarası (01-32 olmalı)",
     "description_too_short": "En az 3 karakter girin",
     "no_class_suggestions": "Açıklamaya uygun sınıf bulunamadı",
-    "class_suggestion_failed": "Öneri alınamadı, lütfen tekrar deneyin"
+    "class_suggestion_failed": "Öneri alınamadı, lütfen tekrar deneyin",
+    "expand_details": "Detayları göster",
+    "hide_details": "Detayları gizle",
+    "score_visual": "Görsel",
+    "score_color": "Renk",
+    "score_text": "Metin"
   },
   "patent_detail": {
     "loading": "Patent detayları yükleniyor…",

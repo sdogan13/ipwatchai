@@ -627,6 +627,8 @@
     "beta": "تجريبي",
     "palette_section_title": "لوحة الألوان",
     "nice_class_optional": "تصنيف نيس (اختياري)",
+    "nice_class_required": "تصنيف نيس",
+    "complete_required_fields": "أكمل جميع الحقول المطلوبة قبل التوليد.",
     "class_select": "اختر التصنيف",
     "concept_placeholder": "أدخل اسم العلامة المتعارضة أو المفهوم...",
     "sector_placeholder": "مثال: تكنولوجيا، أغذية، أزياء...",
@@ -2014,7 +2016,12 @@
     "invalid_class_number": "رقم صنف غير صالح (يجب أن يكون 01-32)",
     "description_too_short": "يرجى إدخال 3 أحرف على الأقل",
     "no_class_suggestions": "لم يتم العثور على اقتراحات أصناف",
-    "class_suggestion_failed": "تعذّر الحصول على الاقتراحات، يرجى المحاولة مرة أخرى"
+    "class_suggestion_failed": "تعذّر الحصول على الاقتراحات، يرجى المحاولة مرة أخرى",
+    "expand_details": "عرض التفاصيل",
+    "hide_details": "إخفاء التفاصيل",
+    "score_visual": "بصري",
+    "score_color": "لون",
+    "score_text": "نص"
   },
   "patent_detail": {
     "loading": "جارٍ تحميل تفاصيل البراءة…",
