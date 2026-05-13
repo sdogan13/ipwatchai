@@ -294,11 +294,16 @@
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_download_portfolio')">Portfolyo indirme</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_unlimited_leads')">Radar (sinirsiz)</span></li>
                 </ul>
-                <div class="mt-5">
+                <div class="mt-5 space-y-2">
                     <a :href="checkoutHref('enterprise')"
                        class="block text-center px-4 py-3 bg-slate-950 hover:bg-slate-800 text-white rounded-2xl text-sm font-semibold transition-colors no-underline"
                        x-text="t('pricing.cta_start')">
                         Basla
+                    </a>
+                    <a href="mailto:sales@ipwatchai.com?subject=Enterprise%20Plan%20Inquiry"
+                       class="block text-center px-4 py-2.5 text-slate-700 hover:bg-slate-100 rounded-2xl text-xs font-medium transition-colors no-underline border border-slate-300"
+                       x-text="t('pricing.enterprise_talk_to_sales')">
+                        Talk to Sales
                     </a>
                 </div>
             </div>
@@ -308,6 +313,13 @@
         <!-- Footer note -->
         <div class="text-center mt-10 text-sm text-slate-500" x-text="t('pricing.vat_note')">
             Tum fiyatlar KDV harictir.
+        </div>
+
+        <!-- Sales / Billing contact strip -->
+        <div class="text-center mt-4 text-xs text-slate-500 space-x-4">
+            <a href="mailto:sales@ipwatchai.com" class="no-underline hover:text-slate-700">
+                <span x-text="t('pricing.contact_sales_line')">Custom plan or volume pricing? Contact sales@ipwatchai.com</span>
+            </a>
         </div>
 
         <!-- FAQ Section -->

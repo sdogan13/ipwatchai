@@ -2434,8 +2434,19 @@
             <div>
                 <h4 class="font-semibold mb-3 text-sm" style="color:var(--color-text-primary)" x-text="t('landing.footer_contact')">Iletisim</h4>
                 <div class="flex flex-col gap-2 text-sm" style="color:var(--color-text-muted)">
-                    <span>info@ipwatchai.com</span>
-                    <span>ipwatchai.com</span>
+                    <a href="mailto:info@ipwatchai.com" class="no-underline hover:opacity-80" style="color:var(--color-text-muted)">
+                        <span class="font-medium" x-text="t('landing.contact_general')">General</span>: info@ipwatchai.com
+                    </a>
+                    <a href="mailto:support@ipwatchai.com" class="no-underline hover:opacity-80" style="color:var(--color-text-muted)">
+                        <span class="font-medium" x-text="t('landing.contact_support')">Support</span>: support@ipwatchai.com
+                    </a>
+                    <a href="mailto:sales@ipwatchai.com" class="no-underline hover:opacity-80" style="color:var(--color-text-muted)">
+                        <span class="font-medium" x-text="t('landing.contact_sales_label')">Sales</span>: sales@ipwatchai.com
+                    </a>
+                    <a href="mailto:billing@ipwatchai.com" class="no-underline hover:opacity-80" style="color:var(--color-text-muted)">
+                        <span class="font-medium" x-text="t('landing.contact_billing')">Billing</span>: billing@ipwatchai.com
+                    </a>
+                    <span class="mt-1">ipwatchai.com</span>
                 </div>
             </div>
         </div>
