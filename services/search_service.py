@@ -114,7 +114,7 @@ def get_public_search_daily_limit(plan_features=None) -> int:
 
     free_plan = plan_features.get("free", {})
     try:
-        return int(free_plan.get("max_daily_quick_searches", 5))
+        return int(free_plan.get("max_daily_live_searches", 5))
     except (TypeError, ValueError):
         return 5
 

@@ -1,6 +1,7 @@
 ﻿"""Patent / Faydalı Model search routes.
 
-  * ``POST /api/v1/patent-search/quick``      — authenticated, full results
+  * ``POST /api/v1/patent-search``            — authenticated, full results;
+    shares the daily Agentic Search quota with the other registries
   * ``GET/POST /api/v1/patent-search/public`` — anonymous, max 10 results, text-only
   * ``GET /api/v1/patent-search/ipc-autocomplete?q=`` — typeahead over IPC
     classes that actually exist in the patent corpus

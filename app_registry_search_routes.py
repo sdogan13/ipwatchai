@@ -1,7 +1,8 @@
 """Cross-registry unified search routes.
 
 Three endpoints, mirroring the design and trademark search shape:
-  * POST   /api/v1/registry-search/quick   — Bearer auth, full results
+  * POST   /api/v1/registry-search         — Bearer auth, full results;
+    shares the daily Agentic Search quota with the other registries
   * GET    /api/v1/registry-search/public  — anonymous, max 10
   * POST   /api/v1/registry-search/public  — same, form body
 

@@ -87,7 +87,7 @@ def _retrieve_trademark_candidates(
 
     Returns a list of normalized result dicts (registry_type='trademark').
     Lightweight by design — does NOT use the RiskEngine. Use
-    ``/api/v1/search/quick`` for full risk-engine scoring on a single
+    ``/api/v1/search`` for full risk-engine scoring on a single
     trademark query.
     """
     by_id: Dict[str, Dict[str, float]] = {}

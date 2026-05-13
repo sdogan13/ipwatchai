@@ -1,7 +1,8 @@
 """Coğrafi İşaret ve Geleneksel Ürün Adı search routes.
 
-  * ``POST /api/v1/cografi-search/quick``      — authenticated, full results,
-    text + image hybrid retrieval, all filters
+  * ``POST /api/v1/cografi-search``            — authenticated, full results,
+    text + image hybrid retrieval, all filters; shares the daily Agentic Search
+    quota with the other registries
   * ``GET/POST /api/v1/cografi-search/public`` — anonymous, max 10 results,
     text-only retrieval, no image upload
   * ``GET /api/v1/cografi-search/autocomplete?q=`` — typeahead over names
