@@ -5805,11 +5805,6 @@ async def test_watchlist_service_import_watchlist_items_from_portfolio_uses_embe
     current_user.id = uuid.uuid4()
     current_user.organization_id = uuid.uuid4()
 
-    db_perm_cm = MagicMock()
-    db_perm = MagicMock()
-    db_perm_cm.__enter__.return_value = db_perm
-    db_perm_cm.__exit__.return_value = False
-
     db_cm = MagicMock()
     db = MagicMock()
     cursor = MagicMock()
@@ -5850,8 +5845,6 @@ async def test_watchlist_service_import_watchlist_items_from_portfolio_uses_embe
     watchlist_crud.create_with_embeddings.return_value = {"id": created_item_id}
 
     def plan_limit_getter(plan_name, feature):
-        if feature == "can_view_holder_portfolio":
-            return True
         if feature == "max_watchlist_items":
             return 2
         raise AssertionError(f"Unexpected feature: {feature}")
@@ -5859,9 +5852,9 @@ async def test_watchlist_service_import_watchlist_items_from_portfolio_uses_embe
     payload = await import_watchlist_items_from_portfolio(
         data=BulkFromPortfolioRequest(holder_id="holder-1", similarity_threshold=0.7),
         current_user=current_user,
-        database_factory=MagicMock(side_effect=[db_perm_cm, db_cm]),
+        database_factory=MagicMock(return_value=db_cm),
         watchlist_crud=watchlist_crud,
-        user_plan_getter=MagicMock(return_value={"plan_name": "starter"}),
+        user_plan_getter=MagicMock(return_value={"plan_name": "free"}),
         plan_limit_getter=plan_limit_getter,
     )
 

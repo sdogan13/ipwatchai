@@ -512,35 +512,6 @@ def _find_column_match(columns, variants):
     return None
 
 
-def _ensure_portfolio_access_allowed(
-    db,
-    user_id,
-    user_plan_getter=None,
-    plan_limit_getter=None,
-):
-    """Ensure the user's plan can import from holder or attorney portfolios."""
-    if user_plan_getter is None:
-        from utils.subscription import get_user_plan
-
-        user_plan_getter = get_user_plan
-    if plan_limit_getter is None:
-        from utils.subscription import get_plan_limit
-
-        plan_limit_getter = get_plan_limit
-
-    plan = user_plan_getter(db, str(user_id))
-    can_view = plan_limit_getter(plan["plan_name"], "can_view_holder_portfolio")
-    if not can_view:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "error": "upgrade_required",
-                "message": "Portfoy erisimi icin Business veya ustu plan gereklidir.",
-                "current_plan": plan["plan_name"],
-            },
-        )
-
-
 def _get_auto_scan_limit(
     db,
     user_id,
@@ -1160,14 +1131,6 @@ async def import_watchlist_items_from_portfolio(
         watchlist_item_create_cls = WatchlistItemCreate
 
     _require_portfolio_lookup_params(data)
-
-    with database_factory() as db_perm:
-        _ensure_portfolio_access_allowed(
-            db_perm,
-            current_user.id,
-            user_plan_getter=user_plan_getter,
-            plan_limit_getter=plan_limit_getter,
-        )
 
     with database_factory() as db:
         cur = db.cursor()
