@@ -1,7 +1,7 @@
 /**
  * Patent leads driver — fed by /api/v1/patent-leads.
  *
- * Powers the Patent registry of Opposition Radar. Surfaces actionable
+ * Powers the Patent registry of Radar. Surfaces actionable
  * events from patent_events as a paginated list with category + holder
  * + watchlist-scope filters.
  *

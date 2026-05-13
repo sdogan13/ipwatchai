@@ -373,6 +373,123 @@ def test_parse_event_index_page_fingerprint_includes_page_independence() -> None
     assert e7.page == 7 and e1500.page == 1500
 
 
+# ---------------------------------------------------------------------------
+# In-page sub-section splitting (bulletin 2025/3 page 1272 bug case)
+# ---------------------------------------------------------------------------
+
+
+def test_parse_event_index_page_in_page_section_split() -> None:
+    """A single page contains multiple sub-section headers. Each
+    anchor should pick up the event_type of the header that most-
+    recently precedes it.
+
+    This reproduces bulletin 2025/3 page 1272 — under the carried-over
+    APPLICATION_LAPSED_OR_REJECTED state, the page then introduces
+    a "Yayından Sonraki Düzeltmenin İlanı" header (→
+    POST_PUB_AMENDMENT) and a "Kesinleşmiş Patentler" header (→
+    GRANT_FINALIZED). Without in-page splitting, all rows would be
+    classified as APPLICATION_LAPSED_OR_REJECTED.
+    """
+    page_text = (
+        # Anchor 1 — falls under the carried-in section (LAPSED).
+        "2012/05381\n"
+        "Application example 1\n"
+        # Sub-header transitions to POST_PUB_AMENDMENT.
+        "Patent / Faydalı Model Başvurularında / Belgelerinde Yayından Sonraki "
+        "Düzeltmenin İlanı\n"
+        "Başvuru No\n"
+        # Anchor 2 — under POST_PUB_AMENDMENT.
+        "2020/16500\n"
+        "Reinforced soil panel\n"
+        # Sub-header transitions to GRANT_FINALIZED.
+        "6769 SAYILI SMK'NIN 99 UNCU MADDE HÜKMÜ UYARINCA YAYIMLANAN "
+        "KESİNLEŞMİŞ PATENTLER\n"
+        "Başvuru No\n"
+        # Anchor 3 — under GRANT_FINALIZED.
+        "2017/04655\n"
+        "ARAÇ SÜSPANSİYONU\n"
+    )
+    events = parse_event_index_page(
+        page_text, page_no=1272, bulletin_no="2025/3",
+        initial_section_event_type="APPLICATION_LAPSED_OR_REJECTED",
+    )
+    assert len(events) == 3
+    # First row falls under the carried-in section.
+    assert events[0].application_no == "2012/05381"
+    assert events[0].event_type == "APPLICATION_LAPSED_OR_REJECTED"
+    # Second row falls under the first in-page header.
+    assert events[1].application_no == "2020/16500"
+    assert events[1].event_type == "POST_PUB_AMENDMENT"
+    # Third row falls under the second in-page header — the bug fix.
+    # Previously this would have been APPLICATION_LAPSED_OR_REJECTED.
+    assert events[2].application_no == "2017/04655"
+    assert events[2].event_type == "GRANT_FINALIZED"
+
+
+def test_parse_event_index_page_phrase_classification_wins_over_carry_in() -> None:
+    """Carry-in section override applies only when the per-row phrase
+    classifier returns UNKNOWN. Rows whose free_text matches a
+    registered phrase keep their classifier result."""
+    # "Başvuru Yayınıın İlanı (6769 SMK)" is in _PHRASE_TO_EVENT_TYPE
+    # but NOT in _SECTION_HEADERS_TO_EVENT_TYPE — so it only classifies
+    # the row, never establishes a section. That gives us a clean test
+    # for phrase-vs-section precedence.
+    page_text = (
+        "2020/00001\n"
+        "Başvuru Yayınıın İlanı (6769 SMK)\n"
+        "2020/00002\n"
+        "Some description that doesn't match any phrase\n"
+    )
+    events = parse_event_index_page(
+        page_text, page_no=99, bulletin_no="2025/8",
+        initial_section_event_type="POST_PUB_AMENDMENT",
+    )
+    assert len(events) == 2
+    # First event keeps its phrase-classified type.
+    assert events[0].event_type == "APPLICATION_PUBLISHED"
+    # Second event has no recognised phrase → gets the carry-in section.
+    assert events[1].event_type == "POST_PUB_AMENDMENT"
+
+
+def test_find_section_header_positions_handles_two_line_wrap() -> None:
+    """PyMuPDF can wrap a long banner across two lines. The header
+    detector should still find it."""
+    from pdf_extract_patent_events import find_section_header_positions
+    lines = [
+        "Some intro text",
+        "6769 SAYILI SMK'NIN 99 UNCU MADDE HÜKMÜ UYARINCA YAYIMLANAN",
+        "KESİNLEŞMİŞ PATENTLER",
+        "Başvuru No",
+        "2017/04655",
+    ]
+    positions = find_section_header_positions(lines)
+    assert len(positions) == 1
+    assert positions[0][1] == "GRANT_FINALIZED"
+
+
+def test_last_section_event_type_carries_when_no_header() -> None:
+    """A page with no recognised header should preserve the caller's
+    initial value."""
+    from pdf_extract_patent_events import last_section_event_type
+    page = "2020/00001\nSome random description\n"
+    assert last_section_event_type(page, initial="LICENSE_OFFER") == "LICENSE_OFFER"
+
+
+def test_last_section_event_type_returns_last_header() -> None:
+    """When multiple headers appear on the page, the LAST one wins —
+    it's what governs the next page's anchors."""
+    from pdf_extract_patent_events import last_section_event_type
+    page = (
+        "Verilen Patent / Faydalı Model İlanı (6769 SMK)\n"
+        "2020/00001\n"
+        "row 1\n"
+        "Reddedilen Patent/Faydalı Model Başvurularının İlanı (6769 SMK)\n"
+        "2020/00002\n"
+        "row 2\n"
+    )
+    assert last_section_event_type(page) == "APPLICATION_REJECTED"
+
+
 def test_parsed_event_serialisable_via_asdict() -> None:
     """ParsedEvent must be json.dumps-clean via dataclasses.asdict.
     events.json serialisation depends on this."""

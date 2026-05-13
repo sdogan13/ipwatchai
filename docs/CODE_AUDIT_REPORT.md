@@ -109,7 +109,7 @@ TOTAL:                                    37 fields
 
 | Feature                    | Backend File(s)           | Endpoint(s)             | Frontend     | Status  |
 |---------------------------|--------------------------|-------------------------|-------------|---------|
-| Opposition radar (leads)   | api/leads.py             | 8 endpoints /leads/*    | leads panel | ACTIVE  |
+| Radar (leads)           | api/leads.py             | 8 endpoints /leads/*    | leads panel | ACTIVE  |
 | Risk scoring (unified)     | risk_engine.py           | All search endpoints    | score badges| ACTIVE  |
 | Watchlist monitoring        | watchlist/scanner.py     | 18 endpoints /watchlist/*| watchlist UI| ACTIVE  |
 | IDF scoring (3-tier)        | services/scoring_service.py | /admin/idf-*        | admin panel | ACTIVE  |

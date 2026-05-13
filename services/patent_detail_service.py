@@ -116,7 +116,16 @@ def _fetch_priorities(cur, patent_id: str) -> List[Dict[str, Any]]:
     return out
 
 
-def _fetch_figures(cur, patent_id: str) -> List[Dict[str, Any]]:
+def _fetch_figures(
+    cur, patent_id: str, bulletin_folder: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Fetch patent figures and pre-compute the image URL per row.
+
+    The serving route is /api/v1/patent-image/{bulletin_folder}/{image_path}.
+    bulletin_folder lives on the patent row (not the figure row), so
+    callers pass it in. Figures with NULL image_path get image_url=None
+    and the UI should skip them.
+    """
     cur.execute(
         """
         SELECT seq, source, image_path, page, image_xref
@@ -127,7 +136,18 @@ def _fetch_figures(cur, patent_id: str) -> List[Dict[str, Any]]:
         """,
         (patent_id,),
     )
-    return [_row_to_dict(r) for r in cur.fetchall()]
+    out: List[Dict[str, Any]] = []
+    for r in cur.fetchall():
+        d = _row_to_dict(r)
+        path = d.get("image_path")
+        if path and bulletin_folder:
+            d["image_url"] = "/api/v1/patent-image/{folder}/{path}".format(
+                folder=bulletin_folder, path=str(path).lstrip("/"),
+            )
+        else:
+            d["image_url"] = None
+        out.append(d)
+    return out
 
 
 def _fetch_recent_events(cur, patent_id: str, app_no: Optional[str]) -> List[Dict[str, Any]]:
@@ -300,7 +320,7 @@ def get_patent_detail(*, patent_id: UUID | str, db_factory=Database) -> Dict[str
             "inventors": _fetch_inventors(cur, pid),
             "attorneys": _fetch_attorneys(cur, pid),
             "priorities": _fetch_priorities(cur, pid),
-            "figures": _fetch_figures(cur, pid),
+            "figures": _fetch_figures(cur, pid, row.get("bulletin_folder")),
             "recent_events": all_events,
         }
 

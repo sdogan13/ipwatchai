@@ -1,9 +1,9 @@
 <!-- ============================================ -->
-<!-- Tab: Opposition Radar                        -->
+<!-- Tab: Radar                        -->
 <!-- Registry-first switcher mirrors Search/Watchlist:
        Marka | Tasarım | Patent | Coğrafi             -->
 <!-- ============================================ -->
-<div id="tab-content-opposition-radar"
+<div id="tab-content-radar"
      x-data="{ radarView: (function () {
          try {
              var v = localStorage.getItem('radarView');
@@ -88,7 +88,7 @@
         <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
             <div>
                 <h2 class="text-2xl font-bold flex items-center gap-3" style="color:var(--color-text-primary)">
-                    <span x-text="t('leads.title')">Opposition Radar</span>
+                    <span x-text="t('leads.title')">Radar</span>
                 </h2>
                 <p class="mt-1" style="color:var(--color-text-muted)" x-text="t('leads.subtitle')">Potansiyel musteriler - Itiraz hizmeti firsatlari</p>
                 <div id="lead-last-scan" class="mt-0.5"></div>
@@ -838,7 +838,7 @@
             <div class="w-16 h-16 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-4">
                 <svg class="h-8 w-8 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
             </div>
-            <h3 class="text-2xl font-bold mb-2" style="color:var(--color-text-primary)" x-text="t('leads.upgrade_title')">Opposition Radar</h3>
+            <h3 class="text-2xl font-bold mb-2" style="color:var(--color-text-primary)" x-text="t('leads.upgrade_title')">Radar</h3>
             <p class="mb-6" style="color:var(--color-text-muted)" x-text="t('leads.upgrade_desc')">
             </p>
             <div class="rounded-xl p-4 mb-6 text-left" style="background:var(--color-bg-muted)">

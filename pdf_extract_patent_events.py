@@ -354,6 +354,49 @@ _SECTION_HEADERS_TO_EVENT_TYPE: List[Tuple[str, str]] = [
     # Section listing apps whose description (tarifname) was amended.
     ("TARİFNAMESİNDE DEĞİŞİKLİK YAPILAN PATENT/FAYDALI MODEL BAŞVURULARI",
      "DESCRIPTION_AMENDED_LEGACY_551"),
+
+    # ── Mixed-case sub-section headers that appear MID-PAGE on the
+    # late-bulletin section pages (pp 1200+ for modern bulletins).
+    # Each one defines its own sub-section of (app_no, title, holder)
+    # rows below it on the same page.
+    #
+    # Verified visually on bulletin 2025/3 (PT_2025_3_2025-03-21)
+    # page 1272 — multiple sub-headers per page, each governing the
+    # rows immediately below until the next sub-header. Previously
+    # only ONE banner was detected per page, so the rows after the
+    # second sub-header got mis-classified as the first one's
+    # event_type (e.g. finalized grants tagged as
+    # APPLICATION_LAPSED_OR_REJECTED).
+    ("Kesinleşen Patent Verilme Kararının İlanı (6769 SMK)",
+     "GRANT_FINALIZED"),
+    ("6769 SAYILI SMK'NIN 99 UNCU MADDE HÜKMÜ UYARINCA YAYIMLANAN KESİNLEŞMİŞ PATENTLER",
+     "GRANT_FINALIZED"),
+    ("Verilen Patent / Faydalı Model İlanı (6769 SMK)",
+     "GRANT_ANNOUNCED"),
+    ("Geri Çekilmiş Sayılan Patent / Faydalı Model Başvurularının İlanı (6769 SMK)",
+     "APPLICATION_WITHDRAWN"),
+    ("GERİ ÇEKMİŞ SAYILAN PATENT / FAYDALI MODEL BAŞVURULARI (6769 SMK)",
+     "APPLICATION_WITHDRAWN"),
+    ("Reddedilen Patent/Faydalı Model Başvurularının İlanı (6769 SMK)",
+     "APPLICATION_REJECTED"),
+    ("Yayımlanmış Patent Başvurularının Araştırma Raporları (6769 SMK)",
+     "SEARCH_REPORT_PATENT"),
+    ("Yayımlanmış Faydalı Model Başvurularının Araştırma Raporları (6769 SMK)",
+     "SEARCH_REPORT_UM"),
+    ("Araştırma Raporu İle Birlikte Yayımlanan Patent Başvuruları (6769 SMK)",
+     "SEARCH_REPORT_WITH_APPLICATION_PATENT"),
+    ("Araştırma Raporu İle Birlikte Yayımlanan Faydalı Model Başvuruları (6769 SMK)",
+     "SEARCH_REPORT_WITH_APPLICATION_UM"),
+    ("Patent / Faydalı Model Başvurularında / Belgelerinde Yayından Sonraki Düzeltmenin İlanı",
+     "POST_PUB_AMENDMENT"),
+    ("YİDK Kararı İle Yeniden İşleme Alınan Patent/FM Başvurusu/Belgesi İlanı",
+     "YIDK_AMENDED_CONTINUATION"),
+    ("Mülga 551 Sayılı KHK'nin 129 uncu veya 165 inci Maddeleri Hükmü Uyarınca Hükümsüzlüğüne Karar Verilen Patent/Faydalı Model Belgeleri",
+     "GRANT_INVALIDATED_LEGACY_551"),
+    ("Kullanıldığı Beyanı Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)",
+     "USE_DECLARATION_RECORDED"),
+    ("Kullanılmadığı Beyanı Sicile Kaydedilen Başvuru veya Patent/Faydalı Modellerin İlanı (6769 SMK)",
+     "NONUSE_DECLARATION_RECORDED"),
 ]
 
 
@@ -468,32 +511,89 @@ class ParsedEvent:
     fingerprint: str
 
 
+def find_section_header_positions(
+    lines: List[str],
+) -> List[Tuple[int, str]]:
+    """Locate every section header from `_SECTION_HEADERS_TO_EVENT_TYPE`
+    inside a page's line list. Returns sorted `[(line_index, event_type)]`.
+
+    Headers in the PDF text often wrap across two consecutive lines
+    (PyMuPDF inserts line breaks at ~80 chars for long banners). Try
+    matching the header in:
+      - single line  : lines[i]
+      - two-line join: lines[i] + " " + lines[i+1]
+      - three-line   : lines[i] + " " + lines[i+1] + " " + lines[i+2]
+
+    Multiple headers can appear on the same page in different
+    positions — they each govern the anchors that follow until the
+    next header. This is the fix for bulletin 2025/3 page 1272 (and
+    others), which mixes 3-5 sub-sections per page.
+    """
+    if not lines:
+        return []
+    norm_headers = [
+        (_normalise_phrase(h).lower(), et)
+        for h, et in _SECTION_HEADERS_TO_EVENT_TYPE
+    ]
+    positions: List[Tuple[int, str]] = []
+    seen_lines: set = set()
+    for i in range(len(lines)):
+        if i in seen_lines:
+            continue
+        for window in (1, 2, 3):
+            if i + window > len(lines):
+                break
+            joined = _normalise_phrase(" ".join(lines[i:i + window])).lower()
+            if not joined:
+                continue
+            matched = None
+            for norm_h, et in norm_headers:
+                if norm_h in joined:
+                    matched = et
+                    break
+            if matched:
+                positions.append((i, matched))
+                # Don't re-detect the same header on its
+                # continuation lines.
+                for j in range(i, i + window):
+                    seen_lines.add(j)
+                break
+    return positions
+
+
 def parse_event_index_page(
     page_text: str,
     page_no: int,
     bulletin_no: Optional[str],
+    initial_section_event_type: Optional[str] = None,
 ) -> List[ParsedEvent]:
     """Parse one EVENT_INDEX page text into a list of events.
 
     Algorithm:
       1. Split page text into lines, strip whitespace per line.
-      2. Find every line matching ``^YYYY/NNNNNN$`` — those are event
+      2. Find every recognised section header position in the lines.
+         Each header defines a sub-section that governs anchors
+         until the next header.
+      3. Find every line matching ``^YYYY/NNNNNN$`` — those are event
          anchors. Header lines ("BAŞVURU NUMARALARINA..." etc.) get
          dropped naturally because they don't match.
-      3. For each consecutive pair of anchors (i, i+1), the lines
+      4. For each consecutive pair of anchors (i, i+1), the lines
          between them are the description for the FIRST anchor.
          Multi-line descriptions (PDF text-extraction wraps long
          phrases) get joined with " " before classification.
-      4. The last anchor's description runs to the end of the page;
-         trailing blank lines are stripped.
+      5. Walk anchors in order. Track the current section event_type
+         as the most-recently-seen header. Use that to fill in
+         UNKNOWN classifications.
 
-    The same application_no can have multiple events on one page —
-    each anchor produces one event regardless of duplicates. The
-    fingerprint includes event_type + free_text so dedup at ingest
-    time keeps both rows.
+    `initial_section_event_type` carries section state from the
+    previous page — anchors at the top of the page (before any
+    in-page header) inherit it.
 
-    page_no is 1-based (PyMuPDF doc[i] uses 0-based, callers pass
-    i + 1). Stored in patent_events.page for traceability.
+    Same application_no can have multiple events on one page — each
+    anchor produces one event. The fingerprint includes event_type +
+    free_text so dedup at ingest time keeps both rows.
+
+    page_no is 1-based.
     """
     if not page_text:
         return []
@@ -514,6 +614,11 @@ def parse_event_index_page(
             break
         lines.append(stripped)
 
+    # In-page section header positions — defines per-anchor section
+    # override. Section state at the very top of the page is the
+    # caller-supplied initial value (last header on previous page).
+    header_positions = find_section_header_positions(lines)
+
     # Find anchor positions
     anchors: List[Tuple[int, str]] = [
         (i, line) for i, line in enumerate(lines)
@@ -523,7 +628,16 @@ def parse_event_index_page(
         return []
 
     events: List[ParsedEvent] = []
+    current_section = initial_section_event_type
+    next_header_idx = 0
     for k, (idx, app_no) in enumerate(anchors):
+        # Consume any headers that precede this anchor — the most
+        # recent one wins as the current section.
+        while (next_header_idx < len(header_positions)
+               and header_positions[next_header_idx][0] < idx):
+            current_section = header_positions[next_header_idx][1]
+            next_header_idx += 1
+
         # Description = lines between this anchor and the next (or end)
         next_idx = anchors[k + 1][0] if k + 1 < len(anchors) else len(lines)
         desc_lines = [line for line in lines[idx + 1:next_idx] if line]
@@ -534,6 +648,15 @@ def parse_event_index_page(
             continue
         free_text = " ".join(desc_lines)
         event_type = classify_event_phrase(free_text)
+
+        # Section override: only apply when the per-row phrase
+        # classifier returned UNKNOWN. Rows whose free_text is a
+        # known phrase keep their classifier result (intermixed
+        # event-index pages remain accurate even when wrapped in a
+        # section).
+        if event_type == EVENT_TYPE_UNKNOWN and current_section:
+            event_type = current_section
+
         events.append(ParsedEvent(
             application_no=app_no,
             event_type=event_type,
@@ -544,6 +667,30 @@ def parse_event_index_page(
             ),
         ))
     return events
+
+
+def last_section_event_type(
+    page_text: str, initial: Optional[str] = None,
+) -> Optional[str]:
+    """Return the section event_type that should carry forward to the
+    next page after processing this page. That's the last header
+    found on this page, or the caller's `initial` value if no header
+    appeared.
+
+    Used by the orchestrator to flow section state across pages.
+    """
+    if not page_text:
+        return initial
+    lines: List[str] = []
+    for raw in page_text.splitlines():
+        stripped = raw.strip()
+        if stripped.startswith("________"):
+            break
+        lines.append(stripped)
+    positions = find_section_header_positions(lines)
+    if positions:
+        return positions[-1][1]
+    return initial
 
 
 # ---------------------------------------------------------------------------
@@ -605,13 +752,14 @@ def parse_pdf_events(pdf_path: Path | str) -> Dict[str, Any]:
         events: List[ParsedEvent] = []
         event_index_pages_scanned = 0
 
-        # Section-state machine: when the parser encounters a page
-        # that contains a canonical section header, that header's
-        # event_type becomes the default for all UNKNOWN rows on this
-        # and subsequent pages until either (a) another recognised
-        # section header appears, or (b) the page changes back to
-        # INID_RECORDS / SKIP. State resets between INID-vs-event
-        # transitions so a section doesn't bleed across the bulletin.
+        # Section-state machine. Each EVENT_INDEX page can contain
+        # MULTIPLE sub-section headers (verified on bulletin 2025/3
+        # page 1272). parse_event_index_page handles per-anchor
+        # section override using the in-page header positions; the
+        # orchestrator just carries the state across pages.
+        #
+        # State resets between INID-vs-event transitions so a section
+        # doesn't bleed across the bulletin.
         current_section_event_type: Optional[str] = None
 
         for i in range(doc.page_count):
@@ -625,29 +773,17 @@ def parse_pdf_events(pdf_path: Path | str) -> Dict[str, Any]:
                 continue
             event_index_pages_scanned += 1
 
-            section_hint = detect_section_event_type(page_text)
-            if section_hint is not None:
-                current_section_event_type = section_hint
-
             page_events = parse_event_index_page(
                 page_text, page_no=i + 1, bulletin_no=bulletin_no,
+                initial_section_event_type=current_section_event_type,
             )
-            # Apply section override to UNKNOWN-classified rows. Rows
-            # whose free_text matched a phrase keep their classifier
-            # result (handles intermixed sections where the flat-
-            # event-index style still appears alongside).
-            if current_section_event_type:
-                for ev in page_events:
-                    if ev.event_type == EVENT_TYPE_UNKNOWN:
-                        ev.event_type = current_section_event_type
-                        # Re-fingerprint to incorporate the assigned
-                        # event_type — otherwise dedup at ingest time
-                        # would still see UNKNOWN+free_text variants.
-                        ev.fingerprint = event_fingerprint(
-                            bulletin_no, ev.application_no,
-                            ev.event_type, ev.free_text,
-                        )
             events.extend(page_events)
+
+            # Carry the page's final section state forward to the
+            # next page (the last header seen on this page wins).
+            current_section_event_type = last_section_event_type(
+                page_text, initial=current_section_event_type,
+            )
 
     by_event_type = Counter(e.event_type for e in events)
 

@@ -142,7 +142,7 @@ window.AppAPI.handleAgenticSearch = async function () {
 };
 
 // ============================================
-// OPPOSITION RADAR - LEADS
+// RADAR - LEADS
 // ============================================
 window.AppAPI.loadLeadStats = async function () {
     try {
@@ -331,7 +331,7 @@ var currentBankruptcyPage = 1;
 var currentRadarMode = 'conflicts';
 
 // Sub-mode switcher within the Marka registry. Patent is now a registry-level
-// view handled by the Alpine x-data on #tab-content-opposition-radar.
+// view handled by the Alpine x-data on #tab-content-radar.
 window.AppAPI.switchRadarMode = function (mode) {
     currentRadarMode = mode;
     var modes = {

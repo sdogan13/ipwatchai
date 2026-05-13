@@ -1543,7 +1543,7 @@
                 <div class="w-12 h-12 rounded-xl mb-4 flex items-center justify-center" style="background:rgba(239, 68, 68, 0.1)">
                     <svg class="w-6 h-6" style="color:#ef4444" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
                 </div>
-                <h3 class="font-semibold mb-2" style="color:var(--color-text-primary)" x-text="t('landing.feature_radar_title')">Opposition Radar</h3>
+                <h3 class="font-semibold mb-2" style="color:var(--color-text-primary)" x-text="t('landing.feature_radar_title')">Radar</h3>
                 <p class="text-sm" style="color:var(--color-text-secondary)" x-text="t('landing.feature_radar_desc')">Yeni marka basvurularini otomatik tarama ve itiraz suresi takibi.</p>
             </div>
             <!-- Watchlist -->
@@ -1705,17 +1705,17 @@
                     <li class="flex items-center gap-2">{{ cross|safe }} <span style="color:#9ca3af" x-text="t('pricing.f_download_portfolio')">Portföy indirme</span></li>
                     {% endif %}
                     {# === PRO+: enabled from professional upward === #}
-                    <!-- 10. Opposition Radar -->
+                    <!-- 10. Radar -->
                     {% if plan.daily_lead_views > 0 %}
                     <li class="flex items-center gap-2">{{ chk|safe }}
                         {% if plan.daily_lead_views >= 999999 %}
-                        <span x-text="t('pricing.f_unlimited_leads')">Opposition Radar (sınırsız)</span>
+                        <span x-text="t('pricing.f_unlimited_leads')">Radar (sınırsız)</span>
                         {% else %}
-                        <span x-text="t('pricing.f_leads_daily', {n: {{ plan.daily_lead_views }}})">Opposition Radar ({{ plan.daily_lead_views }} lead/gün)</span>
+                        <span x-text="t('pricing.f_leads_daily', {n: {{ plan.daily_lead_views }}})">Radar ({{ plan.daily_lead_views }} lead/gün)</span>
                         {% endif %}
                     </li>
                     {% else %}
-                    <li class="flex items-center gap-2">{{ cross|safe }} <span style="color:#9ca3af" x-text="t('pricing.f_leads_daily', {n: 0})">Opposition Radar</span></li>
+                    <li class="flex items-center gap-2">{{ cross|safe }} <span style="color:#9ca3af" x-text="t('pricing.f_leads_daily', {n: 0})">Radar</span></li>
                     {% endif %}
                 </ul>
                 {% if plan_key == 'free' %}
@@ -1758,7 +1758,7 @@
                     <div class="w-10 h-10 rounded-lg flex items-center justify-center" style="background:rgba(239, 68, 68, 0.1)">
                         <svg class="w-5 h-5" style="color:#ef4444" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
                     </div>
-                    <h3 class="font-semibold" style="color:var(--color-text-primary)" x-text="t('landing.about_svc_radar_title')">Opposition Radar</h3>
+                    <h3 class="font-semibold" style="color:var(--color-text-primary)" x-text="t('landing.about_svc_radar_title')">Radar</h3>
                 </div>
                 <p class="text-sm leading-relaxed" style="color:var(--color-text-secondary)" x-text="t('landing.about_svc_radar_desc')"></p>
             </div>

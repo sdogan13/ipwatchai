@@ -306,6 +306,113 @@ def test_grant_fee_lapse_on_unknown_infers_grant():
     assert res.status == PatentStatus.LAPSED_GRANT
 
 
+# ---- PROCEDURAL_REVALIDATION + WITHDRAWN softening -------------
+
+
+def test_procedural_revalidation_revives_withdrawn():
+    # Same date: APPLICATION_WITHDRAWN (rank -3) applied first,
+    # PROCEDURAL_REVALIDATION (rank +2) applied second → PENDING.
+    res = derive_patent_status(
+        [
+            _ev("APPLICATION_WITHDRAWN", "2025-04-21"),
+            _ev("PROCEDURAL_REVALIDATION", "2025-04-21"),
+        ],
+        record_type="PUBLISHED_APP",
+    )
+    assert res.status == PatentStatus.PENDING
+    assert res.last_event_type == "PROCEDURAL_REVALIDATION"
+
+
+def test_procedural_revalidation_revives_lapsed_application():
+    res = derive_patent_status(
+        [
+            _ev("APPLICATION_FEE_LAPSE", "2020-01-01"),
+            _ev("PROCEDURAL_REVALIDATION", "2020-06-01"),
+        ],
+        record_type="PUBLISHED_APP",
+    )
+    assert res.status == PatentStatus.PENDING
+
+
+def test_procedural_revalidation_revives_lapsed_grant():
+    res = derive_patent_status(
+        [
+            _ev("GRANT_FEE_LAPSE", "2020-01-01"),
+            _ev("PROCEDURAL_REVALIDATION", "2020-06-01"),
+        ],
+        record_type="GRANTED_PATENT",
+    )
+    assert res.status == PatentStatus.ACTIVE
+
+
+def test_procedural_revalidation_on_active_is_noop():
+    # Don't accidentally downgrade an active patent — the revival
+    # is informational when there's nothing to revive.
+    res = derive_patent_status(
+        [_ev("PROCEDURAL_REVALIDATION", "2020-01-01")],
+        record_type="GRANTED_PATENT",
+    )
+    assert res.status == PatentStatus.ACTIVE
+
+
+def test_procedural_revalidation_on_rejected_is_blocked():
+    # REJECTED is truly terminal — even a PROCEDURAL_REVALIDATION
+    # doesn't revive it (different from WITHDRAWN which is reversible).
+    res = derive_patent_status(
+        [
+            _ev("APPLICATION_REJECTED", "2020-01-01"),
+            _ev("PROCEDURAL_REVALIDATION", "2020-06-01"),
+        ],
+        record_type="PUBLISHED_APP",
+    )
+    assert res.status == PatentStatus.REJECTED
+
+
+def test_grant_announced_overrides_withdrawn():
+    # The 2022/019658 case: withdrawn at year N, grant announced at
+    # year N+1. The grant proves the withdrawal was undone.
+    res = derive_patent_status(
+        [
+            _ev("APPLICATION_WITHDRAWN", "2025-04-21"),
+            _ev("GRANT_ANNOUNCED", "2026-02-23"),
+        ],
+        record_type="GRANTED_PATENT",
+    )
+    assert res.status == PatentStatus.ACTIVE
+    assert res.last_event_type == "GRANT_ANNOUNCED"
+
+
+def test_grant_finalized_overrides_withdrawn():
+    res = derive_patent_status(
+        [
+            _ev("APPLICATION_WITHDRAWN", "2024-01-01"),
+            _ev("GRANT_FINALIZED", "2025-01-01"),
+        ],
+        record_type="GRANTED_PATENT",
+    )
+    assert res.status == PatentStatus.ACTIVE
+
+
+def test_2022_019658_real_case():
+    # The bug case the user reported. Patent application that was
+    # withdrawn on 2025-04-21 then immediately procedurally revived
+    # the same day, then granted ten months later.
+    res = derive_patent_status(
+        [
+            _ev("APPLICATION_PUBLISHED", "2024-07-22"),
+            _ev("SEARCH_REPORT_WITH_APPLICATION_PATENT", "2024-07-22"),
+            _ev("POST_PUB_AMENDMENT", "2024-12-23"),
+            _ev("APPLICATION_WITHDRAWN", "2025-04-21"),
+            _ev("PROCEDURAL_REVALIDATION", "2025-04-21"),
+            _ev("GRANT_ANNOUNCED", "2026-02-23"),
+        ],
+        record_type="GRANTED_PATENT",
+    )
+    assert res.status == PatentStatus.ACTIVE
+    assert res.last_event_type == "GRANT_ANNOUNCED"
+    assert res.last_event_date == date(2026, 2, 23)
+
+
 def test_2016_02872_cycling_grant_fee_events():
     # The bug case the user reported. UM with no GRANT_ANNOUNCED
     # captured but four full cycles of GRANT_FEE_LAPSE +

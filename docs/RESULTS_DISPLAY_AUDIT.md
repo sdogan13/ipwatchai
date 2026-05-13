@@ -294,7 +294,7 @@ bulletin_no,
 
 ---
 
-### 1.7 Opposition Radar - Lead Feed
+### 1.7 Radar - Lead Feed
 
 - **Path:** `GET /api/v1/leads/feed`
 - **Auth:** JWT required, Professional+ plan
@@ -340,7 +340,7 @@ bulletin_no,
 
 ---
 
-### 1.8 Opposition Radar - Stats
+### 1.8 Radar - Stats
 
 - **Path:** `GET /api/v1/leads/stats`
 - **Response:**
@@ -361,7 +361,7 @@ bulletin_no,
 
 ---
 
-### 1.9 Opposition Radar - Credits
+### 1.9 Radar - Credits
 
 - **Path:** `GET /api/v1/leads/credits`
 - **Response:**
@@ -666,7 +666,7 @@ bulletin_no,
 
 ---
 
-### 2.3 Opposition Radar Tab (`_leads_panel.html`)
+### 2.3 Radar Tab (`_leads_panel.html`)
 
 **Layout:** max-w-7xl, vertical stack
 

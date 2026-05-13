@@ -59,6 +59,7 @@ _LIVE_CHECK_SUCCESS_CODES = {
 }
 _LIVE_PRIORITY_WINDOW_YEARS = 11
 _LIVE_STATUS_RECENT_THRESHOLD = "4 months"
+_LIVE_STATUS_MAX_BULLETIN_DATE_ENV = "REPAIR_LIVE_STATUS_MAX_BULLETIN_DATE"
 _LIVE_PROVISIONAL_REFUSAL_THRESHOLD = "1 year"
 LIVE_PROVISIONAL_SOURCE = "LIVE_PROV"
 _LIVE_CHECK_TABLE_SQL = """
@@ -772,14 +773,46 @@ def _resolve_live_status(status_text: str | None, registration_no: Any = None) -
     return None
 
 
+def _coerce_live_status_max_bulletin_date(value: date | str | None) -> date | None:
+    if value is None:
+        value = os.getenv(_LIVE_STATUS_MAX_BULLETIN_DATE_ENV)
+    if value is None:
+        return None
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text)
+    except ValueError as exc:
+        raise ValueError(
+            f"{_LIVE_STATUS_MAX_BULLETIN_DATE_ENV} must be an ISO date like 2026-01-13"
+        ) from exc
+
+
+def _live_status_recent_sql(
+    *,
+    max_bulletin_date_exclusive: date | str | None = None,
+) -> tuple[str, list[Any], str]:
+    cutoff = _coerce_live_status_max_bulletin_date(max_bulletin_date_exclusive)
+    if cutoff is not None:
+        return "%s::date", [cutoff], str(cutoff)
+    return f"CURRENT_DATE - INTERVAL '{_LIVE_STATUS_RECENT_THRESHOLD}'", [], ""
+
+
 def _live_status_skip_counts(
     conn,
     *,
     app_no: str | None = None,
     include_older_than_11_years: bool = False,
+    max_bulletin_date_exclusive: date | str | None = None,
 ) -> dict:
     cur = conn.cursor(cursor_factory=RealDictCursor)
     params: list[Any] = [DB_STATUS_PUBLISHED, DB_STATUS_REFUSED, LIVE_PROVISIONAL_SOURCE]
+    recent_sql, recent_params, _ = _live_status_recent_sql(
+        max_bulletin_date_exclusive=max_bulletin_date_exclusive
+    )
     filters = [
         """(
             tm.current_status = %s::tm_status
@@ -802,18 +835,18 @@ def _live_status_skip_counts(
             COUNT(*) FILTER (
                 WHERE tm.name IS NOT NULL
                   AND btrim(tm.name) <> ''
-                  AND tm.bulletin_date >= CURRENT_DATE - INTERVAL '{_LIVE_STATUS_RECENT_THRESHOLD}'
+                  AND tm.bulletin_date >= {recent_sql}
             ) AS recent,
             COUNT(*) FILTER (
                 WHERE tm.name IS NOT NULL
                   AND btrim(tm.name) <> ''
-                  AND (tm.bulletin_date IS NULL OR tm.bulletin_date < CURRENT_DATE - INTERVAL '{_LIVE_STATUS_RECENT_THRESHOLD}')
+                  AND (tm.bulletin_date IS NULL OR tm.bulletin_date < {recent_sql})
                   AND (tm.application_date IS NULL OR tm.application_date < CURRENT_DATE - INTERVAL '11 years')
             ) AS older_than_priority_window
         FROM trademarks tm
         WHERE {" AND ".join(filters)}
         """,
-        params,
+        recent_params + recent_params + params,
     )
     row = cur.fetchone() or {}
     older_count = 0 if include_older_than_11_years else row.get("older_than_priority_window", 0)
@@ -1012,9 +1045,13 @@ def _live_status_candidates(
     app_no: str | None = None,
     limit: int | None = None,
     include_older_than_11_years: bool = False,
+    max_bulletin_date_exclusive: date | str | None = None,
 ) -> list[dict]:
     cur = conn.cursor(cursor_factory=RealDictCursor)
     params: list[Any] = [DB_STATUS_PUBLISHED, DB_STATUS_REFUSED, LIVE_PROVISIONAL_SOURCE]
+    recent_sql, recent_params, _ = _live_status_recent_sql(
+        max_bulletin_date_exclusive=max_bulletin_date_exclusive
+    )
     filters = [
         """(
             tm.current_status = %s::tm_status
@@ -1025,8 +1062,9 @@ def _live_status_candidates(
         )""",
         "tm.name IS NOT NULL",
         "btrim(tm.name) <> ''",
-        f"(tm.bulletin_date IS NULL OR tm.bulletin_date < CURRENT_DATE - INTERVAL '{_LIVE_STATUS_RECENT_THRESHOLD}')",
+        f"(tm.bulletin_date IS NULL OR tm.bulletin_date < {recent_sql})",
     ]
+    params.extend(recent_params)
     progress_filter = _live_status_progress_filter_sql()
     if app_no:
         filters.append("tm.application_no = %s")
@@ -1296,10 +1334,12 @@ def run_live_status_repair(
     limit: int | None = None,
     artifact_dir: Path | str | None = None,
     include_older_than_11_years: bool | None = None,
+    max_bulletin_date_exclusive: date | str | None = None,
     live_fetcher=None,
 ) -> dict:
     _ensure_live_check_table(conn)
     effective_limit = limit if limit is not None else _env_int("REPAIR_LIVE_STATUS_BATCH_SIZE", 5)
+    status_cutoff = _coerce_live_status_max_bulletin_date(max_bulletin_date_exclusive)
     include_older = (
         _env_bool("REPAIR_LIVE_INCLUDE_OLDER_THAN_11_YEARS", False)
         if include_older_than_11_years is None
@@ -1310,11 +1350,13 @@ def run_live_status_repair(
         app_no=app_no,
         limit=effective_limit,
         include_older_than_11_years=include_older,
+        max_bulletin_date_exclusive=status_cutoff,
     )
     skip_counts = _live_status_skip_counts(
         conn,
         app_no=app_no,
         include_older_than_11_years=include_older,
+        max_bulletin_date_exclusive=status_cutoff,
     )
     _live_artifact_root(artifact_dir)
 
@@ -1463,6 +1505,7 @@ def run_live_status_repair(
         "include_older_than_11_years": include_older,
         "priority_window_years": _LIVE_PRIORITY_WINDOW_YEARS,
         "status_recent_threshold": _LIVE_STATUS_RECENT_THRESHOLD,
+        "status_max_bulletin_date_exclusive": str(status_cutoff) if status_cutoff else None,
         "safety_stopped": safety_stopped,
         "safety_reason": safety_reason,
         "next_allowed_at": next_allowed_at,
@@ -1642,6 +1685,7 @@ def run_repair(
     dry_run: bool = False,
     app_no: str | None = None,
     limit: int | None = None,
+    live_status_max_bulletin_date: date | str | None = None,
 ) -> dict:
     owns_conn = conn is None
     if root_dir is None:
@@ -1689,6 +1733,7 @@ def run_repair(
             dry_run=dry_run,
             app_no=app_no,
             limit=limit,
+            max_bulletin_date_exclusive=live_status_max_bulletin_date,
         )
         live_classes_summary = run_live_class_repair(
             conn=conn,
@@ -1739,6 +1784,15 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=None, help="Limit rows considered per routine.")
     parser.add_argument("--root-dir", type=str, default=None, help="Root directory containing metadata.")
     parser.add_argument(
+        "--live-status-max-bulletin-date",
+        type=str,
+        default=None,
+        help=(
+            "Exclusive ISO bulletin-date cutoff for live status repair. "
+            "When omitted, live status repair uses the moving 4-month threshold."
+        ),
+    )
+    parser.add_argument(
         "--provision-live-refusals",
         action="store_true",
         help="Temporarily mark unchecked live-status candidates as Reddedildi with LIVE_PROV source.",
@@ -1763,6 +1817,7 @@ def main() -> None:
                 dry_run=args.dry_run,
                 app_no=args.app_no,
                 limit=args.limit,
+                live_status_max_bulletin_date=args.live_status_max_bulletin_date,
             )
         print(json.dumps(summary, ensure_ascii=False, indent=2, default=str))
     finally:

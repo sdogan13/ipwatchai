@@ -278,7 +278,7 @@
     }).join("");
   }
 
-  function renderFigures(figures) {
+  function renderFigures(figures, titleStr) {
     var el = $("cd-figures");
     if (!el) return;
     if (!figures || figures.length === 0) {
@@ -286,16 +286,28 @@
         escapeHtml(t("cografi_detail.no_figures", "No figures.")) + '</p>';
       return;
     }
+    var total = figures.length;
+    var visibleIdx = 0;
     el.innerHTML = figures.map(function (f) {
       var url = imageUrl(f);
       if (!url) return "";
+      visibleIdx += 1;
+      var subtitle = t("cografi_detail.figure_n_of_m", "Figure {n}/{m}")
+        .replace("{n}", String(visibleIdx))
+        .replace("{m}", String(total));
+      // Was a <a target="_blank"> that opened the raw image in a new
+      // tab — replaced with a button that dispatches the shared
+      // open-lightbox CustomEvent (handled in _modals.html).
       return (
-        '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener" ' +
-        'class="block rounded-md overflow-hidden border" ' +
-        'style="border-color:var(--color-border);background:var(--color-bg-muted)">' +
+        '<button type="button" data-cd-zoom ' +
+        'data-zoom-src="' + escapeHtml(url) + '" ' +
+        'data-zoom-title="' + escapeHtml(titleStr || "") + '" ' +
+        'data-zoom-subtitle="' + escapeHtml(subtitle) + '" ' +
+        'class="block rounded-md overflow-hidden border cursor-zoom-in transition-transform hover:scale-105" ' +
+        'style="border-color:var(--color-border);background:var(--color-bg-muted);padding:0">' +
           '<img src="' + escapeHtml(url) + '" alt="" loading="lazy" ' +
-          'class="w-full h-24 object-contain"/>' +
-        '</a>'
+          'class="w-full h-24 object-contain pointer-events-none"/>' +
+        '</button>'
       );
     }).join("");
   }
@@ -341,7 +353,7 @@
     renderBodySections(rec);
     renderHolders(data.holders);
     renderChangeRequests(data.change_requests);
-    renderFigures(data.figures);
+    renderFigures(data.figures, rec.name || rec.application_no || "");
     renderRelated(data.related);
     renderSource(rec);
   }
@@ -396,6 +408,21 @@
     document.addEventListener("click", function (ev) {
       var t_ = ev.target;
       if (!t_) return;
+
+      // Figure thumbnail click → shared lightbox.
+      var zoom = t_.closest && t_.closest("[data-cd-zoom]");
+      if (zoom) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        window.dispatchEvent(new CustomEvent("open-lightbox", {
+          detail: {
+            src: zoom.getAttribute("data-zoom-src") || "",
+            title: zoom.getAttribute("data-zoom-title") || "",
+            subtitle: zoom.getAttribute("data-zoom-subtitle") || "",
+          },
+        }));
+        return;
+      }
 
       // Body-section tab click → activate matching tab + panel.
       var tabBtn = t_.closest && t_.closest("[data-cd-tab]");

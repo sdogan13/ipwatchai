@@ -84,6 +84,15 @@
         <div id="pd-ipc-chips" class="flex flex-wrap gap-1.5"></div>
       </div>
 
+      {# Figures grid — thumbnails open the shared lightbox on click.
+         Hidden by default; renderFigures shows the block only when
+         there's at least one image_url. #}
+      <div id="pd-figures-block" class="hidden">
+        <h3 class="text-xs font-medium mb-1.5" style="color:var(--color-text-faint)"
+            x-text="t('patent_detail.figures')">Figures</h3>
+        <div id="pd-figures" class="grid grid-cols-3 sm:grid-cols-4 gap-2"></div>
+      </div>
+
       {# Two-column grid: holders | inventors #}
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
         <div>

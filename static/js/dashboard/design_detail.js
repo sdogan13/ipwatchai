@@ -207,16 +207,26 @@
       return;
     }
     show(block);
-    grid.innerHTML = views.map(function (v) {
+    var titleStr = (data.design && (data.design.product_name_tr || data.design.product_name_en || data.design.application_no)) || "";
+    var total = views.length;
+    grid.innerHTML = views.map(function (v, i) {
       // design_image_url backend pattern: /api/v1/design-image/{folder}/{path}
       var raw = (v.image_path || "").replace(/^\//, "");
       var url = "/api/v1/design-image/" + encodeURIComponent(folder) + "/" + raw;
+      var subtitle = t("design_detail.view_n_of_m", "View {n}/{m}")
+        .replace("{n}", String(v.view_index || (i + 1)))
+        .replace("{m}", String(total));
       return (
-        '<div class="aspect-square rounded-md overflow-hidden" style="background:var(--color-bg-muted)">' +
+        '<button type="button" data-dd-zoom ' +
+          'data-zoom-src="' + escapeHtml(url) + '" ' +
+          'data-zoom-title="' + escapeHtml(titleStr) + '" ' +
+          'data-zoom-subtitle="' + escapeHtml(subtitle) + '" ' +
+          'class="aspect-square rounded-md overflow-hidden cursor-zoom-in transition-transform hover:scale-105" ' +
+          'style="background:var(--color-bg-muted);border:0;padding:0">' +
           '<img src="' + escapeHtml(url) + '" alt="view ' + escapeHtml(String(v.view_index || "")) + '" ' +
-          'class="w-full h-full object-contain" loading="lazy" ' +
+          'class="w-full h-full object-contain pointer-events-none" loading="lazy" ' +
           'onerror="this.style.display=\'none\'" />' +
-        '</div>'
+        '</button>'
       );
     }).join("");
   }
@@ -375,6 +385,24 @@
     document.addEventListener("click", function (ev) {
       var t_ = ev.target;
       if (!t_) return;
+
+      // View thumbnail click → dispatch the shared lightbox event so
+      // the existing modal (templates/dashboard/partials/_modals.html)
+      // picks it up. Stops propagation so we don't accidentally close
+      // the detail modal underneath.
+      var zoom = t_.closest && t_.closest("[data-dd-zoom]");
+      if (zoom) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        window.dispatchEvent(new CustomEvent("open-lightbox", {
+          detail: {
+            src: zoom.getAttribute("data-zoom-src") || "",
+            title: zoom.getAttribute("data-zoom-title") || "",
+            subtitle: zoom.getAttribute("data-zoom-subtitle") || "",
+          },
+        }));
+        return;
+      }
 
       // Open from [data-dd-open="<design_id>"]. Skip when the click
       // landed on an interactive child (buttons inside the card

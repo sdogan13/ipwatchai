@@ -35,7 +35,7 @@ UNIVERSAL_SCAN_JOB_ID = "weekly_universal_scan"
 #
 # Day-of-week is uniform Wed across all three registry crons to avoid
 # Mon/Tue collisions with the trademark watchlist scan (Mon 00:00) and
-# the universal opposition radar (Tue 00:00).
+# the universal radar (Tue 00:00).
 COGRAFI_SCAN_DAY = "wed"
 COGRAFI_SCAN_DAY_LABEL = "Wednesday"
 COGRAFI_SCAN_HOUR = 2
@@ -93,7 +93,7 @@ def start_scheduler():
         replace_existing=True,
     )
 
-    # Weekly universal conflict scan on Tuesday at 00:00 (Opposition Radar).
+    # Weekly universal conflict scan on Tuesday at 00:00 (Radar).
     scheduler.add_job(
         weekly_universal_scan,
         trigger=CronTrigger(
@@ -200,7 +200,7 @@ def get_watchlist_scan_schedule_label() -> str:
 
 
 def get_universal_scan_schedule_label() -> str:
-    """Return the user-facing Opposition Radar scan schedule label."""
+    """Return the user-facing Radar scan schedule label."""
     return f"Weekly on {UNIVERSAL_SCAN_DAY_LABEL} at {UNIVERSAL_SCAN_HOUR:02d}:00"
 
 
@@ -738,11 +738,11 @@ def weekly_design_watchlist_scan():
 
 def weekly_universal_scan():
     """
-    Scan within-deadline bulletins for opposition conflicts (Opposition Radar).
+    Scan within-deadline bulletins for opposition conflicts (Radar).
 
     Finds all bulletins with appeal_deadline >= today and runs the universal
     scanner against each one. This populates the universal_conflicts table
-    that powers the Opposition Radar lead feed.
+    that powers the Radar lead feed.
 
     Runs weekly on Tuesday at 00:00.
     """

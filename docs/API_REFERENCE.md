@@ -259,7 +259,7 @@ fall back to `UK`. Catalog prices and Stripe Price IDs come from
   `subscription` runs `activate_subscription`; `credit_pack` runs
   `apply_credit_pack_purchase`.
 
-### Lead feed sub-routes (Opposition Radar modes)
+### Lead feed sub-routes (Radar modes)
 
 All lead-feed routes are plan-gated via `daily_lead_views`; CSV exports
 additionally require `can_export_csv_leads`. They share `LEADS_PER_PAGE`

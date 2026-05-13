@@ -293,6 +293,7 @@ Pipeline and data-collection code lives in:
 - `data_collection_patent.py` (Patent / Faydalı Model)
 - `data_collection_tasarim.py` (Tasarım)
 - `data_collection_cografi.py` (Coğrafi İşaret ve Geleneksel Ürün Adı)
+- `data_collection_eutm.py` (EU Trade Marks via EUIPO API — see `docs/EUIPO_DATA_NOTES.md`)
 - `zip.py`
 - `pdf_extract.py`
 - `pdf_extract_tasarim.py`, `pdf_extract_tasarim_events.py`, `cd_extract_tasarim.py`, `embeddings_tasarim.py` (Tasarım extractors)
@@ -317,7 +318,7 @@ Pipeline runtime notes:
 - APP ingest records no longer overwrite an existing BLT/GZ status with `Applied` or registration-number fallback status; APP can only overwrite an existing status when its explicit `STATUS` text maps to a recognized non-`Applied` status
 - ingest normalizes placeholder trademark names by removing `sekil`/variant figure markers before writing metadata into the database
 - `python -m workers.pipeline_worker --force-ingest` forces the trademark ingest step to reprocess existing metadata files, which is useful for repairing earlier ingest-state drift without changing collection or extraction inputs
-- the post-ingest `repair` step now also supports batched live TURKPATENT checks: older `Yayında` rows are status-audited from live result `Durumu`, and exact-six class rows are repaired only from `DETAY` `Nice Sınıfları`; progress is stored in `repair_live_trademark_checks`
+- the post-ingest `repair` step now also supports batched live TURKPATENT checks: older `Yayında` rows are status-audited from live result `Durumu`, and exact-six class rows are repaired only from `DETAY` `Nice Sınıfları`; progress is stored in `repair_live_trademark_checks`. Long-running live status repair freezes the newest eligible bulletin-date cutoff at runner startup so each run moves from that boundary toward older records instead of pulling newly eligible days into the front of the queue.
 - pipeline translation for future folders now defaults to the MADLAD backend, so `pipeline/ai.py` writes `name_tr`, `detected_lang`, and translation provenance into `metadata.json` using MADLAD unless `PIPELINE_TRANSLATION_BACKEND` is overridden
 - MADLAD translation runtime tuning is shared between refresh and pipeline paths through `MADLAD_TRANSLATE_BATCH_SIZE` (default `16`), so future folder translation uses the same safer generation microbatch unless explicitly overridden
 - `TRANSLATION_BACKEND=nllb` remains the immediate rollback lever if live query latency or behavior needs to revert without changing the MADLAD-backed corpus
@@ -472,7 +473,7 @@ Quota is shared across all four registries (trademarks + designs + patents + cog
 
 **Weekly re-sweep cron**: `workers/scheduler.py` registers `weekly_cografi_watchlist_scan` to run **Wednesday at 02:00 (Europe/London)** — picks up drift from retroactively-added watchlist items that weren't caught by the post-ingest hook. Mirrors the trademark scan's plan-gating: free-tier orgs are skipped, paid orgs are capped per their plan's `auto_scan_max_items`, per-item `alert_frequency` window is honoured (weekly items skipped if scanned within 6 days, daily within 20 hours). Manual one-shot: `python -m workers.scheduler --run-cografi`.
 
-**Parallel patent + design weekly re-sweeps**: same scheduler now also registers `weekly_patent_watchlist_scan` (**Wed 03:00**) and `weekly_design_watchlist_scan` (**Wed 04:00**), both following the same plan-gating + frequency-window + per-org item-cap pattern. Hourly offset across the three registry crons spreads DB load across the night window without overlapping with the existing trademark scan (Mon 00:00) or universal opposition radar (Tue 00:00). Manual one-shots: `python -m workers.scheduler --run-patent` / `--run-design`. `--run-now` now runs all five sweeps (trademark + universal + cografi + patent + design) in sequence.
+**Parallel patent + design weekly re-sweeps**: same scheduler now also registers `weekly_patent_watchlist_scan` (**Wed 03:00**) and `weekly_design_watchlist_scan` (**Wed 04:00**), both following the same plan-gating + frequency-window + per-org item-cap pattern. Hourly offset across the three registry crons spreads DB load across the night window without overlapping with the existing trademark scan (Mon 00:00) or universal radar (Tue 00:00). Manual one-shots: `python -m workers.scheduler --run-patent` / `--run-design`. `--run-now` now runs all five sweeps (trademark + universal + cografi + patent + design) in sequence.
 
 **Notification delivery — `notifications/service.py` additions (Phase F3).** Mirrors the patent digest pattern:
 
@@ -566,6 +567,42 @@ python -m pipeline.reconcile_tasarim --all                          # every TS_*
 python -m pipeline.reconcile_tasarim --issue ... --force            # overwrite an existing merged_metadata.json
 python -m pipeline.reconcile_tasarim --all --dedupe-images          # also remove pre-existing PDF image dups
 ```
+
+### EU Trade Mark (EUTM) collector
+
+`data_collection_eutm.py` pulls EU trademarks from the **EUIPO Trademark Search API v1.1.0**. Unlike the TÜRKPATENT collectors, there is no PDF/CD bundle; data is fetched via REST JSON, and media (images, sounds, videos, 3D models) is downloaded per record. Field reference and harvest strategy live in `docs/EUIPO_DATA_NOTES.md`.
+
+Output layout (under `bulletins/Marka_EU/`):
+
+```
+bulletins/Marka_EU/
+├── _media/                         (shared media pool, keyed by application_no)
+│   ├── 000274084.jpg
+│   ├── 000274084_thumb.jpg
+│   └── ...
+├── BACKFILL_1996-06/
+│   ├── manifest.json
+│   ├── page_0001.json
+│   └── page_0002.json
+└── DELTA_2026-05-12/
+    └── ...
+```
+
+Required env vars (in `.env`): `EUIPO_API_KEY`, `EUIPO_API_SECRET`, `EUIPO_API_BASE`. Obtain by registering at `dev.euipo.europa.eu` and subscribing to the **Trademark search** product.
+
+```powershell
+python data_collection_eutm.py --backfill                    # full historical corpus, with media
+python data_collection_eutm.py --backfill --since 2020-01-01 # partial backfill from a date
+python data_collection_eutm.py --window 1996-06              # one specific month
+python data_collection_eutm.py --delta 2026-05-12            # one day's updateDate delta
+python data_collection_eutm.py --no-media                    # metadata only (faster)
+python data_collection_eutm.py --media-only                  # fill missing media for existing windows
+python data_collection_eutm.py --window 1996-06 --limit 2    # smoke test
+```
+
+Resumability: each window writes a `manifest.json` with `partial`, `pages_on_disk`, and `expected_pages` fields. Re-runs skip fully-drained windows and continue partial ones from the next missing page. The shared `_media/` pool dedups across windows.
+
+Full-corpus scale (from sandbox, 2026-05-13): ~2.35M EUTMs, ~1.78M API calls for full backfill (metadata + image + thumbnail), ~43 GB disk. Rate-limit period (25,000 req/period, period not exposed in headers) determines wall-clock: ~3 days if hourly, ~71 days if daily — the collector adapts at runtime via `X-RateLimit-Remaining` throttling.
 
 ## Development Rules
 

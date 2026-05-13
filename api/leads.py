@@ -1,4 +1,4 @@
-"""Lead Feed API - Opposition Radar."""
+"""Lead Feed API - Radar."""
 
 from datetime import date, datetime
 from typing import List, Optional
@@ -83,7 +83,7 @@ class LeadActionResponse(BaseModel):
     new_status: str
 
 
-router = APIRouter(prefix="/leads", tags=["Opposition Radar"])
+router = APIRouter(prefix="/leads", tags=["Radar"])
 
 
 @router.get("/feed")
@@ -112,7 +112,7 @@ async def get_lead_feed(
 
 @router.get("/stats", response_model=LeadStatsResponse)
 async def get_lead_stats(current_user: CurrentUser = Depends(get_current_user)):
-    """Get lead statistics for the Opposition Radar dashboard."""
+    """Get lead statistics for the Radar dashboard."""
     return await get_lead_stats_data(current_user=current_user)
 
 

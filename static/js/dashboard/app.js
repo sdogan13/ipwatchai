@@ -2419,7 +2419,7 @@ function showDashboardTab(tabId) {
     }
 
     // Hide ALL tab content panels
-    var panels = ['overview', 'watchlist', 'search', 'opposition-radar', 'ai-studio', 'reports', 'applications'];
+    var panels = ['overview', 'watchlist', 'search', 'radar', 'ai-studio', 'reports', 'applications'];
     panels.forEach(function (id) {
         var el = document.getElementById('tab-content-' + id);
         if (el) el.classList.add('hidden');
@@ -2450,7 +2450,7 @@ function showDashboardTab(tabId) {
     if (typeof updateBottomTabActive === 'function') updateBottomTabActive(tabId);
 
     // Update page title
-    var tabTitles = { 'overview': 'Dashboard', 'watchlist': 'Watchlist', 'search': 'Search', 'opposition-radar': 'Opposition Radar', 'ai-studio': 'AI Studio', 'reports': 'Reports', 'applications': 'Applications' };
+    var tabTitles = { 'overview': 'Dashboard', 'watchlist': 'Watchlist', 'search': 'Search', 'radar': 'Radar', 'ai-studio': 'AI Studio', 'reports': 'Reports', 'applications': 'Applications' };
     document.title = 'IPWatchAI' + (tabTitles[tabId] ? ' \u2014 ' + tabTitles[tabId] : '');
 
     // Only clear search results when leaving the search tab. Patent
@@ -2461,8 +2461,8 @@ function showDashboardTab(tabId) {
     }
 
     // Lazy-initialize tab content on first visit
-    if (tabId === 'opposition-radar') {
-        initOppositionRadar();
+    if (tabId === 'radar') {
+        initRadar();
     }
     if (tabId === 'ai-studio') {
         initAIStudio();
@@ -2519,9 +2519,9 @@ function showDashboardTab(tabId) {
 }
 
 // ============================================
-// OPPOSITION RADAR INIT
+// RADAR INIT
 // ============================================
-function initOppositionRadar() {
+function initRadar() {
     if (radarInitialized) return;
     radarInitialized = true;
     loadLeadStats();

@@ -88,7 +88,7 @@ def seed_default_settings():
     feature_flags = {
         "feature.live_scraping_enabled": {"value": True, "desc": "Enable live scraping for eligible plans"},
         "feature.ai_studio_enabled": {"value": True, "desc": "Enable AI Studio (Name Lab + Logo Studio)"},
-        "feature.opposition_radar_enabled": {"value": True, "desc": "Enable Opposition Radar leads"},
+        "feature.radar_enabled": {"value": True, "desc": "Enable Radar leads"},
         "feature.auto_scan_enabled": {"value": True, "desc": "Enable automatic watchlist scanning"},
         "feature.public_search_enabled": {"value": True, "desc": "Enable unauthenticated public search"},
     }

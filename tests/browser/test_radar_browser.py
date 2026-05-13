@@ -1,6 +1,6 @@
-"""Browser smoke for the Opposition Radar dashboard tab.
+"""Browser smoke for the Radar dashboard tab.
 
-Covers the registry-first switcher introduced when Opposition Radar
+Covers the registry-first switcher introduced when Radar
 moved from a flat 6-button mode row to a Marka / Tasarım / Patent /
 Coğrafi structure mirroring the Search and Watchlist tabs:
 
@@ -13,7 +13,7 @@ Coğrafi structure mirroring the Search and Watchlist tabs:
 Read-only — no DB writes, no cleanup needed.
 
 Run directly:
-    python tests/browser/test_opposition_radar_browser.py
+    python tests/browser/test_radar_browser.py
 
 Uses the managed-professional persona
 (``managed-professional-smoke@example.com``). Professional plan has
@@ -48,7 +48,7 @@ CONFIG = cografi_config_for_persona("professional")
 REPORTER = LiveReporter()
 
 pytestmark = pytest.mark.skip(
-    reason="Browser E2E script; run directly with python tests/browser/test_opposition_radar_browser.py"
+    reason="Browser E2E script; run directly with python tests/browser/test_radar_browser.py"
 )
 
 
@@ -69,18 +69,18 @@ _COGRAFI_COMING_SOON_SUBSTR = "Coğrafi İşaret fırsat radarı"
 
 def _registry_switcher_button(page, label: str):
     """Locate one of the 4 top-level registry buttons. They live in the
-    first ``inline-flex`` row inside the Opposition Radar tab and have
+    first ``inline-flex`` row inside the Radar tab and have
     no stable IDs (Alpine ``@click`` handlers), so we scope by visible
     text. ``label`` is the localized button text (TR by default)."""
     return page.locator(
-        f"#tab-content-opposition-radar > div.inline-flex button:has-text('{label}')"
+        f"#tab-content-radar > div.inline-flex button:has-text('{label}')"
     ).first
 
 
-def _open_opposition_radar_tab(page) -> dict:
-    page.evaluate("window.showDashboardTab('opposition-radar')")
+def _open_radar_tab(page) -> dict:
+    page.evaluate("window.showDashboardTab('radar')")
     page.wait_for_selector(
-        "#tab-content-opposition-radar:not(.hidden)", timeout=5000
+        "#tab-content-radar:not(.hidden)", timeout=5000
     )
     return {"ok": True}
 
@@ -172,7 +172,7 @@ def _switch_to_tasarim_coming_soon(page) -> dict:
     _registry_switcher_button(page, "Tasarım").click()
     # The coming-soon panel renders the localized hint text.
     locator = page.locator(
-        f"#tab-content-opposition-radar p:has-text({_TASARIM_COMING_SOON_SUBSTR!r})"
+        f"#tab-content-radar p:has-text({_TASARIM_COMING_SOON_SUBSTR!r})"
     )
     locator.wait_for(state="visible", timeout=5000)
     # Patent + Marka containers should be hidden.
@@ -188,7 +188,7 @@ def _switch_to_tasarim_coming_soon(page) -> dict:
 def _switch_to_cografi_coming_soon(page) -> dict:
     _registry_switcher_button(page, "Coğrafi").click()
     locator = page.locator(
-        f"#tab-content-opposition-radar p:has-text({_COGRAFI_COMING_SOON_SUBSTR!r})"
+        f"#tab-content-radar p:has-text({_COGRAFI_COMING_SOON_SUBSTR!r})"
     )
     locator.wait_for(state="visible", timeout=5000)
     return {"coming_soon_visible": True}
@@ -232,9 +232,9 @@ def _assert_localstorage_radarview_marka(page) -> dict:
     return {"radarView": value}
 
 
-def test_opposition_radar_browser_smoke():
+def test_radar_browser_smoke():
     REPORTER.print_heading(
-        "Opposition Radar browser smoke", server=CONFIG.base_url
+        "Radar browser smoke", server=CONFIG.base_url
     )
     with sync_playwright() as playwright:
         browser, context, page, monitor = launch_browser_page(
@@ -248,9 +248,9 @@ def test_opposition_radar_browser_smoke():
             )
 
             run_browser_step(
-                "Open Opposition Radar tab",
+                "Open Radar tab",
                 REPORTER, page, monitor, CONFIG,
-                lambda: _open_opposition_radar_tab(page),
+                lambda: _open_radar_tab(page),
                 allow_request_failures=_TRANSIENT_401S,
             )
             run_browser_step(
@@ -299,10 +299,10 @@ def test_opposition_radar_browser_smoke():
                 lambda: _assert_localstorage_radarview_marka(page),
             )
 
-            failures = REPORTER.summary("Opposition Radar browser smoke")
+            failures = REPORTER.summary("Radar browser smoke")
             if failures:
                 raise AssertionError(
-                    f"{failures} Opposition Radar smoke step(s) failed"
+                    f"{failures} Radar smoke step(s) failed"
                 )
         finally:
             context.close()
@@ -311,7 +311,7 @@ def test_opposition_radar_browser_smoke():
 
 if __name__ == "__main__":
     try:
-        test_opposition_radar_browser_smoke()
+        test_radar_browser_smoke()
     except AssertionError as exc:
         print(exc)
         sys.exit(1)

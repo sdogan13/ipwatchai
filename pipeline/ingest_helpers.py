@@ -120,10 +120,10 @@ def add_to_scan_queue(conn, trademark_ids: list, bulletin_no: str = None,
             queued_count = cur.rowcount
             conn.commit()
             if queued_count > 0:
-                logging.info(f"   Queued {queued_count} trademarks for Opposition Radar scan")
+                logging.info(f"   Queued {queued_count} trademarks for Radar scan")
             return queued_count
     except Exception as e:
-        logging.warning(f"   Failed to queue for Opposition Radar scan: {e}")
+        logging.warning(f"   Failed to queue for Radar scan: {e}")
         return 0
 
 

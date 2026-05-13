@@ -86,6 +86,13 @@ _POSITIVITY_RANK = {
     "APPLICATION_FEE_LAPSE_CANCELLED": 2,
     "APPLICATION_ABANDONED_CANCELLED": 2,
     "APPLICATION_FEE_REVALIDATION": 2,
+    # PROCEDURAL_REVALIDATION is a generic procedural revival emitted
+    # by TPE when an application is restored to processing after a
+    # withdrawal / abandonment / examination-stage lapse. Same date
+    # as the negative event in practice (TPE batches them); the
+    # positivity-rank tiebreak ensures the revival applies after the
+    # negative on the same date.
+    "PROCEDURAL_REVALIDATION": 2,
     "GRANT_ANNOUNCED": 3,
     "GRANT_ANNOUNCED_LEGACY_551": 3,
     "GRANT_FINALIZED": 3,
@@ -216,6 +223,32 @@ def _apply(state: PatentStatus, event_type: str) -> Optional[PatentStatus]:
         if state == PatentStatus.WITHDRAWN:
             return PatentStatus.PENDING
         return None
+
+    # PROCEDURAL_REVALIDATION is a generic procedural revival. It can
+    # revive WITHDRAWN (TPE undoes the withdrawal procedurally), and
+    # the LAPSED_* states. On ACTIVE / PENDING / terminal-grant
+    # states (EXPIRED / INVALIDATED) or truly-rejected applications,
+    # it's informational. Placed before the terminal-state guard so
+    # it can rescue WITHDRAWN.
+    if event_type == "PROCEDURAL_REVALIDATION":
+        if state == PatentStatus.WITHDRAWN:
+            return PatentStatus.PENDING
+        if state == PatentStatus.LAPSED_APPLICATION:
+            return PatentStatus.PENDING
+        if state == PatentStatus.LAPSED_GRANT:
+            return PatentStatus.ACTIVE
+        return None
+
+    # A grant cannot occur after a real withdrawal — so a later
+    # GRANT_* event landing on WITHDRAWN proves the withdrawal was
+    # procedurally undone. Allow the override before the terminal-
+    # state guard. The other grant-type → ACTIVE transitions still
+    # happen further down for non-WITHDRAWN states.
+    if event_type in (
+        "GRANT_ANNOUNCED", "GRANT_ANNOUNCED_LEGACY_551", "GRANT_FINALIZED",
+    ):
+        if state == PatentStatus.WITHDRAWN:
+            return PatentStatus.ACTIVE
 
     # Terminal states are immovable. Any subsequent event is ignored.
     if state in TERMINAL_STATES:

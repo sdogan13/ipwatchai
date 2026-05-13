@@ -773,7 +773,7 @@ CREATE INDEX IF NOT EXISTS idx_discount_usage_code ON discount_code_usage(discou
 CREATE INDEX IF NOT EXISTS idx_discount_usage_org ON discount_code_usage(organization_id);
 
 -- ==========================================
--- 13. OPPOSITION RADAR (universal conflicts)
+-- 13. RADAR (universal conflicts)
 -- ==========================================
 CREATE TABLE IF NOT EXISTS universal_conflicts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

@@ -172,6 +172,42 @@
     }).join("");
   }
 
+  // Figures grid — thumbnails with cursor-zoom-in, click dispatches
+  // the shared open-lightbox event. Service pre-computes image_url
+  // per row; rows with null URL are skipped so we never render a
+  // broken <img>. Block stays hidden when there's nothing to show.
+  function renderFigures(figures, patent) {
+    var block = $("pd-figures-block");
+    var grid = $("pd-figures");
+    if (!grid || !block) return;
+    var usable = (figures || []).filter(function (f) { return !!f.image_url; });
+    if (usable.length === 0) {
+      block.classList.add("hidden");
+      grid.innerHTML = "";
+      return;
+    }
+    block.classList.remove("hidden");
+    var titleStr = (patent && patent.title) || (patent && patent.application_no) || "";
+    var total = usable.length;
+    grid.innerHTML = usable.map(function (f, i) {
+      var subtitle = t("patent_detail.figure_n_of_m", "Figure {n}/{m}")
+        .replace("{n}", String(f.seq || (i + 1)))
+        .replace("{m}", String(total));
+      return (
+        '<button type="button" data-pd-zoom ' +
+          'data-zoom-src="' + escapeHtml(f.image_url) + '" ' +
+          'data-zoom-title="' + escapeHtml(titleStr) + '" ' +
+          'data-zoom-subtitle="' + escapeHtml(subtitle) + '" ' +
+          'class="aspect-square rounded-md overflow-hidden cursor-zoom-in transition-transform hover:scale-105" ' +
+          'style="background:var(--color-bg-muted);border:0;padding:0">' +
+          '<img src="' + escapeHtml(f.image_url) + '" alt="figure ' + escapeHtml(String(f.seq || "")) + '" ' +
+          'class="w-full h-full object-contain pointer-events-none" loading="lazy" ' +
+          'onerror="this.style.display=\'none\'" />' +
+        '</button>'
+      );
+    }).join("");
+  }
+
   function renderHolders(holders) {
     var el = $("pd-holders");
     if (!el) return;
@@ -365,6 +401,7 @@
     renderDates(p);
     renderAbstract(p);
     renderIpc(p);
+    renderFigures(data.figures, p);
     renderHolders(data.holders);
     renderInventors(data.inventors);
     renderAttorneys(data.attorneys);
@@ -423,6 +460,23 @@
     document.addEventListener("click", function (ev) {
       var t_ = ev.target;
       if (!t_) return;
+
+      // Figure thumbnail click → shared lightbox (handled by
+      // templates/dashboard/partials/_modals.html). Stops propagation
+      // so we don't accidentally close the detail modal underneath.
+      var zoom = t_.closest && t_.closest("[data-pd-zoom]");
+      if (zoom) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        window.dispatchEvent(new CustomEvent("open-lightbox", {
+          detail: {
+            src: zoom.getAttribute("data-zoom-src") || "",
+            title: zoom.getAttribute("data-zoom-title") || "",
+            subtitle: zoom.getAttribute("data-zoom-subtitle") || "",
+          },
+        }));
+        return;
+      }
 
       // Open from any [data-pd-open="<patent_id>"] click — but skip if
       // the actual click target is an interactive child (button, link,

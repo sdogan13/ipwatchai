@@ -282,26 +282,26 @@ def open_patent_watchlist_subtab(page) -> None:
 
 
 def open_patent_leads_subtab(page) -> None:
-    """Activate the Opposition Radar dashboard tab and the Patent
+    """Activate the Radar dashboard tab and the Patent
     leads sub-view.
 
-    The leads / opposition-radar panel lives under
-    ``#tab-content-opposition-radar`` (NOT ``tab-content-leads`` —
-    the JS tab name is ``'opposition-radar'``). Inside it, an
+    The leads / radar panel lives under
+    ``#tab-content-radar`` (NOT ``tab-content-leads`` —
+    the JS tab name is ``'radar'``). Inside it, an
     Alpine ``radarView`` switcher chooses between marka / tasarim
     / patent / cografi. We drive radarView=patent and call the
     JS-exposed ``loadPatentLeadsFeed()`` to fetch data without
     needing a button click.
     """
     page.evaluate(
-        "window.showDashboardTab && window.showDashboardTab('opposition-radar')"
+        "window.showDashboardTab && window.showDashboardTab('radar')"
     )
     page.wait_for_selector(
-        "#tab-content-opposition-radar:not(.hidden)", timeout=5000,
+        "#tab-content-radar:not(.hidden)", timeout=5000,
     )
     page.evaluate(
         """() => {
-            const root = document.getElementById('tab-content-opposition-radar');
+            const root = document.getElementById('tab-content-radar');
             if (root && window.Alpine && window.Alpine.$data) {
                 const data = window.Alpine.$data(root);
                 if (data && 'radarView' in data) {

@@ -69,7 +69,7 @@ class TestNavbar:
     def test_all_five_tab_buttons_exist(self):
         assert 'id="tab-btn-overview"' in self.html
         assert 'id="tab-btn-search"' in self.html
-        assert 'id="tab-btn-opposition-radar"' in self.html
+        assert 'id="tab-btn-radar"' in self.html
         assert 'id="tab-btn-ai-studio"' in self.html
         assert 'id="tab-btn-reports"' in self.html
 
@@ -93,13 +93,13 @@ class TestNavbar:
     def test_tab_buttons_call_showDashboardTab(self):
         assert "showDashboardTab('overview')" in self.html
         assert "showDashboardTab('search')" in self.html
-        assert "showDashboardTab('opposition-radar')" in self.html
+        assert "showDashboardTab('radar')" in self.html
         assert "showDashboardTab('ai-studio')" in self.html
         assert "showDashboardTab('reports')" in self.html
 
-    def test_pro_badge_on_opposition_radar(self):
-        # Find the opposition-radar tab area and verify PRO badge
-        idx = self.html.index('id="tab-btn-opposition-radar"')
+    def test_pro_badge_on_radar(self):
+        # Find the radar tab area and verify PRO badge
+        idx = self.html.index('id="tab-btn-radar"')
         chunk = self.html[idx:idx + 700]
         assert "from-amber-500 to-orange-500" in chunk
         assert "tabs.pro" in chunk
@@ -122,7 +122,7 @@ class TestNavbar:
         assert "showDashboardTab('search'); closeMobileDrawer();" in self.html
 
     def test_mobile_drawer_has_all_tabs(self):
-        for tab in ['overview', 'search', 'opposition-radar', 'ai-studio', 'reports']:
+        for tab in ['overview', 'search', 'radar', 'ai-studio', 'reports']:
             assert f"showDashboardTab('{tab}'); closeMobileDrawer();" in self.html
 
     # ─── Mobile Bottom Bar ──────────────────────────────
@@ -152,7 +152,7 @@ class TestNavbar:
         """updateBottomTabActive should map all 5 tabs."""
         assert "'overview': 'bottom-tab-overview'" in self.html
         assert "'search': 'bottom-tab-search'" in self.html
-        assert "'opposition-radar': 'bottom-tab-radar'" in self.html
+        assert "'radar': 'bottom-tab-radar'" in self.html
         assert "'ai-studio': 'bottom-tab-ai-studio'" in self.html
         assert "'reports': 'bottom-tab-reports'" in self.html
 
@@ -242,8 +242,8 @@ class TestOtherPanels:
 
     def test_leads_panel_hidden(self):
         html = (PARTIALS / "_leads_panel.html").read_text(encoding="utf-8")
-        assert 'id="tab-content-opposition-radar"' in html
-        idx = html.index('id="tab-content-opposition-radar"')
+        assert 'id="tab-content-radar"' in html
+        idx = html.index('id="tab-content-radar"')
         tag_start = html.rfind("<div", 0, idx)
         tag_chunk = html[tag_start:idx + 60]
         assert "hidden" in tag_chunk
@@ -302,7 +302,7 @@ class TestAppJS:
         """All 5 panel IDs should be in the hide list."""
         assert "'overview'" in self.js
         assert "'search'" in self.js
-        assert "'opposition-radar'" in self.js
+        assert "'radar'" in self.js
         assert "'ai-studio'" in self.js
         assert "'reports'" in self.js
 
@@ -734,7 +734,7 @@ class TestTabContentIDs:
         mapping = {
             "_search_panel.html": "tab-content-search",
             "_results_panel.html": "tab-content-overview",
-            "_leads_panel.html": "tab-content-opposition-radar",
+            "_leads_panel.html": "tab-content-radar",
             "_ai_studio_panel.html": "tab-content-ai-studio",
             "_reports_panel.html": "tab-content-reports",
         }
@@ -749,7 +749,7 @@ class TestTabContentIDs:
         mapping = {
             "_search_panel.html": "tab-content-search",
             "_results_panel.html": "tab-content-overview",
-            "_leads_panel.html": "tab-content-opposition-radar",
+            "_leads_panel.html": "tab-content-radar",
             "_ai_studio_panel.html": "tab-content-ai-studio",
             "_reports_panel.html": "tab-content-reports",
         }
@@ -782,7 +782,7 @@ class TestTabContentIDs:
             f"Expected only overview visible, got: {visible_tabs}"
         assert set(hidden_tabs) == {
             "tab-content-search",
-            "tab-content-opposition-radar",
+            "tab-content-radar",
             "tab-content-ai-studio",
             "tab-content-reports",
         }

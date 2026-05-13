@@ -186,7 +186,7 @@
                     <li class="flex items-start gap-2">{{ cross|safe }} <span class="text-gray-400" x-text="t('pricing.f_applications', {n: 0})">Marka basvurusu</span></li>
                     <li class="flex items-start gap-2">{{ cross|safe }} <span class="text-gray-400" x-text="t('pricing.f_logo_tracking')">Logo izleme</span></li>
                     <li class="flex items-start gap-2">{{ cross|safe }} <span class="text-gray-400" x-text="t('pricing.f_download_portfolio')">Portfolyo indirme</span></li>
-                    <li class="flex items-start gap-2">{{ cross|safe }} <span class="text-gray-400" x-text="t('pricing.f_leads_daily', {n: 0})">Opposition Radar</span></li>
+                    <li class="flex items-start gap-2">{{ cross|safe }} <span class="text-gray-400" x-text="t('pricing.f_leads_daily', {n: 0})">Radar</span></li>
                 </ul>
                 <div class="mt-5">
                     <a href="/checkout?plan=free&billing=monthly"
@@ -223,7 +223,7 @@
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_applications', {n: {{ plans.starter.monthly_applications }}})">Ayda {{ plans.starter.monthly_applications }} marka basvurusu</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_logo_tracking')">Logo izleme</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_download_portfolio')">Portfolyo indirme</span></li>
-                    <li class="flex items-start gap-2">{{ cross|safe }} <span class="text-gray-400" x-text="t('pricing.f_leads_daily', {n: 0})">Opposition Radar</span></li>
+                    <li class="flex items-start gap-2">{{ cross|safe }} <span class="text-gray-400" x-text="t('pricing.f_leads_daily', {n: 0})">Radar</span></li>
                 </ul>
                 <div class="mt-5">
                     <a :href="checkoutHref('starter')"
@@ -260,7 +260,7 @@
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_applications', {n: {{ plans.professional.monthly_applications }}})">Ayda {{ plans.professional.monthly_applications }} marka basvurusu</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_logo_tracking')">Logo izleme</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_download_portfolio')">Portfolyo indirme</span></li>
-                    <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_leads_daily', {n: {{ plans.professional.daily_lead_views }}})">Opposition Radar ({{ plans.professional.daily_lead_views }} lead/gun)</span></li>
+                    <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_leads_daily', {n: {{ plans.professional.daily_lead_views }}})">Radar ({{ plans.professional.daily_lead_views }} lead/gun)</span></li>
                 </ul>
                 <div class="mt-5">
                     <a :href="checkoutHref('professional')"
@@ -296,7 +296,7 @@
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_applications', {n: {{ plans.enterprise.monthly_applications }}})">Ayda {{ plans.enterprise.monthly_applications }} marka basvurusu</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_logo_tracking')">Logo izleme</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_download_portfolio')">Portfolyo indirme</span></li>
-                    <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_unlimited_leads')">Opposition Radar (sinirsiz)</span></li>
+                    <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_unlimited_leads')">Radar (sinirsiz)</span></li>
                 </ul>
                 <div class="mt-5">
                     <a :href="checkoutHref('enterprise')"
@@ -334,10 +334,10 @@
                 </details>
                 <details class="faq-card group glass-panel rounded-2xl p-5">
                     <summary class="flex items-center justify-between cursor-pointer text-sm font-medium text-slate-900">
-                        <span x-text="t('pricing.faq_q3')">Opposition Radar nedir?</span>
+                        <span x-text="t('pricing.faq_q3')">Radar nedir?</span>
                         <svg class="w-4 h-4 text-slate-400 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
                     </summary>
-                    <p class="mt-3 text-sm text-slate-600" x-text="t('pricing.faq_a3')">Opposition Radar, izleme listenizdeki markalarla benzerlik gosteren yeni basvurulari otomatik tespit eder ve itiraz surelerini takip etmenizi saglar.</p>
+                    <p class="mt-3 text-sm text-slate-600" x-text="t('pricing.faq_a3')">Radar, izleme listenizdeki markalarla benzerlik gosteren yeni basvurulari otomatik tespit eder ve itiraz surelerini takip etmenizi saglar.</p>
                 </details>
                 <details class="faq-card group glass-panel rounded-2xl p-5">
                     <summary class="flex items-center justify-between cursor-pointer text-sm font-medium text-slate-900">

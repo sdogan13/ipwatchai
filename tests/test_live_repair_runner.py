@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+from datetime import date
 
 from scripts import run_live_repair_until_done as runner
 
@@ -95,3 +96,47 @@ def test_runner_runs_classes_first_and_applies_aggressive_profile(monkeypatch, t
     events = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines()]
     assert events[0]["safety_settings"]["SCRAPER_SAFETY_DAILY_BUDGET"] == "8000"
     assert events[0]["include_older_than_11_years"] is True
+
+
+def test_runner_freezes_status_cutoff_for_all_cycles(monkeypatch, tmp_path):
+    log_file = tmp_path / "live_repair.jsonl"
+    conn = object()
+    status_cutoffs = []
+
+    for key in runner.AGGRESSIVE_REPAIR_SAFETY_DEFAULTS:
+        monkeypatch.delenv(key, raising=False)
+
+    monkeypatch.setattr(runner, "get_connection", lambda: conn)
+    monkeypatch.setattr(runner, "release_connection", lambda value: None)
+    monkeypatch.setattr(runner, "close_pool", lambda: None)
+    monkeypatch.setattr(
+        runner,
+        "run_live_class_repair",
+        lambda **kwargs: {"checked": 0, "repaired": 0, "failed": 0, "safety_stopped": False},
+    )
+
+    def status_repair(**kwargs):
+        status_cutoffs.append(kwargs["max_bulletin_date_exclusive"])
+        return {"checked": 0, "repaired": 0, "failed": 0, "safety_stopped": False}
+
+    monkeypatch.setattr(runner, "run_live_status_repair", status_repair)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_live_repair_until_done.py",
+            "--log-file",
+            str(log_file),
+            "--status-max-bulletin-date",
+            "2026-01-13",
+        ],
+    )
+
+    assert runner.main() == 0
+    assert status_cutoffs == [date(2026, 1, 13)]
+    events = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines()]
+    assert events[0]["status_max_bulletin_date"] == "2026-01-13"
+
+
+def test_runner_default_status_cutoff_uses_current_four_month_boundary():
+    assert runner._default_status_max_bulletin_date(date(2026, 5, 13)) == date(2026, 1, 13)

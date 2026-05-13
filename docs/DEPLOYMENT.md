@@ -79,6 +79,13 @@ Billing:
 - keep `IYZICO_API_KEY`, `IYZICO_SECRET_KEY`, `IYZICO_CALLBACK_URL`, and `IYZICO_WEBHOOK_URL` configured for Turkey payments
 - after pulling this billing change, rebuild the backend image so the `stripe` Python package is installed, then recreate the backend after env changes
 
+EUIPO (EU Trade Mark data collection):
+- set `EUIPO_API_KEY` and `EUIPO_API_SECRET` in `.env.production` before running `data_collection_eutm.py`
+- obtain credentials by registering at `https://dev.euipo.europa.eu` and subscribing to the **Trademark search** product (free, "Default Plan" gives 25,000 requests per rate-limit period)
+- keep `EUIPO_API_BASE=https://api-sandbox.euipo.europa.eu` during initial backfill validation; flip to production endpoint by passing `--production` on the CLI once verified
+- the collector is idempotent, resumable per-window, and rate-limit aware; if cron runs it daily, the default mode is a delta over yesterday's `updateDate`
+- field reference and harvest strategy live in `docs/EUIPO_DATA_NOTES.md`
+
 Start the stack:
 
 ```powershell
@@ -158,7 +165,7 @@ curl http://127.0.0.1:8080/health
 - the backend container runs `uvicorn main:app`
 - pipeline trigger routes and `workers/pipeline_scheduler.py` now spawn detached `python -m workers.pipeline_worker` child processes, so the backend or scheduler runtime must be allowed to launch child Python processes from the repo root
 - detached pipeline workers survive parent web or scheduler process exits, but they do not survive a full host or container restart
-- `/api/v1/pipeline/trigger-step?step=repair` can launch the repair step as a detached worker; live repair progress is resumable through `repair_live_trademark_checks`
+- `/api/v1/pipeline/trigger-step?step=repair` can launch the repair step as a detached worker; live repair progress is resumable through `repair_live_trademark_checks`. For long-running CLI live repair, `scripts/run_live_repair_until_done.py` freezes the live-status exclusive bulletin-date cutoff at startup, or accepts `--status-max-bulletin-date YYYY-MM-DD` for an explicit high-water mark.
 - `data_collection.py` incremental mode now verifies recent issues by canonical issue-folder completeness instead of raw file presence; an issue only counts as present when its `BLT_...` or `GZ_...` folder contains both `metadata.json` and `events.json`
 - raw collector downloads now use the canonical issue stem, for example `BLT_490_2026-04-13.pdf` or `GZ_500_2026-03-31.zip`
 - extraction accepts those canonical raw BLT/GZ filenames alongside the older legacy raw filenames

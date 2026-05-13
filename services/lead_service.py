@@ -151,7 +151,7 @@ def _shape_only_name_sql(column_sql: str) -> str:
 
 
 def _shape_only_conflict_exclusion_sql(alias: str = "uc") -> str:
-    """Exclude derived Opposition Radar rows created from logo-only placeholder names."""
+    """Exclude derived Radar rows created from logo-only placeholder names."""
     return f"""
               AND NOT (
                   {_shape_only_name_sql(f"{alias}.new_mark_name")}
