@@ -125,13 +125,19 @@ Verification:
 
 ### Branch Rule
 
-Use `main` only when all of these are true:
-- the change is small
-- the change is low risk
-- the change is easy to undo
-- the change does not touch data, infra, billing, permissions, or test-harness behavior
+**All work happens on `main`. Do not create new branches or worktrees.**
 
-Use a task branch for everything else.
+This rule supersedes the older split-by-risk policy. Multiple parallel agents creating their own branches led to deep divergence and hours of reconciliation work. From now on:
+
+- Always work on `main`. Never run `git checkout -b`, `git switch -c`, `git branch <new-name>`, or `git worktree add`.
+- Never switch to a non-main branch via `git checkout <branch>` or `git switch <branch>`.
+- Allowed: `git checkout main`, file-level `git checkout -- <file>` or `git checkout HEAD -- <file>`, `git branch -d` / `-D` (delete merged branches), all read-only inspection (`git branch`, `git branch -v`, `git worktree list`).
+- Commit small, focused changes directly to `main`. If a change is too risky for a direct commit, surface that concern in chat and let the human decide — do not branch unilaterally.
+- Two enforcement layers are wired up in the repo, both currently **dormant** until the parallel MiniLM/color refactor finishes:
+  - **Model-side** — `.claude/hooks/block-branch-mess.sh` (referenced from `.claude/settings.json` PreToolUse hook). Blocks Claude Code's Bash tool calls that match branch-creation or non-main checkout patterns.
+  - **Git-side** — `.githooks/` (reference-transaction + pre-commit + post-checkout). Once activated, blocks branch creation and non-main commits for every git client (humans, other AI tools, IDE integrations).
+- Activate after the MiniLM refactor lands its final commit. See [`.githooks/README.md`](.githooks/README.md) for the exact activation command. Activating now would block the in-flight `feat/remove-trademark-minilm-color` commits.
+- Don't try to bypass either layer once they're active. If the policy is genuinely wrong for a specific task, raise it in chat first.
 
 ### Test Integrity Rule
 

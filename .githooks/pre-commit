@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Refuse commits made on any branch other than `main`.
+#
+# See CLAUDE.md > Branch Rule.
+
+branch="$(git symbolic-ref --short HEAD 2>/dev/null || echo DETACHED)"
+
+if [ "$branch" != "main" ]; then
+  echo "" >&2
+  echo "BLOCKED by .githooks/pre-commit: refusing commit on '$branch' (current branch is not main)." >&2
+  echo "Policy: all work happens on main. See CLAUDE.md > Branch Rule." >&2
+  echo "Switch back with: git checkout main" >&2
+  exit 1
+fi
+
+exit 0

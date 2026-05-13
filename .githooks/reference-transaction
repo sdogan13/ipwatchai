@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Block creation of any local branch other than `main`.
+#
+# Fires during every ref update. We only care about the "prepared" state
+# (before the update is committed). Exit non-zero from "prepared" aborts
+# the transaction.
+#
+# stdin: lines of "<old-oid> <new-oid> <refname>"
+# $1:    state (prepared | committed | aborted)
+#
+# See CLAUDE.md > Branch Rule.
+
+[ "$1" = "prepared" ] || exit 0
+
+ZERO="0000000000000000000000000000000000000000"
+
+while read -r old new ref; do
+  case "$ref" in
+    refs/heads/main) ;;
+    refs/heads/*)
+      if [ "$old" = "$ZERO" ]; then
+        name="${ref#refs/heads/}"
+        echo "" >&2
+        echo "BLOCKED by .githooks/reference-transaction: refusing to create branch '$name'." >&2
+        echo "Policy: all work happens on main. See CLAUDE.md > Branch Rule." >&2
+        echo "If you genuinely need to branch, raise it with the team — don't bypass." >&2
+        exit 1
+      fi
+      ;;
+  esac
+done
+
+exit 0

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Warn loudly when HEAD lands on any branch other than `main`.
+#
+# Git has no `pre-checkout` hook so we cannot block the switch itself;
+# pre-commit will refuse any commit on the wrong branch and the model-side
+# Claude hook refuses the switch command at the source. This is the final
+# safety net for direct human / other-tool switches.
+#
+# Args: <prev-head> <new-head> <flag>
+#   flag = 1 → branch checkout
+#   flag = 0 → file checkout (ignore)
+
+[ "$3" = "1" ] || exit 0
+
+branch="$(git symbolic-ref --short HEAD 2>/dev/null || echo DETACHED)"
+
+if [ "$branch" != "main" ]; then
+  echo "" >&2
+  echo "================================ WARNING ================================" >&2
+  echo "  You are now on branch '$branch' (not main)."                              >&2
+  echo "  Project policy: all work happens on main."                                >&2
+  echo "  Commits here will be refused by .githooks/pre-commit."                    >&2
+  echo "  Switch back with:  git checkout main"                                     >&2
+  echo "  See CLAUDE.md > Branch Rule"                                              >&2
+  echo "==========================================================================" >&2
+fi
+
+exit 0
