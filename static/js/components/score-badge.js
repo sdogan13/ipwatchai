@@ -446,13 +446,7 @@ window.AppComponents.renderTurkpatentButton = function(applicationNo) {
 var renderTurkpatentButton = window.AppComponents.renderTurkpatentButton;
 
 // ============================================
-// G2) TURKPATENT Bookmarklet - Auto-fill "Başvuru Numarası" on opts.turkpatent.gov.tr
-//     Reads clipboard, finds the Angular Material input, sets value + dispatches events, clicks Sorgula
-// ============================================
-window.AppComponents.TURKPATENT_BOOKMARKLET = 'javascript:void((async()=>{try{var t=(await navigator.clipboard.readText()||"").trim();if(!t){alert("\\u00d6nce IP Watch AI\\u0027dan bir ba\\u015fvuru numaras\\u0131 kopyalay\\u0131n");return}var f=document.querySelectorAll("mat-form-field"),n;for(var i=0;i<f.length;i++){var l=f[i].querySelectorAll("mat-label,label");for(var j=0;j<l.length;j++)if(/ba.vuru/i.test(l[j].textContent)){n=f[i].querySelector("input");break}if(n)break}if(!n){var a=document.querySelectorAll("mat-form-field input");if(a.length)n=a[0]}if(!n){alert("Ba\\u015fvuru Numaras\\u0131 alan\\u0131 bulunamad\\u0131");return}var s=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set;s.call(n,t);n.dispatchEvent(new Event("input",{bubbles:!0}));n.dispatchEvent(new Event("change",{bubbles:!0}));n.focus();n.style.transition="background .3s";n.style.background="#c8e6c9";setTimeout(function(){n.style.background=""},1500);var b=document.querySelectorAll("button");for(var k=0;k<b.length;k++)if(/sorgula/i.test(b[k].textContent)){(function(x){setTimeout(function(){x.click()},400)})(b[k]);break}}catch(e){alert("\\u00d6nce IP Watch AI\\u0027dan bir ba\\u015fvuru numaras\\u0131 kopyalay\\u0131n")}})())';
-
-// ============================================
-// G3) renderEventsButton — opens event timeline modal
+// G2) renderEventsButton — opens event timeline modal
 // ============================================
 window.AppComponents.renderEventsButton = function(applicationNo) {
     if (!applicationNo) return '';
@@ -469,7 +463,7 @@ window.AppComponents.renderEventsButton = function(applicationNo) {
 };
 
 // ============================================
-// G4) Event-derived signal badges
+// G3) Event-derived signal badges
 //     holder-changed pill, restriction warning, last-activity line.
 //     Each helper returns '' when its source field is absent so it
 //     gracefully degrades on responses that don't yet surface events.

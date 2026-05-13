@@ -676,38 +676,6 @@
                 </div>
             </div>
 
-            <!-- Bookmarklet tip (dismissible) -->
-            <div id="bkm-tip" class="rounded-xl p-3 mb-3 flex items-start gap-3"
-                style="background:rgba(79,70,229,0.06);border:1px dashed rgba(79,70,229,0.3)"
-                x-init="if(localStorage.getItem('bkm_tip')==='1') $el.remove()">
-                <div class="flex-1 min-w-0">
-                    <div class="text-sm font-semibold mb-1" style="color:var(--color-primary)"
-                        x-text="t('bookmarklet.title')"></div>
-                    <p class="text-xs mb-2" style="color:var(--color-text-secondary)"
-                        x-text="t('bookmarklet.description')"></p>
-                    <div class="flex flex-wrap items-center gap-3">
-                        <a :href="window.AppComponents.TURKPATENT_BOOKMARKLET"
-                            @click.prevent="if(window.AppToast) window.AppToast.showToast(t('bookmarklet.drag_toast'), 'info')"
-                            class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white cursor-grab active:cursor-grabbing select-none"
-                            style="background:var(--color-primary)" :title="t('bookmarklet.drag_hint')">
-                            &#128278; <span x-text="t('bookmarklet.button_label')"></span>
-                        </a>
-                        <ol class="text-xs list-decimal list-inside space-y-0.5" style="color:var(--color-text-faint)">
-                            <li x-text="t('bookmarklet.step1')"></li>
-                            <li x-text="t('bookmarklet.step2')"></li>
-                            <li x-text="t('bookmarklet.step3')"></li>
-                        </ol>
-                    </div>
-                </div>
-                <button @click="$el.closest('#bkm-tip').remove(); localStorage.setItem('bkm_tip', '1')"
-                    class="flex-shrink-0 p-1 rounded hover:opacity-70" style="color:var(--color-text-faint)">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                </button>
-            </div>
-
             <!-- Result cards (scrollable) -->
             <div class="relative">
                 <div x-ref="resultsScroll" class="max-h-[520px] overflow-y-auto space-y-3 pr-1"
