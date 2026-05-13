@@ -345,6 +345,7 @@ Target structure:
 - `tests/live/features/test_search_live.py`
 - `tests/live/features/test_dashboard_live.py`
 - `tests/live/features/test_watchlist_live.py`
+- `tests/live/features/test_watchlist_delete_alignment_live.py`: proves DELETE on `/api/v1/patent-watchlist/{id}` and `/api/v1/cografi-watchlist/{id}` returns the trademark/design-parity response shape — `success`, `id`, `deleted`, `removed_alerts`, and a Turkish `message` containing the alert count. Per category: create holder-type watch, seed 2 alert rows directly in the alerts table (so the FK cascade has something to remove), DELETE, assert response shape + that `removed_alerts == 2`, then GET asserts 404. Uses default live persona; quota-sensitive (shared 5-item cap across registries).
 - `tests/live/features/test_billing_live.py`
 - `tests/live/features/test_reports_live.py`
 - `tests/live/features/test_applications_live.py`
