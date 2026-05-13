@@ -319,6 +319,16 @@
     return map[key] || ("section_" + key);
   }
 
+  // TÜRKPATENT GI portal — public search page on the dedicated cografi
+  // subdomain. Unlike patent / design, the GI portal does NOT accept
+  // a URL query param to pre-fill the search (verified 2026-05-13:
+  // /veri-tabani is AJAX-driven with no location.search read), and
+  // the only deep-linkable URL is /cografi-isaretler/detay/{internalId}
+  // where {internalId} is TPE's internal numeric ID — not exposed in
+  // our data. So the button lands the user on the search page itself
+  // and they re-enter the application_no manually.
+  var TURKPATENT_COGRAFI_SEARCH_URL = "https://ci.turkpatent.gov.tr/veri-tabani";
+
   // Section_key colours — registered + finalized lean green (live
   // records), modifications/corrections lean amber, examined lean
   // grey. Used both for the header pill and the section-aware label.
@@ -564,8 +574,24 @@
           escapeHtml(t("cografi_search.view_detail", "Detaylar")) +
         '</button>'
       : "";
-    var actionRow = (watchlistBtn || detailBtn)
-      ? '<div class="mt-3 flex flex-wrap items-center gap-2">' + watchlistBtn + detailBtn + '</div>'
+    // Link out to the GI portal's search page. The portal has no
+    // URL-based pre-fill and same-origin policy blocks cross-window
+    // form writes, so the click handler copies the application_no to
+    // the clipboard first, then opens the page — user pastes (Ctrl+V)
+    // into the Başvuru No box. See TURKPATENT_COGRAFI_SEARCH_URL note.
+    var tpCopyValue = appNo || regNo || titleStr || "";
+    var tpBtn =
+      '<button type="button" data-cografi-tpe-open ' +
+      'data-tpe-copy="' + escapeHtml(tpCopyValue) + '" ' +
+      'class="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors cursor-pointer" ' +
+      'style="color:var(--color-primary);background:var(--color-primary-light);border:0">' +
+        '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+          '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>' +
+        '</svg>' +
+        escapeHtml(t("landing.view_on_turkpatent", "Türkpatent'te Gör")) +
+      '</button>';
+    var actionRow = (watchlistBtn || detailBtn || tpBtn)
+      ? '<div class="mt-3 flex flex-wrap items-center gap-2">' + watchlistBtn + detailBtn + tpBtn + '</div>'
       : "";
 
     var detailsHtml =
@@ -834,6 +860,35 @@
         var payload = null;
         try { payload = JSON.parse(raw); } catch (_) { payload = null; }
         if (payload) addCografiToWatchlist(wlBtn, payload);
+        return;
+      }
+
+      // "TÜRKPATENT'te Gör" — the GI portal has no URL-based pre-fill,
+      // so copy the application_no to the clipboard and tell the user
+      // to paste once the new tab opens. window.open MUST run inside
+      // the synchronous click frame (popup blockers reject opens that
+      // happen after an awaited promise), so clipboard write is fired
+      // alongside the open rather than before it.
+      var tpeBtn = t_.closest && t_.closest("[data-cografi-tpe-open]");
+      if (tpeBtn) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        var copyValue = tpeBtn.getAttribute("data-tpe-copy") || "";
+        window.open(TURKPATENT_COGRAFI_SEARCH_URL, "_blank", "noopener");
+        if (copyValue && navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(copyValue).then(function () {
+            if (window.AppToast && typeof window.AppToast.success === "function") {
+              var tmpl = t(
+                "cografi_search.tpe_copied_paste",
+                "Copied “{value}” — paste into the search box."
+              );
+              window.AppToast.success(tmpl.replace("{value}", copyValue));
+            }
+          }, function () {
+            // Clipboard rejected (permissions / non-secure context) —
+            // no toast, the tab is already open.
+          });
+        }
         return;
       }
 

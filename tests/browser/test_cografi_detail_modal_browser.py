@@ -191,19 +191,32 @@ def _assert_at_least_one_body_section(page) -> dict:
     """body_sections is the optional cluster of 4 free-text blocks
     (product_description / production_method / boundary_processing /
     inspection). Karapınar Halısı has at least product_description +
-    production_method populated. Verify the container rendered at
-    least one child block."""
-    container = page.locator("#cd-body-sections > div")
-    count = container.count()
-    assert count >= 1, (
-        f"#cd-body-sections rendered 0 child blocks; Karapınar Halısı "
-        f"has populated body_sections in the live corpus"
+    production_method populated, so JS renders a tab bar + a single
+    visible panel inside #cd-body-sections. Verify both."""
+    sections_root = page.locator("#cd-body-sections")
+    assert sections_root.count() == 1, "#cd-body-sections missing"
+    # The card is hidden via the .hidden class when there are 0 sections.
+    assert "hidden" not in (sections_root.get_attribute("class") or ""), (
+        f"#cd-body-sections is still hidden; Karapınar Halısı has "
+        f"populated body_sections in the live corpus"
     )
-    first_text = container.first.inner_text().strip()
-    assert first_text, "first body_sections block is empty"
+    tabs = page.locator("#cd-body-sections [role='tab']")
+    tab_count = tabs.count()
+    assert tab_count >= 1, (
+        f"#cd-body-sections rendered 0 tabs; Karapınar Halısı has "
+        f"≥2 populated body_sections so the multi-tab path should fire"
+    )
+    visible_panel = page.locator(
+        "#cd-body-sections [role='tabpanel']:not(.hidden)"
+    )
+    assert visible_panel.count() == 1, (
+        f"expected exactly 1 visible tabpanel, got {visible_panel.count()}"
+    )
+    panel_text = visible_panel.first.inner_text().strip()
+    assert panel_text, "visible body_sections tabpanel is empty"
     return {
-        "block_count": count,
-        "first_block_preview": first_text[:120],
+        "tab_count": tab_count,
+        "first_panel_preview": panel_text[:120],
     }
 
 
@@ -266,7 +279,7 @@ def test_cografi_detail_modal_browser_smoke():
                 lambda: _assert_at_least_one_holder(page),
             )
             run_browser_step(
-                "At least 1 body_sections block rendered",
+                "Body sections rendered as tabbed card (≥1 tab + visible panel)",
                 REPORTER, page, monitor, CONFIG,
                 lambda: _assert_at_least_one_body_section(page),
             )

@@ -113,9 +113,33 @@
     if ($("cd-product-group")) $("cd-product-group").textContent = rec.product_group || "—";
   }
 
+  var USAGE_COLLAPSE_AT = 320;
+
   function renderUsage(rec) {
     var el = $("cd-usage-description");
-    if (el) el.textContent = rec.usage_description || t("cografi_detail.no_description", "No description.");
+    if (!el) return;
+    var text = rec.usage_description ? String(rec.usage_description) : "";
+    if (!text.trim()) {
+      el.textContent = t("cografi_detail.no_description", "No description.");
+      return;
+    }
+    if (text.length <= USAGE_COLLAPSE_AT) {
+      el.textContent = text;
+      return;
+    }
+    // Preview + hidden full + show-more toggle. Clicking the toggle is
+    // handled by the delegated [data-cd-usage-toggle] listener in wire().
+    var safe = escapeHtml(text);
+    var preview = escapeHtml(text.slice(0, USAGE_COLLAPSE_AT)) + '…';
+    el.innerHTML = (
+      '<span data-cd-usage-preview class="whitespace-pre-line">' + preview + '</span>' +
+      '<span data-cd-usage-full class="hidden whitespace-pre-line">' + safe + '</span>' +
+      ' <button type="button" data-cd-usage-toggle ' +
+      'class="ml-1 text-xs font-medium hover:underline" ' +
+      'style="color:var(--color-primary)">' +
+        escapeHtml(t("cografi_detail.show_more", "Show more")) +
+      '</button>'
+    );
   }
 
   function renderBodySections(rec) {
@@ -127,23 +151,74 @@
       { key: "production_method",   label: "cografi_detail.production_method" },
       { key: "boundary_processing", label: "cografi_detail.boundary_processing" },
       { key: "inspection",          label: "cografi_detail.inspection" },
-    ];
-    var html = blocks
-      .filter(function (b) { return sections[b.key] && String(sections[b.key]).trim(); })
-      .map(function (b) {
-        return (
-          '<div>' +
-            '<h4 class="text-xs font-medium mb-1" style="color:var(--color-text-faint)">' +
-              escapeHtml(t(b.label, b.key)) +
-            '</h4>' +
-            '<p class="text-sm leading-relaxed whitespace-pre-line" ' +
-            'style="color:var(--color-text-primary)">' +
-              escapeHtml(sections[b.key]) +
-            '</p>' +
-          '</div>'
-        );
-      }).join("");
-    el.innerHTML = html;
+    ].filter(function (b) {
+      return sections[b.key] && String(sections[b.key]).trim();
+    });
+
+    if (blocks.length === 0) {
+      el.innerHTML = "";
+      el.classList.add("hidden");
+      return;
+    }
+    el.classList.remove("hidden");
+
+    // Single section → labelled card, no tab UI (avoids awkward 1-tab bar).
+    if (blocks.length === 1) {
+      var only = blocks[0];
+      el.innerHTML = (
+        '<div class="rounded-lg border p-3.5" ' +
+        'style="border-color:var(--color-border);background:var(--color-bg-muted)">' +
+          '<p class="text-[10px] font-medium uppercase tracking-wider mb-1.5" ' +
+          'style="color:var(--color-text-faint)">' +
+            escapeHtml(t(only.label, only.key)) +
+          '</p>' +
+          '<p class="text-sm leading-relaxed whitespace-pre-line" ' +
+          'style="color:var(--color-text-primary);max-width:64ch">' +
+            escapeHtml(sections[only.key]) +
+          '</p>' +
+        '</div>'
+      );
+      return;
+    }
+
+    // Multi-section → tab bar above a single content panel. First tab
+    // active by default; clicks handled by delegated [data-cd-tab] listener.
+    var tabs = blocks.map(function (b, i) {
+      var active = i === 0;
+      return (
+        '<button type="button" role="tab" ' +
+        'data-cd-tab="' + escapeHtml(b.key) + '" ' +
+        'aria-selected="' + (active ? "true" : "false") + '" ' +
+        'class="px-3 py-2 text-xs font-medium border-b-2 transition-colors whitespace-nowrap" ' +
+        'style="border-color:' + (active ? "var(--color-primary)" : "transparent") + ';' +
+        'color:' + (active ? "var(--color-primary)" : "var(--color-text-faint)") + ';' +
+        'background:transparent">' +
+          escapeHtml(t(b.label, b.key)) +
+        '</button>'
+      );
+    }).join("");
+
+    var panels = blocks.map(function (b, i) {
+      var active = i === 0;
+      return (
+        '<div role="tabpanel" data-cd-tabpanel="' + escapeHtml(b.key) + '" ' +
+        'class="' + (active ? '' : 'hidden') + '">' +
+          '<p class="text-sm leading-relaxed whitespace-pre-line" ' +
+          'style="color:var(--color-text-primary);max-width:64ch">' +
+            escapeHtml(sections[b.key]) +
+          '</p>' +
+        '</div>'
+      );
+    }).join("");
+
+    el.innerHTML = (
+      '<div class="rounded-lg border overflow-hidden" ' +
+      'style="border-color:var(--color-border);background:var(--color-bg-muted)">' +
+        '<div role="tablist" class="flex flex-wrap border-b overflow-x-auto" ' +
+        'style="border-color:var(--color-border)">' + tabs + '</div>' +
+        '<div class="p-3.5">' + panels + '</div>' +
+      '</div>'
+    );
   }
 
   function renderHolders(holders) {
@@ -321,6 +396,54 @@
     document.addEventListener("click", function (ev) {
       var t_ = ev.target;
       if (!t_) return;
+
+      // Body-section tab click → activate matching tab + panel.
+      var tabBtn = t_.closest && t_.closest("[data-cd-tab]");
+      if (tabBtn) {
+        ev.preventDefault();
+        var key = tabBtn.getAttribute("data-cd-tab");
+        var bs = $("cd-body-sections");
+        if (bs && key) {
+          var tabs = bs.querySelectorAll("[data-cd-tab]");
+          for (var i = 0; i < tabs.length; i++) {
+            var on = tabs[i].getAttribute("data-cd-tab") === key;
+            tabs[i].setAttribute("aria-selected", on ? "true" : "false");
+            tabs[i].style.borderColor = on ? "var(--color-primary)" : "transparent";
+            tabs[i].style.color = on ? "var(--color-primary)" : "var(--color-text-faint)";
+          }
+          var panels = bs.querySelectorAll("[data-cd-tabpanel]");
+          for (var j = 0; j < panels.length; j++) {
+            var match = panels[j].getAttribute("data-cd-tabpanel") === key;
+            if (match) panels[j].classList.remove("hidden");
+            else panels[j].classList.add("hidden");
+          }
+        }
+        return;
+      }
+
+      // Usage-description show-more / show-less toggle.
+      var usageBtn = t_.closest && t_.closest("[data-cd-usage-toggle]");
+      if (usageBtn) {
+        ev.preventDefault();
+        var u = $("cd-usage-description");
+        if (u) {
+          var prev = u.querySelector("[data-cd-usage-preview]");
+          var full = u.querySelector("[data-cd-usage-full]");
+          if (prev && full) {
+            var expanding = !prev.classList.contains("hidden");
+            if (expanding) {
+              prev.classList.add("hidden");
+              full.classList.remove("hidden");
+              usageBtn.textContent = t("cografi_detail.show_less", "Show less");
+            } else {
+              prev.classList.remove("hidden");
+              full.classList.add("hidden");
+              usageBtn.textContent = t("cografi_detail.show_more", "Show more");
+            }
+          }
+        }
+        return;
+      }
 
       // Open from any [data-cd-open="<record_id>"] click — but skip if
       // the actual click target is an interactive child (button, link,

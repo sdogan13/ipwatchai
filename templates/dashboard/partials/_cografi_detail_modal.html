@@ -91,16 +91,18 @@
         </div>
       </div>
 
-      {# Usage description #}
+      {# Usage description (collapsible if long; JS renders preview/full/toggle) #}
       <div>
-        <h3 class="text-xs font-medium mb-1" style="color:var(--color-text-faint)"
+        <h3 class="text-xs font-medium mb-1.5" style="color:var(--color-text-faint)"
             x-text="t('cografi_detail.usage_description')">Usage / certification</h3>
-        <p id="cd-usage-description" class="text-sm leading-relaxed"
-           style="color:var(--color-text-primary)">—</p>
+        <div id="cd-usage-description" class="text-sm leading-relaxed rounded-lg border p-3.5"
+             style="color:var(--color-text-primary);background:var(--color-bg-muted);
+                    border-color:var(--color-border);max-width:64ch">—</div>
       </div>
 
-      {# Body sections (4 free-text blocks; only shown when populated) #}
-      <div id="cd-body-sections" class="space-y-3"></div>
+      {# Body sections — tabbed card (JS builds tab bar + active panel from
+         non-empty body_sections; hidden entirely when no sections). #}
+      <div id="cd-body-sections" class="hidden"></div>
 
       {# Holders #}
       <div>

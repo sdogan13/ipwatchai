@@ -2259,7 +2259,8 @@
     "stats_db_records": "coğrafi işaret kaydı canlı veritabanında analiz ediliyor",
     "no_image": "Görsel yok",
     "record_type_gi": "Coğrafi İşaret",
-    "record_type_tpn": "Geleneksel Ürün Adı"
+    "record_type_tpn": "Geleneksel Ürün Adı",
+    "tpe_copied_paste": "“{value}” kopyalandı — TÜRKPATENT arama kutusuna yapıştırın."
   },
   "cografi_watchlist": {
     "panel_title": "Coğrafi İşaret Takibi",
@@ -2416,7 +2417,9 @@
     "no_holders": "Tescilli hak sahibi bulunmuyor.",
     "no_change_requests": "Bu kayda ait değişiklik talebi yok.",
     "no_figures": "Görsel yok.",
-    "source_format": "Kaynak"
+    "source_format": "Kaynak",
+    "show_more": "Daha fazla",
+    "show_less": "Daha az"
   },
   "patent_leads": {
     "mode_patent": "Patent Fırsatları",

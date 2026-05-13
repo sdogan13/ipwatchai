@@ -2256,7 +2256,8 @@
     "stats_db_records": "سجل مؤشر جغرافي يتم تحليلها في قاعدة البيانات المباشرة",
     "no_image": "لا توجد صورة",
     "record_type_gi": "مؤشر جغرافي",
-    "record_type_tpn": "اسم منتج تقليدي"
+    "record_type_tpn": "اسم منتج تقليدي",
+    "tpe_copied_paste": "تم نسخ ”{value}“ — الصقه في مربع البحث في TÜRKPATENT."
   },
   "cografi_watchlist": {
     "panel_title": "مراقبة المؤشرات الجغرافية",
@@ -2413,7 +2414,9 @@
     "no_holders": "لا يوجد مالكون مسجلون.",
     "no_change_requests": "لا توجد طلبات تغيير على هذا السجل.",
     "no_figures": "لا توجد صور.",
-    "source_format": "المصدر"
+    "source_format": "المصدر",
+    "show_more": "عرض المزيد",
+    "show_less": "عرض أقل"
   },
   "patent_leads": {
     "mode_patent": "فرص البراءات",
