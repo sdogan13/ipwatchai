@@ -36,7 +36,7 @@ PLAN_FEATURES = {
     "free": {
         "price_monthly": 0,
         "price_annual_monthly": 0,
-        "monthly_live_searches": 0,
+        "max_daily_live_searches": 5,
         "daily_lead_views": 0,
         "monthly_reports": 1,
         "can_export_reports": True,
@@ -47,10 +47,8 @@ PLAN_FEATURES = {
         "can_view_holder_portfolio": True,
         "can_download_portfolio": False,
         "can_export_csv_leads": False,
-        "can_use_live_scraping": False,
         "max_users": 1,
         "max_watchlist_items": 3,
-        "max_daily_quick_searches": 5,
         "auto_scan_max_items": 0,
         "auto_scan_frequency": None,
         "priority_support": False,
@@ -60,7 +58,7 @@ PLAN_FEATURES = {
     "starter": {
         "price_monthly": 499,
         "price_annual_monthly": 399,
-        "monthly_live_searches": 10,
+        "max_daily_live_searches": 50,
         "daily_lead_views": 0,
         "monthly_reports": 10,
         "can_export_reports": True,
@@ -71,10 +69,8 @@ PLAN_FEATURES = {
         "can_view_holder_portfolio": True,
         "can_download_portfolio": True,
         "can_export_csv_leads": True,
-        "can_use_live_scraping": True,
         "max_users": 3,
         "max_watchlist_items": 15,
-        "max_daily_quick_searches": 50,
         "auto_scan_max_items": 15,
         "auto_scan_frequency": "daily",
         "priority_support": False,
@@ -84,7 +80,7 @@ PLAN_FEATURES = {
     "professional": {
         "price_monthly": 1999,
         "price_annual_monthly": 1599,
-        "monthly_live_searches": 100,
+        "max_daily_live_searches": 2000,
         "daily_lead_views": 10,
         "monthly_reports": 30,
         "can_export_reports": True,
@@ -95,10 +91,8 @@ PLAN_FEATURES = {
         "can_view_holder_portfolio": True,
         "can_download_portfolio": True,
         "can_export_csv_leads": True,
-        "can_use_live_scraping": True,
         "max_users": 10,
         "max_watchlist_items": 1000,
-        "max_daily_quick_searches": 2000,
         "auto_scan_max_items": 100,
         "auto_scan_frequency": "daily",
         "priority_support": True,
@@ -108,7 +102,7 @@ PLAN_FEATURES = {
     "enterprise": {
         "price_monthly": 4999,
         "price_annual_monthly": 3999,
-        "monthly_live_searches": 999999,
+        "max_daily_live_searches": 999999,
         "daily_lead_views": 999999,
         "monthly_reports": 999999,
         "can_export_reports": True,
@@ -119,10 +113,8 @@ PLAN_FEATURES = {
         "can_view_holder_portfolio": True,
         "can_download_portfolio": True,
         "can_export_csv_leads": True,
-        "can_use_live_scraping": True,
         "max_users": 999999,
         "max_watchlist_items": 999999,
-        "max_daily_quick_searches": 999999,
         "auto_scan_max_items": 999999,
         "auto_scan_frequency": "daily",
         "priority_support": True,
@@ -132,7 +124,7 @@ PLAN_FEATURES = {
     "superadmin": {
         "price_monthly": 0,
         "price_annual_monthly": 0,
-        "monthly_live_searches": 999999,
+        "max_daily_live_searches": 999999,
         "daily_lead_views": 999999,
         "monthly_reports": 999999,
         "can_export_reports": True,
@@ -143,10 +135,8 @@ PLAN_FEATURES = {
         "can_view_holder_portfolio": True,
         "can_download_portfolio": True,
         "can_export_csv_leads": True,
-        "can_use_live_scraping": True,
         "max_users": 999999,
         "max_watchlist_items": 999999,
-        "max_daily_quick_searches": 999999,
         "auto_scan_max_items": 999999,
         "auto_scan_frequency": "daily",
         "priority_support": True,
@@ -285,14 +275,13 @@ def get_user_plan(db, user_id: str) -> dict:
         user_id: UUID string of the user
 
     Returns:
-        dict with keys: plan_name, can_use_live_search, monthly_limit, display_name
+        dict with keys: plan_name, can_use_live_search, daily_limit, display_name
     """
     cur = db.cursor(cursor_factory=RealDictCursor)
     cur.execute("""
         SELECT
             COALESCE(sp_user.name, sp_org.name, 'free') as plan_name,
             COALESCE(sp_user.display_name, sp_org.display_name, 'Free Trial') as display_name,
-            COALESCE(sp_user.can_use_live_search, sp_org.can_use_live_search, FALSE) as can_use_live_search,
             COALESCE(u.is_superadmin, FALSE) as is_superadmin,
             o.subscription_end_date
         FROM users u
@@ -307,8 +296,8 @@ def get_user_plan(db, user_id: str) -> dict:
         return {
             'plan_name': 'free',
             'display_name': 'Free Trial',
-            'can_use_live_search': False,
-            'monthly_limit': 0,
+            'can_use_live_search': True,
+            'daily_limit': PLAN_FEATURES['free']['max_daily_live_searches'],
         }
 
     plan_name = _canonical_plan_name(_row_value(row, 'plan_name', default='free'))
@@ -330,42 +319,36 @@ def get_user_plan(db, user_id: str) -> dict:
                 plan_name = 'free'
                 display_name = 'Free Trial'
 
-    monthly_limit = get_plan_limit(plan_name, 'monthly_live_searches')
-    can_use_live_search = bool(_row_value(row, 'is_superadmin', default=False)) or (
-        bool(get_plan_limit(plan_name, 'can_use_live_scraping')) and monthly_limit > 0
-    )
+    daily_limit = get_plan_limit(plan_name, 'max_daily_live_searches')
+    can_use_live_search = daily_limit > 0
 
     return {
         'plan_name': plan_name,
         'display_name': display_name,
         'can_use_live_search': can_use_live_search,
-        'monthly_limit': monthly_limit,
+        'daily_limit': daily_limit,
     }
 
 
-def get_live_search_usage(db, user_id: str) -> int:
+def get_daily_live_search_usage(db, user_id: str) -> int:
     """
-    Get current month's Agentic Search usage count.
-    Sums api_usage.live_searches for all rows in the current month.
+    Get today's Agentic Search usage count for a user.
 
     Args:
         db: Database context manager instance
         user_id: UUID string
 
     Returns:
-        Total Agentic Searches this month
+        Today's Agentic Search count
     """
     cur = db.cursor(cursor_factory=RealDictCursor)
-
-    # First day of current month
     today = date.today()
-    month_start = today.replace(day=1)
 
     cur.execute("""
-        SELECT COALESCE(SUM(live_searches), 0) as total
+        SELECT COALESCE(live_searches, 0) as total
         FROM api_usage
-        WHERE user_id = %s AND usage_date >= %s
-    """, (user_id, month_start))
+        WHERE user_id = %s AND usage_date = %s
+    """, (user_id, today))
 
     row = cur.fetchone()
     return row['total'] if row else 0
@@ -404,7 +387,7 @@ def increment_live_search_usage(db, user_id: str, org_id: str = None) -> int:
 
 def check_live_search_eligibility(db, user_id: str) -> Tuple[bool, str, dict]:
     """
-    Check if user can perform an Agentic Search.
+    Check if user can perform an Agentic Search today.
 
     Args:
         db: Database context manager instance
@@ -415,119 +398,33 @@ def check_live_search_eligibility(db, user_id: str) -> Tuple[bool, str, dict]:
 
     Reasons:
         - "ok": User can search
-        - "upgrade_required": Plan doesn't include Agentic Search
-        - "limit_exceeded": Monthly limit reached
+        - "daily_limit_exceeded": Daily limit reached
     """
     plan = get_user_plan(db, user_id)
     plan_name = plan['plan_name']
-    can_use = plan['can_use_live_search']
-    monthly_limit = plan['monthly_limit']
+    daily_limit = plan['daily_limit']
 
-    if not can_use:
-        logger.info(f"Feature denied: user={user_id} plan={plan_name} feature=live_search reason=upgrade_required")
-        return False, "upgrade_required", {
-            "error": "upgrade_required",
-            "current_plan": plan_name,
-            "display_name": plan['display_name'],
-            "required_plan": "live_search_enabled_plan",
-            "message": "Agentic Search, planinda Agentic Search hakki bulunan kullanicilar icindir. Agentic Search'i destekleyen bir plana yukseltmeniz gerekiyor.",
-            "message_en": "Agentic Search is only available on plans with Agentic Search access. Upgrade to a plan that includes Agentic Search.",
-        }
+    current_usage = get_daily_live_search_usage(db, user_id)
 
-    current_usage = get_live_search_usage(db, user_id)
-
-    if current_usage >= monthly_limit:
-        logger.info(f"Plan limit reached: user={user_id} plan={plan_name} feature=live_search limit={monthly_limit}")
-        return False, "limit_exceeded", {
-            "error": "limit_exceeded",
-            "current_plan": plan_name,
-            "display_name": plan['display_name'],
-            "monthly_limit": monthly_limit,
-            "current_usage": current_usage,
-            "remaining": 0,
-            "message": f"Bu ay {monthly_limit} Agentic Search hakkinin tamamini kullandiniz.",
-            "message_en": f"You've used all {monthly_limit} Agentic Searches this month.",
-        }
-
-    remaining = monthly_limit - current_usage
-    return True, "ok", {
-        "current_plan": plan_name,
-        "display_name": plan['display_name'],
-        "monthly_limit": monthly_limit,
-        "current_usage": current_usage,
-        "remaining": remaining,
-    }
-
-
-def get_daily_quick_searches(db, user_id: str) -> int:
-    """Get today's quick search count for a user."""
-    cur = db.cursor(cursor_factory=RealDictCursor)
-    today = date.today()
-
-    cur.execute("""
-        SELECT COALESCE(quick_searches, 0) as total
-        FROM api_usage
-        WHERE user_id = %s AND usage_date = %s
-    """, (user_id, today))
-
-    row = cur.fetchone()
-    return row['total'] if row else 0
-
-
-def increment_quick_search_usage(db, user_id: str, org_id: str = None) -> int:
-    """Increment quick search counter for today. Returns new count."""
-    cur = db.cursor(cursor_factory=RealDictCursor)
-    today = date.today()
-
-    cur.execute("""
-        INSERT INTO api_usage (user_id, organization_id, usage_date, quick_searches)
-        VALUES (%s, %s, %s, 1)
-        ON CONFLICT (user_id, usage_date)
-        DO UPDATE SET
-            quick_searches = api_usage.quick_searches + 1,
-            updated_at = CURRENT_TIMESTAMP
-        RETURNING quick_searches
-    """, (user_id, org_id, today))
-
-    db.commit()
-    row = cur.fetchone()
-    return row['quick_searches'] if row else 1
-
-
-def check_quick_search_eligibility(db, user_id: str) -> Tuple[bool, str, dict]:
-    """
-    Check if user can perform a quick search today.
-
-    Returns:
-        (can_search, reason, details)
-    """
-    plan = get_user_plan(db, user_id)
-    plan_name = plan['plan_name']
-    daily_limit = get_plan_limit(plan_name, 'max_daily_quick_searches')
-    used_today = get_daily_quick_searches(db, user_id)
-
-    if used_today >= daily_limit:
-        logger.info(f"Plan limit reached: user={user_id} plan={plan_name} feature=quick_search limit={daily_limit}")
+    if current_usage >= daily_limit:
+        logger.info(f"Plan limit reached: user={user_id} plan={plan_name} feature=live_search limit={daily_limit}")
         return False, "daily_limit_exceeded", {
             "error": "daily_limit_exceeded",
             "current_plan": plan_name,
+            "display_name": plan['display_name'],
             "daily_limit": daily_limit,
-            "used_today": used_today,
+            "used_today": current_usage,
             "remaining": 0,
-            "message": f"Gunluk {daily_limit} arama limitinize ulastiniz. Yarin tekrar deneyebilirsiniz.",
-            "message_en": f"You've reached your daily limit of {daily_limit} searches. Try again tomorrow.",
+            "message": f"Gunluk {daily_limit} Agentic Search hakkinizin tamamini kullandiniz. Yarin tekrar deneyebilirsiniz.",
+            "message_en": f"You've used all {daily_limit} Agentic Searches today. Try again tomorrow.",
         }
 
-    remaining = daily_limit - used_today
-
-    # Abuse indicator: 80% of daily cap consumed
-    if daily_limit > 0 and used_today >= daily_limit * 0.8:
-        logger.info(f"High usage: user={user_id} plan={plan_name} feature=quick_search used={used_today}/{daily_limit}")
-
+    remaining = daily_limit - current_usage
     return True, "ok", {
         "current_plan": plan_name,
+        "display_name": plan['display_name'],
         "daily_limit": daily_limit,
-        "used_today": used_today,
+        "used_today": current_usage,
         "remaining": remaining,
     }
 

@@ -439,9 +439,22 @@ def update_patent_watchlist_item(
 
 
 def delete_patent_watchlist_item(*, item_id: UUID, current_user, db_factory=Database) -> Dict[str, Any]:
-    """Hard delete. Cascades to patent_alerts_mt via FK ON DELETE CASCADE."""
+    """Hard delete. Cascades to patent_alerts_mt via FK ON DELETE CASCADE.
+
+    Mirrors ``design_watchlist_service.delete_design_watchlist_item`` and
+    ``watchlist_service.delete_watchlist_item_record``: counts the alerts
+    that will disappear so the caller can report the side effect.
+    """
     with db_factory() as db:
         cur = db.cursor()
+        cur.execute(
+            "SELECT COUNT(*) AS c FROM patent_alerts_mt WHERE watchlist_item_id = %s",
+            (str(item_id),),
+        )
+        alerts_row = cur.fetchone()
+        removed_alerts = int(
+            alerts_row.get("c") if isinstance(alerts_row, dict) else alerts_row[0]
+        )
         cur.execute(
             """
             DELETE FROM patent_watchlist_mt
@@ -454,7 +467,13 @@ def delete_patent_watchlist_item(*, item_id: UUID, current_user, db_factory=Data
         if not row:
             raise HTTPException(status_code=404, detail="Watchlist item not found")
         db.commit()
-        return {"id": str(item_id), "deleted": True}
+        return {
+            "success": True,
+            "id": str(item_id),
+            "deleted": True,
+            "removed_alerts": removed_alerts,
+            "message": f"Patent takibi ve {removed_alerts} uyari silindi",
+        }
 
 
 # ---------------------------------------------------------------------------
