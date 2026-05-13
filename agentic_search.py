@@ -31,7 +31,7 @@ import threading
 import psycopg2
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from dotenv import load_dotenv
 from config.settings import settings
 
@@ -723,12 +723,10 @@ from utils.settings_manager import get_rate_limit_value
 from utils.feature_flags import is_feature_enabled
 from utils.subscription import (
     check_live_search_eligibility,
-    check_quick_search_eligibility,
     check_report_eligibility,
     increment_live_search_usage,
-    increment_quick_search_usage,
     get_user_plan,
-    get_live_search_usage,
+    get_daily_live_search_usage,
 )
 
 _search_limiter = Limiter(key_func=get_remote_address)
@@ -916,17 +914,17 @@ async def get_search_credits(
     """
     with Database() as db:
         plan = get_user_plan(db, str(current_user.id))
-        current_usage = get_live_search_usage(db, str(current_user.id))
-        monthly_limit = plan['monthly_limit']
+        current_usage = get_daily_live_search_usage(db, str(current_user.id))
+        daily_limit = plan['daily_limit']
 
         return {
             "plan": plan['plan_name'],
             "display_name": plan['display_name'],
             "can_use_live_search": plan['can_use_live_search'],
-            "monthly_limit": monthly_limit,
-            "used_this_month": current_usage,
-            "remaining": max(0, monthly_limit - current_usage),
-            "resets_on": datetime.now().strftime('%Y-%m') + "-01",
+            "daily_limit": daily_limit,
+            "used_today": current_usage,
+            "remaining": max(0, daily_limit - current_usage),
+            "resets_on": (date.today() + timedelta(days=1)).isoformat(),
         }
 
 
