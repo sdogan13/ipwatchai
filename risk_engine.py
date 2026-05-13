@@ -183,7 +183,6 @@ class RiskEngine:
 
         # --- OPTIMIZATION: Reuse models from pipeline.ai to save VRAM ---
         self.device = ai.device
-        self.text_model = ai.text_model
         self.clip_model = ai.clip_model
         self.clip_preprocess = ai.clip_preprocess
         self.dino_model = ai.dinov2_model
@@ -315,13 +314,16 @@ class RiskEngine:
         return clip_vec, dino_vec, color_vec, ocr_text
 
     def get_query_vectors(self, name, image_path=None):
-        """Encode query name and optional image into vectors.
+        """Encode optional image into vectors.
 
         Returns:
-            tuple: (text_vec, img_vec, dino_vec, color_vec, ocr_text)
+            tuple: (text_vec, img_vec, dino_vec, color_vec, ocr_text) where
+            text_vec and color_vec are always None (MiniLM + color histogram
+            removed) and kept positionally for caller back-compat.
         """
         # Trademark name retrieval is lexical/phonetic/translation based. Text
         # embeddings are intentionally not generated for trademark risk scoring.
+        del name
         text_vec = None
         img_vec, dino_vec, color_vec, ocr_text = None, None, None, ""
         self._last_query_logo_profile = None
@@ -340,25 +342,12 @@ class RiskEngine:
         return text_vec, img_vec, dino_vec, color_vec, ocr_text
 
     def suggest_classes(self, description, limit=3):
-        if not description or not str(description).strip():
-            return []
-
-        desc_vec = self.text_model.encode(description).tolist()
-        cur = self.conn.cursor()
-        sql = """
-            SELECT class_number, description,
-                   (1 - (description_embedding <=> %s::halfvec)) as similarity
-            FROM nice_classes_lookup
-            ORDER BY similarity DESC
-            LIMIT %s
-        """
-        try:
-            cur.execute(sql, (str(desc_vec), limit))
-            results = cur.fetchall()
-            return [{"class_number": r[0], "description": r[1], "confidence": float(r[2])} for r in results]
-        except Exception:
-            self.conn.rollback()
-            return []
+        # MiniLM-based NICE class suggestion removed.
+        # Returning empty list preserves caller contract; callers should treat
+        # missing suggestions as "no semantic match available" and fall back to
+        # keyword-based class hints elsewhere if needed.
+        del description, limit
+        return []
 
     def _record_candidate_retrieval(self, candidate_id, stage, fields, variant=None):
         if not hasattr(self, "_candidate_retrieval_metadata"):
@@ -799,6 +788,8 @@ class RiskEngine:
                 if remaining_limit <= 0:
                     break
 
+        # Semantic text-vector stage removed (relied on MiniLM `text_embedding`).
+
         if q_img_vec:
             try:
                 img_sql = """
@@ -956,16 +947,18 @@ class RiskEngine:
         all_candidates = cur.fetchall()
         return all_candidates
 
-    def calculate_hybrid_risk(self, candidates, name_input, query_text_vec,
-                                 query_img_vec, query_dino_vec=None, query_color_vec=None,
+    def calculate_hybrid_risk(self, candidates, name_input, query_text_vec=None,
+                                 query_img_vec=None, query_dino_vec=None, query_color_vec=None,
                                  query_ocr_text=""):
+        # query_text_vec + query_color_vec are accepted for back-compat but no longer
+        # contribute scores (MiniLM text_embedding and color_histogram are removed).
+        del query_text_vec, query_color_vec
         if not candidates: return []
 
         candidate_ids = [str(c[0]) for c in candidates]
 
         clip_col = f"(1 - (t.image_embedding <=> %s::halfvec))" if query_img_vec else "0.0"
         dino_col = f"(1 - (t.dinov2_embedding <=> %s::halfvec))" if query_dino_vec else "0.0"
-        color_col = f"(1 - (t.color_histogram <=> %s::halfvec))" if query_color_vec else "0.0"
 
         sql = f"""
             SELECT
@@ -976,7 +969,7 @@ class RiskEngine:
                 similarity(t.name, %s) as score_lexical,
                 {clip_col} as score_clip,
                 {dino_col} as score_dinov2,
-                {color_col} as score_color,
+                0.0 as score_color,
                 t.logo_ocr_text,
                 t.bulletin_no,
                 (dmetaphone(t.name) = dmetaphone(%s)) as phonetic_match,
@@ -995,8 +988,6 @@ class RiskEngine:
             params.append(str(query_img_vec))
         if query_dino_vec:
             params.append(str(query_dino_vec))
-        if query_color_vec:
-            params.append(str(query_color_vec))
         params.extend([name_input, candidate_ids])
 
         cur = self.conn.cursor()

@@ -114,7 +114,7 @@ def get_public_search_daily_limit(plan_features=None) -> int:
 
     free_plan = plan_features.get("free", {})
     try:
-        return int(free_plan.get("max_daily_live_searches", 5))
+        return int(free_plan.get("max_daily_quick_searches", 5))
     except (TypeError, ValueError):
         return 5
 
@@ -318,14 +318,14 @@ async def run_public_search(
     logger=None,
     searcher_factory=None,
 ):
-    """Run the public landing-page search flow against the live Agentic pipeline."""
+    """Run the public landing-page search flow."""
     if searcher_factory is None:
         from agentic_search import AgenticTrademarkSearch
 
         searcher_factory = AgenticTrademarkSearch
 
     try:
-        with searcher_factory(auto_scrape=True) as searcher:
+        with searcher_factory(auto_scrape=False) as searcher:
             result = searcher.search(
                 query=query,
                 nice_classes=nice_classes,
@@ -764,6 +764,7 @@ async def run_enhanced_search(
     connect_fn=None,
     timer=None,
     risk_engine_factory=None,
+    text_embedding_getter=None,
 ):
     """Run the enhanced text and optional image search flow."""
     if connect_fn is None:
@@ -946,7 +947,6 @@ async def run_enhanced_search(
                 t.logo_ocr_text,
                 t.image_embedding,
                 t.dinov2_embedding,
-                t.color_histogram,
                 GREATEST(
                     similarity(LOWER(t.name), LOWER(%s)),
                     similarity({normalize_sql}, LOWER(%s))
@@ -996,6 +996,9 @@ async def run_enhanced_search(
 
         cur.execute(base_select + where_clause + order_limit, base_params + where_params)
         rows = cur.fetchall()
+
+        # MiniLM semantic name vector removed; semantic_sim is no longer computed.
+        del text_embedding_getter  # accepted as a kwarg for back-compat but unused.
 
         query_img_data = None
         if search_request.image_url and use_unified:
@@ -1058,16 +1061,11 @@ async def run_enhanced_search(
                         query_img_data["dino_vec"],
                         row.get("dinov2_embedding"),
                     )
-                    color_sim = _cosine(
-                        query_img_data["color_vec"],
-                        row.get("color_histogram"),
-                    )
                     candidate_ocr = (row.get("logo_ocr_text") or "").strip()
 
                     vis_sim = visual_similarity_fn(
                         clip_sim=clip_sim,
                         dinov2_sim=dino_sim,
-                        color_sim=color_sim,
                         ocr_text_a=query_img_data.get("ocr_text", ""),
                         ocr_text_b=candidate_ocr,
                     )
@@ -1183,6 +1181,7 @@ async def run_image_search(
     get_image_embedding_handler,
     extract_ocr_text_handler,
     connect_fn=None,
+    text_embedding_getter=None,
     name_similarity_fn=None,
 ):
     """Run the public image-search flow used by the upload endpoint."""
@@ -1288,7 +1287,7 @@ async def run_image_search(
         clip_sql = f"""
             SELECT t.id, t.name, t.application_no, t.final_status, t.nice_class_numbers,
                    t.bulletin_no, t.image_path, t.logo_ocr_text, t.name_tr,
-                   t.image_embedding, t.dinov2_embedding, t.color_histogram,
+                   t.image_embedding, t.dinov2_embedding,
                    t.holder_name, t.holder_tpe_client_id,
                    t.attorney_name, t.attorney_no, t.registration_no,
                    t.application_date, t.expiry_date,
@@ -1309,8 +1308,8 @@ async def run_image_search(
         if use_unified and dino_vec_str:
             dino_sql = f"""
                 SELECT t.id, t.name, t.application_no, t.final_status, t.nice_class_numbers,
-                   t.bulletin_no, t.image_path, t.logo_ocr_text, t.name_tr,
-                   t.image_embedding, t.dinov2_embedding, t.color_histogram,
+                       t.bulletin_no, t.image_path, t.logo_ocr_text, t.name_tr,
+                       t.image_embedding, t.dinov2_embedding,
                        t.holder_name, t.holder_tpe_client_id,
                        t.attorney_name, t.attorney_no, t.registration_no,
                        t.application_date, t.expiry_date,
@@ -1332,11 +1331,10 @@ async def run_image_search(
         has_typed_name = bool(name and name.strip())
         query_name = (name or "").strip()
         query_text_source = "USER_TEXT" if has_typed_name else "IMAGE_ONLY"
-        if has_typed_name:
-            if name_similarity_fn is None:
-                from risk_engine import calculate_name_similarity
+        if has_typed_name and name_similarity_fn is None:
+            from risk_engine import calculate_name_similarity
 
-                name_similarity_fn = calculate_name_similarity
+            name_similarity_fn = calculate_name_similarity
 
         cur.close()
         conn.close()
@@ -1367,7 +1365,6 @@ async def run_image_search(
             if use_unified:
                 clip_sim = _cosine(query_img_data["clip_vec"], row.get("image_embedding"))
                 dino_sim = _cosine(query_img_data.get("dino_vec"), row.get("dinov2_embedding"))
-                color_sim = _cosine(query_img_data.get("color_vec"), row.get("color_histogram"))
                 candidate_profile_path = resolve_logo_image_path(
                     row.get("image_path") or "",
                     roots=[
@@ -1383,7 +1380,6 @@ async def run_image_search(
                 vis_sim, visual_breakdown = _calculate_visual_breakdown(
                     clip_sim=clip_sim,
                     dinov2_sim=dino_sim,
-                    color_sim=color_sim,
                     ocr_text_a=query_ocr_text,
                     ocr_text_b=candidate_ocr,
                     logo_profile_a=query_logo_profile,
