@@ -699,8 +699,6 @@ class PipelineWorker:
         Reads each metadata.json, generates:
           - CLIP embeddings (512-dim) for logo images
           - DINOv2 embeddings (768-dim) for logo images
-          - MiniLM text embeddings (384-dim) for trademark names
-          - Color histograms for logo images
           - OCR text extraction for logo images
         Then writes all embeddings BACK INTO the same metadata.json.
 
@@ -712,7 +710,7 @@ class PipelineWorker:
 
         try:
             logger.info("[Step 4/8] Starting embedding generation (GPU)...")
-            logger.info("[Step 4/8] Loading AI models (CLIP, DINOv2, MiniLM)...")
+            logger.info("[Step 4/8] Loading AI models (CLIP, DINOv2)...")
 
             # Deferred import - pipeline.ai loads CUDA models at import time
             from pipeline.ai import run_embedding_generation
@@ -1357,7 +1355,7 @@ Steps:
   1. download      - Download bulletin archives from TURKPATENT
   2. extract       - Extract archives to structured folders
   3. metadata      - Parse HSQLDB SQL files to metadata.json
-  4. embeddings    - Generate CLIP/DINOv2/MiniLM embeddings (GPU)
+  4. embeddings    - Generate CLIP/DINOv2 embeddings (GPU)
   5. ingest        - Load enriched metadata.json into PostgreSQL
   6. repair        - Run post-ingest DB repair routines
   7. event_ingest  - Reconcile events.json into trademark_events/state

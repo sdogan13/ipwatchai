@@ -43,9 +43,8 @@ except ImportError:
     EASYOCR_AVAILABLE = False
 from PIL import Image, ImageFile
 from torchvision import transforms
-from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
-from utils.model_cache import find_hf_snapshot_dir, find_hf_snapshot_file, find_torch_hub_repo
+from utils.model_cache import find_hf_snapshot_file, find_torch_hub_repo
 from pipeline.ingest_rules import clean_name
 
 # ===================== STRUCTURED LOGGING =====================
@@ -80,9 +79,8 @@ def _prepare_name_derived_ai_features(record):
 
     raw_name = ((record.get("TRADEMARK") or {}).get("NAME") or "").strip()
     name_was_cleaned = cleaned_name != " ".join(raw_name.split())
-    if name_was_cleaned:
-        if record.get(_TRANSLATION_SOURCE_NAME_KEY) != cleaned_name:
-            _clear_name_derived_ai_features(record, clear_translation=True)
+    if name_was_cleaned and record.get(_TRANSLATION_SOURCE_NAME_KEY) != cleaned_name:
+        _clear_name_derived_ai_features(record, clear_translation=True)
     return cleaned_name
 
 # ===================== CENTRALIZED SETTINGS =====================
@@ -104,7 +102,6 @@ try:
     CLIP_MODEL = settings.ai.clip_model
     CLIP_PRETRAINED = settings.ai.clip_pretrained
     DINO_MODEL = settings.ai.dino_model
-    TEXT_MODEL = settings.ai.text_model
     USE_FP16 = settings.ai.use_fp16
     USE_TF32 = settings.ai.use_tf32
     PIPELINE_TRANSLATION_BACKEND = settings.ai.pipeline_translation_backend
@@ -130,7 +127,6 @@ except ImportError:
     CLIP_MODEL = "ViT-B-32"
     CLIP_PRETRAINED = "laion2b_s34b_b79k"
     DINO_MODEL = "dinov2_vitb14"
-    TEXT_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     USE_FP16 = True
     USE_TF32 = True
     PIPELINE_TRANSLATION_BACKEND = "madlad"
@@ -184,18 +180,6 @@ def _resolve_dinov2_repo_source() -> tuple[str, str | None]:
     return "facebookresearch/dinov2", None
 
 
-def _resolve_text_model_source(model_name: str) -> str:
-    model_path = Path(model_name).expanduser()
-    if model_path.exists():
-        return str(model_path)
-
-    cached_snapshot = find_hf_snapshot_dir(model_name, required_files=["config.json"])
-    if cached_snapshot is not None:
-        logger.info("Using cached sentence transformer", model=model_name, path=str(cached_snapshot))
-        return str(cached_snapshot)
-
-    return model_name
-
 if SKIP_MODEL_LOAD:
     logger.warning("AI model loading skipped", reason="AI_SKIP_MODEL_LOAD")
 
@@ -218,17 +202,10 @@ if SKIP_MODEL_LOAD:
     def _dummy_preprocess(_image):
         return torch.zeros((3, 224, 224))
 
-    class _DummyTextModel:
-        def encode(self, texts, **_kwargs):
-            if isinstance(texts, str):
-                return np.zeros(384)
-            return np.zeros((len(texts), 384))
-
     clip_model = _DummyVisionModel()
     clip_preprocess = _dummy_preprocess
     dinov2_model = _DummyVisionModel()
     dinov2_preprocess = _dummy_preprocess
-    text_model = _DummyTextModel()
 else:
     _model_load_start = time.perf_counter()
     clip_pretrained_source = _resolve_clip_pretrained_source(CLIP_MODEL, CLIP_PRETRAINED)
@@ -272,11 +249,6 @@ else:
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
     logger.info("DINOv2 loaded", duration_ms=round((time.perf_counter() - _model_load_start) * 1000, 2))
-
-    _model_load_start = time.perf_counter()
-    logger.info("Loading text model", model=TEXT_MODEL.split('/')[-1])
-    text_model = SentenceTransformer(_resolve_text_model_source(TEXT_MODEL), device=device)
-    logger.info("Text model loaded", duration_ms=round((time.perf_counter() - _model_load_start) * 1000, 2))
 
 # ===================== OCR SETUP (Optional) =====================
 ocr_reader = None
@@ -369,76 +341,6 @@ except Exception as e:
     logger.warning("Redis not available - caching disabled", error=str(e))
     redis_client = None
     REDIS_AVAILABLE = False
-
-def get_text_embedding_cached(text: str) -> list:
-    """Get text embedding with Redis caching (24h TTL). Falls back to non-cached if Redis unavailable."""
-    if not text:
-        return text_model.encode("", show_progress_bar=False).tolist()
-
-    # If Redis not available, just generate embedding without caching
-    if not REDIS_AVAILABLE:
-        return text_model.encode(text, show_progress_bar=False).tolist()
-
-    # Generate cache key from MD5 hash
-    cache_key = f"text_emb:{hashlib.md5(text.encode('utf-8')).hexdigest()}"
-
-    # Try to get from cache
-    cached = redis_client.get(cache_key)
-    if cached:
-        return json.loads(cached)
-
-    # Generate embedding
-    embedding = text_model.encode(text, show_progress_bar=False).tolist()
-
-    # Store in cache with TTL
-    redis_client.setex(cache_key, EMBEDDING_CACHE_TTL, json.dumps(embedding))
-
-    return embedding
-
-def get_text_embeddings_batch_cached(texts: list) -> list:
-    """Batch text embeddings with Redis caching (24h TTL). Falls back to non-cached if Redis unavailable."""
-    results = [None] * len(texts)
-
-    # If Redis not available, just batch encode without caching
-    if not REDIS_AVAILABLE:
-        for i, text in enumerate(texts):
-            if not text:
-                results[i] = text_model.encode("", show_progress_bar=False).tolist()
-            else:
-                results[i] = text_model.encode(text, show_progress_bar=False).tolist()
-        return results
-
-    uncached_texts = []
-    uncached_indices = []
-
-    # Check cache for each text
-    for i, text in enumerate(texts):
-        if not text:
-            results[i] = text_model.encode("", show_progress_bar=False).tolist()
-            continue
-
-        cache_key = f"text_emb:{hashlib.md5(text.encode('utf-8')).hexdigest()}"
-        cached = redis_client.get(cache_key)
-
-        if cached:
-            results[i] = json.loads(cached)
-        else:
-            uncached_texts.append(text)
-            uncached_indices.append(i)
-
-    # Batch encode uncached texts
-    if uncached_texts:
-        embeddings = text_model.encode(uncached_texts, batch_size=64, show_progress_bar=False)
-
-        for idx, (text, embedding) in enumerate(zip(uncached_texts, embeddings)):
-            embedding_list = embedding.tolist()
-            results[uncached_indices[idx]] = embedding_list
-
-            # Cache the new embedding
-            cache_key = f"text_emb:{hashlib.md5(text.encode('utf-8')).hexdigest()}"
-            redis_client.setex(cache_key, EMBEDDING_CACHE_TTL, json.dumps(embedding_list))
-
-    return results
 
 # ===================== IMAGE EMBEDDING CACHE HELPERS =====================
 def _get_image_bytes_hash(image_path: str) -> str:
