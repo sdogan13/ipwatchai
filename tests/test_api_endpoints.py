@@ -1,4 +1,4 @@
-"""
+﻿"""
 Tests for API endpoints via FastAPI TestClient.
 
 Auth dependency is overridden in conftest.py (client/superadmin_client fixtures).
@@ -3899,13 +3899,13 @@ class TestSearchValidation:
 
     def test_quick_search_requires_query(self, client):
         """Quick search without 'query' param should fail."""
-        resp = client.get("/api/v1/search/quick")
+        resp = client.get("/api/v1/search")
         # Either 422 (validation) or 500 (unhandled)
         assert resp.status_code in (422, 500)
 
     def test_quick_search_with_query(self, client):
         """Quick search with a valid query should not return 422 (validation error)."""
-        resp = client.get("/api/v1/search/quick?query=NIKE")
+        resp = client.get("/api/v1/search?query=NIKE")
         # May get 500 (DB not available) but should not get 422 (bad input)
         assert resp.status_code != 422
 

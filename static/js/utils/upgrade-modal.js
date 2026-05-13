@@ -9,7 +9,7 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
     var FALLBACK_PLANS = {
         free: {
             price_monthly: 0,
-            monthly_live_searches: 0,
+            max_daily_live_searches: 5,
             daily_lead_views: 0,
             monthly_reports: 1,
             monthly_ai_credits: 0,
@@ -17,10 +17,8 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
             can_track_logos: false,
             can_download_portfolio: false,
             can_export_csv_leads: false,
-            can_use_live_scraping: false,
             max_users: 1,
             max_watchlist_items: 3,
-            max_daily_quick_searches: 5,
             auto_scan_max_items: 0,
             priority_support: false,
             api_access: false,
@@ -28,7 +26,7 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
         },
         starter: {
             price_monthly: 499,
-            monthly_live_searches: 10,
+            max_daily_live_searches: 50,
             daily_lead_views: 0,
             monthly_reports: 10,
             monthly_ai_credits: 10,
@@ -36,10 +34,8 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
             can_track_logos: true,
             can_download_portfolio: true,
             can_export_csv_leads: true,
-            can_use_live_scraping: true,
             max_users: 3,
             max_watchlist_items: 15,
-            max_daily_quick_searches: 50,
             auto_scan_max_items: 15,
             priority_support: false,
             api_access: false,
@@ -47,7 +43,7 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
         },
         professional: {
             price_monthly: 1999,
-            monthly_live_searches: 100,
+            max_daily_live_searches: 2000,
             daily_lead_views: 10,
             monthly_reports: 30,
             monthly_ai_credits: 50,
@@ -55,10 +51,8 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
             can_track_logos: true,
             can_download_portfolio: true,
             can_export_csv_leads: true,
-            can_use_live_scraping: true,
             max_users: 10,
             max_watchlist_items: 1000,
-            max_daily_quick_searches: 2000,
             auto_scan_max_items: 100,
             priority_support: true,
             api_access: false,
@@ -66,7 +60,7 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
         },
         enterprise: {
             price_monthly: 4999,
-            monthly_live_searches: 999999,
+            max_daily_live_searches: 999999,
             daily_lead_views: 999999,
             monthly_reports: 999999,
             monthly_ai_credits: 500,
@@ -74,10 +68,8 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
             can_track_logos: true,
             can_download_portfolio: true,
             can_export_csv_leads: true,
-            can_use_live_scraping: true,
             max_users: 999999,
             max_watchlist_items: 999999,
-            max_daily_quick_searches: 999999,
             auto_scan_max_items: 999999,
             priority_support: true,
             api_access: true,
@@ -85,9 +77,7 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
         }
     };
     var CONTEXT_RULES = {
-        public_search: { feature: 'max_daily_quick_searches', kind: 'numeric' },
-        quick_search: { feature: 'max_daily_quick_searches', kind: 'numeric' },
-        live_search: { feature: 'monthly_live_searches', kind: 'numeric' },
+        agentic_search: { feature: 'max_daily_live_searches', kind: 'numeric' },
         watchlist_items: { feature: 'max_watchlist_items', kind: 'numeric' },
         watchlist_logo: { feature: 'can_track_logos', kind: 'boolean' },
         reports: { feature: 'monthly_reports', kind: 'numeric' },
@@ -102,35 +92,23 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
         api_access: { feature: 'api_access', kind: 'boolean' }
     };
     var CONTEXT_PRIORITIES = {
-        public_search: ['max_daily_quick_searches', 'max_watchlist_items', 'monthly_live_searches'],
-        quick_search: ['max_daily_quick_searches', 'max_watchlist_items', 'monthly_live_searches'],
-        live_search: ['monthly_live_searches', 'max_daily_quick_searches', 'monthly_reports'],
+        agentic_search: ['max_daily_live_searches', 'max_watchlist_items', 'monthly_reports'],
         watchlist_items: ['max_watchlist_items', 'auto_scan_max_items', 'monthly_reports'],
-        watchlist_logo: ['can_track_logos', 'max_watchlist_items', 'monthly_live_searches'],
-        reports: ['monthly_reports', 'monthly_live_searches', 'max_daily_quick_searches'],
-        report_export: ['can_export_reports', 'monthly_live_searches', 'can_download_portfolio'],
+        watchlist_logo: ['can_track_logos', 'max_watchlist_items', 'max_daily_live_searches'],
+        reports: ['monthly_reports', 'max_daily_live_searches', 'max_watchlist_items'],
+        report_export: ['can_export_reports', 'max_daily_live_searches', 'can_download_portfolio'],
         applications: ['monthly_applications', 'monthly_ai_credits', 'can_track_logos'],
         ai_credits: ['monthly_ai_credits', 'name_suggestions_per_session', 'can_track_logos'],
         name_suggestions: ['name_suggestions_per_session', 'monthly_ai_credits', 'can_track_logos'],
-        class_suggestions: ['monthly_ai_credits', 'max_daily_quick_searches', 'can_track_logos'],
+        class_suggestions: ['monthly_ai_credits', 'max_daily_live_searches', 'can_track_logos'],
         leads: ['daily_lead_views', 'can_export_csv_leads', 'can_download_portfolio'],
         csv_export: ['api_access', 'daily_lead_views', 'can_download_portfolio'],
-        auto_scan: ['auto_scan_max_items', 'max_watchlist_items', 'monthly_live_searches'],
-        portfolio_download: ['can_download_portfolio', 'max_watchlist_items', 'max_daily_quick_searches'],
+        auto_scan: ['auto_scan_max_items', 'max_watchlist_items', 'max_daily_live_searches'],
+        portfolio_download: ['can_download_portfolio', 'max_watchlist_items', 'max_daily_live_searches'],
         api_access: ['api_access', 'priority_support', 'dedicated_account_manager']
     };
     var CONTEXT_COPY = {
-        public_search: {
-            eyebrow: 'upgrade.search_limit_eyebrow',
-            title: 'upgrade.search_limit_title',
-            description: 'upgrade.search_limit_description'
-        },
-        quick_search: {
-            eyebrow: 'upgrade.search_limit_eyebrow',
-            title: 'upgrade.search_limit_title',
-            description: 'upgrade.search_limit_description'
-        },
-        live_search: {
+        agentic_search: {
             eyebrow: 'upgrade.live_search_eyebrow',
             title: 'upgrade.live_search_title',
             description: 'upgrade.live_search_description'
@@ -201,7 +179,7 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
             description: 'upgrade.api_access_description'
         }
     };
-    var FALLBACK_CONTEXT = 'quick_search';
+    var FALLBACK_CONTEXT = 'agentic_search';
 
     function canonicalPlanName(plan) {
         var normalized = String(plan || 'free').trim().toLowerCase();
@@ -377,18 +355,14 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
     function featureLabel(planName, featureKey) {
         var plan = getPlan(planName);
         switch (featureKey) {
-            case 'max_daily_quick_searches':
-                return isUnlimited(plan.max_daily_quick_searches)
+            case 'max_daily_live_searches':
+                return isUnlimited(plan.max_daily_live_searches)
                     ? t('pricing.f_unlimited_searches')
-                    : t('pricing.f_daily_searches', { n: plan.max_daily_quick_searches });
+                    : t('pricing.f_daily_searches', { n: plan.max_daily_live_searches });
             case 'max_watchlist_items':
                 return isUnlimited(plan.max_watchlist_items)
                     ? t('pricing.f_unlimited_watchlist')
                     : t('pricing.f_watchlist', { n: plan.max_watchlist_items });
-            case 'monthly_live_searches':
-                return isUnlimited(plan.monthly_live_searches)
-                    ? t('pricing.f_unlimited_live')
-                    : t('pricing.f_live_monthly', { n: plan.monthly_live_searches });
             case 'monthly_reports':
                 return isUnlimited(plan.monthly_reports)
                     ? t('pricing.f_unlimited_reports')
@@ -431,7 +405,7 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
     }
 
     function highlightsFor(planName, context) {
-        var order = CONTEXT_PRIORITIES[context] || CONTEXT_PRIORITIES.quick_search;
+        var order = CONTEXT_PRIORITIES[context] || CONTEXT_PRIORITIES.agentic_search;
         var unique = [];
         for (var index = 0; index < order.length; index += 1) {
             var label = featureLabel(planName, order[index]);
@@ -440,7 +414,7 @@ window.AppUpgradeModal = window.AppUpgradeModal || (function () {
         }
         if (context === 'portfolio_download') return unique;
         if (unique.length < 3) {
-            ['max_daily_quick_searches', 'max_watchlist_items', 'monthly_live_searches'].forEach(function (featureKey) {
+            ['max_daily_live_searches', 'max_watchlist_items', 'monthly_reports'].forEach(function (featureKey) {
                 var label = featureLabel(planName, featureKey);
                 if (label && unique.indexOf(label) === -1 && unique.length < 3) unique.push(label);
             });

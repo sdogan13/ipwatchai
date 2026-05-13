@@ -1,4 +1,4 @@
-"""Shared helpers for design (Tasarım) browser smokes.
+﻿"""Shared helpers for design (Tasarım) browser smokes.
 
 Parallel to ``tests/browser/helpers/cografi.py`` and
 ``tests/browser/helpers/patent.py``. Each registry's helper file
@@ -296,7 +296,7 @@ def wait_for_search_rate_limit_to_clear(
     while time.time() < deadline:
         try:
             req = urllib.request.Request(
-                f"{config.base_url}/api/v1/design-search/quick",
+                f"{config.base_url}/api/v1/design-search",
                 method="POST",
                 headers={"Authorization": f"Bearer {token}"},
                 data=b"--x\r\nContent-Disposition: form-data; name=\"query\"\r\n\r\nping\r\n--x--\r\n",

@@ -1,4 +1,4 @@
-"""Browser smoke for the cografi search filter panel.
+﻿"""Browser smoke for the cografi search filter panel.
 
 The 8 filter dimensions exposed in ``_search_cografi_subview.html``
 have zero browser exercise today. The existing dashboard smoke
@@ -127,7 +127,7 @@ def _submit_search_capture_post(page) -> dict:
     # autocomplete-overlays-submit-button issue that caught us
     # earlier in test_cografi_dashboard_browser.py).
     with page.expect_request(
-        lambda r: r.url.endswith("/api/v1/cografi-search/quick")
+        lambda r: r.url.endswith("/api/v1/cografi-search")
                   and r.method == "POST",
         timeout=15000,
     ) as req_info:

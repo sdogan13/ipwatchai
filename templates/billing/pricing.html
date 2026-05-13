@@ -176,11 +176,10 @@
                     <p class="text-sm text-slate-500 mt-3" x-text="t('pricing.free_desc')">Platformu kesfetmek icin</p>
                 </div>
                 <ul class="plan-feature-list space-y-3 text-sm text-slate-700 flex-1">
-                    <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_daily_searches', {n: {{ plans.free.max_daily_quick_searches }}})">Gunluk {{ plans.free.max_daily_quick_searches }} hizli arama</span></li>
+                    <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_daily_searches', {n: {{ plans.free.max_daily_live_searches }}})">Gunluk {{ plans.free.max_daily_live_searches }} Agentik Arama</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_watchlist', {n: {{ plans.free.max_watchlist_items }}})">{{ plans.free.max_watchlist_items }} marka izleme</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_reports', {n: {{ plans.free.monthly_reports }}})">Ayda {{ plans.free.monthly_reports }} risk raporu</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_users', {n: {{ plans.free.max_users }}})">{{ plans.free.max_users }} kullanici</span></li>
-                    <li class="flex items-start gap-2">{{ cross|safe }} <span class="text-gray-400" x-text="t('pricing.f_live_search')">Agentik Arama</span></li>
                     <li class="flex items-start gap-2">{{ cross|safe }} <span class="text-gray-400" x-text="t('pricing.f_ai_credits', {n: 0})">AI kredi</span></li>
                     <li class="flex items-start gap-2">{{ cross|safe }} <span class="text-gray-400" x-text="t('pricing.f_class_suggestions')">AI sinif onerisi</span></li>
                     <li class="flex items-start gap-2">{{ cross|safe }} <span class="text-gray-400" x-text="t('pricing.f_applications', {n: 0})">Marka basvurusu</span></li>
@@ -213,11 +212,10 @@
                     <p class="text-xs text-indigo-600 font-semibold mt-3 flex items-center gap-1"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.includes_free')">Ucretsiz+</span></p>
                 </div>
                 <ul class="plan-feature-list space-y-3 text-sm text-slate-700 flex-1">
-                    <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_daily_searches', {n: {{ plans.starter.max_daily_quick_searches }}})">Gunluk {{ plans.starter.max_daily_quick_searches }} hizli arama</span></li>
+                    <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_daily_searches', {n: {{ plans.starter.max_daily_live_searches }}})">Gunluk {{ plans.starter.max_daily_live_searches }} Agentik Arama</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_watchlist', {n: {{ plans.starter.max_watchlist_items }}})">{{ plans.starter.max_watchlist_items }} marka izleme</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_reports_export', {n: {{ plans.starter.monthly_reports }}})">Ayda {{ plans.starter.monthly_reports }} risk raporu</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_users', {n: {{ plans.starter.max_users }}})">{{ plans.starter.max_users }} kullanici</span></li>
-                    <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_live_monthly', {n: {{ plans.starter.monthly_live_searches }}})">Ayda {{ plans.starter.monthly_live_searches }} Agentik Arama</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_ai_credits', {n: {{ plans.starter.monthly_ai_credits }}})">Ayda {{ plans.starter.monthly_ai_credits }} AI kredi</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_class_suggestions_n', {n: {{ plans.starter.monthly_ai_credits }}})">AI sinif onerisi · ayda {{ plans.starter.monthly_ai_credits }} kullanim</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_applications', {n: {{ plans.starter.monthly_applications }}})">Ayda {{ plans.starter.monthly_applications }} marka basvurusu</span></li>
@@ -250,11 +248,10 @@
                     <p class="text-xs text-indigo-600 font-semibold mt-3 flex items-center gap-1"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.includes_starter')">Baslangic+</span></p>
                 </div>
                 <ul class="plan-feature-list space-y-3 text-sm text-slate-700 flex-1">
-                    <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_daily_searches', {n: {{ plans.professional.max_daily_quick_searches }}})">Gunluk {{ plans.professional.max_daily_quick_searches }} hizli arama</span></li>
+                    <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_daily_searches', {n: {{ plans.professional.max_daily_live_searches }}})">Gunluk {{ plans.professional.max_daily_live_searches }} Agentik Arama</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_watchlist', {n: {{ plans.professional.max_watchlist_items }}})">{{ plans.professional.max_watchlist_items }} marka izleme</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_reports_export', {n: {{ plans.professional.monthly_reports }}})">Ayda {{ plans.professional.monthly_reports }} risk raporu</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_users', {n: {{ plans.professional.max_users }}})">{{ plans.professional.max_users }} kullanici</span></li>
-                    <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_live_monthly', {n: {{ plans.professional.monthly_live_searches }}})">Ayda {{ plans.professional.monthly_live_searches }} Agentik Arama</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_ai_credits', {n: {{ plans.professional.monthly_ai_credits }}})">Ayda {{ plans.professional.monthly_ai_credits }} AI kredi</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_class_suggestions_n', {n: {{ plans.professional.monthly_ai_credits }}})">AI sinif onerisi · ayda {{ plans.professional.monthly_ai_credits }} kullanim</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_applications', {n: {{ plans.professional.monthly_applications }}})">Ayda {{ plans.professional.monthly_applications }} marka basvurusu</span></li>
@@ -286,11 +283,10 @@
                     <p class="text-xs text-indigo-600 font-semibold mt-3 flex items-center gap-1"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> <span x-text="t('pricing.includes_professional')">Professional+</span></p>
                 </div>
                 <ul class="plan-feature-list space-y-3 text-sm text-slate-700 flex-1">
-                    <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_unlimited_searches')">Sinirsiz hizli arama</span></li>
+                    <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_unlimited_searches')">Sınırsız Agentik Arama</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_unlimited_watchlist')">Sinirsiz marka izleme</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_unlimited_reports')">Sinirsiz risk raporu</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_unlimited_users')">Sinirsiz kullanici</span></li>
-                    <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_unlimited_live')">Sınırsız Agentik Arama</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_ai_credits', {n: {{ plans.enterprise.monthly_ai_credits }}})">Ayda {{ plans.enterprise.monthly_ai_credits }} AI kredi</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_class_suggestions_n', {n: {{ plans.enterprise.monthly_ai_credits }}})">AI sinif onerisi · ayda {{ plans.enterprise.monthly_ai_credits }} kullanim</span></li>
                     <li class="flex items-start gap-2">{{ chk|safe }} <span x-text="t('pricing.f_applications', {n: {{ plans.enterprise.monthly_applications }}})">Ayda {{ plans.enterprise.monthly_applications }} marka basvurusu</span></li>

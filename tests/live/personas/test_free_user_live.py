@@ -1,4 +1,4 @@
-"""
+﻿"""
 Live HTTP suite for the free-plan persona.
 
 Run directly:
@@ -91,8 +91,8 @@ def test_quick_search_available():
     if session is None:
         return
 
-    name = "GET /api/v1/search/quick (free quick search)"
-    response = session.client.get("/api/v1/search/quick", params={"query": "wosen"})
+    name = "GET /api/v1/search (free quick search)"
+    response = session.client.get("/api/v1/search", params={"query": "wosen"})
     if response.status_code != 200:
         REPORTER.fail(f"{name} -> expected 200, got {response.status_code}: {response.text[:200]}")
         REPORTER.record(name, False, response.text[:200])

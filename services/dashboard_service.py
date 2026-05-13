@@ -77,7 +77,7 @@ async def get_dashboard_stats_data(
 
         cur.execute(
             """
-            SELECT COALESCE(SUM(au.quick_searches), 0) + COALESCE(SUM(au.live_searches), 0) as cnt
+            SELECT COALESCE(SUM(au.live_searches), 0) as cnt
             FROM api_usage au
             JOIN users u ON au.user_id = u.id
             WHERE u.organization_id = %s
@@ -93,8 +93,7 @@ async def get_dashboard_stats_data(
 
         wl_limit = plan_limit_getter(plan_name, "max_watchlist_items")
         user_limit = plan_limit_getter(plan_name, "max_users")
-        qs_limit = plan_limit_getter(plan_name, "max_daily_quick_searches")
-        ls_limit = plan_limit_getter(plan_name, "monthly_live_searches")
+        ls_limit = plan_limit_getter(plan_name, "max_daily_live_searches")
         report_limit = plan_limit_getter(plan_name, "monthly_reports")
         report_eligibility = report_eligibility_checker(db, plan_name, org_id)
 
@@ -117,7 +116,7 @@ async def get_dashboard_stats_data(
         plan_usage={
             "watchlist": {"used": wl["active"], "limit": wl_limit},
             "users": {"used": user_count, "limit": user_limit},
-            "searches": {"used": searches_this_month, "limit": qs_limit + ls_limit},
+            "searches": {"used": searches_this_month, "limit": ls_limit},
             "reports": {
                 "used": report_eligibility["reports_used"],
                 "limit": report_limit,

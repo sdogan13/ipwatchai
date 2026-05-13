@@ -1,4 +1,4 @@
-"""Browser smoke for the cografi image-upload search (DINOv2 figure
+﻿"""Browser smoke for the cografi image-upload search (DINOv2 figure
 similarity, hybrid text+image mode).
 
 The drag-drop zone in ``_search_cografi_subview.html`` accepts a
@@ -105,7 +105,7 @@ def _find_record_with_figure_and_download() -> dict:
         f"--{boundary}--\r\n"
     ).encode("utf-8")
     req = urllib.request.Request(
-        f"{CONFIG.base_url}/api/v1/cografi-search/quick",
+        f"{CONFIG.base_url}/api/v1/cografi-search",
         method="POST",
         headers={
             "Authorization": f"Bearer {token}",
@@ -212,7 +212,7 @@ def _upload_figure_and_submit(page) -> dict:
     page.wait_for_timeout(200)
 
     with page.expect_response(
-        lambda r: r.url.endswith("/api/v1/cografi-search/quick")
+        lambda r: r.url.endswith("/api/v1/cografi-search")
                   and r.request.method == "POST",
         timeout=60000,  # image search is heavier than text-only
     ) as resp_info:

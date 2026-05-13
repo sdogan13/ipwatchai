@@ -1,4 +1,4 @@
-"""Unit tests for the cross-registry unified search service + routes.
+﻿"""Unit tests for the cross-registry unified search service + routes.
 
 Pure helpers, merge-and-rank logic, and route registration are tested
 here. Live DB queries are exercised by manual smoke (covered in the
@@ -274,7 +274,7 @@ def test_register_registry_search_routes_attaches_three_paths():
     expected = {
         ("/api/v1/registry-search/public", ("GET",)),
         ("/api/v1/registry-search/public", ("POST",)),
-        ("/api/v1/registry-search/quick", ("POST",)),
+        ("/api/v1/registry-search", ("POST",)),
     }
     for path, methods in expected:
         matching = [

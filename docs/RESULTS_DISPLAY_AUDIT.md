@@ -1,4 +1,4 @@
-# Results Display Audit - Full Project Report
+﻿# Results Display Audit - Full Project Report
 
 **Date:** 2026-02-08
 **Scope:** Every view/endpoint that returns or displays trademark data
@@ -9,7 +9,7 @@
 
 ### 1.1 Quick Search
 
-- **Path:** `GET /api/v1/search/quick`
+- **Path:** `GET /api/v1/search`
 - **Auth:** JWT required
 - **Rate Limit:** 60/min + daily plan quota
 - **Params:** `query` (required), `classes` (comma-sep), `page` (default=1), `per_page` (default=20, max=100)
@@ -101,7 +101,7 @@ bulletin_no,
 
 ### 1.2 Intelligent Search (GET - text only)
 
-- **Path:** `GET /api/v1/search/intelligent`
+- **Path:** `GET /api/v1/search`
 - **Auth:** JWT required, Professional+ plan
 - **Rate Limit:** 10/min + monthly credit check
 - **Params:** `query`, `classes`, `attorney_no`, `page`, `per_page`
@@ -125,7 +125,7 @@ bulletin_no,
 
 ### 1.3 Intelligent Search (POST - with image)
 
-- **Path:** `POST /api/v1/search/intelligent`
+- **Path:** `POST /api/v1/search`
 - **Content-Type:** `multipart/form-data`
 - **Params:** `query`, `image` (UploadFile, optional), `classes`, `attorney_no`, `page`, `per_page`
 
@@ -151,7 +151,7 @@ bulletin_no,
 - Builds a `SearchRiskReportRequest` from the agentic results (top 20) and calls the LLM report pipeline, which charges 1 `monthly_reports` atomically.
 - Response shape: standard `SearchRiskReportResponse` with an extra `search` field containing the full agentic search response so the dashboard can render the result list and the report-ready card off the same payload.
 - Cancellation (via `/api/v1/search/cancel`): the in-flight agentic search aborts and the endpoint returns `{cancelled: true, search: <cancelled response>}` with no quota consumed.
-- Progress events (Redis-backed under the user's id) are emitted by the bundled agentic search exactly as for `/api/v1/search/intelligent`.
+- Progress events (Redis-backed under the user's id) are emitted by the bundled agentic search exactly as for `/api/v1/search`.
 
 **HTTP Status Codes:** 200, 401, 403 (report quota), 422 (missing Nice classes), 429, 503 (live scraping disabled)
 
@@ -516,8 +516,8 @@ bulletin_no,
   "plan": "professional",
   "display_name": "Professional",
   "usage": {
-    "daily_quick_searches": { "used": 12, "limit": 100 },
-    "monthly_live_searches": { "used": 3, "limit": 50 },
+    "daily_live_searches": { "used": 12, "limit": 100 },
+    "daily_live_searches": { "used": 3, "limit": 50 },
     "monthly_name_generations": { "used": 2, "limit": 15 },
     "logo_credits": { "remaining": 3, "limit": 3 },
     "watchlist_items": { "used": 8, "limit": 50 }

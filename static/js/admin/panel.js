@@ -646,7 +646,7 @@ function adminAnalytics() {
         get totalSearches() {
             if (!this.data || !this.data.daily_usage) return 0;
             return this.data.daily_usage.reduce(function(s, d) {
-                return s + (d.quick_searches || 0) + (d.live_searches || 0);
+                return s + (d.live_searches || 0);
             }, 0);
         },
 
@@ -678,14 +678,6 @@ function adminAnalytics() {
                 data: {
                     labels: labels,
                     datasets: [
-                        {
-                            label: 'Quick Searches',
-                            data: daily.map(function(d) { return d.quick_searches || 0; }),
-                            borderColor: '#6366f1',
-                            backgroundColor: 'rgba(99,102,241,0.1)',
-                            fill: true,
-                            tension: 0.3,
-                        },
                         {
                             label: 'Agentic Searches',
                             data: daily.map(function(d) { return d.live_searches || 0; }),

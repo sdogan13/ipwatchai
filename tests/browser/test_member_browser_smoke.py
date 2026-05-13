@@ -1,4 +1,4 @@
-"""
+﻿"""
 Browser smoke suite for authenticated member journeys.
 
 Run directly:
@@ -323,7 +323,7 @@ def main() -> None:
             def quick_search() -> None:
                 page.click("#tab-btn-search")
                 page.locator("#tab-content-search").wait_for(state="visible")
-                with page.expect_response(lambda response: "/api/v1/search/quick" in response.url, timeout=CONFIG.timeout_ms) as response_info:
+                with page.expect_response(lambda response: "/api/v1/search" in response.url, timeout=CONFIG.timeout_ms) as response_info:
                     page.fill('input[name="trademark-search"]', "wosen")
                     page.press('input[name="trademark-search"]', "Enter")
                 response = response_info.value
@@ -331,7 +331,7 @@ def main() -> None:
                     monitor.request_failures = [
                         failure
                         for failure in monitor.request_failures
-                        if "/api/v1/search/quick" not in failure
+                        if "/api/v1/search" not in failure
                     ]
                     return
                 if response.status != 200:

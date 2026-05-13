@@ -62,7 +62,6 @@ var currentHolderTpeId = null;
 var _storedSearchResults = [];
 var _lastSearchBannerHtml = '';
 var currentSearchTotal = 0;
-var currentSearchType = 'quick';
 
 // Watchlist cache — tracks which application_nos are already monitored
 var userWatchlistAppNos = {};  // using object as Set for IE compat
@@ -93,7 +92,6 @@ function dashboard() {
         searchResults: [],
         searchLoading: false,
         searchError: '',
-        searchType: 'quick',
         searchMeta: {},
         expandedResult: null,
         lightboxImage: '',
@@ -465,88 +463,7 @@ function dashboard() {
         },
 
         // ==================== SEARCH ====================
-        async dashboardQuickSearch() {
-            var query = this.searchQuery.trim();
-            if (!query && !this.selectedImage) {
-                showToast(this.t('search.enter_brand_name'), 'error');
-                return;
-            }
-
-            this.searchLoading = true;
-            this.searchError = '';
-            this.searchType = 'quick';
-            this.searchResults = [];
-            this.expandedResult = null;
-            this.clearRiskReportState();
-
-            var classes = this.selectedClasses;
-            var token = getAuthToken();
-
-            try {
-                var res;
-                if (this.selectedImage) {
-                    // POST with FormData for image
-                    var formData = new FormData();
-                    if (query) formData.append('query', query);
-                    formData.append('image', this.selectedImage);
-                    if (classes.length) formData.append('classes', classes.join(','));
-
-                    res = await fetch('/api/v1/search/quick', {
-                        method: 'POST',
-                        headers: { 'Authorization': 'Bearer ' + token },
-                        body: formData
-                    });
-                } else {
-                    // GET text-only
-                    var url = '/api/v1/search/quick?query=' + encodeURIComponent(query);
-                    if (classes.length) url += '&classes=' + classes.join(',');
-
-                    res = await fetch(url, {
-                        headers: { 'Authorization': 'Bearer ' + token }
-                    });
-                }
-
-                if (res.status === 401) { showToast(this.t('auth.session_expired'), 'error'); return; }
-                if (res.status === 429) {
-                    var errData = await res.json().catch(function () { return {}; });
-                    var detail = errData.detail || errData;
-                    if (window.AppUpgradeModal && typeof window.AppUpgradeModal.maybeHandle === 'function'
-                        && window.AppUpgradeModal.maybeHandle(detail, 'quick_search')) {
-                        return;
-                    }
-                    this.searchError = this.t('search.rate_limited');
-                    showToast(this.searchError, 'warning');
-                    return;
-                }
-                if (!res.ok) throw new Error(this.t('search.search_failed'));
-
-                var data = await res.json();
-                this.searchResults = (data.results || []).slice(0, DASHBOARD_SEARCH_RESULT_LIMIT);
-                this.searchMeta = {
-                    total: Math.min(data.total || 0, DASHBOARD_SEARCH_RESULT_LIMIT),
-                    scrape_triggered: false,
-                    image_used: data.image_used || false,
-                    elapsed_seconds: data.elapsed_seconds || null,
-                    source: 'database'
-                };
-                this.expandedResult = null;
-                this.sortResults();
-
-                currentSearchTotal = data.total || 0;
-                currentSearchType = 'quick';
-
-                this.saveSearchQuery(query);
-                this.showSearchHistory = false;
-                showToast(this.t('search.results_found_db', { count: Math.min(data.total || 0, DASHBOARD_SEARCH_RESULT_LIMIT) }), 'success');
-            } catch (e) {
-                console.error('Quick search error:', e);
-                this.searchError = e.message || this.t('search.search_failed');
-            } finally {
-                this.searchLoading = false;
-            }
-        },
-
-        async dashboardLiveSearch() {
+        async dashboardAgenticSearch() {
             var query = this.searchQuery.trim();
             if (!query) {
                 showToast(this.t('search.live_search_name_required'), 'warning');
@@ -555,7 +472,6 @@ function dashboard() {
 
             this.searchLoading = true;
             this.searchError = '';
-            this.searchType = 'intelligent';
             this.searchResults = [];
             this.expandedResult = null;
             this.clearRiskReportState();
@@ -575,14 +491,14 @@ function dashboard() {
                     formData.append('image', this.selectedImage);
                     if (classes.length) formData.append('classes', classes.join(','));
 
-                    res = await fetch('/api/v1/search/intelligent', {
+                    res = await fetch('/api/v1/search', {
                         method: 'POST',
                         headers: { 'Authorization': 'Bearer ' + token },
                         body: formData,
                         signal: signal
                     });
                 } else {
-                    var url = '/api/v1/search/intelligent?query=' + encodeURIComponent(query);
+                    var url = '/api/v1/search?query=' + encodeURIComponent(query);
                     if (classes.length) url += '&classes=' + classes.join(',');
 
                     res = await fetch(url, {
@@ -594,8 +510,17 @@ function dashboard() {
                 if (agenticSearchAborted) return;
                 var data = await res.json();
 
-                if (res.status === 403) { hideAgenticLoadingModal(); showUpgradeModal(data.detail || data, 'live_search'); return; }
-                if (res.status === 402) { hideAgenticLoadingModal(); showUpgradeModal(data.detail || data, 'live_search'); return; }
+                if (res.status === 429) {
+                    hideAgenticLoadingModal();
+                    var detail = (data && data.detail) ? data.detail : data;
+                    if (window.AppUpgradeModal && typeof window.AppUpgradeModal.maybeHandle === 'function'
+                        && window.AppUpgradeModal.maybeHandle(detail, 'agentic_search')) {
+                        return;
+                    }
+                    this.searchError = this.t('search.rate_limited');
+                    showToast(this.searchError, 'warning');
+                    return;
+                }
                 if (res.status === 401) { hideAgenticLoadingModal(); showToast(this.t('auth.session_expired'), 'error'); return; }
                 if (!res.ok) throw new Error((data.detail && data.detail.message) || data.detail || this.t('search.search_failed'));
 
@@ -614,7 +539,6 @@ function dashboard() {
                 this.sortResults();
 
                 currentSearchTotal = data.total || 0;
-                currentSearchType = 'intelligent';
 
                 this.saveSearchQuery(query);
                 this.showSearchHistory = false;
@@ -750,7 +674,6 @@ function dashboard() {
 
             this.riskReportLoading = true;
             this.searchLoading = true;
-            this.searchType = 'intelligent';
             this.searchResults = [];
             this.expandedResult = null;
             this.searchError = '';
@@ -1558,17 +1481,8 @@ function dashboard() {
                     function _fmtLimit(val) { return val >= 999999 ? '∞' : val; }
                     function _fmtPct(used, limit) { return limit >= 999999 ? 0 : (limit > 0 ? Math.min(100, Math.round(used / limit * 100)) : 0); }
 
-                    // Quick searches
-                    var qs = usage.daily_quick_searches || {};
-                    var qsEl = document.getElementById('usage-quick-text');
-                    var qsBar = document.getElementById('usage-quick-bar');
-                    var qsRing = document.getElementById('usage-quick-ring');
-                    if (qsEl) qsEl.textContent = (qs.used || 0) + ' / ' + _fmtLimit(qs.limit || 0);
-                    if (qsBar && qs.limit) qsBar.style.width = _fmtPct(qs.used || 0, qs.limit) + '%';
-                    if (qsRing && qs.limit) qsRing.innerHTML = window.AppComponents.renderUsageRing(qs.used || 0, qs.limit >= 999999 ? 1 : qs.limit, 'var(--color-primary)');
-
-                    // Agentic Search credits
-                    var ls = usage.monthly_live_searches || {};
+                    // Agentic Search daily credits
+                    var ls = usage.daily_live_searches || {};
                     var lsEl = document.getElementById('usage-live-text');
                     var lsBar = document.getElementById('usage-live-bar');
                     var lsRing = document.getElementById('usage-live-ring');
@@ -7486,7 +7400,7 @@ function renderReportsList(data) {
 
         var statusBadge = '';
         var downloadBtn = '';
-        var deleteBtn = '<button onclick="deleteReport(decodeURIComponent(\'' + encodedId + '\'), decodeURIComponent(\'' + encodedTitle + '\'))" '
+        var deleteBtn = '<button onclick="event.stopPropagation(); deleteReport(decodeURIComponent(\'' + encodedId + '\'), decodeURIComponent(\'' + encodedTitle + '\'))" '
             + 'title="' + escapeHtml(t('reports.delete_report')) + '" '
             + 'class="p-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg transition-colors flex items-center justify-center" '
             + 'aria-label="' + escapeHtml(t('reports.delete_report')) + '">'
@@ -7495,7 +7409,8 @@ function renderReportsList(data) {
             + '</svg></button>';
         if (report.status === 'completed') {
             statusBadge = '<span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">' + t('reports.status_completed') + '</span>';
-            downloadBtn = '<button onclick="handleReportDownload(\'' + report.id + '\')" '
+            downloadBtn = '<button onclick="event.stopPropagation(); handleReportDownload(\'' + report.id + '\')" '
+                + 'title="' + escapeHtml(t('reports.download_btn')) + '" '
                 + 'class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded-lg transition-colors flex items-center gap-1">'
                 + '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">'
                 + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>'
@@ -7511,7 +7426,18 @@ function renderReportsList(data) {
             sizeStr = '<span class="text-xs text-gray-400 ml-2">' + formatFileSize(report.file_size_bytes) + '</span>';
         }
 
-        html += '<div class="bg-white rounded-xl p-4 border border-gray-100 shadow-sm flex items-center gap-4">'
+        var isViewable = report.status === 'completed';
+        var rowAttrs = isViewable
+            ? ' role="button" tabindex="0" '
+                + 'onclick="handleReportView(\'' + report.id + '\')" '
+                + 'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();handleReportView(\'' + report.id + '\');}" '
+                + 'title="' + escapeHtml(t('reports.view_report')) + '" '
+                + 'aria-label="' + escapeHtml(t('reports.view_report')) + ': ' + title + '"'
+            : '';
+        var rowClass = 'bg-white rounded-xl p-4 border border-gray-100 shadow-sm flex items-center gap-4'
+            + (isViewable ? ' cursor-pointer hover:bg-blue-50/40 hover:border-blue-200 transition-colors' : '');
+
+        html += '<div class="' + rowClass + '"' + rowAttrs + '>'
             + '<div class="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">'
             + '<svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">'
             + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>'
@@ -7692,7 +7618,7 @@ function submitReportGeneration() {
 }
 
 // ============================================
-// REPORT DOWNLOAD
+// REPORT DOWNLOAD / VIEW
 // ============================================
 function handleReportDownload(reportId) {
     downloadReportAPI(reportId).then(function (blob) {
@@ -7707,6 +7633,25 @@ function handleReportDownload(reportId) {
         window.URL.revokeObjectURL(url);
     }).catch(function (err) {
         showToast(t('reports.download_failed') + ': ' + err.message, 'error');
+    });
+}
+
+function handleReportView(reportId) {
+    // Open placeholder synchronously so the popup blocker treats this as a
+    // user-gesture navigation; we redirect it once the auth'd fetch resolves.
+    var viewerTab = window.open('about:blank', '_blank');
+
+    downloadReportAPI(reportId).then(function (blob) {
+        var url = window.URL.createObjectURL(blob);
+        if (viewerTab && !viewerTab.closed) {
+            viewerTab.location.href = url;
+        } else {
+            window.location.href = url;
+        }
+        setTimeout(function () { window.URL.revokeObjectURL(url); }, 60000);
+    }).catch(function (err) {
+        if (viewerTab && !viewerTab.closed) viewerTab.close();
+        showToast(t('reports.view_failed') + ': ' + ((err && err.message) || ''), 'error');
     });
 }
 

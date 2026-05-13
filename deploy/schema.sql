@@ -663,7 +663,6 @@ CREATE TABLE IF NOT EXISTS api_usage (
     live_searches INTEGER DEFAULT 0,
     leads_viewed INTEGER DEFAULT 0,
     name_generations INTEGER DEFAULT 0,
-    quick_searches INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(user_id, usage_date)

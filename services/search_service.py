@@ -114,7 +114,7 @@ def get_public_search_daily_limit(plan_features=None) -> int:
 
     free_plan = plan_features.get("free", {})
     try:
-        return int(free_plan.get("max_daily_quick_searches", 5))
+        return int(free_plan.get("max_daily_live_searches", 5))
     except (TypeError, ValueError):
         return 5
 
@@ -318,14 +318,14 @@ async def run_public_search(
     logger=None,
     searcher_factory=None,
 ):
-    """Run the public landing-page search flow."""
+    """Run the public landing-page search flow against the live Agentic pipeline."""
     if searcher_factory is None:
         from agentic_search import AgenticTrademarkSearch
 
         searcher_factory = AgenticTrademarkSearch
 
     try:
-        with searcher_factory(auto_scrape=False) as searcher:
+        with searcher_factory(auto_scrape=True) as searcher:
             result = searcher.search(
                 query=query,
                 nice_classes=nice_classes,

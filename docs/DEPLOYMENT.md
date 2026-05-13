@@ -1,4 +1,4 @@
-# IP Watch AI Deployment
+﻿# IP Watch AI Deployment
 
 Last updated: 2026-04-19
 Status: Current
@@ -101,7 +101,7 @@ Useful endpoints:
 Notes:
 - Docker bootstraps the database from `deploy/schema.sql`
 - the base local stack exposes PostgreSQL on host port `5433`
-- the current validated backend default is `WORKERS=1`; the previous four-worker default caused intermittent dropped responses on `/api/v1/search/quick` and `/api/v1/search/intelligent`
+- the current validated backend default is `WORKERS=1`; the previous four-worker default caused intermittent dropped responses on `/api/v1/search` and `/api/v1/search`
 - the local Docker backend bind-mounts `education/` and `migrations/`, so landing Education materials and the Education progress startup check stay aligned with the workspace
 
 ## Prod-Style Deploy Path

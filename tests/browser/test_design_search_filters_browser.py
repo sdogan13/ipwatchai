@@ -1,4 +1,4 @@
-"""Browser smoke for the design search filter panel.
+﻿"""Browser smoke for the design search filter panel.
 
 Design's search has a smaller filter surface than patent's (no
 holder, no kind code, no date range) — the dominant filter is
@@ -187,7 +187,7 @@ def _submit_and_assert_locarno_in_body(page) -> dict:
     # The empty-query check requires query OR locarno OR image; we
     # have locarno selected so submit should fire.
     with page.expect_request(
-        lambda r: r.url.endswith("/api/v1/design-search/quick")
+        lambda r: r.url.endswith("/api/v1/design-search")
                   and r.method == "POST",
         timeout=15000,
     ) as req_info:

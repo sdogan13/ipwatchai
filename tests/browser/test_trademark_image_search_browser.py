@@ -1,8 +1,8 @@
 """Browser smoke for the trademark image-search path (comprehensive).
 
-Trademark's image search uses POST ``/api/v1/search/quick`` with
+Trademark's image search uses POST ``/api/v1/search`` with
 multipart body containing ``image``, ``query``, and ``classes``
-fields (per ``dashboardQuickSearch()`` in app.js).
+fields (per ``dashboardAgenticSearch()`` in app.js).
 
 Existing coverage (test_search_browser.paid_image_search) uses
 a synthetic 1×1 PNG + the query "wosen" + asserts response 200
@@ -73,7 +73,7 @@ def _find_record_with_image_and_download() -> dict:
 
     # Use the GET text-only quick-search to find candidates
     req = urllib.request.Request(
-        f"{CONFIG.base_url}/api/v1/search/quick"
+        f"{CONFIG.base_url}/api/v1/search"
         f"?query={PROBE_QUERY}&limit=20",
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -180,15 +180,15 @@ def _attach_image_and_submit(page) -> dict:
     page.wait_for_timeout(200)
 
     with page.expect_response(
-        lambda r: "/api/v1/search/quick" in r.url
+        lambda r: "/api/v1/search" in r.url
                   and r.request.method == "POST",
         timeout=60000,
     ) as resp_info:
         page.evaluate(
             """() => {
                 const stack = document.body && document.body._x_dataStack;
-                if (stack && stack[0] && typeof stack[0].dashboardQuickSearch === 'function') {
-                    stack[0].dashboardQuickSearch();
+                if (stack && stack[0] && typeof stack[0].dashboardAgenticSearch === 'function') {
+                    stack[0].dashboardAgenticSearch();
                 }
             }"""
         )

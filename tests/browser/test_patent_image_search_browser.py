@@ -1,4 +1,4 @@
-"""Browser smoke for the patent image-upload search (DINOv2 figure
+﻿"""Browser smoke for the patent image-upload search (DINOv2 figure
 similarity, hybrid text+image mode).
 
 The drag-drop zone in ``_search_patent_subview.html`` accepts a
@@ -87,7 +87,7 @@ def _find_record_with_figure_and_download() -> dict:
         f"--{boundary}--\r\n"
     ).encode("utf-8")
     req = urllib.request.Request(
-        f"{CONFIG.base_url}/api/v1/patent-search/quick",
+        f"{CONFIG.base_url}/api/v1/patent-search",
         method="POST",
         headers={
             "Authorization": f"Bearer {token}",
@@ -166,7 +166,7 @@ def _upload_figure_and_submit_hybrid(page) -> dict:
     page.wait_for_timeout(200)
 
     with page.expect_response(
-        lambda r: r.url.endswith("/api/v1/patent-search/quick")
+        lambda r: r.url.endswith("/api/v1/patent-search")
                   and r.request.method == "POST",
         timeout=60000,  # image search is heavier
     ) as resp_info:

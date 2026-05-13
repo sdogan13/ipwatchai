@@ -1,4 +1,4 @@
-"""
+﻿"""
 Browser journeys for quick-search coverage split by free, paid, and image paths.
 
 Run directly:
@@ -225,7 +225,7 @@ def _create_watchlist_item(session: PersonaSession, brand_name: str) -> str:
 def _perform_quick_search(page, browser_config, query: str) -> None:
     _open_search_tab(page, browser_config.timeout_ms)
     with page.expect_response(
-        lambda response: response.request.method == "GET" and "/api/v1/search/quick" in response.url,
+        lambda response: response.request.method == "GET" and "/api/v1/search" in response.url,
         timeout=browser_config.timeout_ms,
     ) as response_info:
         page.fill('input[name="trademark-search"]', query)
@@ -333,7 +333,7 @@ def main() -> None:
 
             _open_search_tab(page, free_browser_config.timeout_ms)
             with page.expect_response(
-                lambda response: response.request.method == "GET" and "/api/v1/search/quick" in response.url,
+                lambda response: response.request.method == "GET" and "/api/v1/search" in response.url,
                 timeout=free_browser_config.timeout_ms,
             ) as response_info:
                 page.fill('input[name="trademark-search"]', "wosen")
@@ -438,7 +438,7 @@ def main() -> None:
 
             for attempt in range(expected_limit + 1):
                 with page.expect_response(
-                    lambda response: response.request.method == "GET" and "/api/v1/search/quick" in response.url,
+                    lambda response: response.request.method == "GET" and "/api/v1/search" in response.url,
                     timeout=free_browser_config.timeout_ms,
                 ) as response_info:
                     page.press('input[name="trademark-search"]', "Enter")
@@ -482,7 +482,7 @@ def main() -> None:
             "free quick search daily limit browser gate",
             free_daily_limit_gate,
             allow_console_errors=("status of 429",),
-            allow_request_failures=(f"429 GET {CONFIG.base_url}/api/v1/search/quick",),
+            allow_request_failures=(f"429 GET {CONFIG.base_url}/api/v1/search",),
         )
         reset_daily_quick_search_usage(
             REPORTER,
@@ -579,7 +579,7 @@ def main() -> None:
 
             _open_search_tab(page, paid_browser_config.timeout_ms)
             with page.expect_response(
-                lambda response: response.request.method == "GET" and "/api/v1/search/quick" in response.url,
+                lambda response: response.request.method == "GET" and "/api/v1/search" in response.url,
                 timeout=paid_browser_config.timeout_ms,
             ) as response_info:
                 page.fill('input[name="trademark-search"]', "wosen")
@@ -616,7 +616,7 @@ def main() -> None:
             page.fill('input[name="trademark-search"]', "wosen")
 
             with page.expect_response(
-                lambda response: response.request.method == "POST" and "/api/v1/search/quick" in response.url,
+                lambda response: response.request.method == "POST" and "/api/v1/search" in response.url,
                 timeout=paid_browser_config.timeout_ms,
             ) as response_info:
                 page.press('input[name="trademark-search"]', "Enter")

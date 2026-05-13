@@ -1,4 +1,4 @@
-"""Browser smoke for the design image-upload search.
+﻿"""Browser smoke for the design image-upload search.
 
 Design is the most image-first registry — its result cards
 typically carry a primary thumbnail and the search service is
@@ -77,7 +77,7 @@ def _find_record_with_image_and_download() -> dict:
         f"--{boundary}--\r\n"
     ).encode("utf-8")
     req = urllib.request.Request(
-        f"{CONFIG.base_url}/api/v1/design-search/quick",
+        f"{CONFIG.base_url}/api/v1/design-search",
         method="POST",
         headers={
             "Authorization": f"Bearer {token}",
@@ -158,7 +158,7 @@ def _upload_image_and_submit(page) -> dict:
     page.wait_for_timeout(200)
 
     with page.expect_response(
-        lambda r: r.url.endswith("/api/v1/design-search/quick")
+        lambda r: r.url.endswith("/api/v1/design-search")
                   and r.request.method == "POST",
         timeout=60000,
     ) as resp_info:

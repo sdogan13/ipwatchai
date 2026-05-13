@@ -1,4 +1,4 @@
-import base64
+﻿import base64
 import json
 import io
 from types import SimpleNamespace
@@ -1555,7 +1555,7 @@ def test_intelligent_risk_report_happy_path_charges_only_report(client):
         mock_gen.return_value = SearchRiskReportResponse(**_report_response_payload())
 
         resp = client.post(
-            "/api/v1/search/intelligent-risk-report",
+            "/api/v1/search-risk-report",
             data={"query": "wosen", "classes": "25", "language": "en"},
         )
 
@@ -1579,7 +1579,7 @@ def test_intelligent_risk_report_cancelled_mid_search_consumes_no_quota(client):
          patch("agentic_search.generate_search_risk_report_data", new_callable=AsyncMock) as mock_gen:
 
         resp = client.post(
-            "/api/v1/search/intelligent-risk-report",
+            "/api/v1/search-risk-report",
             data={"query": "wosen", "classes": "25", "language": "tr"},
         )
 
@@ -1596,7 +1596,7 @@ def test_intelligent_risk_report_rejects_missing_classes_with_422(client):
          patch("agentic_search.generate_search_risk_report_data", new_callable=AsyncMock) as mock_gen:
 
         resp = client.post(
-            "/api/v1/search/intelligent-risk-report",
+            "/api/v1/search-risk-report",
             data={"query": "wosen", "language": "en"},  # no classes
         )
 
@@ -1617,7 +1617,7 @@ def test_public_intelligent_risk_report_rejects_missing_classes_with_422(client)
          patch("agentic_search.generate_pending_search_risk_report_data", new_callable=AsyncMock) as mock_pending:
 
         resp = client.post(
-            "/api/v1/search/intelligent-risk-report/public",
+            "/api/v1/search-risk-report/public",
             data={"query": "wosen", "language": "en"},  # no classes
         )
 
@@ -1635,7 +1635,7 @@ def test_intelligent_risk_report_quota_exhausted_short_circuits_before_scrape(cl
          patch("agentic_search._run_search_sync") as mock_search:
 
         resp = client.post(
-            "/api/v1/search/intelligent-risk-report",
+            "/api/v1/search-risk-report",
             data={"query": "wosen", "classes": "25", "language": "tr"},
         )
 
@@ -1661,7 +1661,7 @@ def test_public_intelligent_risk_report_returns_pending_with_claim_token(client)
         mock_pending.return_value = SearchRiskReportResponse(**pending_payload)
 
         resp = client.post(
-            "/api/v1/search/intelligent-risk-report/public",
+            "/api/v1/search-risk-report/public",
             data={"query": "wosen", "classes": "25", "language": "en"},
         )
 

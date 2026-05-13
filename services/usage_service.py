@@ -9,8 +9,7 @@ async def get_usage_summary_data(
     database_factory=Database,
     user_plan_getter=None,
     plan_limit_getter=None,
-    daily_quick_searches_getter=None,
-    live_search_usage_getter=None,
+    daily_live_search_usage_getter=None,
     ai_credit_eligibility_checker=None,
     report_eligibility_checker=None,
     monthly_name_generations_getter=None,
@@ -27,15 +26,10 @@ async def get_usage_summary_data(
 
         plan_limit_getter = get_plan_limit
 
-    if daily_quick_searches_getter is None:
-        from utils.subscription import get_daily_quick_searches
+    if daily_live_search_usage_getter is None:
+        from utils.subscription import get_daily_live_search_usage
 
-        daily_quick_searches_getter = get_daily_quick_searches
-
-    if live_search_usage_getter is None:
-        from utils.subscription import get_live_search_usage
-
-        live_search_usage_getter = get_live_search_usage
+        daily_live_search_usage_getter = get_daily_live_search_usage
 
     if ai_credit_eligibility_checker is None:
         from utils.subscription import check_ai_credit_eligibility
@@ -64,11 +58,8 @@ async def get_usage_summary_data(
         plan_name = plan["plan_name"]
         is_superadmin = getattr(current_user, "is_superadmin", False) is True or plan_name == "superadmin"
 
-        qs_used = daily_quick_searches_getter(db, user_id)
-        qs_limit = plan_limit_getter(plan_name, "max_daily_quick_searches")
-
-        ls_used = live_search_usage_getter(db, user_id)
-        ls_limit = plan_limit_getter(plan_name, "monthly_live_searches")
+        ls_used = daily_live_search_usage_getter(db, user_id)
+        ls_limit = plan_limit_getter(plan_name, "max_daily_live_searches")
 
         ai_limit = plan_limit_getter(plan_name, "monthly_ai_credits")
         if is_superadmin:
@@ -117,8 +108,7 @@ async def get_usage_summary_data(
         "plan": plan_name,
         "display_name": plan["display_name"],
         "usage": {
-            "daily_quick_searches": {"used": qs_used, "limit": qs_limit},
-            "monthly_live_searches": {"used": ls_used, "limit": ls_limit},
+            "daily_live_searches": {"used": ls_used, "limit": ls_limit},
             "monthly_ai_credits": {"remaining": ai_remaining, "limit": ai_limit, "used": ai_used},
             "monthly_reports": {
                 "used": report_eligibility["reports_used"],

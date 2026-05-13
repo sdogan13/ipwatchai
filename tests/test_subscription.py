@@ -4,7 +4,6 @@ Tests for subscription eligibility checks with mocked DB.
 Covers:
 - get_user_plan() with mocked cursor
 - check_live_search_eligibility()
-- check_quick_search_eligibility()
 - check_name_generation_eligibility()
 - check_logo_generation_eligibility()
 - check_report_eligibility()
@@ -18,7 +17,6 @@ from unittest.mock import patch, MagicMock
 from utils.subscription import (
     get_user_plan,
     check_live_search_eligibility,
-    check_quick_search_eligibility,
     check_name_generation_eligibility,
     check_logo_generation_eligibility,
     check_report_eligibility,
@@ -49,39 +47,21 @@ class TestGetUserPlan:
         db, cursor = _make_db({
             "plan_name": "professional",
             "display_name": "Professional",
-            "can_use_live_search": True,
+            "is_superadmin": False,
+            "subscription_end_date": None,
         })
         result = get_user_plan(db, str(uuid.uuid4()))
         assert result["plan_name"] == "professional"
         assert result["can_use_live_search"] is True
-        assert "monthly_limit" in result
+        assert "daily_limit" in result
+        assert result["daily_limit"] == 2000
 
     def test_no_row_defaults_to_free(self):
         db, cursor = _make_db(None)
         result = get_user_plan(db, str(uuid.uuid4()))
         assert result["plan_name"] == "free"
-        assert result["can_use_live_search"] is False
-        assert result["monthly_limit"] == 0
-
-    @patch("utils.subscription.get_plan_limit")
-    def test_uses_canonical_live_search_limits_even_if_db_flag_is_stale(self, mock_get_plan_limit):
-        db, cursor = _make_db({
-            "plan_name": "starter",
-            "display_name": "Starter",
-            "can_use_live_search": False,
-            "is_superadmin": False,
-            "subscription_end_date": None,
-        })
-        mock_get_plan_limit.side_effect = lambda plan_name, feature: {
-            "monthly_live_searches": 10,
-            "can_use_live_scraping": True,
-        }[feature]
-
-        result = get_user_plan(db, str(uuid.uuid4()))
-
-        assert result["plan_name"] == "starter"
         assert result["can_use_live_search"] is True
-        assert result["monthly_limit"] == 10
+        assert result["daily_limit"] == 5
 
 
 # ============================================================
@@ -89,83 +69,35 @@ class TestGetUserPlan:
 # ============================================================
 
 class TestCheckLiveSearchEligibility:
-    @patch("utils.subscription.get_live_search_usage", return_value=0)
+    @patch("utils.subscription.get_daily_live_search_usage", return_value=0)
     @patch("utils.subscription.get_user_plan")
     def test_eligible_professional(self, mock_plan, mock_usage):
         mock_plan.return_value = {
             "plan_name": "professional",
             "display_name": "Professional",
             "can_use_live_search": True,
-            "monthly_limit": 50,
+            "daily_limit": 2000,
         }
         db = MagicMock()
         can, reason, details = check_live_search_eligibility(db, "user1")
         assert can is True
         assert reason == "ok"
-        assert details["remaining"] == 50
+        assert details["remaining"] == 2000
 
+    @patch("utils.subscription.get_daily_live_search_usage", return_value=2000)
     @patch("utils.subscription.get_user_plan")
-    def test_free_plan_denied(self, mock_plan):
-        mock_plan.return_value = {
-            "plan_name": "free",
-            "display_name": "Free Trial",
-            "can_use_live_search": False,
-            "monthly_limit": 0,
-        }
-        db = MagicMock()
-        can, reason, details = check_live_search_eligibility(db, "user1")
-        assert can is False
-        assert reason == "upgrade_required"
-
-    @patch("utils.subscription.get_live_search_usage", return_value=50)
-    @patch("utils.subscription.get_user_plan")
-    def test_limit_exceeded(self, mock_plan, mock_usage):
+    def test_daily_limit_exceeded(self, mock_plan, mock_usage):
         mock_plan.return_value = {
             "plan_name": "professional",
             "display_name": "Professional",
             "can_use_live_search": True,
-            "monthly_limit": 50,
+            "daily_limit": 2000,
         }
         db = MagicMock()
         can, reason, details = check_live_search_eligibility(db, "user1")
         assert can is False
-        assert reason == "limit_exceeded"
-        assert details["remaining"] == 0
-
-
-# ============================================================
-# check_quick_search_eligibility
-# ============================================================
-
-class TestCheckQuickSearchEligibility:
-    @patch("utils.subscription.get_daily_quick_searches", return_value=0)
-    @patch("utils.subscription.get_user_plan")
-    def test_eligible(self, mock_plan, mock_usage):
-        mock_plan.return_value = {
-            "plan_name": "free",
-            "display_name": "Free Trial",
-            "can_use_live_search": False,
-            "monthly_limit": 0,
-        }
-        db = MagicMock()
-        can, reason, details = check_quick_search_eligibility(db, "user1")
-        assert can is True
-        assert reason == "ok"
-        assert details["remaining"] == 5
-
-    @patch("utils.subscription.get_daily_quick_searches", return_value=50)
-    @patch("utils.subscription.get_user_plan")
-    def test_daily_limit_exceeded(self, mock_plan, mock_usage):
-        mock_plan.return_value = {
-            "plan_name": "free",
-            "display_name": "Free Trial",
-            "can_use_live_search": False,
-            "monthly_limit": 0,
-        }
-        db = MagicMock()
-        can, reason, details = check_quick_search_eligibility(db, "user1")
-        assert can is False
         assert reason == "daily_limit_exceeded"
+        assert details["remaining"] == 0
 
 
 # ============================================================

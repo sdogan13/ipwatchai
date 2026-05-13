@@ -1,4 +1,4 @@
-"""
+﻿"""
 Live HTTP suite for the search feature surface.
 
 Run directly:
@@ -20,7 +20,7 @@ if str(ROOT) not in sys.path:
 from tests.live.helpers.assertions import LiveReporter
 from tests.live.helpers.auth import login_user
 from tests.live.helpers.client import LiveClient
-from tests.live.helpers.cleanup import reset_daily_quick_search_usage
+from tests.live.helpers.cleanup import reset_daily_live_search_usage
 from tests.live.helpers.config import PNG_1X1, load_live_config
 from tests.live.helpers.personas import (
     PAID_PLANS,
@@ -106,8 +106,8 @@ def ensure_paid_session() -> PersonaSession | None:
 
 
 def test_quick_search_auth_gate():
-    name = "GET /api/v1/search/quick requires auth"
-    response = LiveClient(CONFIG).get("/api/v1/search/quick", params={"query": "wosen"}, token=False)
+    name = "GET /api/v1/search requires auth"
+    response = LiveClient(CONFIG).get("/api/v1/search", params={"query": "wosen"}, token=False)
     if response.status_code in (401, 403):
         REPORTER.ok(f"{name} -> {response.status_code}")
         REPORTER.record(name, True)
@@ -156,8 +156,8 @@ def test_quick_search_missing_query_validation():
     if client is None:
         return
 
-    name = "GET /api/v1/search/quick missing query"
-    response = client.get("/api/v1/search/quick")
+    name = "GET /api/v1/search missing query"
+    response = client.get("/api/v1/search")
     if response.status_code == 422:
         REPORTER.ok(f"{name} -> 422 as expected")
         REPORTER.record(name, True)
@@ -172,8 +172,8 @@ def test_quick_search_text_happy_path():
     if client is None:
         return
 
-    name = "GET /api/v1/search/quick"
-    response = client.get("/api/v1/search/quick", params={"query": "wosen"})
+    name = "GET /api/v1/search"
+    response = client.get("/api/v1/search", params={"query": "wosen"})
     if _record_daily_limit_skip(name, response):
         return
     if response.status_code != 200:
@@ -197,8 +197,8 @@ def test_quick_search_class_filter():
     if client is None:
         return
 
-    name = "GET /api/v1/search/quick with classes"
-    response = client.get("/api/v1/search/quick", params={"query": "wosen", "classes": "9,35"})
+    name = "GET /api/v1/search with classes"
+    response = client.get("/api/v1/search", params={"query": "wosen", "classes": "9,35"})
     if _record_daily_limit_skip(name, response):
         return
     if response.status_code != 200:
@@ -221,10 +221,10 @@ def test_quick_search_image_happy_path():
     if client is None:
         return
 
-    name = "POST /api/v1/search/quick with image"
+    name = "POST /api/v1/search with image"
     files = {"image": ("search-test.png", io.BytesIO(PNG_1X1), "image/png")}
     response = client.post(
-        "/api/v1/search/quick",
+        "/api/v1/search",
         data={"query": "wosen", "classes": "9,35"},
         files=files,
     )
@@ -292,7 +292,7 @@ def test_free_quick_search_usage_shape():
     if session is None:
         return
 
-    reset_daily_quick_search_usage(
+    reset_daily_live_search_usage(
         REPORTER,
         session.user_id,
         name="RESET free quick-search usage before live limit check",
@@ -323,8 +323,8 @@ def test_free_quick_search_text_happy_path():
     if session is None:
         return
 
-    name = "GET /api/v1/search/quick (free text search)"
-    response = session.client.get("/api/v1/search/quick", params={"query": "wosen"})
+    name = "GET /api/v1/search (free text search)"
+    response = session.client.get("/api/v1/search", params={"query": "wosen"})
     if _record_daily_limit_skip(name, response):
         return
     if response.status_code != 200:
@@ -382,17 +382,17 @@ def test_free_quick_search_daily_limit_gate():
     if session is None:
         return
 
-    reset_daily_quick_search_usage(
+    reset_daily_live_search_usage(
         REPORTER,
         session.user_id,
         name="RESET free quick-search usage before live limit gate",
     )
 
-    name = "GET /api/v1/search/quick (free daily limit gate)"
+    name = "GET /api/v1/search (free daily limit gate)"
     try:
         expected_limit = PLAN_FEATURES["free"]["max_daily_quick_searches"]
         for attempt in range(expected_limit + 1):
-            response = session.client.get("/api/v1/search/quick", params={"query": "wosen"})
+            response = session.client.get("/api/v1/search", params={"query": "wosen"})
             if attempt < expected_limit:
                 if response.status_code != 200:
                     REPORTER.fail(f"{name} -> expected 200 before free limit, got {response.status_code}: {response.text[:200]}")
@@ -421,7 +421,7 @@ def test_free_quick_search_daily_limit_gate():
             REPORTER.record(name, False, str(detail))
             return
     finally:
-        reset_daily_quick_search_usage(
+        reset_daily_live_search_usage(
             REPORTER,
             session.user_id,
             name="RESET free quick-search usage after live limit gate",
@@ -433,8 +433,8 @@ def test_paid_quick_search_text_happy_path():
     if session is None:
         return
 
-    name = "GET /api/v1/search/quick (paid text search)"
-    response = session.client.get("/api/v1/search/quick", params={"query": "wosen"})
+    name = "GET /api/v1/search (paid text search)"
+    response = session.client.get("/api/v1/search", params={"query": "wosen"})
     if _record_daily_limit_skip(name, response):
         return
     if response.status_code != 200:
@@ -458,10 +458,10 @@ def test_paid_quick_search_image_happy_path():
     if session is None:
         return
 
-    name = "POST /api/v1/search/quick (paid image search)"
+    name = "POST /api/v1/search (paid image search)"
     files = {"image": ("search-test.png", io.BytesIO(PNG_1X1), "image/png")}
     response = session.client.post(
-        "/api/v1/search/quick",
+        "/api/v1/search",
         data={"query": "wosen", "classes": "9,35"},
         files=files,
     )

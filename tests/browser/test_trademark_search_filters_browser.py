@@ -24,7 +24,7 @@ Flow:
   4. Verify the chip renders + Alpine ``selectedClasses``
      contains 9.
   5. Submit search with query "Coca" + assert the GET
-     ``/api/v1/search/quick`` URL carries ``query=Coca`` AND
+     ``/api/v1/search`` URL carries ``query=Coca`` AND
      ``classes=9``.
   6. Pick a second class (35 = Advertising) via the same path
      and resubmit; assert the URL now carries ``classes=9,35``.
@@ -133,7 +133,7 @@ def _pick_class_9_and_assert(page) -> dict:
 
 
 def _submit_search_and_capture_url(page) -> str:
-    """Fill query + invoke dashboardQuickSearch() via Alpine. We
+    """Fill query + invoke dashboardAgenticSearch() via Alpine. We
     invoke the method directly rather than clicking the submit
     button because the button is :disabled while searchLoading is
     true (e.g. while a previous submit is mid-flight); calling via
@@ -150,14 +150,14 @@ def _submit_search_and_capture_url(page) -> str:
     )
     page.wait_for_timeout(200)
     with page.expect_request(
-        lambda r: "/api/v1/search/quick" in r.url and r.method == "GET",
+        lambda r: "/api/v1/search" in r.url and r.method == "GET",
         timeout=20000,
     ) as req_info:
         page.evaluate(
             """() => {
                 const stack = document.body && document.body._x_dataStack;
-                if (stack && stack[0] && typeof stack[0].dashboardQuickSearch === 'function') {
-                    stack[0].dashboardQuickSearch();
+                if (stack && stack[0] && typeof stack[0].dashboardAgenticSearch === 'function') {
+                    stack[0].dashboardAgenticSearch();
                 }
             }"""
         )

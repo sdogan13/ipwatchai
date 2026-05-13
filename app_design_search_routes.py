@@ -1,7 +1,7 @@
-"""Tasarım (industrial design) search routes.
+﻿"""Tasarım (industrial design) search routes.
 
 Three endpoints:
-  * ``POST /api/v1/design-search/quick``  — authenticated, full results
+  * ``POST /api/v1/design-search``  — authenticated, full results
   * ``GET/POST /api/v1/design-search/public`` — anonymous, max 10 results
   * ``GET /api/v1/design-image/{path:path}`` — serve view JPEGs
 
@@ -153,7 +153,7 @@ async def _do_design_search(
         )
 
 
-async def design_search_quick(
+async def design_search_authenticated(
     *,
     query: Optional[str],
     image: Optional[UploadFile],
@@ -164,7 +164,7 @@ async def design_search_quick(
 ) -> dict:
     """Authenticated full-detail search.
 
-    Counts against the same daily ``max_daily_quick_searches`` quota the
+    Counts against the same daily ``max_daily_live_searches`` quota the
     trademark quick search uses. Over-limit returns 429 with the upgrade-hint
     payload. Increment happens AFTER a successful search so failed retrievals
     don't burn the user's quota.
@@ -174,12 +174,12 @@ async def design_search_quick(
     if not (has_image or has_query):
         raise HTTPException(status_code=422, detail="Provide a product name (min 2 chars) or upload a design image")
 
-    # Daily quota check (mirrors agentic_search.py:954-961)
+    # Daily quota check — consumes from the unified daily Agentic Search budget
     if user_id:
         from database.crud import Database
-        from utils.subscription import check_quick_search_eligibility
+        from utils.subscription import check_live_search_eligibility
         with Database() as db:
-            can_search, reason, details = check_quick_search_eligibility(db, user_id)
+            can_search, reason, details = check_live_search_eligibility(db, user_id)
             if not can_search:
                 raise HTTPException(status_code=429, detail=details)
 
@@ -207,9 +207,9 @@ async def design_search_quick(
     # Increment AFTER successful retrieval — failed searches don't burn quota
     if user_id:
         from database.crud import Database
-        from utils.subscription import increment_quick_search_usage
+        from utils.subscription import increment_live_search_usage
         with Database() as db:
-            increment_quick_search_usage(db, user_id, organization_id)
+            increment_live_search_usage(db, user_id, organization_id)
 
     return result
 
@@ -307,9 +307,9 @@ def register_design_search_routes(app, limiter):
         record_public_search_usage(client_id)
         return payload
 
-    @app.post("/api/v1/design-search/quick", tags=["Design Search"])
+    @app.post("/api/v1/design-search", tags=["Design Search"])
     @limiter.limit("60/minute")
-    async def quick_design_search(
+    async def design_search(
         request: Request,
         query: Optional[str] = Form(None),
         image: Optional[UploadFile] = File(None),
@@ -324,7 +324,7 @@ def register_design_search_routes(app, limiter):
             user_id = str(uid) if uid is not None else None
             oid = getattr(current_user, "organization_id", None)
             org_id = str(oid) if oid is not None else None
-        return await design_search_quick(
+        return await design_search_authenticated(
             query=query, image=image, locarno=locarno, limit=limit,
             user_id=user_id, organization_id=org_id,
         )

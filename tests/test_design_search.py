@@ -1,4 +1,4 @@
-"""Unit tests for the design search service + route helpers.
+﻿"""Unit tests for the design search service + route helpers.
 
 Pure helpers and SQL-builder behavior are tested here. End-to-end DB
 queries are exercised by manual smoke runs against the live Postgres
@@ -387,7 +387,7 @@ def test_register_design_search_routes_attaches_three_paths():
         ("/api/v1/design-image/{image_path:path}", ("GET",)),
         ("/api/v1/design-search/public", ("GET",)),
         ("/api/v1/design-search/public", ("POST",)),
-        ("/api/v1/design-search/quick", ("POST",)),
+        ("/api/v1/design-search", ("POST",)),
     }
     for path, methods in expected:
         # FastAPI may include HEAD on GET routes; check subset relation

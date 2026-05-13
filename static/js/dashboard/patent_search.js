@@ -14,7 +14,7 @@
 (function () {
   "use strict";
 
-  var API_QUICK = "/api/v1/patent-search/quick";
+  var API_QUICK = "/api/v1/patent-search";
   var API_IPC_AUTOCOMPLETE = "/api/v1/patent-search/ipc-autocomplete";
   var HISTORY_KEY = "patent_search_history";
   var HISTORY_MAX = 20;

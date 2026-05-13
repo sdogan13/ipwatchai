@@ -1,4 +1,4 @@
-"""Browser smoke for trademark search result expansion.
+﻿"""Browser smoke for trademark search result expansion.
 
 Trademark uses INLINE result expansion — clicking a result-card
 header toggles ``expandedResult = i`` on the Alpine search-state
@@ -78,15 +78,15 @@ def _submit_and_wait_for_results(page) -> dict:
     )
     page.wait_for_timeout(200)
     with page.expect_response(
-        lambda r: "/api/v1/search/quick" in r.url
+        lambda r: "/api/v1/search" in r.url
                   and r.request.method == "GET",
         timeout=30000,
     ) as resp_info:
         page.evaluate(
             """() => {
                 const stack = document.body && document.body._x_dataStack;
-                if (stack && stack[0] && typeof stack[0].dashboardQuickSearch === 'function') {
-                    stack[0].dashboardQuickSearch();
+                if (stack && stack[0] && typeof stack[0].dashboardAgenticSearch === 'function') {
+                    stack[0].dashboardAgenticSearch();
                 }
             }"""
         )

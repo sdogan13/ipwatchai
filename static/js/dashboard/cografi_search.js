@@ -15,7 +15,7 @@
 (function () {
   "use strict";
 
-  var API_QUICK = "/api/v1/cografi-search/quick";
+  var API_QUICK = "/api/v1/cografi-search";
   var API_AUTOCOMPLETE = "/api/v1/cografi-search/autocomplete";
   var HISTORY_KEY = "cografi_search_history";
   var HISTORY_MAX = 20;

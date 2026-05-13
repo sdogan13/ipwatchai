@@ -240,7 +240,7 @@ async def _do_cografi_search(
         )
 
 
-async def cografi_search_quick(
+async def cografi_search_authenticated(
     *,
     query: Optional[str],
     image: Optional[UploadFile],
@@ -259,7 +259,7 @@ async def cografi_search_quick(
 ) -> dict:
     """Authenticated full-detail cografi search.
 
-    Shares the daily ``max_daily_quick_searches`` quota with patent /
+    Shares the daily ``max_daily_live_searches`` quota with patent /
     trademark / design quick searches (one bucket covers all four
     registries). Increment happens AFTER a successful retrieval so
     failed searches don't burn quota.
@@ -279,9 +279,9 @@ async def cografi_search_quick(
 
     if user_id:
         from database.crud import Database
-        from utils.subscription import check_quick_search_eligibility
+        from utils.subscription import check_live_search_eligibility
         with Database() as db:
-            can_search, _reason, details = check_quick_search_eligibility(db, user_id)
+            can_search, _reason, details = check_live_search_eligibility(db, user_id)
             if not can_search:
                 raise HTTPException(status_code=429, detail=details)
 
@@ -316,9 +316,9 @@ async def cografi_search_quick(
 
     if user_id:
         from database.crud import Database
-        from utils.subscription import increment_quick_search_usage
+        from utils.subscription import increment_live_search_usage
         with Database() as db:
-            increment_quick_search_usage(db, user_id, organization_id)
+            increment_live_search_usage(db, user_id, organization_id)
 
     return result
 
@@ -514,9 +514,9 @@ def register_cografi_search_routes(app, limiter):
         record_public_search_usage(client_id)
         return payload
 
-    @app.post("/api/v1/cografi-search/quick", tags=["Cografi Search"])
+    @app.post("/api/v1/cografi-search", tags=["Cografi Search"])
     @limiter.limit("60/minute")
-    async def quick_cografi_search(
+    async def cografi_search(
         request: Request,
         query: Optional[str] = Form(None),
         image: Optional[UploadFile] = File(None),
@@ -539,7 +539,7 @@ def register_cografi_search_routes(app, limiter):
             user_id = str(uid) if uid is not None else None
             oid = getattr(current_user, "organization_id", None)
             org_id = str(oid) if oid is not None else None
-        return await cografi_search_quick(
+        return await cografi_search_authenticated(
             query=query,
             image=image,
             section_keys=section_keys,

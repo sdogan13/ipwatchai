@@ -102,27 +102,19 @@ window.AppAuth.updatePlanBadges = function () {
     var usage = window.AppAuth.usage;
     if (!usage) return;
 
-    // Search bar: show remaining daily quick searches
-    var searchBadge = document.getElementById('quick-search-credits-badge');
-    if (searchBadge && usage.daily_quick_searches) {
-        var qs = usage.daily_quick_searches;
-        var remaining = qs.limit - qs.used;
-        searchBadge.textContent = remaining + '/' + qs.limit;
-        searchBadge.classList.remove('hidden');
-        if (remaining <= 5 && remaining > 0) {
-            searchBadge.className = searchBadge.className.replace('text-gray-500', 'text-amber-600 font-bold');
-        } else if (remaining <= 0) {
-            searchBadge.className = searchBadge.className.replace('text-gray-500', 'text-red-600 font-bold');
-        }
-    }
-
-    // Agentic Search badge: show monthly remaining
+    // Agentic Search badge: show daily remaining
     var liveBadge = document.getElementById('live-search-credits-badge');
-    if (liveBadge && usage.monthly_live_searches) {
-        var ls = usage.monthly_live_searches;
+    if (liveBadge && usage.daily_live_searches) {
+        var ls = usage.daily_live_searches;
         if (ls.limit > 0) {
-            liveBadge.textContent = (ls.limit - ls.used) + '/' + ls.limit;
+            var remaining = ls.limit - ls.used;
+            liveBadge.textContent = remaining + '/' + ls.limit;
             liveBadge.classList.remove('hidden');
+            if (remaining <= 5 && remaining > 0) {
+                liveBadge.className = liveBadge.className.replace('text-gray-500', 'text-amber-600 font-bold');
+            } else if (remaining <= 0) {
+                liveBadge.className = liveBadge.className.replace('text-gray-500', 'text-red-600 font-bold');
+            }
         }
     }
 

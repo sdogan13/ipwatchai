@@ -1,4 +1,4 @@
-"""Shared helpers for patent (Patent / Faydalı Model) browser smokes.
+﻿"""Shared helpers for patent (Patent / Faydalı Model) browser smokes.
 
 Mirrors the structure of ``tests/browser/helpers/cografi.py`` with
 patent-specific endpoint URLs + watch_type values. The two helpers
@@ -365,7 +365,7 @@ def wait_for_search_rate_limit_to_clear(
     while time.time() < deadline:
         try:
             req = urllib.request.Request(
-                f"{config.base_url}/api/v1/patent-search/quick",
+                f"{config.base_url}/api/v1/patent-search",
                 method="POST",
                 headers={"Authorization": f"Bearer {token}"},
                 data=b"--x\r\nContent-Disposition: form-data; name=\"query\"\r\n\r\nping\r\n--x--\r\n",

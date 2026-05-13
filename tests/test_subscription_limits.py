@@ -1,4 +1,4 @@
-"""
+﻿"""
 Subscription Limit Enforcement Tests
 =====================================
 Verifies that ALL plan limits are properly enforced across endpoints.
@@ -28,7 +28,6 @@ from utils.subscription import (
     get_plan_limit,
     get_user_plan,
     check_live_search_eligibility,
-    check_quick_search_eligibility,
     check_application_eligibility,
     check_report_eligibility,
     check_ai_credit_eligibility,
@@ -46,12 +45,12 @@ class TestPlanFeaturesConsistency:
 
     REQUIRED_KEYS = [
         "price_monthly", "price_annual_monthly",
-        "monthly_live_searches", "daily_lead_views", "monthly_reports",
+        "max_daily_live_searches", "daily_lead_views", "monthly_reports",
         "can_export_reports", "name_suggestions_per_session",
         "monthly_ai_credits", "monthly_applications",
         "can_track_logos", "can_view_holder_portfolio", "can_download_portfolio",
-        "can_export_csv_leads", "can_use_live_scraping",
-        "max_users", "max_watchlist_items", "max_daily_quick_searches",
+        "can_export_csv_leads",
+        "max_users", "max_watchlist_items",
         "auto_scan_max_items", "auto_scan_frequency",
         "priority_support", "api_access", "dedicated_account_manager",
     ]
@@ -68,9 +67,9 @@ class TestPlanFeaturesConsistency:
                 assert key in features, f"Plan '{plan_name}' missing key '{key}'"
 
     def test_free_plan_is_most_restrictive(self):
-        """Free plan should have 0 or False for all paid features."""
+        """Free plan should have minimal limits for paid features."""
         free = PLAN_FEATURES["free"]
-        assert free["monthly_live_searches"] == 0
+        assert free["max_daily_live_searches"] == 5
         assert free["daily_lead_views"] == 0
         assert free["monthly_ai_credits"] == 0
         assert free["monthly_applications"] == 0
@@ -80,16 +79,15 @@ class TestPlanFeaturesConsistency:
         assert free["can_view_holder_portfolio"] is True
         assert free["can_download_portfolio"] is False
         assert free["can_export_csv_leads"] is False
-        assert free["can_use_live_scraping"] is False
         assert free["api_access"] is False
 
     def test_limits_increase_with_plan_tier(self):
         """Higher plans should have >= limits of lower plans."""
         ordered = ["free", "starter", "professional", "enterprise"]
         numeric_keys = [
-            "monthly_live_searches", "daily_lead_views", "monthly_reports",
+            "max_daily_live_searches", "daily_lead_views", "monthly_reports",
             "monthly_ai_credits", "monthly_applications",
-            "max_users", "max_watchlist_items", "max_daily_quick_searches",
+            "max_users", "max_watchlist_items",
             "auto_scan_max_items",
         ]
         for key in numeric_keys:
@@ -105,25 +103,23 @@ class TestPlanFeaturesConsistency:
     def test_superadmin_has_unlimited_access(self):
         """Superadmin should have 999999 for all numeric limits and True for all booleans."""
         sa = PLAN_FEATURES["superadmin"]
-        assert sa["monthly_live_searches"] == 999999
+        assert sa["max_daily_live_searches"] == 999999
         assert sa["daily_lead_views"] == 999999
         assert sa["monthly_reports"] == 999999
         assert sa["monthly_ai_credits"] == 999999
         assert sa["monthly_applications"] == 999999
         assert sa["max_users"] == 999999
         assert sa["max_watchlist_items"] == 999999
-        assert sa["max_daily_quick_searches"] == 999999
         assert sa["can_export_reports"] is True
         assert sa["can_track_logos"] is True
         assert sa["can_view_holder_portfolio"] is True
         assert sa["can_export_csv_leads"] is True
-        assert sa["can_use_live_scraping"] is True
         assert sa["api_access"] is True
 
     def test_get_plan_limit_unknown_plan_falls_back_to_free(self):
         """Unknown plan names should fall back to free tier limits."""
         assert get_plan_limit("nonexistent", "max_watchlist_items") == 3
-        assert get_plan_limit("nonexistent", "monthly_live_searches") == 0
+        assert get_plan_limit("nonexistent", "max_daily_live_searches") == 5
 
     def test_get_plan_limit_unknown_feature_returns_zero(self):
         """Unknown feature names should return 0."""
@@ -162,77 +158,40 @@ class TestWatchlistLimits:
 # ===========================================================================
 
 class TestSearchLimits:
-    """Verify quick and live search limits per plan."""
+    """Verify daily Agentic Search limits per plan."""
 
-    def test_free_daily_quick_search_limit(self):
-        assert PLAN_FEATURES["free"]["max_daily_quick_searches"] == 5
+    def test_free_daily_live_search_limit(self):
+        assert PLAN_FEATURES["free"]["max_daily_live_searches"] == 5
 
-    def test_starter_daily_quick_search_limit(self):
-        assert PLAN_FEATURES["starter"]["max_daily_quick_searches"] == 50
+    def test_starter_daily_live_search_limit(self):
+        assert PLAN_FEATURES["starter"]["max_daily_live_searches"] == 50
 
-    def test_free_monthly_live_search_limit(self):
-        assert PLAN_FEATURES["free"]["monthly_live_searches"] == 0
-
-    def test_starter_monthly_live_search_limit(self):
-        assert PLAN_FEATURES["starter"]["monthly_live_searches"] == 10
+    def test_professional_daily_live_search_limit(self):
+        assert PLAN_FEATURES["professional"]["max_daily_live_searches"] == 2000
 
     @patch("utils.subscription.get_user_plan")
-    @patch("utils.subscription.get_daily_quick_searches")
-    def test_quick_search_blocked_when_limit_reached(self, mock_qs, mock_plan):
-        mock_plan.return_value = {"plan_name": "free", "display_name": "Free", "can_use_live_search": False, "monthly_limit": 0}
-        mock_qs.return_value = 5  # Free limit is 5
+    @patch("utils.subscription.get_daily_live_search_usage")
+    def test_live_search_blocked_when_daily_limit_reached(self, mock_ls, mock_plan):
+        mock_plan.return_value = {"plan_name": "free", "display_name": "Free", "can_use_live_search": True, "daily_limit": 5}
+        mock_ls.return_value = 5  # Used all 5
         db = MagicMock()
 
-        can_search, reason, details = check_quick_search_eligibility(db, "user-123")
+        can_search, reason, details = check_live_search_eligibility(db, "user-123")
         assert not can_search
         assert reason == "daily_limit_exceeded"
         assert details["remaining"] == 0
 
     @patch("utils.subscription.get_user_plan")
-    @patch("utils.subscription.get_daily_quick_searches")
-    def test_quick_search_allowed_under_limit(self, mock_qs, mock_plan):
-        mock_plan.return_value = {"plan_name": "starter", "display_name": "Starter", "can_use_live_search": True, "monthly_limit": 10}
-        mock_qs.return_value = 3
-        db = MagicMock()
-
-        can_search, reason, details = check_quick_search_eligibility(db, "user-123")
-        assert can_search
-        assert reason == "ok"
-        assert details["remaining"] == 47  # 50 - 3
-
-    @patch("utils.subscription.get_user_plan")
-    @patch("utils.subscription.get_live_search_usage")
-    def test_live_search_blocked_for_free_plan(self, mock_ls, mock_plan):
-        mock_plan.return_value = {"plan_name": "free", "display_name": "Free", "can_use_live_search": False, "monthly_limit": 0}
-        db = MagicMock()
-
-        can_search, reason, details = check_live_search_eligibility(db, "user-123")
-        assert not can_search
-        assert reason == "upgrade_required"
-
-    @patch("utils.subscription.get_user_plan")
-    @patch("utils.subscription.get_live_search_usage")
-    def test_live_search_blocked_when_monthly_limit_reached(self, mock_ls, mock_plan):
-        mock_plan.return_value = {"plan_name": "starter", "display_name": "Starter", "can_use_live_search": True, "monthly_limit": 10}
-        mock_ls.return_value = 10  # Used all 10
-        db = MagicMock()
-
-        can_search, reason, details = check_live_search_eligibility(db, "user-123")
-        assert not can_search
-        assert reason == "limit_exceeded"
-        assert details["remaining"] == 0
-
-    @patch("utils.subscription.get_user_plan")
-    @patch("utils.subscription.get_live_search_usage")
+    @patch("utils.subscription.get_daily_live_search_usage")
     def test_live_search_allowed_under_limit(self, mock_ls, mock_plan):
-        mock_plan.return_value = {"plan_name": "professional", "display_name": "Pro", "can_use_live_search": True, "monthly_limit": 100}
+        mock_plan.return_value = {"plan_name": "professional", "display_name": "Pro", "can_use_live_search": True, "daily_limit": 2000}
         mock_ls.return_value = 50
         db = MagicMock()
 
         can_search, reason, details = check_live_search_eligibility(db, "user-123")
         assert can_search
         assert reason == "ok"
-        assert details["remaining"] == 50
+        assert details["remaining"] == 1950
 
 
 # ===========================================================================
@@ -253,7 +212,7 @@ class TestLeadAccessLimits:
 
     @patch("utils.subscription.get_user_plan")
     def test_lead_access_denied_for_free_plan(self, mock_plan):
-        mock_plan.return_value = {"plan_name": "free", "display_name": "Free", "can_use_live_search": False, "monthly_limit": 0}
+        mock_plan.return_value = {"plan_name": "free", "display_name": "Free", "can_use_live_search": False, "daily_limit": 0}
         db = MagicMock()
 
         access = get_lead_access(db, "user-123")
@@ -262,7 +221,7 @@ class TestLeadAccessLimits:
 
     @patch("utils.subscription.get_user_plan")
     def test_lead_access_granted_for_professional_plan(self, mock_plan):
-        mock_plan.return_value = {"plan_name": "professional", "display_name": "Professional", "can_use_live_search": True, "monthly_limit": 100}
+        mock_plan.return_value = {"plan_name": "professional", "display_name": "Professional", "can_use_live_search": True, "daily_limit": 100}
         db = MagicMock()
         cursor = MagicMock()
         db.cursor.return_value = cursor
@@ -366,7 +325,7 @@ class TestApplicationLimits:
     @patch("utils.subscription.get_user_plan")
     @patch("utils.subscription.get_monthly_applications")
     def test_application_blocked_for_free_plan(self, mock_apps, mock_plan):
-        mock_plan.return_value = {"plan_name": "free", "display_name": "Free", "can_use_live_search": False, "monthly_limit": 0}
+        mock_plan.return_value = {"plan_name": "free", "display_name": "Free", "can_use_live_search": False, "daily_limit": 0}
         db = MagicMock()
 
         can_create, reason, details = check_application_eligibility(db, "user-123", "org-123")
@@ -376,7 +335,7 @@ class TestApplicationLimits:
     @patch("utils.subscription.get_user_plan")
     @patch("utils.subscription.get_monthly_applications")
     def test_application_blocked_when_limit_reached(self, mock_apps, mock_plan):
-        mock_plan.return_value = {"plan_name": "starter", "display_name": "Starter", "can_use_live_search": True, "monthly_limit": 10}
+        mock_plan.return_value = {"plan_name": "starter", "display_name": "Starter", "can_use_live_search": True, "daily_limit": 10}
         mock_apps.return_value = 1  # Starter limit is 1
         db = MagicMock()
 
@@ -387,7 +346,7 @@ class TestApplicationLimits:
     @patch("utils.subscription.get_user_plan")
     @patch("utils.subscription.get_monthly_applications")
     def test_application_allowed_under_limit(self, mock_apps, mock_plan):
-        mock_plan.return_value = {"plan_name": "professional", "display_name": "Pro", "can_use_live_search": True, "monthly_limit": 100}
+        mock_plan.return_value = {"plan_name": "professional", "display_name": "Pro", "can_use_live_search": True, "daily_limit": 100}
         mock_apps.return_value = 2
         db = MagicMock()
 

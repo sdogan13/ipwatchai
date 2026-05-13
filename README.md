@@ -1,4 +1,4 @@
-# IP Watch AI
+﻿# IP Watch AI
 
 IP Watch AI is a FastAPI-based trademark monitoring and search platform for Turkish trademark data.
 
@@ -282,8 +282,8 @@ See `test.md` for the current test lanes and coverage expectations.
 - `/api/info`: basic service metadata
 - `/api/v1/status`: service status and headline database stats
 - `/api/v1/search/public`: public landing-page search
-- `/api/v1/search/quick`: authenticated quick search
-- `/api/v1/search/intelligent`: authenticated deeper search flow
+- `/api/v1/search`: authenticated quick search
+- `/api/v1/search`: authenticated deeper search flow
 - `/api/v1/tools/status`: AI Studio Name Lab and Logo Studio availability
 
 ## Pipeline Notes
@@ -432,7 +432,7 @@ Empirical: 3.5 min for the full 220-bulletin set on local Postgres 16 + pgvector
 
 | Endpoint | Auth | Purpose |
 |---|---|---|
-| `POST /api/v1/cografi-search/quick` | yes | hybrid text + image, all filters, up to 100 results |
+| `POST /api/v1/cografi-search` | yes | hybrid text + image, all filters, up to 100 results |
 | `GET\|POST /api/v1/cografi-search/public` | no | text-only, capped at 10 results, region + section_keys filters only |
 | `GET /api/v1/cografi-search/autocomplete?q=` | yes | typeahead over distinct names + regions |
 | `GET /api/v1/cografi/{record_id}` | yes | full hydrated detail (record + holders + change_requests + figures + related siblings) |

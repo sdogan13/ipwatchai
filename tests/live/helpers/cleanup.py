@@ -8,11 +8,11 @@ from tests.live.helpers.assertions import LiveReporter
 from tests.live.helpers.client import LiveClient
 
 
-def reset_daily_quick_search_usage(
+def reset_daily_live_search_usage(
     reporter: LiveReporter,
     user_id: str | None,
     *,
-    name: str = "RESET daily quick-search usage",
+    name: str = "RESET daily live-search usage",
 ) -> bool:
     if not user_id:
         reporter.warn(f"{name} -> missing user id")
@@ -24,7 +24,7 @@ def reset_daily_quick_search_usage(
             cur.execute(
                 """
                 UPDATE api_usage
-                SET quick_searches = 0,
+                SET live_searches = 0,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE user_id = %s AND usage_date = %s
                 """,
@@ -37,7 +37,7 @@ def reset_daily_quick_search_usage(
         return False
 
     if updated:
-        reporter.info(f"{name} -> reset {updated} quick-search usage row(s)")
+        reporter.info(f"{name} -> reset {updated} live-search usage row(s)")
     return True
 
 

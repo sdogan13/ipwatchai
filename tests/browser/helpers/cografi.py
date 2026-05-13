@@ -1,4 +1,4 @@
-"""Shared helpers for cografi (Coğrafi İşaret) browser smokes.
+﻿"""Shared helpers for cografi (Coğrafi İşaret) browser smokes.
 
 Centralizes:
   * Persona switching via the managed-* accounts auto-provisioned by
@@ -335,7 +335,7 @@ def wait_for_search_rate_limit_to_clear(
     while time.time() < deadline:
         try:
             req = urllib.request.Request(
-                f"{config.base_url}/api/v1/cografi-search/quick",
+                f"{config.base_url}/api/v1/cografi-search",
                 method="POST",
                 headers={"Authorization": f"Bearer {token}"},
                 data=b"--x\r\nContent-Disposition: form-data; name=\"query\"\r\n\r\nping\r\n--x--\r\n",

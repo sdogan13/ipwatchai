@@ -519,7 +519,7 @@ async def get_current_user_profile_data(
         org_data["plan"] = "enterprise"
         org_data["max_watchlist_items"] = superadmin_features["max_watchlist_items"]
         org_data["max_monthly_searches"] = superadmin_features[
-            "monthly_live_searches"
+            "max_daily_live_searches"
         ]
         org_data["max_users"] = superadmin_features["max_users"]
 

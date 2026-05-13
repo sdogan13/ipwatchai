@@ -1,4 +1,4 @@
-"""Browser smoke for the patent search filter panel.
+﻿"""Browser smoke for the patent search filter panel.
 
 The 4 filter dimensions exposed in ``_search_patent_subview.html``
 have zero browser exercise today. The existing dashboard slice
@@ -100,7 +100,7 @@ def _clear_all_filters(page) -> None:
 
 def _submit_search_capture_post(page) -> dict:
     with page.expect_request(
-        lambda r: r.url.endswith("/api/v1/patent-search/quick")
+        lambda r: r.url.endswith("/api/v1/patent-search")
                   and r.method == "POST",
         timeout=15000,
     ) as req_info:

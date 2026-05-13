@@ -27,7 +27,7 @@ def _write_admin_audit_log(db: Database, user_id: str, action: str, details: dic
 
 ADMIN_PLAN_FEATURE_CATEGORIES = {
     "pricing": ["price_monthly", "price_annual_monthly"],
-    "search_limits": ["max_daily_quick_searches", "monthly_live_searches"],
+    "search_limits": ["max_daily_live_searches"],
     "content_limits": [
         "max_watchlist_items",
         "max_users",
@@ -39,7 +39,6 @@ ADMIN_PLAN_FEATURE_CATEGORIES = {
         "auto_scan_max_items",
     ],
     "boolean_flags": [
-        "can_use_live_scraping",
         "can_track_logos",
         "can_view_holder_portfolio",
         "can_export_reports",
@@ -174,7 +173,7 @@ async def get_admin_overview_data(*, db_factory=Database):
 
         cur.execute(
             """
-            SELECT COALESCE(SUM(quick_searches), 0) + COALESCE(SUM(live_searches), 0) as cnt
+            SELECT COALESCE(SUM(live_searches), 0) as cnt
             FROM api_usage WHERE usage_date = CURRENT_DATE
             """
         )
@@ -1405,7 +1404,6 @@ async def get_admin_usage_analytics_data(
             """
             SELECT usage_date as date,
                    COUNT(DISTINCT user_id) as unique_users,
-                   COALESCE(SUM(quick_searches), 0) as quick_searches,
                    COALESCE(SUM(live_searches), 0) as live_searches,
                    COALESCE(SUM(name_generations), 0) as name_generations
             FROM api_usage
@@ -1420,7 +1418,7 @@ async def get_admin_usage_analytics_data(
         cur.execute(
             """
             SELECT COALESCE(sp.name, 'free') as plan,
-                   COALESCE(SUM(au.quick_searches), 0) + COALESCE(SUM(au.live_searches), 0) as total_searches
+                   COALESCE(SUM(au.live_searches), 0) as total_searches
             FROM api_usage au
             JOIN users u ON au.user_id = u.id
             JOIN organizations o ON u.organization_id = o.id
@@ -1435,7 +1433,7 @@ async def get_admin_usage_analytics_data(
         cur.execute(
             """
             SELECT u.email, u.first_name, u.last_name, o.name as org_name,
-                   COALESCE(SUM(au.quick_searches), 0) + COALESCE(SUM(au.live_searches), 0) as total_searches
+                   COALESCE(SUM(au.live_searches), 0) as total_searches
             FROM api_usage au
             JOIN users u ON au.user_id = u.id
             JOIN organizations o ON u.organization_id = o.id
@@ -1481,7 +1479,6 @@ async def build_admin_usage_export_response(
             """
             SELECT au.usage_date, u.email as user_email, o.name as org_name,
                    COALESCE(sp.name, 'free') as plan,
-                   COALESCE(au.quick_searches, 0) as quick_searches,
                    COALESCE(au.live_searches, 0) as live_searches,
                    COALESCE(au.name_generations, 0) as name_generations
             FROM api_usage au
@@ -1503,7 +1500,6 @@ async def build_admin_usage_export_response(
             "user_email",
             "org_name",
             "plan",
-            "quick_searches",
             "live_searches",
             "name_generations",
         ]
@@ -1515,7 +1511,6 @@ async def build_admin_usage_export_response(
                 row["user_email"],
                 row["org_name"],
                 row["plan"],
-                row["quick_searches"],
                 row["live_searches"],
                 row["name_generations"],
             ]

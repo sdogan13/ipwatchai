@@ -1,4 +1,4 @@
-# IP Watch AI API Reference
+﻿# IP Watch AI API Reference
 
 Last updated: 2026-05-12
 Status: Current high-level map
@@ -121,8 +121,8 @@ Core account and org:
 - `/api/v1/usage`
 
 Search and trademark:
-- `/api/v1/search/quick`
-- `/api/v1/search/intelligent`
+- `/api/v1/search`
+- `/api/v1/search`
 - `/api/v1/search/risk-report`
 - `/api/v1/search/risk-report/public`
 - `/api/v1/search/risk-report/claim`
@@ -168,14 +168,14 @@ Portfolio and monitoring:
 Watchlist similarity alerts exclude same-holder conflicts when the watched mark's `customer_application_no` can be resolved to a trademark holder identifier and the candidate trademark has the same `holder_tpe_client_id` or `holder_id`. Event alerts for the watched trademark remain visible.
 
 Patent search:
-- `POST /api/v1/patent-search/quick` is authenticated and runs a text-first hybrid retrieval (trigram on `patents.title` plus cosine on `title_abstract_embedding` produced by `intfloat/multilingual-e5-large`); accepts `query`, `ipc` (comma-separated IPC class filter), `holder` (free-text trigram on `patent_holders.name`), `date_from`/`date_to` (filing-date window), `kind_code` (e.g. `B`, `A1`, `U3`, `T4`), and `limit` (default 20, max 100); shares the daily `max_daily_quick_searches` quota with trademark and design quick searches; returns 429 with the upgrade-hint payload over quota
+- `POST /api/v1/patent-search` is authenticated and runs a text-first hybrid retrieval (trigram on `patents.title` plus cosine on `title_abstract_embedding` produced by `intfloat/multilingual-e5-large`); accepts `query`, `ipc` (comma-separated IPC class filter), `holder` (free-text trigram on `patent_holders.name`), `date_from`/`date_to` (filing-date window), `kind_code` (e.g. `B`, `A1`, `U3`, `T4`), and `limit` (default 20, max 100); shares the daily `max_daily_live_searches` quota with trademark and design quick searches; returns 429 with the upgrade-hint payload over quota
 - queries that look like an application/publication number (`2017/15048`, `TR 2017 15048 U3`, etc.) short-circuit to a direct row lookup and skip embedding/trigram retrieval
 - `GET /api/v1/patent-search/public` and `POST /api/v1/patent-search/public` are anonymous variants capped at 10 results, rate-limited at 10/min per IP and gated by the shared landing-page free-tier quota. The POST surface accepts the same inputs as `/quick` — `query`, optional `image` upload, `ipc`, `holder`, `date_from`, `date_to`, `kind_code` — and runs the same hybrid retrieval (e5 text embedding + DINOv2 figure embedding when an image is supplied). The GET variant accepts `query` plus the same filter set as query params for link-share use cases
 - `GET /api/v1/patent-search/ipc-autocomplete?q=` returns IPC classes that actually appear in the corpus (`patents.ipc_classes`) prefix-matching the query, joined to `ipc_classes_lookup` for descriptions when available; rate-limited at 60/min
 - `GET /api/v1/patent-image/{path:path}` serves figure thumbnails for search result cards; resolves under `bulletins/Patent__Faydali_Model/` with a directory-traversal guard, direct-serves PNG/JPEG figures, and converts CD-era `.tif` figures to JPEG on the fly so browsers can render them; cached for 24h. Search results include an `image_url` field built from `patent_figures.image_path` and `patents.bulletin_folder` (the first non-null figure by `seq` is selected)
 
 Design search:
-- `POST /api/v1/design-search/quick` is authenticated and runs visual-dominant retrieval against `designs` (DINOv2 ViT-L/14 ≈55% + CLIP ViT-B/32 ≈30% + HSV color ≈10% + trigram text ≈5%); accepts `query`, optional `image`, `locarno` (comma-separated Locarno classes), and `limit` (default 20); shares the daily `max_daily_quick_searches` quota with trademark/patent/cografi quick searches
+- `POST /api/v1/design-search` is authenticated and runs visual-dominant retrieval against `designs` (DINOv2 ViT-L/14 ≈55% + CLIP ViT-B/32 ≈30% + HSV color ≈10% + trigram text ≈5%); accepts `query`, optional `image`, `locarno` (comma-separated Locarno classes), and `limit` (default 20); shares the daily `max_daily_live_searches` quota with trademark/patent/cografi quick searches
 - `GET /api/v1/design-search/public` and `POST /api/v1/design-search/public` are anonymous variants capped at 10 results, rate-limited at 10/min per IP and gated by the shared landing-page free-tier quota. The POST surface accepts `query`, optional `image`, and `locarno` — the same input shape as `/quick`. Image-based retrieval runs the same visual model stack on the public path
 - `GET /api/v1/locarno-classes` is public and lists the 32 top-level Locarno classes with localized names for the design search filter UI; rate-limited at 60/min
 - `POST /api/v1/tools/suggest-locarno-classes` is authenticated and returns AI-suggested Locarno classes for a free-text product description; rate-limited at 20/min
@@ -195,7 +195,7 @@ Design search:
 - `GET /api/v1/portfolio/public/cografi-agents/csv?name=X` is authenticated, plan-gated CSV variant; rate-limited at 3/min
 
 Cografi search (Geographical Indications + Traditional Specialties):
-- `POST /api/v1/cografi-search/quick` is authenticated and runs a hybrid retrieval against `cografi_records` (trigram on name plus cosine on `text_embedding` from e5-large, fused with DINOv2 figure embedding when an image is supplied); accepts `query`, optional `image`, `section_keys` (comma-separated), `record_types` (comma-separated), `gi_type` (`mensei` / `mahreç` / `geleneksel`), `region` (free-text trigram on `geographical_boundary`), `date_from`/`date_to`, `application_no`, `registration_no`, `include_admin`, and `limit` (default 20); shares the daily `max_daily_quick_searches` quota
+- `POST /api/v1/cografi-search` is authenticated and runs a hybrid retrieval against `cografi_records` (trigram on name plus cosine on `text_embedding` from e5-large, fused with DINOv2 figure embedding when an image is supplied); accepts `query`, optional `image`, `section_keys` (comma-separated), `record_types` (comma-separated), `gi_type` (`mensei` / `mahreç` / `geleneksel`), `region` (free-text trigram on `geographical_boundary`), `date_from`/`date_to`, `application_no`, `registration_no`, `include_admin`, and `limit` (default 20); shares the daily `max_daily_live_searches` quota
 - queries that look like an application/registration number short-circuit to a direct row lookup and skip embedding/trigram retrieval
 - `GET /api/v1/cografi-search/public` and `POST /api/v1/cografi-search/public` are anonymous variants capped at 10 results, rate-limited at 10/min per IP and gated by the shared landing-page free-tier quota. The POST surface accepts the same input as `/quick` (less `include_admin`, which stays admin-side). The public path runs the same e5 text + DINOv2 figure embeddings
 - `GET /api/v1/cografi-search/autocomplete?q=` returns name + region typeahead from the cografi corpus; rate-limited at 60/min
@@ -364,7 +364,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/auth/login `
 Authenticated quick search:
 
 ```powershell
-curl "http://127.0.0.1:8000/api/v1/search/quick?query=wosen&classes=9,35" `
+curl "http://127.0.0.1:8000/api/v1/search?query=wosen&classes=9,35" `
   -H "Authorization: Bearer <access_token>"
 ```
 

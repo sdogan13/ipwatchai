@@ -1,4 +1,4 @@
-"""Patent / Faydalı Model search routes.
+﻿"""Patent / Faydalı Model search routes.
 
   * ``POST /api/v1/patent-search/quick``      — authenticated, full results
   * ``GET/POST /api/v1/patent-search/public`` — anonymous, max 10 results, text-only
@@ -233,7 +233,7 @@ async def _do_patent_search(
         )
 
 
-async def patent_search_quick(
+async def patent_search_authenticated(
     *,
     query: Optional[str],
     image: Optional[UploadFile],
@@ -248,7 +248,7 @@ async def patent_search_quick(
 ) -> dict:
     """Authenticated full-detail patent search.
 
-    Shares the daily ``max_daily_quick_searches`` quota with trademark and
+    Shares the daily ``max_daily_live_searches`` quota with trademark and
     design quick searches (one bucket covers all three registries in v1).
     Increment happens AFTER a successful retrieval so failed searches
     don't burn quota.
@@ -268,9 +268,9 @@ async def patent_search_quick(
 
     if user_id:
         from database.crud import Database
-        from utils.subscription import check_quick_search_eligibility
+        from utils.subscription import check_live_search_eligibility
         with Database() as db:
-            can_search, _reason, details = check_quick_search_eligibility(db, user_id)
+            can_search, _reason, details = check_live_search_eligibility(db, user_id)
             if not can_search:
                 raise HTTPException(status_code=429, detail=details)
 
@@ -301,9 +301,9 @@ async def patent_search_quick(
 
     if user_id:
         from database.crud import Database
-        from utils.subscription import increment_quick_search_usage
+        from utils.subscription import increment_live_search_usage
         with Database() as db:
-            increment_quick_search_usage(db, user_id, organization_id)
+            increment_live_search_usage(db, user_id, organization_id)
 
     return result
 
@@ -481,9 +481,9 @@ def register_patent_search_routes(app, limiter):
         record_public_search_usage(client_id)
         return payload
 
-    @app.post("/api/v1/patent-search/quick", tags=["Patent Search"])
+    @app.post("/api/v1/patent-search", tags=["Patent Search"])
     @limiter.limit("60/minute")
-    async def quick_patent_search(
+    async def patent_search(
         request: Request,
         query: Optional[str] = Form(None),
         image: Optional[UploadFile] = File(None),
@@ -502,7 +502,7 @@ def register_patent_search_routes(app, limiter):
             user_id = str(uid) if uid is not None else None
             oid = getattr(current_user, "organization_id", None)
             org_id = str(oid) if oid is not None else None
-        return await patent_search_quick(
+        return await patent_search_authenticated(
             query=query, image=image, ipc=ipc, holder=holder,
             date_from=date_from, date_to=date_to, kind_code=kind_code,
             limit=limit,

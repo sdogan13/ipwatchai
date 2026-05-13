@@ -1593,12 +1593,12 @@
                 {% set cross = '<svg class="w-4 h-4 flex-shrink-0" style="color:#d1d5db" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>' %}
                 <ul class="pricing-feature-list space-y-2 mb-6 text-sm" style="color:var(--color-text-secondary)">
                     {# === ALL PLANS: always enabled === #}
-                    <!-- 1. Daily searches -->
+                    <!-- 1. Daily Agentic Searches -->
                     <li class="flex items-center gap-2">{{ chk|safe }}
-                        {% if plan.max_daily_quick_searches >= 999999 %}
-                        <span x-text="t('pricing.f_unlimited_searches')">Sınırsız arama</span>
+                        {% if plan.max_daily_live_searches >= 999999 %}
+                        <span x-text="t('pricing.f_unlimited_searches')">Sınırsız Agentik Arama</span>
                         {% else %}
-                        <span x-text="t('pricing.f_daily_searches', {n: {{ plan.max_daily_quick_searches }}})">{{ plan.max_daily_quick_searches }} arama/gün</span>
+                        <span x-text="t('pricing.f_daily_searches', {n: {{ plan.max_daily_live_searches }}})">{{ plan.max_daily_live_searches }} arama/gün</span>
                         {% endif %}
                     </li>
                     <!-- 2. Watchlist -->
@@ -1627,19 +1627,6 @@
                         <span x-text="t('pricing.f_users', {n: {{ plan.max_users }}})">{{ plan.max_users }} kullanıcı</span>
                         {% endif %}
                     </li>
-                    {# === STARTER+: enabled from starter upward === #}
-                    <!-- 5. Agentic search -->
-                    {% if plan.monthly_live_searches > 0 %}
-                    <li class="flex items-center gap-2">{{ chk|safe }}
-                        {% if plan.monthly_live_searches >= 999999 %}
-                        <span x-text="t('pricing.f_unlimited_live')">Sınırsız Agentik Arama</span>
-                        {% else %}
-                        <span x-text="t('pricing.f_live_monthly', {n: {{ plan.monthly_live_searches }}})">Ayda {{ plan.monthly_live_searches }} Agentik Arama</span>
-                        {% endif %}
-                    </li>
-                    {% else %}
-                    <li class="flex items-center gap-2">{{ cross|safe }} <span style="color:#9ca3af" x-text="t('pricing.f_live_search')">Agentik Arama</span></li>
-                    {% endif %}
                     <!-- 6. AI credits -->
                     {% if plan.monthly_ai_credits > 0 %}
                     <li class="flex items-center gap-2">{{ chk|safe }}

@@ -1,5 +1,5 @@
 /**
- * Design search tab — driver for /api/v1/design-search/quick.
+ * Design search tab — driver for /api/v1/design-search.
  *
  * Vanilla JS to avoid extending the 8K-line Alpine app.js with reactive
  * state. Mounts when the user clicks the Search tab; lazy-attaches event
@@ -19,7 +19,7 @@
 (function () {
   "use strict";
 
-  var API_QUICK = "/api/v1/design-search/quick";
+  var API_QUICK = "/api/v1/design-search";
   var API_LOCARNO_LIST = "/api/v1/locarno-classes";
   var API_LOCARNO_SUGGEST = "/api/v1/tools/suggest-locarno-classes";
   var HISTORY_KEY = "design_search_history";

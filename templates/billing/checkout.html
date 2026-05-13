@@ -467,7 +467,7 @@
                                 <svg class="w-3.5 h-3.5 text-green-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
                                 <span x-text="summaryFeatureText('watchlist')"></span>
                             </li>
-                            <template x-if="planData.monthly_live_searches > 0">
+                            <template x-if="planData.max_daily_live_searches > 0">
                                 <li class="flex items-start gap-1.5">
                                     <svg class="w-3.5 h-3.5 text-green-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
                                     <span x-text="summaryFeatureText('live')"></span>
@@ -660,20 +660,15 @@
 
             summaryFeatureText(kind) {
                 var planData = this.planData || {};
-                if (kind === 'search') {
-                    return this.isUnlimitedLimit(planData.max_daily_quick_searches)
+                if (kind === 'search' || kind === 'live') {
+                    return this.isUnlimitedLimit(planData.max_daily_live_searches)
                         ? this.t('pricing.f_unlimited_searches')
-                        : this.t('checkout.feat_search', { n: planData.max_daily_quick_searches || 5 });
+                        : this.t('pricing.f_daily_searches', { n: planData.max_daily_live_searches || 5 });
                 }
                 if (kind === 'watchlist') {
                     return this.isUnlimitedLimit(planData.max_watchlist_items)
                         ? this.t('pricing.f_unlimited_watchlist')
                         : this.t('checkout.feat_watchlist', { n: planData.max_watchlist_items || 3 });
-                }
-                if (kind === 'live') {
-                    return this.isUnlimitedLimit(planData.monthly_live_searches)
-                        ? this.t('pricing.f_unlimited_live')
-                        : this.t('checkout.feat_live', { n: planData.monthly_live_searches || 0 });
                 }
                 if (kind === 'logo') {
                     return this.isUnlimitedLimit(planData.monthly_logo_runs)
