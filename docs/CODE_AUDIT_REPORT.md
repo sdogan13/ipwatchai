@@ -27,8 +27,6 @@ extracted_goods          JSONB      Yes     goods EP    goods resp    /trademark
 name_tr                  VARCHAR    Yes     risk transl -             (via scoring)       (via score)  INTERNAL
 image_embedding          halfvec    Yes     CLIP search -             (via visual_sim)    (via badge)  INTERNAL
 dinov2_embedding         halfvec    Yes     risk score  -             (via visual_sim)    (via badge)  INTERNAL
-text_embedding           halfvec    Yes     semantic    -             (via semantic_sim)  (via badge)  INTERNAL
-color_histogram          halfvec    Yes     risk score  -             (via visual_sim)    (via badge)  INTERNAL
 logo_ocr_text            TEXT       Yes     risk score  -             (via visual_sim)    (via badge)  INTERNAL
 detected_lang            VARCHAR    Yes     transl.py   -             -                   -            BACKEND ONLY
 status_source            VARCHAR    Yes     src priority-             -                   -            INTERNAL

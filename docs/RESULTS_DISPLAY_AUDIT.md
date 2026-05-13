@@ -987,8 +987,6 @@ CREATE TABLE trademarks (
     -- AI Embeddings
     image_embedding      halfvec(512),    -- CLIP ViT-B-32
     dinov2_embedding     halfvec(768),    -- DINOv2 ViT-B/14
-    text_embedding       halfvec(384),    -- MiniLM-L12-v2
-    color_histogram      halfvec(32),     -- RGB histogram
     logo_ocr_text        TEXT,            -- EasyOCR extracted text
 
     -- Translations (NLLB-200-distilled-600M)
@@ -1011,7 +1009,7 @@ CREATE TABLE trademarks (
 CREATE INDEX idx_tm_name_trgm      ON trademarks USING GIST (name gist_trgm_ops);
 CREATE INDEX idx_tm_holder_tpe_id  ON trademarks(holder_tpe_client_id);
 CREATE INDEX idx_tm_holder_name    ON trademarks(holder_name);
--- Plus HNSW indexes on image_embedding, text_embedding, dinov2_embedding
+-- Plus HNSW indexes on image_embedding, dinov2_embedding
 ```
 
 **Total columns: 28** (excluding indexes/constraints)
