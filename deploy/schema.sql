@@ -47,7 +47,6 @@ CREATE TABLE IF NOT EXISTS nice_classes_lookup (
     description TEXT,
     description_tr TEXT,
     description_en TEXT,
-    description_embedding halfvec(384),
     keywords TEXT[],
     updated_at TIMESTAMP DEFAULT NOW()
 );
@@ -180,7 +179,6 @@ CREATE TABLE IF NOT EXISTS trademarks (
     -- AI Vectors
     image_embedding halfvec(512),
     dinov2_embedding halfvec(768),
-    color_histogram halfvec(512),
     -- Translation fields
     name_tr VARCHAR(500),
     name_en VARCHAR(500),
@@ -229,8 +227,6 @@ CREATE INDEX IF NOT EXISTS idx_tm_image_vec ON trademarks USING hnsw (image_embe
     WITH (m = 16, ef_construction = 200) WHERE image_embedding IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_tm_dinov2_vec ON trademarks USING hnsw (dinov2_embedding halfvec_cosine_ops)
     WITH (m = 16, ef_construction = 200) WHERE dinov2_embedding IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_tm_color_vec ON trademarks USING hnsw (color_histogram halfvec_cosine_ops)
-    WITH (m = 16, ef_construction = 200) WHERE color_histogram IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_tm_ocr_trgm ON trademarks USING gin (logo_ocr_text gin_trgm_ops);
 -- Translation indexes
 CREATE INDEX IF NOT EXISTS idx_trademarks_name_tr ON trademarks(name_tr);
@@ -464,9 +460,7 @@ CREATE TABLE IF NOT EXISTS watchlist_mt (
     logo_path TEXT,
     logo_embedding halfvec(512),
     logo_dinov2_embedding halfvec(768),
-    logo_color_histogram halfvec(512),
     logo_ocr_text TEXT,
-    text_embedding halfvec(384),
     alert_threshold FLOAT DEFAULT 0.5,
     monitor_new_applications BOOLEAN DEFAULT TRUE,
     monitor_registrations BOOLEAN DEFAULT TRUE,

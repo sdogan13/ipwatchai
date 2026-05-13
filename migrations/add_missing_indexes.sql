@@ -1,5 +1,5 @@
 -- ============================================
--- Add Missing HNSW Indexes for DINOv2 and Color Histogram
+-- Add Missing HNSW Indexes for DINOv2
 -- Also add GIN trigram index on logo_ocr_text
 --
 -- IMPORTANT: Run during low-activity window.
@@ -15,12 +15,6 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tm_dinov2_vec
     ON trademarks USING hnsw (dinov2_embedding halfvec_cosine_ops)
     WITH (m = 16, ef_construction = 200)
     WHERE dinov2_embedding IS NOT NULL;
-
--- Color histogram HNSW index (512-dim, ~30-60 minutes build)
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tm_color_vec
-    ON trademarks USING hnsw (color_histogram halfvec_cosine_ops)
-    WITH (m = 16, ef_construction = 200)
-    WHERE color_histogram IS NOT NULL;
 
 -- OCR text trigram index for text search (~5-10 minutes build)
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tm_ocr_trgm
