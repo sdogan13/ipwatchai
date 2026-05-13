@@ -583,7 +583,7 @@ class AgenticTrademarkSearch:
         return formatted
 
     def _generate_embeddings(self, records: List[Dict]) -> int:
-        """Generate translations for scraped records using pipeline.ai."""
+        """Generate Turkish translations + language detection for scraped records."""
         try:
             from pipeline import ai
 
@@ -597,6 +597,7 @@ class AgenticTrademarkSearch:
                         trans = ai.get_translations(name)
                         if trans.get("name_tr"):
                             record["name_tr"] = trans["name_tr"]
+                            enriched_count += 1
                         if trans.get("detected_lang"):
                             record["detected_lang"] = trans["detected_lang"]
                         enriched_count += 1

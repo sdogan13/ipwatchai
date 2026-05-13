@@ -136,7 +136,6 @@ _INSERT_COLUMNS = [
     "image_path",
     "image_embedding",
     "dinov2_embedding",
-    "color_histogram",
     "logo_ocr_text",
     "name_tr",
     "detected_lang",
@@ -175,7 +174,6 @@ def _build_insert_sql():
                     appeal_deadline = COALESCE(EXCLUDED.appeal_deadline, trademarks.appeal_deadline),
                     image_embedding = COALESCE(EXCLUDED.image_embedding, trademarks.image_embedding),
                     dinov2_embedding = COALESCE(EXCLUDED.dinov2_embedding, trademarks.dinov2_embedding),
-                    color_histogram = COALESCE(EXCLUDED.color_histogram, trademarks.color_histogram),
                     logo_ocr_text = COALESCE(EXCLUDED.logo_ocr_text, trademarks.logo_ocr_text),
                     name_tr = COALESCE(EXCLUDED.name_tr, trademarks.name_tr),
                     detected_lang = COALESCE(EXCLUDED.detected_lang, trademarks.detected_lang),
@@ -405,7 +403,6 @@ def process_file_batch(conn, file_path, force=False, *, records=None):
                     and not _metadata_text_features_are_from_clean_name(rec, tm_name)
                 )
             )
-            color_emb = embedding_to_halfvec(rec.get("color_histogram"), 512)
             img_path = _resolve_image_path(folder_name, rec.get("IMAGE"), ROOT_DIR)
             ocr_text = rec.get("logo_ocr_text")
 
@@ -473,7 +470,6 @@ def process_file_batch(conn, file_path, force=False, *, records=None):
                         img_path,
                         img_emb,
                         dino_emb,
-                        color_emb,
                         sanitize(ocr_text),
                         name_tr,
                         detected_lang,
@@ -561,7 +557,6 @@ def process_file_batch(conn, file_path, force=False, *, records=None):
                     reg_date,
                     img_emb,
                     dino_emb,
-                    color_emb,
                     sanitize(ocr_text),
                     name_tr,
                     detected_lang,

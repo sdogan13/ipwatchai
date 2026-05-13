@@ -35,7 +35,6 @@ SENTINEL = "__DONE__"
 FEATURES = [
     "image_embedding",
     "dinov2_embedding",
-    "color_histogram",
     "logo_ocr_text",
     "name_tr",
     "detected_lang",

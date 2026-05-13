@@ -359,6 +359,7 @@ def test_logo_only_text_feature_repair_clears_stale_name_derived_features(monkey
         assert "text_embedding" not in sql
         assert "logo_ocr_text" not in sql
         assert "image_embedding" not in sql
+        assert "name_tr = NULL" in sql
 
     monkeypatch.setattr(repair, "execute_values", fake_execute_values)
 

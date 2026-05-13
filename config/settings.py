@@ -178,7 +178,6 @@ class AISettings(BaseSettings):
     # Model names
     clip_model: str = Field(default="ViT-B-32", alias="CLIP_MODEL")
     clip_pretrained: str = Field(default="laion2b_s34b_b79k", alias="CLIP_PRETRAINED")
-    text_model: str = Field(default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2", alias="TEXT_MODEL")
     dino_model: str = Field(default="dinov2_vitb14", alias="DINO_MODEL")
 
     # Translation

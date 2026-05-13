@@ -80,7 +80,6 @@ REQUIRED_TRADEMARK_COLUMNS = {
     "image_path",
     "image_embedding",
     "dinov2_embedding",
-    "color_histogram",
     "logo_ocr_text",
     "name_tr",
     "detected_lang",

@@ -93,9 +93,7 @@ class WatchlistCRUD:
         logo_path: Optional[str] = None,
         logo_embedding: Optional[List[float]] = None,
         logo_dinov2_embedding: Optional[List[float]] = None,
-        logo_color_histogram: Optional[List[float]] = None,
         logo_ocr_text: Optional[str] = None,
-        text_embedding: Optional[List[float]] = None,
         auto_commit: bool = True,
     ) -> Dict:
         """Create watchlist item with pre-computed embeddings (from trademark data)."""
@@ -161,18 +159,10 @@ class WatchlistCRUD:
             cols.append("logo_dinov2_embedding")
             vals.append(str(logo_dinov2_embedding))
             placeholders.append("%s::halfvec")
-        if logo_color_histogram is not None:
-            cols.append("logo_color_histogram")
-            vals.append(str(logo_color_histogram))
-            placeholders.append("%s::halfvec")
         if logo_ocr_text is not None:
             cols.append("logo_ocr_text")
             vals.append(logo_ocr_text)
             placeholders.append("%s")
-        if text_embedding is not None:
-            cols.append("text_embedding")
-            vals.append(str(text_embedding))
-            placeholders.append("%s::halfvec")
 
         sql = f"INSERT INTO watchlist_mt ({', '.join(cols)}) VALUES ({', '.join(placeholders)}) RETURNING *"
         cur.execute(sql, vals)
@@ -497,33 +487,32 @@ class WatchlistCRUD:
     def update_embedding(
         db: Database,
         item_id: UUID,
-        text_embedding: List[float],
         logo_embedding: Optional[List[float]] = None,
         logo_ocr_text: Optional[str] = None,
     ):
-        """Update watchlist item embeddings and OCR text."""
-        cur = db.cursor()
+        """Update watchlist item logo embedding and OCR text (text_embedding removed)."""
+        if logo_embedding is None and logo_ocr_text is None:
+            return
 
-        if logo_embedding:
+        cur = db.cursor()
+        if logo_embedding is not None:
             cur.execute(
                 """
                 UPDATE watchlist_mt
-                SET text_embedding = %s::halfvec,
-                    logo_embedding = %s::halfvec,
+                SET logo_embedding = %s::halfvec,
                     logo_ocr_text = COALESCE(%s, logo_ocr_text)
                 WHERE id = %s
             """,
-                (str(text_embedding), str(logo_embedding), logo_ocr_text, str(item_id)),
+                (str(logo_embedding), logo_ocr_text, str(item_id)),
             )
         else:
             cur.execute(
                 """
                 UPDATE watchlist_mt
-                SET text_embedding = %s::halfvec,
-                    logo_ocr_text = COALESCE(%s, logo_ocr_text)
+                SET logo_ocr_text = COALESCE(%s, logo_ocr_text)
                 WHERE id = %s
             """,
-                (str(text_embedding), logo_ocr_text, str(item_id)),
+                (logo_ocr_text, str(item_id)),
             )
 
         db.commit()
@@ -535,10 +524,9 @@ class WatchlistCRUD:
         logo_path: Optional[str],
         logo_embedding: Optional[List[float]] = None,
         dino_embedding: Optional[List[float]] = None,
-        color_histogram: Optional[List[float]] = None,
         logo_ocr_text: Optional[str] = None,
     ):
-        """Update watchlist item logo path and all visual embeddings."""
+        """Update watchlist item logo path and visual embeddings."""
         cur = db.cursor()
 
         sets = ["logo_path = %s"]
@@ -550,9 +538,6 @@ class WatchlistCRUD:
         if dino_embedding is not None:
             sets.append("logo_dinov2_embedding = %s::halfvec")
             vals.append(str(dino_embedding))
-        if color_histogram is not None:
-            sets.append("logo_color_histogram = %s::halfvec")
-            vals.append(str(color_histogram))
         if logo_ocr_text is not None:
             sets.append("logo_ocr_text = %s")
             vals.append(logo_ocr_text)
@@ -574,7 +559,6 @@ class WatchlistCRUD:
             SET logo_path = NULL,
                 logo_embedding = NULL,
                 logo_dinov2_embedding = NULL,
-                logo_color_histogram = NULL,
                 logo_ocr_text = NULL
             WHERE id = %s
         """,

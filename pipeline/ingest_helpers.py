@@ -236,7 +236,6 @@ _SHARED_FIELDS = [
     ('image_path',            'v.img_path'),
     ('image_embedding',       'v.img_emb::halfvec(512)'),
     ('dinov2_embedding',      'v.dino_emb::halfvec(768)'),
-    ('color_histogram',       'v.color_emb::halfvec(512)'),
     ('logo_ocr_text',         'v.ocr_text'),
 ]
 
@@ -299,7 +298,7 @@ def _build_update_sql(source):
                 FROM (VALUES %s) AS v(
                     name, status, nice_classes, goods, last_date, appeal, expiry,
                     b_no, b_date, g_no, g_date, img_path,
-                    app_date, reg_date, img_emb, dino_emb, color_emb,
+                    app_date, reg_date, img_emb, dino_emb,
                     ocr_text,
                     name_tr, detected_lang,
                     holder_name, holder_tpe_client_id,
@@ -601,8 +600,7 @@ def check_and_migrate_schema(conn):
             ("gazette_no", "VARCHAR(255)"), ("gazette_date", "DATE"),
             ("appeal_deadline", "DATE"), ("expiry_date", "DATE"),
             ("image_path", "TEXT"), ("image_embedding", "halfvec(512)"),
-            ("dinov2_embedding", "halfvec(768)"),
-            ("color_histogram", "halfvec(512)"), ("logo_ocr_text", "TEXT"),
+            ("dinov2_embedding", "halfvec(768)"), ("logo_ocr_text", "TEXT"),
             ("name_tr", "VARCHAR(500)"), ("detected_lang", "VARCHAR(10)"),
             ("holder_name", "VARCHAR(500)"), ("holder_tpe_client_id", "VARCHAR(50)"),
             ("attorney_name", "VARCHAR(500)"), ("attorney_no", "VARCHAR(50)"),
@@ -770,7 +768,6 @@ _INSERT_COLUMNS = [
     "image_path",
     "image_embedding",
     "dinov2_embedding",
-    "color_histogram",
     "logo_ocr_text",
     "name_tr",
     "detected_lang",
@@ -796,7 +793,6 @@ def _build_insert_sql():
                     appeal_deadline = COALESCE(EXCLUDED.appeal_deadline, trademarks.appeal_deadline),
                     image_embedding = COALESCE(EXCLUDED.image_embedding, trademarks.image_embedding),
                     dinov2_embedding = COALESCE(EXCLUDED.dinov2_embedding, trademarks.dinov2_embedding),
-                    color_histogram = COALESCE(EXCLUDED.color_histogram, trademarks.color_histogram),
                     logo_ocr_text = COALESCE(EXCLUDED.logo_ocr_text, trademarks.logo_ocr_text),
                     name_tr = COALESCE(EXCLUDED.name_tr, trademarks.name_tr),
                     detected_lang = COALESCE(EXCLUDED.detected_lang, trademarks.detected_lang),
@@ -954,7 +950,6 @@ def process_file_batch(conn, file_path, force=False):
                     and not _metadata_text_features_are_from_clean_name(rec, tm_name)
                 )
             )
-            color_emb = embedding_to_halfvec(rec.get("color_histogram"), 512)
             img_path = _resolve_image_path(folder_name, rec.get("IMAGE"), ROOT_DIR)
             ocr_text = rec.get("logo_ocr_text")
 
@@ -1004,7 +999,7 @@ def process_file_batch(conn, file_path, force=False):
                     sanitize(insert_bulletin_no), insert_bulletin_date,
                     sanitize(folder_gazette_no if is_gazette_source else tm.get("GAZETTE_NO")), gazette_date_val,
                     appeal_dl, new_expiry_date, img_path,
-                    img_emb, dino_emb, color_emb, sanitize(ocr_text),
+                    img_emb, dino_emb, sanitize(ocr_text),
                     name_tr, detected_lang, holder_name, holder_tpe_client_id,
                     attorney_name, attorney_no, source_tag
                 ))
@@ -1068,7 +1063,7 @@ def process_file_batch(conn, file_path, force=False):
                         sanitize(tm.get("BULLETIN_NO")), bulletin_date_val,
                         sanitize(folder_gazette_no if is_gazette_source else tm.get("GAZETTE_NO")), gazette_date_val,
                         img_path, app_date, reg_date,
-                        img_emb, dino_emb, color_emb, sanitize(ocr_text),
+                        img_emb, dino_emb, sanitize(ocr_text),
                         name_tr, detected_lang, None, None, None,
                         holder_name, holder_tpe_client_id,
                         attorney_name, attorney_no,
