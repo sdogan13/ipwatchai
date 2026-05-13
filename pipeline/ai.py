@@ -680,14 +680,6 @@ def get_image_path(folder_path, image_id):
         if candidate.exists(): return candidate
     return None
 
-# FIX #3: Increased histogram bins from [8, 2, 2] to [8, 8, 8]
-def extract_color_histogram(pil_image):
-    cv_img = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
-    hsv_img = cv2.cvtColor(cv_img, cv2.COLOR_BGR2HSV)
-    hist = cv2.calcHist([hsv_img], [0, 1, 2], None, [8, 8, 8], [0, 180, 0, 256, 0, 256])
-    cv2.normalize(hist, hist)
-    return hist.flatten().tolist()
-
 @torch.inference_mode()
 def process_batch(batch_data, stats):
     """Process a batch of images with Redis-cached CLIP and DINOv2 embeddings."""
@@ -703,19 +695,9 @@ def process_batch(batch_data, stats):
     dino_indices = []  # Indices needing DINO embeddings
     dino_paths = []    # Corresponding image paths
 
-    # First pass: process color histograms and identify what needs embedding
+    # Identify which images need CLIP / DINO embeddings
     for i, (rec, img_path) in enumerate(batch_data):
         try:
-            # Color histogram (not cached - fast to compute)
-            # Also regenerate if wrong dimension (old code produced 32-dim, correct is 512)
-            existing_color = rec.get("color_histogram")
-            if existing_color is None or (isinstance(existing_color, list) and len(existing_color) != 512):
-                pil_image = _load_and_preprocess_image(str(img_path))
-                rec["color_histogram"] = extract_color_histogram(pil_image)
-                stats["color_gen"] += 1
-            else:
-                stats["color_skip"] += 1
-
             # Track which images need CLIP embeddings
             if rec.get("image_embedding") is None:
                 clip_indices.append(i)
@@ -801,9 +783,8 @@ def process_folder(folder_path):
         if has_images:
             has_clip = rec.get("image_embedding") is not None
             has_dino = rec.get("dinov2_embedding") is not None
-            has_color = rec.get("color_histogram") is not None
             has_ocr = rec.get("logo_ocr_text") is not None
-            all_done = has_clip and has_dino and has_color and has_ocr and translation_done
+            all_done = has_clip and has_dino and has_ocr and translation_done
         else:
             # No images dir: only translation features matter.
             all_done = translation_done
@@ -846,13 +827,12 @@ def process_folder(folder_path):
         )
 
     stats = {
-        "color_gen": 0, "color_skip": 0,
         "clip_gen": 0, "clip_skip": 0,
         "dino_gen": 0, "dino_skip": 0,
         "ocr_gen": 0, "ocr_skip": 0
     }
 
-    # Task 2: Visual & Color & OCR (only if images directory exists)
+    # Task 2: Visual & OCR (only if images directory exists)
     if has_images:
         current_batch = []
         for i, rec in enumerate(tqdm(records_to_process, desc="   Extracting Features", leave=False)):
@@ -875,14 +855,13 @@ def process_folder(folder_path):
             else:
                 stats["ocr_skip"] += 1
 
-            # Visual & Color Batch Accumulation
-            if rec.get("image_embedding") is None or rec.get("dinov2_embedding") is None or rec.get("color_histogram") is None:
+            # Visual Batch Accumulation
+            if rec.get("image_embedding") is None or rec.get("dinov2_embedding") is None:
                 current_batch.append((rec, img_path))
                 if len(current_batch) >= BATCH_SIZE:
                     process_batch(current_batch, stats)
                     current_batch = []
             else:
-                stats["color_skip"] += 1
                 stats["clip_skip"] += 1
                 stats["dino_skip"] += 1
 
@@ -912,7 +891,6 @@ def process_folder(folder_path):
         folder=folder_path.name,
         clip_generated=stats["clip_gen"],
         dino_generated=stats["dino_gen"],
-        color_generated=stats["color_gen"],
         ocr_generated=stats["ocr_gen"]
     )
 
