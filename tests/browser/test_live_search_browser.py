@@ -1,4 +1,4 @@
-"""
+﻿"""
 Browser journeys for dashboard live-search coverage.
 
 Run directly:
@@ -222,7 +222,7 @@ def main() -> None:
             page.fill('input[name="trademark-search"]', "wosen")
 
             with page.expect_response(
-                lambda response: response.request.method == "GET" and "/api/v1/search/intelligent" in response.url,
+                lambda response: response.request.method == "GET" and "/api/v1/search" in response.url,
                 timeout=LIVE_SEARCH_TIMEOUT_MS,
             ) as response_info:
                 page.click("#dashboard-live-search-btn")
@@ -270,7 +270,7 @@ def main() -> None:
             "free live-search upgrade gate browser journey",
             free_live_search_upgrade_gate,
             allow_console_errors=("status of 403",),
-            allow_request_failures=("/api/v1/search/intelligent",),
+            allow_request_failures=("/api/v1/search",),
         )
 
         if business_session is None:
@@ -305,7 +305,7 @@ def main() -> None:
             page.fill('input[name="trademark-search"]', "wosen")
 
             with page.expect_response(
-                lambda response: response.request.method == "GET" and "/api/v1/search/intelligent" in response.url,
+                lambda response: response.request.method == "GET" and "/api/v1/search" in response.url,
                 timeout=LIVE_SEARCH_TIMEOUT_MS,
             ) as response_info:
                 page.click("#dashboard-live-search-btn")

@@ -118,8 +118,16 @@ services:
       - ./app_admin_scoring_routes.py:/app/app_admin_scoring_routes.py:ro
       - ./app_assets.py:/app/app_assets.py:ro
       - ./app_design_alert_routes.py:/app/app_design_alert_routes.py:ro
+      - ./app_design_detail_routes.py:/app/app_design_detail_routes.py:ro
       - ./app_design_search_routes.py:/app/app_design_search_routes.py:ro
       - ./app_design_watchlist_routes.py:/app/app_design_watchlist_routes.py:ro
+      - ./app_patent_search_routes.py:/app/app_patent_search_routes.py:ro
+      - ./app_patent_watchlist_routes.py:/app/app_patent_watchlist_routes.py:ro
+      - ./app_patent_alert_routes.py:/app/app_patent_alert_routes.py:ro
+      - ./app_patent_lead_routes.py:/app/app_patent_lead_routes.py:ro
+      - ./app_patent_detail_routes.py:/app/app_patent_detail_routes.py:ro
+      - ./app_cografi_search_routes.py:/app/app_cografi_search_routes.py:ro
+      - ./app_cografi_watchlist_routes.py:/app/app_cografi_watchlist_routes.py:ro
       - ./app_enhanced_search_routes.py:/app/app_enhanced_search_routes.py:ro
       - ./app_errors.py:/app/app_errors.py:ro
       - ./app_factory.py:/app/app_factory.py:ro
@@ -131,6 +139,7 @@ services:
       - ./app_middleware.py:/app/app_middleware.py:ro
       - ./app_nice_class_routes.py:/app/app_nice_class_routes.py:ro
       - ./app_public_portfolio_routes.py:/app/app_public_portfolio_routes.py:ro
+      - ./app_public_search_quota.py:/app/app_public_search_quota.py:ro
       - ./app_public_search_routes.py:/app/app_public_search_routes.py:ro
       - ./app_rate_limit.py:/app/app_rate_limit.py:ro
       - ./app_registry_search_routes.py:/app/app_registry_search_routes.py:ro
@@ -153,6 +162,7 @@ services:
       - ./pdf_extract_tasarim.py:/app/pdf_extract_tasarim.py:ro
       - ./pdf_extract_tasarim_events.py:/app/pdf_extract_tasarim_events.py:ro
       - ./embeddings_tasarim.py:/app/embeddings_tasarim.py:ro
+      - ./embeddings_patent.py:/app/embeddings_patent.py:ro
       # Mount API and database modules for development
       - ./api:/app/api:ro
       - ./database:/app/database:ro

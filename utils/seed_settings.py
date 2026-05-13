@@ -11,13 +11,6 @@ from database.crud import get_db_connection
 
 logger = logging.getLogger(__name__)
 
-LEGACY_QUICK_SEARCH_LIMITS = {
-    "free": 50,
-    "starter": 200,
-    "professional": 500,
-    "business": 150,
-}
-
 PAID_CSV_FEATURES = {
     "can_download_portfolio": {
         "free": False,
@@ -70,8 +63,7 @@ def seed_default_settings():
     rate_limits = {
         "rate_limit.login": {"value": 5, "desc": "Login attempts per minute per IP"},
         "rate_limit.register": {"value": 5, "desc": "Registration attempts per minute per IP"},
-        "rate_limit.quick_search": {"value": 60, "desc": "Quick searches per minute per user"},
-        "rate_limit.intelligent_search": {"value": 10, "desc": "Intelligent searches per minute per user"},
+        "rate_limit.intelligent_search": {"value": 60, "desc": "Agentic Search calls per minute per user"},
         "rate_limit.api_general": {"value": 100, "desc": "General API calls per minute per user"},
         "rate_limit.public_search": {"value": 10, "desc": "Public search per minute per IP"},
     }
@@ -88,7 +80,7 @@ def seed_default_settings():
     feature_flags = {
         "feature.live_scraping_enabled": {"value": True, "desc": "Enable live scraping for eligible plans"},
         "feature.ai_studio_enabled": {"value": True, "desc": "Enable AI Studio (Name Lab + Logo Studio)"},
-        "feature.opposition_radar_enabled": {"value": True, "desc": "Enable Opposition Radar leads"},
+        "feature.radar_enabled": {"value": True, "desc": "Enable Radar leads"},
         "feature.auto_scan_enabled": {"value": True, "desc": "Enable automatic watchlist scanning"},
         "feature.public_search_enabled": {"value": True, "desc": "Enable unauthenticated public search"},
     }
@@ -128,61 +120,6 @@ def seed_default_settings():
         logger.warning(f"Settings seed failed (non-fatal): {e}")
         if conn:
             conn.rollback()
-    finally:
-        if conn:
-            conn.close()
-
-
-def align_legacy_quick_search_limits():
-    """
-    Rewrite only the known stale quick-search limit overrides.
-
-    This keeps intentional admin overrides intact while bringing older
-    runtime settings back to the current product defaults.
-    """
-    from utils.settings_manager import settings_manager
-    from utils.subscription import PLAN_FEATURES
-
-    target_limits = {
-        "free": PLAN_FEATURES["free"]["max_daily_quick_searches"],
-        "starter": PLAN_FEATURES["starter"]["max_daily_quick_searches"],
-        "professional": PLAN_FEATURES["professional"]["max_daily_quick_searches"],
-        "business": PLAN_FEATURES["professional"]["max_daily_quick_searches"],
-    }
-
-    conn = None
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        updated = 0
-
-        for plan_name, legacy_value in LEGACY_QUICK_SEARCH_LIMITS.items():
-            cur.execute(
-                """
-                UPDATE app_settings
-                SET value = %s::jsonb,
-                    updated_at = NOW()
-                WHERE key = %s
-                  AND value = %s::jsonb
-                """,
-                (
-                    json.dumps(target_limits[plan_name]),
-                    f"plan.{plan_name}.max_daily_quick_searches",
-                    json.dumps(legacy_value),
-                ),
-            )
-            updated += cur.rowcount or 0
-
-        conn.commit()
-        if updated:
-            settings_manager.invalidate_cache()
-            logger.info(f"Aligned {updated} legacy quick-search plan override(s)")
-        return True
-    except Exception as e:
-        if conn:
-            conn.rollback()
-        logger.warning(f"Quick-search limit alignment failed (non-fatal): {e}")
-        return False
     finally:
         if conn:
             conn.close()

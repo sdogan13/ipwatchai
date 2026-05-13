@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import calendar
 import json
 import os
 import sys
 import time
 import traceback
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +58,29 @@ def _apply_safety_profile(profile: str) -> dict[str, str]:
     return applied
 
 
+def _subtract_months(value: date, months: int) -> date:
+    month = value.month - months
+    year = value.year
+    while month <= 0:
+        month += 12
+        year -= 1
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return date(year, month, day)
+
+
+def _parse_iso_date(value: str | None) -> date | None:
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    return date.fromisoformat(text)
+
+
+def _default_status_max_bulletin_date(today: date | None = None) -> date:
+    return _subtract_months(today or date.today(), 4)
+
+
 def _run_cycle(args: argparse.Namespace) -> dict[str, Any]:
     conn = get_connection()
     try:
@@ -82,6 +106,7 @@ def _run_cycle(args: argparse.Namespace) -> dict[str, Any]:
             limit=args.status_batch_size,
             artifact_dir=args.artifact_dir,
             include_older_than_11_years=args.include_older_than_11_years,
+            max_bulletin_date_exclusive=args.status_max_bulletin_date,
         )
         return {"live_status": status_summary, "live_classes": class_summary}
     finally:
@@ -107,6 +132,15 @@ def main() -> int:
         help="Include older/unknown application-date records after the priority window.",
     )
     parser.add_argument(
+        "--status-max-bulletin-date",
+        type=str,
+        default=None,
+        help=(
+            "Exclusive ISO bulletin-date cutoff for live status repair. "
+            "Defaults to today's 4-month boundary and stays frozen for this runner."
+        ),
+    )
+    parser.add_argument(
         "--safety-profile",
         choices=["aggressive", "env"],
         default="aggressive",
@@ -123,6 +157,7 @@ def main() -> int:
         default=Path("artifacts/repair/live_repair_until_done.jsonl"),
     )
     args = parser.parse_args()
+    args.status_max_bulletin_date = _parse_iso_date(args.status_max_bulletin_date) or _default_status_max_bulletin_date()
     safety_settings = _apply_safety_profile(args.safety_profile)
 
     total_checked = 0
@@ -141,6 +176,7 @@ def main() -> int:
             "artifact_dir": str(args.artifact_dir),
             "max_checks": args.max_checks,
             "include_older_than_11_years": args.include_older_than_11_years,
+            "status_max_bulletin_date": args.status_max_bulletin_date,
             "safety_profile": args.safety_profile,
             "safety_settings": safety_settings,
         },

@@ -1,4 +1,4 @@
-# IP Watch AI
+﻿# IP Watch AI
 
 IP Watch AI is a FastAPI-based trademark monitoring and search platform for Turkish trademark data.
 
@@ -129,6 +129,13 @@ Common local values when PostgreSQL and Redis are running through Docker Compose
 - `REDIS_PORT=6379`
 - `AI_DEVICE=cpu` if you are not running with CUDA
 
+Billing/payment setup:
+- UK and Europe route to Stripe Checkout; Turkey routes to iyzico Checkout Form.
+- Configure `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_SUCCESS_URL`, `STRIPE_CANCEL_URL`, and `STRIPE_AUTOMATIC_TAX=true` for Stripe.
+- Configure `IYZICO_*` values for Turkey payments.
+- Set `BILLING_REGION_CATALOG_JSON` with UK/EU display prices and Stripe Price IDs plus TR display prices. Unknown regions fall back to UK.
+- Apply `migrations/regional_payment_providers.sql` after the existing payments and credit-pack migrations.
+
 Start the backing services if needed:
 
 ```powershell
@@ -161,6 +168,12 @@ Core API regression:
 python -m pytest tests/test_api_endpoints.py -s
 ```
 
+Regional billing regression:
+
+```powershell
+python -m pytest tests/test_billing_regional.py -s
+```
+
 ## Scoring Engine
 
 Canonical similarity scoring lives behind `score_pair()` in `services/scoring_service.py` and is re-exported through `risk_engine.py`.
@@ -174,7 +187,7 @@ Current version: `v2_text_visual`.
 - short acronym-style anchors require exact normalized copying; non-exact fuzzy/phonetic matches such as a two-character acronym against a longer translated word are capped as weak evidence
 - exact short-acronym subset matches with missing matter on either side are capped as limited text, and short collapsed `name_tr` values cannot turn a longer original candidate into a high translated match
 - compact compounds with true-generic suffixes, such as `doganpatent`, are scored through their anchor plus generic components
-- Retrieval V2 pre-screening searches normalized, compact, containment, token, fuzzy, OCR, semantic, visual, and phonetic candidate paths before V2 scoring
+- Retrieval V2 pre-screening searches normalized, compact, containment, token, fuzzy, OCR, visual, and phonetic candidate paths before V2 scoring; trademark text-semantic embeddings are no longer used
 - short anchor tokens use exact token-boundary retrieval across `name` and `name_tr`; broad substring token retrieval is reserved for longer anchors so short queries are not flooded by unrelated fragments
 - textual retrieval runs symmetrically across `trademarks.name` and `trademarks.name_tr`, so translated-name candidates enter the same scoring flow as original-name candidates
 - retrieval diagnostics record which internal stage and field found a candidate; scoring still decides Path A (`name`) versus Path B (`name_tr`)
@@ -183,7 +196,7 @@ Current version: `v2_text_visual`.
 - visual scoring normalizes across active CLIP, DINOv2, and OCR components only; OCR is compared logo-to-logo with conservative exact/character evidence, can drive plain text wordmark visual matches when both images are text-on-blank, and cannot cap or drag down neural CLIP/DINO evidence; color vectors may still be present in retrieval data but do not contribute to visual risk
 - blank-background plain-text wordmark images are profiled from image geometry and OCR presence; when those logo texts or names do not agree, their CLIP/DINO visual score is capped so typography-on-white false positives do not dominate
 - image-only searches do not promote uploaded-logo OCR into the trademark-name text query; OCR stays inside `visual_breakdown`, is compared only against candidate `logo_ocr_text`, and has low weight in the image-only visual quality guard because EasyOCR can be noisy on logo crops; graphic/mixed logo layout variants can escape the moderate cap when CLIP and DINOv2 corroborate the same visual identity through strict high-component evidence or balanced close-component evidence
-- weak textual evidence, including generic-only, missing-anchor, dominant-anchor-missing, or semantic/phonetic-only support, prevents moderate visual similarity from creating a high conflict score
+- weak textual evidence, including generic-only, missing-anchor, dominant-anchor-missing, or phonetic-only support, prevents moderate visual similarity from creating a high conflict score
 - partial multi-anchor matches with changed matter on both sides are capped as limited text evidence, so one shared token cannot be boosted into high risk by moderate visual similarity
 - single-anchor matches with generic/service query matter and different target identity matter are treated as limited text evidence unless the full core is copied
 - weak non-exact dominant-anchor matches, including fuzzy and phonetic anchors, are calibrated by length ratio, edit distance, and anchor coverage; full-length one-edit variants can remain meaningful while fragment-like or weak translated matches are capped as limited text evidence
@@ -192,7 +205,7 @@ Current version: `v2_text_visual`.
 - `name_tr` values that normalize to the original candidate name cannot beat Path A solely because translated IDF flags classify tokens differently
 - final text/visual combining is max-plus, so a strong text or logo match is not diluted when the other signal is missing
 - search and watchlist score cards display original-name text from `path_a_score` and translated-name text from `translation_similarity`; `text_idf_score` remains the selected textual path used by the overall combiner
-- new watchlist similarity alerts persist the full V2 score diagnostics in `alerts_mt.score_details`, so conflict cards can show original-name, translated-name, semantic, and visual components without collapsing translated Path B into the direct text card; existing alert rows remain score snapshots until rescanned
+- new watchlist similarity alerts persist the full V2 score diagnostics in `alerts_mt.score_details`, so conflict cards can show original-name, translated-name, phonetic, and visual components without collapsing translated Path B into the direct text card; existing alert rows remain score snapshots until rescanned
 - watchlist conflict lists, counters, scanner pools, and alert feeds treat a similarity conflict as active only when the conflicting mark is published and its opposition deadline has not passed; older registered, renewed, refused, or withdrawn rows are not shown as active conflicts even if stale deadline data exists
 - the score remains a `0.0-1.0` similarity-risk score; legal factors such as status, class relatedness, seniority, and enforceability are handled outside this scoring slice
 
@@ -269,8 +282,8 @@ See `test.md` for the current test lanes and coverage expectations.
 - `/api/info`: basic service metadata
 - `/api/v1/status`: service status and headline database stats
 - `/api/v1/search/public`: public landing-page search
-- `/api/v1/search/quick`: authenticated quick search
-- `/api/v1/search/intelligent`: authenticated deeper search flow
+- `/api/v1/search`: authenticated quick search
+- `/api/v1/search`: authenticated deeper search flow
 - `/api/v1/tools/status`: AI Studio Name Lab and Logo Studio availability
 
 ## Pipeline Notes
@@ -278,8 +291,12 @@ See `test.md` for the current test lanes and coverage expectations.
 Pipeline and data-collection code lives in:
 - `data_collection.py` (Marka)
 - `data_collection_patent.py` (Patent / Faydalı Model)
+- `data_collection_tasarim.py` (Tasarım)
+- `data_collection_cografi.py` (Coğrafi İşaret ve Geleneksel Ürün Adı)
+- `data_collection_eutm.py` (EU Trade Marks via EUIPO API — see `docs/EUIPO_DATA_NOTES.md`)
 - `zip.py`
 - `pdf_extract.py`
+- `pdf_extract_tasarim.py`, `pdf_extract_tasarim_events.py`, `cd_extract_tasarim.py`, `embeddings_tasarim.py` (Tasarım extractors)
 - `ingest_events.py`
 - `pipeline/`
 
@@ -301,7 +318,7 @@ Pipeline runtime notes:
 - APP ingest records no longer overwrite an existing BLT/GZ status with `Applied` or registration-number fallback status; APP can only overwrite an existing status when its explicit `STATUS` text maps to a recognized non-`Applied` status
 - ingest normalizes placeholder trademark names by removing `sekil`/variant figure markers before writing metadata into the database
 - `python -m workers.pipeline_worker --force-ingest` forces the trademark ingest step to reprocess existing metadata files, which is useful for repairing earlier ingest-state drift without changing collection or extraction inputs
-- the post-ingest `repair` step now also supports batched live TURKPATENT checks: older `Yayında` rows are status-audited from live result `Durumu`, and exact-six class rows are repaired only from `DETAY` `Nice Sınıfları`; progress is stored in `repair_live_trademark_checks`
+- the post-ingest `repair` step now also supports batched live TURKPATENT checks: older `Yayında` rows are status-audited from live result `Durumu`, and exact-six class rows are repaired only from `DETAY` `Nice Sınıfları`; progress is stored in `repair_live_trademark_checks`. Long-running live status repair freezes the newest eligible bulletin-date cutoff at runner startup so each run moves from that boundary toward older records instead of pulling newly eligible days into the front of the queue.
 - pipeline translation for future folders now defaults to the MADLAD backend, so `pipeline/ai.py` writes `name_tr`, `detected_lang`, and translation provenance into `metadata.json` using MADLAD unless `PIPELINE_TRANSLATION_BACKEND` is overridden
 - MADLAD translation runtime tuning is shared between refresh and pipeline paths through `MADLAD_TRANSLATE_BATCH_SIZE` (default `16`), so future folder translation uses the same safer generation microbatch unless explicitly overridden
 - `TRANSLATION_BACKEND=nllb` remains the immediate rollback lever if live query latency or behavior needs to revert without changing the MADLAD-backed corpus
@@ -338,6 +355,254 @@ python data_collection_patent.py --bulletins-root C:\path\to\elsewhere
 A legacy menu fallback path is retained in case TÜRKPATENT reintroduces a dropdown UI for some bulletins (Marka and Tasarım both rely on that path), but it is not exercised by the current Patent flow.
 
 Pure-helper unit tests live in `tests/test_data_collection_patent.py` and cover card-id normalization, recency window, per-track filename construction, completeness check (including the legacy multi-month bundle false-match guard), menu-item CD/PDF classification, the direct-href validator, and CLI argv parsing.
+
+### Coğrafi İşaret ve Geleneksel Ürün Adı pipeline
+
+The cografi pipeline materializes every issue into a single canonical folder, mirroring the tasarım layout so downstream stages have one predictable place to look:
+
+```
+bulletins/Cografi_Isaret_ve_Geleneksel_Urun_Adi/
+├── CI_{card_id}_{YYYY-MM-DD}/
+│   ├── bulletin.pdf                ← PDF source (data_collection_cografi)
+│   └── metadata.json               ← extracted records (pdf_extract_cografi)
+└── {card_id}_bundle.rar            ← legacy multi-bulletin RAR archives
+                                      (cards 1-99 era; expanded by the
+                                      one-shot migration helper)
+```
+
+**Collector — `data_collection_cografi.py`** targets the TÜRKPATENT bulletin page for the **Coğrafi İşaret ve Geleneksel Ürün Adı** (geographical indication / traditional product name) category. Each downloaded card lands directly in `CI_{card_id}_{date}/bulletin.pdf`. Files whose magic bytes are `Rar!` (legacy multi-bulletin bundles served with a `.pdf` content-disposition) are renamed to `{card_id}_bundle.rar` for the migration helper to expand.
+
+```powershell
+python data_collection_cografi.py                     # incremental, headless
+python data_collection_cografi.py --full              # walk full archive
+python data_collection_cografi.py --limit 1           # stop after 1 download
+python data_collection_cografi.py --headless=false    # show browser
+python data_collection_cografi.py --force             # ignore on-disk freshness
+python data_collection_cografi.py --bulletins-root C:\path\to\elsewhere
+```
+
+**UI reality (verified 2026-05-10):** every cografi card on the live UI surfaces a single direct-href `<a>` (`webim.turkpatent.gov.tr/file/{uuid}?name={ID}&download`) pointing at the issue PDF (or, for cards 1-99, a RAR archive). No CD bundle and no İndir dropdown menu. Cards rendered without a usable href are reported as failures (not silently skipped) so a future UI change is loud.
+
+Card IDs are sequential issue numbers (`220, 219, 218 ...`) rather than the patent collector's `YYYY_M` shape; cadence is roughly biweekly. The card-date regex is intentionally wider than the patent collector's (`\d{1,2}` vs `\d{2}` for the day) — the cografi UI emits dates with single-digit days (e.g. `4.05.2026`).
+
+**Migration helper — `scripts/migrate_cografi_layout.py`** is the one-shot conversion from the legacy flat layout (`{N}.pdf` + RAR bundles named `{N1}-{N2}.pdf`) into the subfolder layout. Idempotent.
+
+```powershell
+python scripts/migrate_cografi_layout.py --dry-run     # preview
+python scripts/migrate_cografi_layout.py               # apply
+```
+
+**Extractor — `pdf_extract_cografi.py`** reads each `CI_*/bulletin.pdf` and emits the sibling `metadata.json` containing one record per published application across 8 record types (examined / registered / article 40 modified / article 42 change requests / article 42 finalized / article 43 modified / corrections / gazette-only announcements). Section 2's `Sıralı Liste` is the parsing oracle. As of B2 the extractor also captures **figures** (embedded images written to `figures/{record_slug}/{idx}.ext`, smart-filtered against per-page header logos) and **body_sections** (the four free-text subsections found in every applied/registered record: product_description, production_method, boundary_processing, inspection).
+
+```powershell
+python pdf_extract_cografi.py --pdf path/to/bulletin.pdf
+python pdf_extract_cografi.py --issue 220
+python pdf_extract_cografi.py --all                    # every CI_*/bulletin.pdf
+python pdf_extract_cografi.py --all --force            # overwrite metadata.json
+```
+
+**Full archive supported (B1.5).** Cards 1-220 (KHK 555 + SMK 6769 eras) extract via a label-mapping refactor that handles both legal regimes' field labels and section types. Section dispatch is by **semantic key** classified from the TOC title (so transitional bulletins with both KHK and SMK examined sub-sections get routed correctly), and per-record slicing supports multiple body extents per semantic key. **Empirical: 220/220 bulletins, 3,527 records, ≈99.26% record-level success** — see the extractor's docstring for the residual edge-case categories (mostly source-data omissions).
+
+**Embeddings — `embeddings_cografi.py` (B2+C1).** Reads each `CI_*/metadata.json` and writes embeddings back in place:
+- **Text** (`intfloat/multilingual-e5-large`, 1024-dim, L2-normalised): per-record passage built from name + gi_type + product_group + geographical_boundary + usage_description + body_sections; stored under `record.text_embedding`.
+- **DINOv2 ViT-L/14** (1024-dim) per figure under `figure.embeddings.dinov2_vitl14`; mean-pooled per record into `record.primary_figure_embedding`.
+- **CLIP ViT-B/32** (512-dim, L2-normalised) per figure under `figure.embeddings.clip_vitb32`.
+
+```powershell
+python embeddings_cografi.py                    # all bulletins missing aggregates
+python embeddings_cografi.py --issue 220
+python embeddings_cografi.py --device cuda      # default: auto-detect
+python embeddings_cografi.py --force            # re-embed everything
+```
+
+Vision branch is auto-skipped when no figures exist across the selected metadata.json files (saves ~1.8 GB GPU memory). Idempotent — already-embedded records pass through untouched unless `--force`. Empirical: 5.3 min on an RTX 4070 for the full 220-bulletin set (3,527 text + 5,393 image embeddings + 1,458 primary aggregates).
+
+**DB ingest — `pipeline/ingest_cografi.py` + `migrations/cografi.sql` (Phase D).** Upserts each `CI_*/metadata.json` into four `cografi_*` tables (records, holders, change_requests, figures). Reuses the global `holders` table for applicants/registrants/agents (TPECLIENT IDs are shared across all four registries — locked decision). HNSW indexes on `halfvec(1024)` text + image embeddings; trigram (`gist_trgm_ops`) on `name` and `geographical_boundary` for fuzzy lookup; full natural-key UPSERT for idempotency.
+
+```powershell
+psql ... -f migrations/cografi.sql                  # apply schema
+python -m pipeline.ingest_cografi                   # ingest all CI_*/metadata.json
+python -m pipeline.ingest_cografi --issue 220
+python -m pipeline.ingest_cografi --dry-run         # parse + project + rollback
+```
+
+Empirical: 3.5 min for the full 220-bulletin set on local Postgres 16 + pgvector 0.8.1. End-to-end HNSW similarity verified: querying for `Karapınar Halısı` returns the self-match at distance 0.0, then `Karapınar Tülü Dokuması` (0.075, same region + product family), then `Emirgazi Halısı` (0.097, same region) — semantic ranking working as expected on Turkish text.
+
+**Search API — `services/cografi_search_service.py` + `app_cografi_search_routes.py` (Phase E).** Mirrors the patent / design / marka search route conventions:
+
+| Endpoint | Auth | Purpose |
+|---|---|---|
+| `POST /api/v1/cografi-search` | yes | hybrid text + image, all filters, up to 100 results |
+| `GET\|POST /api/v1/cografi-search/public` | no | text-only, capped at 10 results, region + section_keys filters only |
+| `GET /api/v1/cografi-search/autocomplete?q=` | yes | typeahead over distinct names + regions |
+| `GET /api/v1/cografi/{record_id}` | yes | full hydrated detail (record + holders + change_requests + figures + related siblings) |
+| `GET /api/v1/cografi-image/{path:path}` | — | serve figure thumbnails with 24h cache |
+
+Score modes follow the patent pattern: text-only (text 0.4 + embedding 0.6), text+image hybrid (0.25 / 0.35 / 0.40), image-only (1.0). Exact-ID shortcut: `C{YYYY}/{NNNNNN}` short-circuits to `application_no` lookup; bare integers short-circuit to `registration_no` lookup (also matches the `existing_registration_no` of art42 records that reference that registration). Filter set: `section_keys`, `record_types`, `gi_type`, `region` (trigram on `geographical_boundary`), `bulletin_date` range, `application_no`, `registration_no`, `include_admin` (defaults false; admin records — corrections + gazette-only announcements — are excluded from name searches by default). Watchlist + alerts are deferred to Phase F.
+
+Empirical: app-boot smoke confirms the routes register cleanly; an integration test against the live ingested DB ranks `Karapınar Halısı` first when its name is queried, and the C-style exact-ID lookup short-circuits to direct-row hits.
+
+**Watchlist + alerts — `services/cografi_watchlist_service.py` + `services/cografi_scanner_service.py` + `app_cografi_watchlist_routes.py` + `migrations/cografi_watchlist.sql` (Phase F).** Mirrors the patent + design watchlist conventions but with **four watch types** vs patent's two:
+
+| Watch type | Trigger | Match strategy |
+|---|---|---|
+| `holder` | new GI by a watched applicant | holder_id FK > tpe_client_id > name trigram on `cografi_holders.name` |
+| `reference` | semantic similarity vs a reference cografi record or free-text query | cosine on `text_embedding` (+ optional text trigram hybrid 0.4/0.6) |
+| `region` | new GI in a watched region (NEW for cografi) | trigram on `geographical_boundary` + `region_terms[]` ANY-match |
+| `lifecycle` | art42 / correction targeting a watched registration (NEW for cografi) | exact match on `registration_no` / `existing_registration_no` / `correction_referenced_record_id` |
+
+Endpoints:
+```
+POST   /api/v1/cografi-watchlist                   create
+GET    /api/v1/cografi-watchlist                   list
+GET    /api/v1/cografi-watchlist/{id}              fetch
+PATCH  /api/v1/cografi-watchlist/{id}              update mutable fields
+DELETE /api/v1/cografi-watchlist/{id}              delete (cascades alerts)
+POST   /api/v1/cografi-watchlist/{id}/scan         on-demand scan
+
+GET    /api/v1/cografi-alerts                      list (filters: status, severity, match_type, watchlist_item_id)
+GET    /api/v1/cografi-alerts/export.csv           UTF-8 BOM CSV export (filters: status[], severity[], match_type, min_score, watchlist_item_id; capped at 5000 rows)
+GET    /api/v1/cografi-alerts/{id}                 fetch
+PATCH  /api/v1/cografi-alerts/{id}                 acknowledge / dismiss / resolve / change severity
+DELETE /api/v1/cografi-alerts/{id}                 hard delete
+```
+
+Quota is shared across all four registries (trademarks + designs + patents + cografi via `combined_watchlist_count`). Severity bucketing (critical/high/medium/low) follows the design + patent thresholds; the storage floor is 0.5 (alerts below that aren't persisted). `holder` / `region` / `lifecycle` matches always score 1.0 and bypass the threshold (they're binary).
+
+**Post-ingest hook**: `pipeline/ingest_cografi.py --all` calls `trigger_cografi_watchlist_scan` after a successful run, scoping each scan to the upserted record_ids only (cost is O(watchlist_count × new_ids), not O(watchlist_count × corpus_size)). `--skip-watchlist-scan` opts out for backfills.
+
+**Weekly re-sweep cron**: `workers/scheduler.py` registers `weekly_cografi_watchlist_scan` to run **Wednesday at 02:00 (Europe/London)** — picks up drift from retroactively-added watchlist items that weren't caught by the post-ingest hook. Mirrors the trademark scan's plan-gating: free-tier orgs are skipped, paid orgs are capped per their plan's `auto_scan_max_items`, per-item `alert_frequency` window is honoured (weekly items skipped if scanned within 6 days, daily within 20 hours). Manual one-shot: `python -m workers.scheduler --run-cografi`.
+
+**Parallel patent + design weekly re-sweeps**: same scheduler now also registers `weekly_patent_watchlist_scan` (**Wed 03:00**) and `weekly_design_watchlist_scan` (**Wed 04:00**), both following the same plan-gating + frequency-window + per-org item-cap pattern. Hourly offset across the three registry crons spreads DB load across the night window without overlapping with the existing trademark scan (Mon 00:00) or universal radar (Tue 00:00). Manual one-shots: `python -m workers.scheduler --run-patent` / `--run-design`. `--run-now` now runs all five sweeps (trademark + universal + cografi + patent + design) in sequence.
+
+**Notification delivery — `notifications/service.py` additions (Phase F3).** Mirrors the patent digest pattern:
+
+- `EmailService.send_cografi_digest(...)` — bilingual TR/EN HTML digest. Cografi-specific columns (watch label, name + region + gi_type + bulletin date, per-watch_type Eşleşme summary, score, severity). Critical-count subject prefix.
+- `WebhookService.send_cografi_alert_webhook(...)` — `event: "cografi.alert.new"` JSON payload. Discriminating `watched.watch_type` lets integrators branch cleanly across the 4 watch types (holder / reference / region / lifecycle) without parsing free-text labels.
+- `NotificationWorker.process_cografi_immediate_webhooks()` — every minute, pulls unsent webhook alerts ordered by severity + score, fires one POST per alert via `WebhookService.send_cografi_alert_webhook`, marks `webhook_sent=TRUE` on success. Failures stay unsent so the next run retries.
+- `NotificationWorker.process_cografi_daily_digest()` / `process_cografi_weekly_digest()` — daily 09:10 / weekly Monday 09:10 (5-min stagger after the patent runs to spread SMTP load). Selects unsent email alerts grouped by user; sends one digest per user; marks `email_sent=TRUE` per alert.
+- CLI entries: `python -m notifications.service [cografi-daily-digest | cografi-weekly-digest | cografi-webhooks]` for one-shot manual runs.
+
+```powershell
+# Run the worker (registers all four registries' schedules):
+python -m notifications.service worker
+
+# One-shot manual runs (cron / debugging):
+python -m notifications.service cografi-daily-digest
+python -m notifications.service cografi-weekly-digest
+python -m notifications.service cografi-webhooks
+```
+
+Empirical: 14 new pure-helper tests pass (severity colour mapping, no-alerts short-circuit, bilingual phrasing, watch_type column variation, webhook payload shape across all 4 watch_types). End-to-end smoke against the live empty-inbox DB confirms both CLI commands complete cleanly and report "nothing to send".
+
+**Pipeline orchestrator — `scripts/run_cografi_pipeline.py` (Phase G).** Chains all four stages (collect → extract → embed → ingest) under one entrypoint. Idempotent by default; `--force` forwards to stages 1-3 (ingest is naturally idempotent via UPSERT and has no `--force` flag — the runner emits a one-line note and skips passing it).
+
+```powershell
+python scripts/run_cografi_pipeline.py                  # idempotent end-to-end
+python scripts/run_cografi_pipeline.py --force          # re-run stages 1-3 + re-UPSERT
+python scripts/run_cografi_pipeline.py --stages 2,3,4   # skip the network-heavy collector
+python scripts/run_cografi_pipeline.py --stages 4       # re-ingest only (post-watchlist-change)
+python scripts/run_cografi_pipeline.py --dry-run        # print per-stage commands without running
+python scripts/run_cografi_pipeline.py --stop-on-error  # abort on first failure (default: report and continue)
+```
+
+Per-PDF quality verifier built into the extractor cross-checks Section 2 index counts against the parsed body for every bulletin during `--all`; structural problems are surfaced as `[?]` warnings so a regression is loud.
+
+Pure-helper unit tests live in `tests/test_data_collection_cografi.py` (collector + subfolder layout + RAR detection) and `tests/test_pdf_extract_cografi.py` (extractor helpers + section-key classification + record header parsing + change-request / correction parsers).
+
+### Tasarım (industrial design) pipeline
+
+The Tasarım pipeline materializes every issue into a single canonical folder so downstream stages have one predictable place to look for sources, metadata, and images:
+
+```
+bulletins/Tasarim/TS_{bulletin_no}_{bulletin_date}/
+├── bulletin.pdf                  ← PDF source (data_collection_tasarim)
+├── metadata.json                 ← PDF-extracted (pdf_extract_tasarim)
+├── events.json                   ← PDF events (pdf_extract_tasarim_events)
+├── images/                       ← PDF figures
+│   └── {appno_norm}/
+│       └── {d}_{v}.jpg
+├── cd_metadata.json              ← HSQLDB-CD-extracted (cd_extract_tasarim)
+└── cd_images/                    ← CD-extracted JPEGs
+    └── {appno_norm}/
+        └── {d}_{v}.jpg
+```
+
+Pipeline modules:
+- `data_collection_tasarim.py` — bulletin collector (TÜRKPATENT Tasarım category, PDF only via the legacy menu fallback)
+- `pdf_extract_tasarim.py` — PDF metadata + per-design view image extraction; saves figures to `images/{appno_norm}/{d}_{v}.jpg`
+- `pdf_extract_tasarim_events.py` — events on existing registrations (12 event types: transfer, seizure, renewal, cancellation variants, etc.)
+- `cd_extract_tasarim.py` — HSQLDB CD bundle extractor for legacy issues 230..466. Reads `idbulletin.{script,log,inf}` plus per-application JPEG folders, persists images to `cd_images/{appno_norm}/{d}_{v}.jpg`, emits `cd_metadata.json` with all dossiers, holders, designers, designs, and IDANNOTATION rows. Handles both modern `{N}_CD.rar` and the verbose-named `* cd içeri *.rar` layouts. Hague (`DM/...`) dossiers are emitted with `views: []` (no images on CD)
+- `embeddings_tasarim.py` — DINOv2 + CLIP + HSV per-view embeddings, mean-pooled per design; written back into `metadata.json`
+- `pipeline/reconcile_tasarim.py` — Stage 3 reconciler. Merges per-issue `cd_metadata.json` and `metadata.json` into `merged_metadata.json`. Locked precedence: **CD wins on every overlapping field**, PDF fills gaps. Pairs TR records by `application_no` and Hague by normalised `registration_no`. CD images stay in `cd_images/`; PDF dups at the canonical key are dropped (proactively at extraction time by D.1 + D.2 in pdf_extract_tasarim and cd_extract_tasarim, plus an idempotent `dedupe_images_on_disk` mop-up callable via `--dedupe-images`). Embeddings stay in source `metadata.json`; CD `annotations[]` and PDF `events.json` pass through unchanged
+- `scripts/fix_tasarim_folder_dates.py` — one-shot folder-hygiene script: extracts each `_CD.rar`'s `idbulletin.inf`, finds existing `TS_{N}_*/` folders whose date suffix drifts from the canonical inf DATE (TÜRKPATENT page intermittently reports archive-ingestion dates instead of publication dates), and renames them so subsequent CD output lands in the same folder
+- `pipeline/ingest_designs.py` — DB ingest into `designs`, `design_views`, `design_events` (idempotent)
+
+**Canonical image key**: both `metadata.json` and `cd_metadata.json` use the same string shape for `image_path` — `{appno_norm}/{d}_{v}.jpg`, no leading folder prefix. The folder prefix (`images/` vs `cd_images/`) is provided by the consumer when resolving the key against disk. This lets a future stage-3 reconciler match PDF and CD images by a single string.
+
+CD CLI examples:
+```powershell
+python cd_extract_tasarim.py --rar bulletins/Tasarim/240_CD.rar     # one archive
+python cd_extract_tasarim.py --all                                  # every HSQLDB-shape rar in bulletins/Tasarim/
+python cd_extract_tasarim.py --rar ... --force                      # overwrite an existing cd_metadata.json
+```
+
+PDF CLI:
+```powershell
+python pdf_extract_tasarim.py --issue TS_483_2026-04-24             # single issue
+python pdf_extract_tasarim.py --force                               # re-extract; --force wipes images/ for clean slate
+```
+
+Collector CLI:
+```powershell
+python data_collection_tasarim.py                                   # incremental, headless
+python data_collection_tasarim.py --full                            # walk full archive
+python data_collection_tasarim.py --issue 240                       # targeted single-bulletin recovery (implies --full)
+```
+
+Reconciler CLI:
+```powershell
+python -m pipeline.reconcile_tasarim --issue TS_240_2016-03-09      # one folder
+python -m pipeline.reconcile_tasarim --all                          # every TS_*/ folder
+python -m pipeline.reconcile_tasarim --issue ... --force            # overwrite an existing merged_metadata.json
+python -m pipeline.reconcile_tasarim --all --dedupe-images          # also remove pre-existing PDF image dups
+```
+
+### EU Trade Mark (EUTM) collector
+
+`data_collection_eutm.py` pulls EU trademarks from the **EUIPO Trademark Search API v1.1.0**. Unlike the TÜRKPATENT collectors, there is no PDF/CD bundle; data is fetched via REST JSON, and media (images, sounds, videos, 3D models) is downloaded per record. Field reference and harvest strategy live in `docs/EUIPO_DATA_NOTES.md`.
+
+Output layout (under `bulletins/Marka_EU/`):
+
+```
+bulletins/Marka_EU/
+├── _media/                         (shared media pool, keyed by application_no)
+│   ├── 000274084.jpg
+│   ├── 000274084_thumb.jpg
+│   └── ...
+├── BACKFILL_1996-06/
+│   ├── manifest.json
+│   ├── page_0001.json
+│   └── page_0002.json
+└── DELTA_2026-05-12/
+    └── ...
+```
+
+Required env vars (in `.env`): `EUIPO_API_KEY`, `EUIPO_API_SECRET`, `EUIPO_API_BASE`. Obtain by registering at `dev.euipo.europa.eu` and subscribing to the **Trademark search** product.
+
+```powershell
+python data_collection_eutm.py --backfill                    # full historical corpus, with media
+python data_collection_eutm.py --backfill --since 2020-01-01 # partial backfill from a date
+python data_collection_eutm.py --window 1996-06              # one specific month
+python data_collection_eutm.py --delta 2026-05-12            # one day's updateDate delta
+python data_collection_eutm.py --no-media                    # metadata only (faster)
+python data_collection_eutm.py --media-only                  # fill missing media for existing windows
+python data_collection_eutm.py --window 1996-06 --limit 2    # smoke test
+```
+
+Resumability: each window writes a `manifest.json` with `partial`, `pages_on_disk`, and `expected_pages` fields. Re-runs skip fully-drained windows and continue partial ones from the next missing page. The shared `_media/` pool dedups across windows.
+
+Full-corpus scale (from sandbox, 2026-05-13): ~2.35M EUTMs, ~1.78M API calls for full backfill (metadata + image + thumbnail), ~43 GB disk. Rate-limit period (25,000 req/period, period not exposed in headers) determines wall-clock: ~3 days if hourly, ~71 days if daily — the collector adapts at runtime via `X-RateLimit-Remaining` throttling.
 
 ## Development Rules
 

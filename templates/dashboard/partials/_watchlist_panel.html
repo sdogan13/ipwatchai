@@ -1,5 +1,62 @@
-<!-- Tab: Watchlist -->
-<main id="tab-content-watchlist" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 md:py-8 hidden">
+<!-- Tab: Watchlist (unified — Marka + Tasarım sub-views)
+     Defaults to Marka (trademark) every time the app loads. The
+     localStorage `watchlistView` key is a one-shot semaphore the
+     post-add navigation flow uses to land on the Tasarım sub-view —
+     it's read once and cleared so subsequent reloads return to the
+     trademark default. -->
+<main id="tab-content-watchlist"
+      x-data="{ watchlistView: (function () {
+          try {
+              if (localStorage.getItem('watchlistView') === 'design') {
+                  localStorage.removeItem('watchlistView');
+                  return 'design';
+              }
+          } catch (_) {}
+          return 'trademark';
+      })() }"
+      x-init="if (watchlistView === 'design' && typeof window.initDesignWatchlistTab === 'function') {
+                  window.initDesignWatchlistTab();
+              }"
+      class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 md:py-8 hidden">
+
+    <!-- Sub-view toggle: Marka ↔ Tasarım. Kept above both sub-views; each
+         sub-view owns its own header / controls. Selection persists via
+         localStorage so the user lands on their last-used view. -->
+    <div class="mb-5 inline-flex rounded-xl p-1"
+         style="background:var(--color-bg-muted);border:1px solid var(--color-border)">
+        <button type="button"
+                @click="watchlistView = 'trademark'"
+                class="px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                :class="watchlistView === 'trademark' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
+                :style="watchlistView === 'trademark' ? '' : 'color:var(--color-text-muted)'"
+                x-text="t('watchlist.view_trademark')">Marka</button>
+        <button type="button"
+                @click="watchlistView = 'design';
+                        if (typeof window.initDesignWatchlistTab === 'function') window.initDesignWatchlistTab();"
+                class="px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                :class="watchlistView === 'design' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
+                :style="watchlistView === 'design' ? '' : 'color:var(--color-text-muted)'"
+                x-text="t('watchlist.view_design')">Tasarım</button>
+        <button type="button"
+                @click="watchlistView = 'patent';
+                        if (typeof window.initPatentWatchlistTab === 'function') window.initPatentWatchlistTab();"
+                class="px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                :class="watchlistView === 'patent' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
+                :style="watchlistView === 'patent' ? '' : 'color:var(--color-text-muted)'"
+                x-text="t('watchlist.view_patent')">Patent</button>
+        <button type="button"
+                @click="watchlistView = 'cografi';
+                        if (typeof window.initCografiWatchlistTab === 'function') window.initCografiWatchlistTab();"
+                class="px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                :class="watchlistView === 'cografi' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
+                :style="watchlistView === 'cografi' ? '' : 'color:var(--color-text-muted)'"
+                x-text="t('watchlist.view_cografi')">Coğrafi</button>
+    </div>
+
+    <!-- ============================================
+         TRADEMARK SUB-VIEW
+         ============================================ -->
+    <div x-show="watchlistView === 'trademark'">
 
     <!-- Header -->
     <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-3">
@@ -19,17 +76,15 @@
                     <option value="50">50%</option>
                 </select>
             </div>
-            <button id="btn-scan-all" onclick="scanAllWatchlist()" class="px-3 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5 border" style="color:var(--color-primary);border-color:var(--color-primary);background:transparent" onmouseover="if(!this.disabled){this.style.background='var(--color-primary)';this.style.color='white';}" onmouseout="if(!this.disabled){this.style.background='transparent';this.style.color='var(--color-primary)';}"
+            <button id="btn-scan-all" onclick="scanAllWatchlist()" class="px-3 py-2 text-sm font-medium rounded-lg transition-colors flex items-center border" style="color:var(--color-primary);border-color:var(--color-primary);background:transparent" onmouseover="if(!this.disabled){this.style.background='var(--color-primary)';this.style.color='white';}" onmouseout="if(!this.disabled){this.style.background='transparent';this.style.color='var(--color-primary)';}"
                 title="" :title="t('watchlist.scan_all_title')">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-                <span class="hidden sm:inline" x-text="t('watchlist.scan_all')">Tara</span>
             </button>
 
             <!-- Bulk Upload -->
-            <button onclick="openBulkUploadModal()" class="px-3 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5 border" style="color:var(--color-text-secondary);border-color:var(--color-border)" onmouseover="this.style.borderColor='var(--color-primary)';this.style.color='var(--color-primary)'" onmouseout="this.style.borderColor='var(--color-border)';this.style.color='var(--color-text-secondary)'"
+            <button onclick="openBulkUploadModal()" class="px-3 py-2 text-sm font-medium rounded-lg transition-colors flex items-center border" style="color:var(--color-text-secondary);border-color:var(--color-border)" onmouseover="this.style.borderColor='var(--color-primary)';this.style.color='var(--color-primary)'" onmouseout="this.style.borderColor='var(--color-border)';this.style.color='var(--color-text-secondary)'"
                 title="" :title="t('watchlist.bulk_upload_title')">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
-                <span class="hidden sm:inline" x-text="t('watchlist.bulk_upload')">Yukle</span>
             </button>
 
             <!-- Delete All -->
@@ -153,12 +208,35 @@
             <div id="wl-page-info" class="text-xs text-center mt-2 hidden" style="color:var(--color-text-faint)"></div>
         </div>
     </div>
+
+    </div><!-- /trademark sub-view -->
+
+    <!-- ============================================
+         DESIGN (TASARIM) SUB-VIEW
+         ============================================ -->
+    <div x-show="watchlistView === 'design'" x-cloak>
+        {% include 'dashboard/partials/_watchlist_design_subview.html' %}
+    </div>
+
+    <!-- ============================================
+         PATENT SUB-VIEW
+         ============================================ -->
+    <div x-show="watchlistView === 'patent'" x-cloak>
+        {% include 'dashboard/partials/_watchlist_patent_subview.html' %}
+    </div>
+
+    <!-- ============================================
+         COĞRAFI İŞARET (GI) SUB-VIEW
+         ============================================ -->
+    <div x-show="watchlistView === 'cografi'" x-cloak>
+        {% include 'dashboard/partials/_watchlist_cografi_subview.html' %}
+    </div>
 </main>
 
 <!-- ============================================ -->
 <!-- WATCHLIST EDIT MODAL                         -->
 <!-- ============================================ -->
-<div id="watchlist-edit-modal" class="hidden fixed inset-0 flex items-center justify-center p-4" style="background:var(--color-bg-overlay);z-index:var(--z-modal)" onclick="if(event.target===this)closeEditWatchlistModal()">
+<div id="watchlist-edit-modal" class="hidden fixed inset-0 flex items-center justify-center p-4 modal-mobile-fullscreen" style="background:var(--color-bg-overlay);z-index:var(--z-modal)" onclick="if(event.target===this)closeEditWatchlistModal()">
     <div class="rounded-xl shadow-xl max-w-md w-full overflow-hidden" style="background:var(--color-bg-card);border:1px solid var(--color-border)" onclick="event.stopPropagation()">
         <div class="px-6 py-4 flex items-center justify-between" style="border-bottom:1px solid var(--color-border)">
             <h3 class="text-lg font-semibold" style="color:var(--color-text-primary)" x-text="t('watchlist.edit_title')">Duzenle</h3>
@@ -223,7 +301,7 @@
 <!-- ============================================ -->
 <!-- WATCHLIST BULK UPLOAD MODAL                  -->
 <!-- ============================================ -->
-<div id="watchlist-upload-modal" class="hidden fixed inset-0 flex items-center justify-center p-4" style="background:var(--color-bg-overlay);z-index:var(--z-modal)" onclick="if(event.target===this)closeBulkUploadModal()">
+<div id="watchlist-upload-modal" class="hidden fixed inset-0 flex items-center justify-center p-4 modal-mobile-fullscreen" style="background:var(--color-bg-overlay);z-index:var(--z-modal)" onclick="if(event.target===this)closeBulkUploadModal()">
     <div id="watchlist-upload-modal-card" class="rounded-xl shadow-xl max-w-lg w-full overflow-hidden" style="background:var(--color-bg-card);border:1px solid var(--color-border)" onclick="event.stopPropagation()">
         <div class="px-6 py-4 flex items-center justify-between" style="border-bottom:1px solid var(--color-border)">
             <h3 class="text-lg font-semibold" style="color:var(--color-text-primary)" x-text="t('watchlist.bulk_upload_title')">Toplu Yukle</h3>

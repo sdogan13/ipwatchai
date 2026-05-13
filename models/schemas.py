@@ -1016,11 +1016,17 @@ class EducationModerationItem(BaseModel):
 class NameSuggestionRequest(BaseModel):
     """Request for AI-powered name suggestions"""
     query: str = Field(..., min_length=1, max_length=200, description="Original brand name or concept")
-    nice_classes: List[int] = Field(default=[], description="Nice classes to check against")
-    industry: str = Field(default="", max_length=200, description="Industry description for context")
-    style: Literal["modern", "classic", "playful", "technical"] = Field(default="modern", description="Naming style")
-    language: Literal["tr", "en"] = Field(default="tr", description="Primary language preference")
+    nice_classes: List[int] = Field(..., min_length=1, description="Nice classes to check against")
+    industry: str = Field(..., min_length=1, max_length=200, description="Industry description for context")
+    style: Literal["modern", "classic", "playful", "technical"] = Field(..., description="Naming style")
+    language: Literal["mixed", "tr", "en", "de", "it", "fr", "ar", "ku", "fa", "zh", "ru"] = Field(..., description="Name suggestion language preference")
     avoid_names: List[str] = Field(default=[], description="Names to explicitly avoid")
+
+    @validator("query", "industry")
+    def validate_required_text(cls, v):
+        if not str(v or "").strip():
+            raise ValueError("Field is required")
+        return str(v).strip()
 
     @validator("nice_classes", each_item=True)
     def validate_nice_classes(cls, v):
@@ -1155,11 +1161,24 @@ class GenerationHistoryResponse(BaseModel):
 # ==========================================
 
 class TrademarkApplicationCreate(BaseModel):
-    """Create a new trademark application"""
+    """Create a new application (polymorphic across registries).
+
+    Field name retained for backwards compatibility; covers trademark,
+    design, patent, and cografi applications via registry_kind.
+    `brand_name` is the generic primary display title (brand name for
+    TM, design title for design, invention title for patent, GI name
+    for cografi). `classification_codes` is the multi-registry
+    classification list (NICE for TM, Locarno for design, IPC for
+    patent, empty for cografi). `details` is a registry-specific
+    extras JSON blob.
+    """
+    registry_kind: str = Field(default="trademark", pattern=r'^(trademark|design|patent|cografi)$')
     application_type: ApplicationType = ApplicationType.REGISTRATION
     brand_name: str = Field(..., min_length=1, max_length=500)
     mark_type: MarkType = MarkType.WORD
     nice_class_numbers: List[int] = Field(default=[])
+    classification_codes: List[str] = Field(default=[])
+    details: Dict[str, Any] = Field(default_factory=dict)
     goods_services_description: Optional[str] = None
 
     # Applicant info (optional at draft stage)
@@ -1193,11 +1212,17 @@ class TrademarkApplicationCreate(BaseModel):
 
 
 class TrademarkApplicationUpdate(BaseModel):
-    """Update a draft application"""
+    """Update a draft application (polymorphic).
+
+    `registry_kind` is immutable after creation, so it's deliberately
+    omitted from Update.
+    """
     application_type: Optional[ApplicationType] = None
     brand_name: Optional[str] = None
     mark_type: Optional[MarkType] = None
     nice_class_numbers: Optional[List[int]] = None
+    classification_codes: Optional[List[str]] = None
+    details: Optional[Dict[str, Any]] = None
     goods_services_description: Optional[str] = None
 
     applicant_full_name: Optional[str] = None
@@ -1220,15 +1245,18 @@ class TrademarkApplicationUpdate(BaseModel):
 
 
 class TrademarkApplicationResponse(BaseModel):
-    """Response model for a trademark application"""
+    """Response model for an application (polymorphic across registries)."""
     id: UUID
     organization_id: UUID
     user_id: UUID
     status: ApplicationStatus
+    registry_kind: str = "trademark"
     application_type: ApplicationType = ApplicationType.REGISTRATION
-    brand_name: str
+    brand_name: Optional[str] = None
     mark_type: MarkType
     nice_class_numbers: List[int]
+    classification_codes: List[str] = Field(default=[])
+    details: Dict[str, Any] = Field(default_factory=dict)
     goods_services_description: Optional[str] = None
 
     applicant_full_name: Optional[str] = None

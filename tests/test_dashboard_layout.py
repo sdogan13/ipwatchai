@@ -69,7 +69,7 @@ class TestNavbar:
     def test_all_five_tab_buttons_exist(self):
         assert 'id="tab-btn-overview"' in self.html
         assert 'id="tab-btn-search"' in self.html
-        assert 'id="tab-btn-opposition-radar"' in self.html
+        assert 'id="tab-btn-radar"' in self.html
         assert 'id="tab-btn-ai-studio"' in self.html
         assert 'id="tab-btn-reports"' in self.html
 
@@ -93,13 +93,13 @@ class TestNavbar:
     def test_tab_buttons_call_showDashboardTab(self):
         assert "showDashboardTab('overview')" in self.html
         assert "showDashboardTab('search')" in self.html
-        assert "showDashboardTab('opposition-radar')" in self.html
+        assert "showDashboardTab('radar')" in self.html
         assert "showDashboardTab('ai-studio')" in self.html
         assert "showDashboardTab('reports')" in self.html
 
-    def test_pro_badge_on_opposition_radar(self):
-        # Find the opposition-radar tab area and verify PRO badge
-        idx = self.html.index('id="tab-btn-opposition-radar"')
+    def test_pro_badge_on_radar(self):
+        # Find the radar tab area and verify PRO badge
+        idx = self.html.index('id="tab-btn-radar"')
         chunk = self.html[idx:idx + 700]
         assert "from-amber-500 to-orange-500" in chunk
         assert "tabs.pro" in chunk
@@ -122,7 +122,7 @@ class TestNavbar:
         assert "showDashboardTab('search'); closeMobileDrawer();" in self.html
 
     def test_mobile_drawer_has_all_tabs(self):
-        for tab in ['overview', 'search', 'opposition-radar', 'ai-studio', 'reports']:
+        for tab in ['overview', 'search', 'radar', 'ai-studio', 'reports']:
             assert f"showDashboardTab('{tab}'); closeMobileDrawer();" in self.html
 
     # ─── Mobile Bottom Bar ──────────────────────────────
@@ -152,7 +152,7 @@ class TestNavbar:
         """updateBottomTabActive should map all 5 tabs."""
         assert "'overview': 'bottom-tab-overview'" in self.html
         assert "'search': 'bottom-tab-search'" in self.html
-        assert "'opposition-radar': 'bottom-tab-radar'" in self.html
+        assert "'radar': 'bottom-tab-radar'" in self.html
         assert "'ai-studio': 'bottom-tab-ai-studio'" in self.html
         assert "'reports': 'bottom-tab-reports'" in self.html
 
@@ -242,8 +242,8 @@ class TestOtherPanels:
 
     def test_leads_panel_hidden(self):
         html = (PARTIALS / "_leads_panel.html").read_text(encoding="utf-8")
-        assert 'id="tab-content-opposition-radar"' in html
-        idx = html.index('id="tab-content-opposition-radar"')
+        assert 'id="tab-content-radar"' in html
+        idx = html.index('id="tab-content-radar"')
         tag_start = html.rfind("<div", 0, idx)
         tag_chunk = html[tag_start:idx + 60]
         assert "hidden" in tag_chunk
@@ -302,7 +302,7 @@ class TestAppJS:
         """All 5 panel IDs should be in the hide list."""
         assert "'overview'" in self.js
         assert "'search'" in self.js
-        assert "'opposition-radar'" in self.js
+        assert "'radar'" in self.js
         assert "'ai-studio'" in self.js
         assert "'reports'" in self.js
 
@@ -330,6 +330,8 @@ class TestAppJS:
         assert "loadStudioUsageSummary()" in self.js
         assert "loadStudioHistory()" in self.js
         assert "applyStudioAvailability" in self.js
+        assert "getStudioRunCost" in self.js
+        assert "fallback = mode === 'logo' ? 5 : 2" in self.js
         assert "toggleStudioClassPicker" in self.js
         assert "setStudioHistoryFilter" in self.js
         assert "selectStudioColorPalette" in self.js
@@ -434,6 +436,20 @@ class TestLocaleFiles:
             "classes_selected",
             "edit_classes",
             "done_classes",
+            "nice_class_required",
+            "complete_required_fields",
+            "name_language",
+            "name_language_mixed",
+            "name_language_tr",
+            "name_language_en",
+            "name_language_de",
+            "name_language_it",
+            "name_language_fr",
+            "name_language_ar",
+            "name_language_ku",
+            "name_language_fa",
+            "name_language_zh",
+            "name_language_ru",
             "palette_label",
             "palette_blue",
             "palette_green",
@@ -491,6 +507,74 @@ class TestLocaleFiles:
             assert "risk_source_deterministic" not in source
         assert "ai_risk_score" in dashboard_app
         assert "ai_risk_score_short" in studio_card
+
+    def test_name_cards_do_not_render_retrieval_scores(self):
+        studio_card = (STATIC / "js" / "components" / "studio-card.js").read_text(encoding="utf-8")
+        name_card_source = studio_card.split("// ============================================\n// B) Logo result card")[0]
+
+        assert "renderSimilarityBadges(name)" not in name_card_source
+        assert "name.text_similarity" not in name_card_source
+        assert "name.semantic_similarity" not in name_card_source
+        assert "name.phonetic_match" not in name_card_source
+        assert "similarity_pct" not in name_card_source
+
+    def test_name_generation_language_is_user_selectable(self):
+        html = (PARTIALS / "_ai_studio_panel.html").read_text(encoding="utf-8")
+        dashboard_app = (STATIC / "js" / "dashboard" / "app.js").read_text(encoding="utf-8")
+        generate_names_source = dashboard_app.split("async function generateNames()")[1].split("function renderStudioNameResults")[0]
+
+        assert 'id="studio-name-language"' in html
+        assert '<option value="mixed"' in html
+        for language in ("tr", "en", "de", "it", "fr", "ar", "ku", "fa", "zh", "ru"):
+            assert f'<option value="{language}"' in html
+        assert "document.getElementById('studio-name-language')" in generate_names_source
+        assert "language: language" in generate_names_source
+        assert "language: 'tr'" not in generate_names_source
+
+    def test_name_lab_generate_button_is_clickable_and_validates_missing_fields(self):
+        html = (PARTIALS / "_ai_studio_panel.html").read_text(encoding="utf-8")
+        dashboard_app = (STATIC / "js" / "dashboard" / "app.js").read_text(encoding="utf-8")
+        generate_names_source = dashboard_app.split("async function generateNames()")[1].split("function renderStudioNameResults")[0]
+        button_chunk = html[html.index('id="studio-name-btn"'):html.index('id="studio-name-btn"') + 300]
+
+        assert 'disabled' not in button_chunk
+        assert 'cursor-not-allowed' not in button_chunk
+        assert "t('studio.nice_class_required')" in html
+        assert "t('studio.complete_required_fields')" in html
+        assert 'id="studio-name-query" type="text"' in html
+        assert 'id="studio-name-industry" type="text"' in html
+        assert 'id="studio-name-language" class="studio-input" required' in html
+        assert 'id="studio-name-style" class="studio-input" required' in html
+        assert "function getStudioNameRequiredMissingFields()" in dashboard_app
+        assert "function updateStudioNameButtonState()" in dashboard_app
+        assert "getStudioNiceClasses('studio-name-classes').length" in dashboard_app
+        assert "var disabled = studioNameLoading || !available;" in dashboard_app
+        assert "|| !formComplete" not in dashboard_app
+        assert "showToast(t('studio.complete_required_fields'), 'error')" in generate_names_source
+
+    def test_dashboard_assets_bust_name_lab_validation_cache(self):
+        html = DASHBOARD_TEMPLATE.read_text(encoding="utf-8")
+
+        assert "/static/js/dashboard/app.js?v=100" in html
+        assert "/static/js/utils/i18n.js?v=63" in html
+
+    def test_studio_loading_status_uses_animated_dots(self):
+        import json
+
+        html = (PARTIALS / "_ai_studio_panel.html").read_text(encoding="utf-8")
+        css = (STATIC / "css" / "tokens.css").read_text(encoding="utf-8")
+
+        assert html.count("studio-loading-dots") == 2
+        assert "t('studio.name_loading')" in html
+        assert "t('studio.logo_loading')" in html
+        assert "AI is generating safe name alternatives..." not in html
+        assert "AI is generating logo variations..." not in html
+        assert "@keyframes studio-loading-dot" in css
+
+        for locale in ("en", "tr", "ar"):
+            data = json.loads((STATIC / "locales" / f"{locale}.json").read_text(encoding="utf-8"))
+            assert not data["studio"]["name_loading"].endswith("...")
+            assert not data["studio"]["logo_loading"].endswith("...")
 
     def test_i18n_asset_versions_bust_ai_studio_locale_cache(self):
         import re
@@ -650,7 +734,7 @@ class TestTabContentIDs:
         mapping = {
             "_search_panel.html": "tab-content-search",
             "_results_panel.html": "tab-content-overview",
-            "_leads_panel.html": "tab-content-opposition-radar",
+            "_leads_panel.html": "tab-content-radar",
             "_ai_studio_panel.html": "tab-content-ai-studio",
             "_reports_panel.html": "tab-content-reports",
         }
@@ -665,7 +749,7 @@ class TestTabContentIDs:
         mapping = {
             "_search_panel.html": "tab-content-search",
             "_results_panel.html": "tab-content-overview",
-            "_leads_panel.html": "tab-content-opposition-radar",
+            "_leads_panel.html": "tab-content-radar",
             "_ai_studio_panel.html": "tab-content-ai-studio",
             "_reports_panel.html": "tab-content-reports",
         }
@@ -698,7 +782,7 @@ class TestTabContentIDs:
             f"Expected only overview visible, got: {visible_tabs}"
         assert set(hidden_tabs) == {
             "tab-content-search",
-            "tab-content-opposition-radar",
+            "tab-content-radar",
             "tab-content-ai-studio",
             "tab-content-reports",
         }

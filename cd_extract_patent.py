@@ -454,11 +454,28 @@ def extract_cd_archive(
             f"{(result.stderr or result.stdout).strip()[:500]}"
         )
 
-    # Identify the extracted CD root. A patent CD has exactly one
-    # top-level folder containing data/, autorun.inf, etc.
+    return _resolve_cd_root(scratch, rar.name)
+
+
+def _resolve_cd_root(scratch: Path, source_label: str = "<unknown>") -> Path:
+    """Locate the CD root folder inside an extracted scratch dir.
+
+    Modern CDs (2017+) wrap their contents in a single top-level folder
+    named after the bulletin month (e.g. ``scratch/2025_8/data/...``).
+    Some older CDs (verified on 2015_12_CD.rar, 2016_1_CD.rar) flatten
+    the archive — ``data/`` lands directly under ``scratch`` with no
+    wrapper. Check for the no-wrapper case first so callers' subsequent
+    ``cd_root / "data"`` joins don't double up.
+
+    Used by ``extract_cd_archive`` (post-7-Zip) and by ``_process_one``
+    (post-extraction, to copy raw HSQLDB files into the parent folder).
+    """
+    if (scratch / "data" / "ptbulletin.log").is_file():
+        return scratch
+
     candidates = [p for p in scratch.iterdir() if p.is_dir()]
     if not candidates:
-        raise RuntimeError(f"no folders found in {scratch} after extracting {rar.name}")
+        raise RuntimeError(f"no folders found in {scratch} after extracting {source_label}")
 
     if len(candidates) == 1:
         return candidates[0]
@@ -685,19 +702,20 @@ class CLIArgs:
     scratch_dir: Path
     seven_zip: Optional[Path]
     keep_scratch: bool
+    force: bool = False
 
 
-def metadata_filename(rar_path: Path) -> str:
-    """Return the canonical metadata.json name for a CD .rar.
-
-    e.g. ``2025_12_CD.rar`` -> ``2025_12_metadata.json``. Drops the
-    ``_CD`` suffix so the metadata lines up alphabetically next to its
-    sibling PDF (``2025_12.pdf``).
-    """
-    stem = rar_path.stem
-    if stem.endswith("_CD"):
-        stem = stem[:-3]
-    return f"{stem}_metadata.json"
+# Each bulletin's CD-side artifacts live in a parent folder named for
+# the bulletin (PT_{YYYY}_{M}_{date}/) — see patent_paths.bulletin_folder_name.
+# These are the canonical filenames inside that folder.
+CD_METADATA_FILENAME = "cd_metadata.json"
+RAW_HSQLDB_FILES = ("ptbulletin.log", "ptbulletin.script", "ptbulletin.properties")
+# CD-side TIFFs land in the same ``figures/`` directory as PDF-side
+# JPEGs/PNGs so reconcile/merge can dedup on a shared {year}_{appno}
+# prefix (CD: figures/2017_15048.tif, PDF: figures/2017_15048_p120_2.png).
+# Filename is flat year-underscore-appno — matches the PDF naming shape
+# minus the page/idx tail.
+from patent_paths import FIGURES_DIRNAME as CD_FIGURES_DIRNAME  # noqa: E402
 
 
 def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
@@ -750,6 +768,12 @@ def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
         action="store_true",
         help="Don't delete the per-CD scratch folder after extraction.",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-extract every CD even when the cd_metadata.json on disk "
+             "is at least as recent as the source .rar.",
+    )
     ns = parser.parse_args(argv)
 
     if ns.all and ns.rar:
@@ -772,6 +796,7 @@ def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
         scratch_dir=ns.scratch_dir,
         seven_zip=ns.seven_zip,
         keep_scratch=ns.keep_scratch,
+        force=ns.force,
     )
 
 
@@ -782,7 +807,16 @@ def _process_one(
     seven_zip: Optional[Path],
     keep_scratch: bool,
 ) -> Dict[str, Any]:
-    """Run cd_to_metadata for a single archive and write its JSON sidecar."""
+    """Extract one CD archive into its bulletin parent folder.
+
+    Writes ``out_dir/PT_{Y}_{M}_{date}/cd_metadata.json`` and copies the
+    raw HSQLDB files (``ptbulletin.log``, ``.script``, ``.properties``)
+    into the same folder. The parent folder is created if it doesn't
+    yet exist; if a sibling stage (PDF extract, reconcile) already
+    created it, the CD outputs land alongside.
+    """
+    from patent_paths import bulletin_folder_path  # local import; avoids cycles
+
     cd_scratch = scratch_dir / rar.stem
     if cd_scratch.exists():
         shutil.rmtree(cd_scratch, ignore_errors=True)
@@ -790,25 +824,167 @@ def _process_one(
 
     try:
         doc = cd_to_metadata(rar, cd_scratch, seven_zip=seven_zip)
+        # Find cd_root again so we can copy raw files. cd_to_metadata
+        # already extracted into cd_scratch; _resolve_cd_root reuses
+        # extract_cd_archive's layout-detection logic.
+        cd_root = _resolve_cd_root(cd_scratch, source_label=rar.name)
+
+        parent = bulletin_folder_path(out_dir, doc["bulletin_no"], doc["bulletin_date"])
+        parent.mkdir(parents=True, exist_ok=True)
+
+        # Carry CD TIFFs into parent/figures/, rewrite image_paths,
+        # and drop any PDF PNGs in the same dir that duplicate them
+        # (CD-first dedup — visually verified the title-page TIFF and
+        # PDF first figure are the same drawing on app 2023/018085).
+        carry = _carry_cd_images(doc, cd_root, parent)
+
+        # Track the source RAR's filename + mtime in cd_metadata.json so
+        # the --all loop can skip-if-fresh on re-runs without doing a
+        # full HSQLDB extract just to learn the bulletin_no.
+        try:
+            doc["source_filename"] = rar.name
+            doc["source_mtime"] = rar.stat().st_mtime
+        except OSError:
+            pass
+
+        (parent / CD_METADATA_FILENAME).write_text(
+            json.dumps(doc, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        for fname in RAW_HSQLDB_FILES:
+            src = cd_root / "data" / fname
+            if src.is_file():
+                shutil.copy2(src, parent / fname)
     except Exception:
         if not keep_scratch:
             shutil.rmtree(cd_scratch, ignore_errors=True)
         raise
-
-    out_path = out_dir / metadata_filename(rar)
-    out_path.write_text(
-        json.dumps(doc, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
 
     if not keep_scratch:
         shutil.rmtree(cd_scratch, ignore_errors=True)
 
     return {
         "rar": rar.name,
-        "out": out_path.name,
+        "out": parent.name,
         "stats": doc["stats"],
+        "figures_carried": carry["moved"],
+        "pdf_dups_dropped": carry["pdf_dups_dropped"],
     }
+
+
+def _carry_cd_images(
+    doc: Dict[str, Any],
+    cd_root: Path,
+    parent: Path,
+) -> Dict[str, int]:
+    """Move CD TIFFs from the scratch dir into ``parent/figures/`` and
+    drop any PDF PNGs that duplicate them.
+
+    cd_to_metadata sets ``image_path`` to the path relative to cd_root
+    (e.g. ``"data/images/2017/15048.tif"``). After this function runs,
+    each present TIFF lives at ``parent/figures/{year}_{appno}.tif``
+    and ``image_path`` is rewritten to ``"figures/{year}_{appno}.tif"``.
+
+    The flat ``{year}_{appno}.tif`` filename mirrors the PDF-side
+    convention (``figures/{year}_{appno}_p{page}_{idx}.png``) so a CD
+    TIFF for an application can be matched against PDF PNGs sharing
+    the ``{year}_{appno}`` prefix.
+
+    **CD-wins dedup** — for every TIFF carried, any pre-existing PDF
+    PNG in the same folder whose name starts with ``{year}_{appno}_p``
+    is deleted (they're known duplicates of the same drawing per
+    visual verification on app 2023/018085, 2026-05-09). If a sibling
+    pdf_metadata.json exists in the parent folder, the corresponding
+    figure entries' ``image_path`` values are nulled so they don't
+    point at deleted files.
+
+    Patents with a missing-on-disk source TIFF keep their image_path
+    nulled — better to surface the gap than leave a dead path.
+
+    Returns ``{"moved": int, "pdf_dups_dropped": int}``.
+    """
+    figures_root = parent / CD_FIGURES_DIRNAME
+    moved = 0
+    dropped_pngs: List[str] = []   # the basenames deleted
+
+    for patent in doc.get("patents", []):
+        rel = patent.get("image_path")
+        if not rel:
+            continue
+        rel_path = Path(rel)
+        try:
+            inside = rel_path.relative_to("data/images")
+        except ValueError:
+            patent["image_path"] = None
+            continue
+
+        src = cd_root / rel_path
+        if not src.is_file():
+            patent["image_path"] = None
+            continue
+
+        new_name = "_".join(inside.parts)            # "{year}_{appno}.tif"
+        dest = figures_root / new_name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dest))
+        patent["image_path"] = (Path(CD_FIGURES_DIRNAME) / new_name).as_posix()
+        moved += 1
+
+        # Drop PDF PNG duplicates: figures/{year}_{appno}_p*.png
+        prefix = Path(new_name).stem + "_p"
+        for png in figures_root.glob(f"{prefix}*.png"):
+            png.unlink()
+            dropped_pngs.append(png.name)
+
+    # Update sibling pdf_metadata.json so its figure entries don't
+    # reference deleted PNGs. We null only the image_path fields whose
+    # value matches a path we just deleted; the rest of the figure
+    # metadata (page, xref, bbox, dims) stays intact.
+    pdf_meta = parent / "pdf_metadata.json"
+    if dropped_pngs and pdf_meta.is_file():
+        dropped_paths = {f"{CD_FIGURES_DIRNAME}/{name}" for name in dropped_pngs}
+        pdf_doc = json.loads(pdf_meta.read_text(encoding="utf-8"))
+        changed = False
+        for record in pdf_doc.get("records", []):
+            for fig in record.get("figures", []):
+                if fig.get("image_path") in dropped_paths:
+                    fig["image_path"] = None
+                    changed = True
+        if changed:
+            pdf_meta.write_text(
+                json.dumps(pdf_doc, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+    return {"moved": moved, "pdf_dups_dropped": len(dropped_pngs)}
+
+
+def _build_freshness_index(out_dir: Path) -> Dict[str, float]:
+    """Walk every existing ``PT_*/cd_metadata.json`` and build a map of
+    ``source_filename → source_mtime``. Used by the --all loop to skip
+    a CD whose .rar mtime is no newer than the recorded mtime; lets us
+    avoid a full HSQLDB re-extract just to learn the bulletin_no.
+    """
+    index: Dict[str, float] = {}
+    if not out_dir.is_dir():
+        return index
+    for fp in out_dir.glob("PT_*/cd_metadata.json"):
+        try:
+            doc = json.loads(fp.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        src = doc.get("source_filename")
+        mt = doc.get("source_mtime")
+        if not src or mt is None:
+            continue
+        # Multiple .rars may map to the same bulletin (duplicate
+        # downloads with different filenames — saw 14 such pairs in
+        # the user's archive). Keep whichever record is most recent.
+        prev = index.get(src)
+        if prev is None or mt > prev:
+            index[src] = float(mt)
+    return index
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -818,7 +994,10 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     started = time.time()
     succeeded: List[str] = []
+    skipped: List[str] = []
     failed: List[tuple[str, str]] = []
+
+    fresh_index = {} if args.force else _build_freshness_index(args.out_dir)
 
     for rar in args.rar_paths:
         if not rar.is_file():
@@ -826,7 +1005,25 @@ def main(argv: Optional[List[str]] = None) -> int:
             failed.append((rar.name, "not found"))
             continue
 
-        logger.info("[*] %s -> %s", rar.name, metadata_filename(rar))
+        if not args.force:
+            recorded_mtime = fresh_index.get(rar.name)
+            try:
+                rar_mtime = rar.stat().st_mtime
+            except OSError:
+                rar_mtime = None
+            if (
+                recorded_mtime is not None
+                and rar_mtime is not None
+                and recorded_mtime >= rar_mtime
+            ):
+                skipped.append(rar.name)
+                logger.info(
+                    "[=] %s is fresh, skipping (use --force to override)",
+                    rar.name,
+                )
+                continue
+
+        logger.info("[*] %s -> PT_<bulletin>/%s", rar.name, CD_METADATA_FILENAME)
         try:
             result = _process_one(
                 rar, args.out_dir, args.scratch_dir,
@@ -844,8 +1041,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     duration = time.time() - started
     logger.info(
-        "Done in %.1fs: %d succeeded, %d failed",
-        duration, len(succeeded), len(failed),
+        "Done in %.1fs: %d succeeded, %d skipped, %d failed",
+        duration, len(succeeded), len(skipped), len(failed),
     )
     return 0 if not failed else 1
 

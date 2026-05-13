@@ -2,12 +2,18 @@
 
 import logging
 import re
-from typing import List
+from typing import List, Optional
 
-from fastapi import Form
+from fastapi import Depends, Form, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from auth.authentication import CurrentUser, get_current_user_optional
 from config.settings import settings
+from utils.anon_quota import (
+    ANON_CLASS_SUGGEST_DAILY_LIMIT,
+    _client_ip_from_request,
+    check_and_consume_anon_class_suggest,
+)
 from utils.class_utils import GLOBAL_CLASS
 
 
@@ -30,6 +36,7 @@ class SuggestedClass(BaseModel):
     class_name: str
     similarity: float
     description: str
+    reason: Optional[str] = None
 
 
 class ClassSuggestionResponse(BaseModel):
@@ -239,34 +246,121 @@ async def get_nice_classes(lang: str = "tr"):
     }
 
 
-async def suggest_nice_classes(request: ClassSuggestionRequest):
-    """
-    Suggest relevant Nice classes based on goods/services description.
+async def suggest_nice_classes(
+    request: Request,
+    payload_in: ClassSuggestionRequest,
+    current_user: Optional[CurrentUser] = Depends(get_current_user_optional),
+):
+    """Suggest Nice classes from a goods/services description.
 
-    Uses the configured LLM class-suggestion provider chain against the
-    canonical Nice class catalogue.
+    Access policy:
+      * Anonymous: ``ANON_CLASS_SUGGEST_DAILY_LIMIT`` calls per IP per day,
+        then 401. Lets prospects taste the feature once a day.
+      * Authenticated: requires AI credits. Free plan has zero credits ⇒ 402
+        ``credits_exhausted`` ⇒ frontend prompts upgrade. Paid plans deduct
+        1 credit from the shared ``monthly_ai_credits`` pool per call.
     """
     from services.nice_class_service import run_nice_class_suggestion
 
+    org_id: Optional[str] = None
+    if current_user is None:
+        ip = _client_ip_from_request(request)
+        allowed, remaining = check_and_consume_anon_class_suggest(ip)
+        if not allowed:
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "error": "anon_limit_reached",
+                    "upgrade_context": "class_suggestions",
+                    "anon_daily_limit": ANON_CLASS_SUGGEST_DAILY_LIMIT,
+                    "message": (
+                        "Ücretsiz deneme hakkınız bugün için doldu. "
+                        "Devam etmek için giriş yapın veya bir plana abone olun."
+                    ),
+                    "message_en": (
+                        f"Anonymous daily limit ({ANON_CLASS_SUGGEST_DAILY_LIMIT}) "
+                        "reached. Sign in or subscribe to a plan to continue."
+                    ),
+                },
+            )
+    else:
+        # Authenticated path: gate on the AI-credits pool (shared with Name Lab).
+        # Superadmins bypass the gate, mirroring Tasarım/Locarno.
+        from database.crud import Database
+        from services.creative_service import _is_superadmin_user
+        from utils.subscription import check_ai_credit_eligibility
+
+        is_superadmin = _is_superadmin_user(current_user)
+        org_id = str(getattr(current_user, "organization_id", "") or "")
+        if not is_superadmin:
+            if not org_id:
+                raise HTTPException(status_code=403, detail={
+                    "error": "no_organization",
+                    "message": "Hesabınız bir organizasyona bağlı değil.",
+                    "message_en": "Account is not linked to an organization.",
+                })
+            with Database() as db:
+                can_use, reason, details = check_ai_credit_eligibility(db, org_id, cost=1)
+            if not can_use:
+                status_code = 403 if reason == "upgrade_required" else 402
+                # Tailor the upgrade modal to class suggestion specifically
+                # rather than the generic AI-credits framing.
+                if isinstance(details, dict):
+                    details["upgrade_context"] = "class_suggestions"
+                raise HTTPException(status_code=status_code, detail=details)
+        else:
+            # Skip deduction for superadmin
+            org_id = ""
+
     payload = await run_nice_class_suggestion(
-        description=request.description,
-        top_k=request.top_k,
-        lang=request.lang,
+        description=payload_in.description,
+        top_k=payload_in.top_k,
+        lang=payload_in.lang,
         settings=settings,
         logger=MODULE_LOGGER,
         class_name_getter=get_class_name,
     )
+
+    # Deduct AFTER a successful retrieval so failed LLM calls don't burn
+    # credits. Anonymous path doesn't deduct from any pool.
+    if current_user is not None and org_id:
+        from database.crud import Database
+        from utils.subscription import deduct_name_credit
+        with Database() as db:
+            deduct_name_credit(db, org_id)
+
     return ClassSuggestionResponse(**payload)
 
 
-def register_nice_class_routes(app):
-    """Register Nice Classification endpoints on the legacy FastAPI app."""
+def register_nice_class_routes(app, limiter=None):
+    """Register Nice Classification endpoints on the legacy FastAPI app.
+
+    ``limiter`` is the slowapi.Limiter instance used by the rest of the app.
+    The class-suggester is rate-limited to mirror the Tasarım/Locarno
+    counterpart and to add a safety ceiling on top of the per-IP anon quota.
+    """
     app.add_api_route("/api/validate-classes", validate_classes, methods=["POST"], tags=["Nice Classification"])
     app.add_api_route("/api/nice-classes", get_nice_classes, methods=["GET"], tags=["Nice Classification"])
-    app.add_api_route(
-        "/api/suggest-classes",
-        suggest_nice_classes,
-        methods=["POST"],
-        response_model=ClassSuggestionResponse,
-        tags=["Nice Classification"],
-    )
+
+    if limiter is not None:
+        @app.post(
+            "/api/suggest-classes",
+            response_model=ClassSuggestionResponse,
+            tags=["Nice Classification"],
+        )
+        @limiter.limit("20/minute")
+        async def _suggest_nice_classes_limited(
+            request: Request,
+            payload_in: ClassSuggestionRequest,
+            current_user: Optional[CurrentUser] = Depends(get_current_user_optional),
+        ):
+            return await suggest_nice_classes(request, payload_in, current_user)
+    else:
+        # Test / lightweight environments without a configured limiter.
+        app.add_api_route(
+            "/api/suggest-classes",
+            suggest_nice_classes,
+            methods=["POST"],
+            response_model=ClassSuggestionResponse,
+            tags=["Nice Classification"],
+        )

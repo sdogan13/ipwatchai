@@ -1,4 +1,4 @@
-"""
+﻿"""
 Tests for API endpoints via FastAPI TestClient.
 
 Auth dependency is overridden in conftest.py (client/superadmin_client fixtures).
@@ -1063,6 +1063,182 @@ class TestPublicEndpoints:
         assert mock_search.await_args.kwargs["query"] == "NIKE"
         assert mock_search.await_args.kwargs["nice_classes"] == [9, 35]
 
+    def test_patent_public_search_post_accepts_image_and_filters(self, client):
+        """Patent public POST now mirrors /quick: image upload + IPC + holder
+        + date range + kind_code, all gated by the shared 5/day quota."""
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value.fetchone.side_effect = [None, {"searches": 1}]
+        image_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+
+        with patch(
+            "app_patent_search_routes.patent_search_public",
+            new_callable=AsyncMock,
+        ) as mock_impl, patch(
+            "database.crud.get_db_connection",
+            return_value=mock_conn,
+        ):
+            mock_impl.return_value = {"results": [], "total": 0}
+            resp = client.post(
+                "/api/v1/patent-search/public",
+                data={
+                    "query": "elektrik motoru",
+                    "ipc": "H02K",
+                    "holder": "ASELSAN",
+                    "date_from": "2024-01-01",
+                    "date_to": "2024-12-31",
+                    "kind_code": "B",
+                },
+                files={"image": ("logo.png", image_bytes, "image/png")},
+            )
+
+        assert resp.status_code == 200
+        assert mock_impl.await_count == 1
+        kwargs = mock_impl.await_args.kwargs
+        assert kwargs["query"] == "elektrik motoru"
+        assert kwargs["ipc"] == "H02K"
+        assert kwargs["holder"] == "ASELSAN"
+        assert kwargs["kind_code"] == "B"
+        assert kwargs["image"] is not None and kwargs["image"].filename == "logo.png"
+
+    def test_design_public_search_post_accepts_image_and_locarno(self, client):
+        """Design public POST now accepts image + Locarno chips, matching /quick."""
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value.fetchone.side_effect = [None, {"searches": 1}]
+        image_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * 32
+
+        with patch(
+            "app_design_search_routes.design_search_public",
+            new_callable=AsyncMock,
+        ) as mock_impl, patch(
+            "database.crud.get_db_connection",
+            return_value=mock_conn,
+        ):
+            mock_impl.return_value = {"results": [], "total": 0}
+            resp = client.post(
+                "/api/v1/design-search/public",
+                data={"query": "sandalye", "locarno": "06-01, 06-03"},
+                files={"image": ("chair.jpg", image_bytes, "image/jpeg")},
+            )
+
+        assert resp.status_code == 200
+        assert mock_impl.await_count == 1
+        kwargs = mock_impl.await_args.kwargs
+        assert kwargs["query"] == "sandalye"
+        assert kwargs["locarno"] == "06-01, 06-03"
+        assert kwargs["image"] is not None and kwargs["image"].filename == "chair.jpg"
+
+    def test_cografi_public_search_post_accepts_image_and_filters(self, client):
+        """Cografi public POST mirrors /quick — image + section + region + gi_type."""
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value.fetchone.side_effect = [None, {"searches": 1}]
+        image_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * 32
+
+        with patch(
+            "app_cografi_search_routes.cografi_search_public",
+            new_callable=AsyncMock,
+        ) as mock_impl, patch(
+            "database.crud.get_db_connection",
+            return_value=mock_conn,
+        ):
+            mock_impl.return_value = {"results": [], "total": 0}
+            resp = client.post(
+                "/api/v1/cografi-search/public",
+                data={
+                    "query": "konya",
+                    "section_keys": "gida,tarim",
+                    "region": "Konya",
+                    "gi_type": "mensei",
+                },
+                files={"image": ("photo.jpg", image_bytes, "image/jpeg")},
+            )
+
+        assert resp.status_code == 200
+        assert mock_impl.await_count == 1
+        kwargs = mock_impl.await_args.kwargs
+        assert kwargs["query"] == "konya"
+        assert kwargs["section_keys"] == "gida,tarim"
+        assert kwargs["region"] == "Konya"
+        assert kwargs["gi_type"] == "mensei"
+        assert kwargs["image"] is not None and kwargs["image"].filename == "photo.jpg"
+
+    def test_public_search_quota_returns_429_when_exhausted(self, client):
+        """Once today's shared quota is gone, every public endpoint should 429
+        — proves the shared-counter wiring is live on patent/design/cografi."""
+        from services import search_service
+
+        mock_conn = MagicMock()
+
+        with patch.object(
+            search_service,
+            "check_public_search_eligibility",
+            return_value=(False, "daily_limit_exceeded", {
+                "error": "daily_limit_exceeded",
+                "daily_limit": 5,
+                "used_today": 5,
+                "remaining": 0,
+            }),
+        ), patch(
+            "database.crud.get_db_connection",
+            return_value=mock_conn,
+        ):
+            for url, data in [
+                ("/api/v1/patent-search/public", {"query": "x"}),
+                ("/api/v1/design-search/public", {"query": "x"}),
+                ("/api/v1/cografi-search/public", {"query": "x"}),
+            ]:
+                resp = client.post(url, data=data)
+                assert resp.status_code == 429, f"{url} should 429 over quota"
+                assert resp.json()["detail"]["error"] == "daily_limit_exceeded"
+
+    def test_public_search_shared_counter_increments_across_registries(self, client):
+        """A trademark search and a patent search by the same anonymous client
+        should both increment the SAME public_search_usage row. Proves the
+        5/day quota is one bucket across all 4 registries, not 4 buckets."""
+        from services import search_service
+
+        increments = []
+
+        def _capture_increment(db, client_id, today_factory=None):
+            increments.append(client_id)
+            return len(increments)
+
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value.fetchone.return_value = None
+
+        with patch.object(
+            search_service,
+            "increment_public_search_usage",
+            side_effect=_capture_increment,
+        ), patch.object(
+            search_service,
+            "check_public_search_eligibility",
+            return_value=(True, "ok", {"remaining": 5}),
+        ), patch(
+            "app_patent_search_routes.patent_search_public",
+            new_callable=AsyncMock,
+            return_value={"results": []},
+        ), patch(
+            "app_design_search_routes.design_search_public",
+            new_callable=AsyncMock,
+            return_value={"results": []},
+        ), patch(
+            "database.crud.get_db_connection",
+            return_value=mock_conn,
+        ):
+            # First request gets a cookie; reuse it for the second so both
+            # hits land on the same client_id row.
+            r1 = client.post("/api/v1/patent-search/public", data={"query": "abc"})
+            assert r1.status_code == 200
+            cookie = r1.cookies.get("public_search_client_id")
+            assert cookie, "First public request must set the tracking cookie"
+
+            client.cookies.set("public_search_client_id", cookie)
+            r2 = client.post("/api/v1/design-search/public", data={"query": "def"})
+            assert r2.status_code == 200
+
+        assert len(increments) == 2
+        assert increments[0] == increments[1] == cookie
+
     def test_public_portfolio_route_delegates_to_extracted_impl(self, client):
         with patch(
             "app_public_portfolio_routes.public_portfolio_impl",
@@ -1101,6 +1277,421 @@ class TestPublicEndpoints:
         assert mock_portfolio_csv.await_args.kwargs["holder_id"] is None
         assert mock_portfolio_csv.await_args.kwargs["attorney_no"] == "A-1"
         assert mock_portfolio_csv.await_args.kwargs["current_user"].email == "test@example.com"
+
+    def test_public_design_portfolio_route_delegates_to_extracted_impl(self, client):
+        """GET /api/v1/portfolio/public/designs threads holder_id into
+        public_design_portfolio_impl and returns its JSON payload. Same
+        shape as the trademark portfolio so the dashboard modal can
+        render either registry."""
+        with patch(
+            "app_public_portfolio_routes.public_design_portfolio_impl",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = {
+                "entity_type": "design-holder",
+                "entity_id": "TPE-123",
+                "entity_name": "Mock Tasarım A.Ş.",
+                "results": [],
+                "total_count": 0,
+            }
+            resp = client.get("/api/v1/portfolio/public/designs?holder_id=TPE-123")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["entity_type"] == "design-holder"
+        assert body["entity_id"] == "TPE-123"
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["holder_id"] == "TPE-123"
+
+    def test_public_design_portfolio_csv_route_delegates_to_extracted_impl(self, client):
+        """GET /api/v1/portfolio/public/designs/csv requires auth (already
+        provided by the test fixture) and delegates to the CSV impl."""
+        with patch(
+            "app_public_portfolio_routes.public_design_portfolio_csv_impl",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = JSONResponse(
+                content={"ok": True},
+                headers={"Content-Disposition": 'attachment; filename="x_design_portfolio.csv"'},
+            )
+            resp = client.get("/api/v1/portfolio/public/designs/csv?holder_id=TPE-123")
+
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+        assert resp.headers["Content-Disposition"] == 'attachment; filename="x_design_portfolio.csv"'
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["holder_id"] == "TPE-123"
+        assert mock_impl.await_args.kwargs["current_user"].email == "test@example.com"
+
+    def test_design_watchlist_bulk_from_portfolio_requires_holder_id(self, client):
+        """POST /api/v1/design-watchlist/bulk-from-portfolio with an
+        empty body must 422 before touching the service — proves the
+        route guards against missing holder_id rather than dispatching
+        to a service call that would fail mid-transaction."""
+        with patch(
+            "services.design_watchlist_service.import_design_watchlist_from_portfolio",
+            new_callable=AsyncMock,
+        ) as mock_svc:
+            resp = client.post(
+                "/api/v1/design-watchlist/bulk-from-portfolio", json={}
+            )
+        assert resp.status_code == 422
+        assert mock_svc.await_count == 0
+
+    def test_design_watchlist_bulk_from_portfolio_route_delegates(self, client):
+        """Happy path: POST {holder_id} → service is called once with the
+        holder_id, the result is returned with queued_scans added."""
+        with patch(
+            "services.design_watchlist_service.import_design_watchlist_from_portfolio",
+            new_callable=AsyncMock,
+        ) as mock_svc:
+            mock_svc.return_value = {
+                "created": 3, "skipped": 1, "errors": 0, "total": 4,
+                "limit_reached": False, "errors_detail": [],
+                "scan_item_ids": ["00000000-0000-0000-0000-000000000001"],
+            }
+            resp = client.post(
+                "/api/v1/design-watchlist/bulk-from-portfolio",
+                json={"holder_id": "TPE-999"},
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        # `created` matches the trademark watchlist bulk shape so the
+        # shared _modals.html bulk-confirm modal can read it directly.
+        assert body["created"] == 3
+        assert body["skipped"] == 1
+        assert body["queued_scans"] == 1
+        assert mock_svc.await_count == 1
+        assert mock_svc.await_args.kwargs["holder_id"] == "TPE-999"
+
+    def test_public_designer_portfolio_route_delegates_to_extracted_impl(self, client):
+        """GET /api/v1/portfolio/public/designers threads the designer
+        name into public_designer_portfolio_impl. Response shape
+        mirrors holder/design-holder so the existing modal renders it."""
+        with patch(
+            "app_public_portfolio_routes.public_designer_portfolio_impl",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = {
+                "entity_type": "design-designer",
+                "entity_id": "Ahmet Yılmaz",
+                "entity_name": "Ahmet Yılmaz",
+                "results": [],
+                "total_count": 0,
+            }
+            resp = client.get("/api/v1/portfolio/public/designers?name=Ahmet%20Y%C4%B1lmaz")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["entity_type"] == "design-designer"
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["name"] == "Ahmet Yılmaz"
+
+    def test_public_designer_portfolio_csv_route_delegates_to_extracted_impl(self, client):
+        """CSV variant forwards name + current_user to the CSV impl."""
+        with patch(
+            "app_public_portfolio_routes.public_designer_portfolio_csv_impl",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = JSONResponse(
+                content={"ok": True},
+                headers={"Content-Disposition": 'attachment; filename="ahmet_designer_portfolio.csv"'},
+            )
+            resp = client.get("/api/v1/portfolio/public/designers/csv?name=Ahmet")
+
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["name"] == "Ahmet"
+        assert mock_impl.await_args.kwargs["current_user"].email == "test@example.com"
+
+    def test_design_watchlist_bulk_accepts_designer_name(self, client):
+        """The shared bulk endpoint now accepts {designer_name} too,
+        not just {holder_id}. Service receives designer_name verbatim."""
+        with patch(
+            "services.design_watchlist_service.import_design_watchlist_from_portfolio",
+            new_callable=AsyncMock,
+        ) as mock_svc:
+            mock_svc.return_value = {
+                "created": 2, "skipped": 0, "errors": 0, "total": 2,
+                "limit_reached": False, "errors_detail": [], "scan_item_ids": [],
+            }
+            resp = client.post(
+                "/api/v1/design-watchlist/bulk-from-portfolio",
+                json={"designer_name": "Ahmet Yılmaz"},
+            )
+        assert resp.status_code == 200
+        assert mock_svc.await_count == 1
+        assert mock_svc.await_args.kwargs["holder_id"] is None
+        assert mock_svc.await_args.kwargs["designer_name"] == "Ahmet Yılmaz"
+
+    def test_design_watchlist_bulk_requires_holder_or_designer(self, client):
+        """Empty body → 422; can't dispatch without an identifier."""
+        with patch(
+            "services.design_watchlist_service.import_design_watchlist_from_portfolio",
+            new_callable=AsyncMock,
+        ) as mock_svc:
+            resp = client.post(
+                "/api/v1/design-watchlist/bulk-from-portfolio", json={},
+            )
+        assert resp.status_code == 422
+        assert mock_svc.await_count == 0
+
+    def test_public_attorney_portfolio_route_delegates_to_extracted_impl(self, client):
+        """GET /api/v1/portfolio/public/attorneys threads name + firm
+        into the impl. The lookup is stricter than holder/designer
+        because attorneys have no canonical id."""
+        with patch(
+            "app_public_portfolio_routes.public_attorney_portfolio_impl",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = {
+                "entity_type": "design-attorney",
+                "entity_id": '{"name": "Ali Demir", "firm": "ABC Patent"}',
+                "entity_name": "Ali Demir — ABC Patent",
+                "results": [],
+                "total_count": 0,
+            }
+            resp = client.get(
+                "/api/v1/portfolio/public/attorneys?name=Ali%20Demir&firm=ABC%20Patent"
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["entity_type"] == "design-attorney"
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["name"] == "Ali Demir"
+        assert mock_impl.await_args.kwargs["firm"] == "ABC Patent"
+
+    def test_public_attorney_portfolio_csv_route_delegates(self, client):
+        """CSV variant forwards name + firm + current_user."""
+        with patch(
+            "app_public_portfolio_routes.public_attorney_portfolio_csv_impl",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = JSONResponse(
+                content={"ok": True},
+                headers={"Content-Disposition": 'attachment; filename="x.csv"'},
+            )
+            resp = client.get(
+                "/api/v1/portfolio/public/attorneys/csv?name=Ali&firm=ABC"
+            )
+        assert resp.status_code == 200
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["name"] == "Ali"
+        assert mock_impl.await_args.kwargs["firm"] == "ABC"
+        assert mock_impl.await_args.kwargs["current_user"].email == "test@example.com"
+
+    def test_design_watchlist_bulk_accepts_attorney_pair(self, client):
+        """Bulk endpoint now accepts {attorney_name, attorney_firm} too."""
+        with patch(
+            "services.design_watchlist_service.import_design_watchlist_from_portfolio",
+            new_callable=AsyncMock,
+        ) as mock_svc:
+            mock_svc.return_value = {
+                "created": 4, "skipped": 0, "errors": 0, "total": 4,
+                "limit_reached": False, "errors_detail": [], "scan_item_ids": [],
+            }
+            resp = client.post(
+                "/api/v1/design-watchlist/bulk-from-portfolio",
+                json={"attorney_name": "Ali Demir", "attorney_firm": "ABC Patent"},
+            )
+        assert resp.status_code == 200
+        assert mock_svc.await_count == 1
+        kw = mock_svc.await_args.kwargs
+        assert kw["attorney_name"] == "Ali Demir"
+        assert kw["attorney_firm"] == "ABC Patent"
+        assert kw["holder_id"] is None
+        assert kw["designer_name"] is None
+
+    # ---- Patent portfolio (Phase 2 of actor click-through work) ----
+
+    def test_public_patent_portfolio_route_delegates(self, client):
+        """GET /api/v1/portfolio/public/patents threads holder_id into
+        run_public_patent_portfolio_lookup. The route closure calls the
+        service directly so we patch at the service layer."""
+        with patch(
+            "services.patent_portfolio_service.run_public_patent_portfolio_lookup",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = {
+                "entity_type": "patent-holder",
+                "entity_id": "TPE-PT-1",
+                "entity_name": "Mock Patent A.Ş.",
+                "results": [],
+                "total_count": 0,
+            }
+            resp = client.get("/api/v1/portfolio/public/patents?holder_id=TPE-PT-1")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["entity_type"] == "patent-holder"
+        assert body["entity_id"] == "TPE-PT-1"
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["holder_id"] == "TPE-PT-1"
+
+    def test_public_patent_portfolio_csv_route_delegates(self, client):
+        with patch(
+            "services.patent_portfolio_service.build_public_patent_portfolio_csv",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = JSONResponse(
+                content={"ok": True},
+                headers={"Content-Disposition": 'attachment; filename="x.csv"'},
+            )
+            resp = client.get("/api/v1/portfolio/public/patents/csv?holder_id=TPE-PT-1")
+
+        assert resp.status_code == 200
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["holder_id"] == "TPE-PT-1"
+        assert mock_impl.await_args.kwargs["current_user"].email == "test@example.com"
+
+    def test_public_inventor_portfolio_route_delegates(self, client):
+        """GET /api/v1/portfolio/public/patent-inventors threads name
+        into run_public_inventor_portfolio_lookup."""
+        with patch(
+            "services.patent_portfolio_service.run_public_inventor_portfolio_lookup",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = {
+                "entity_type": "patent-inventor",
+                "entity_id": "Ada Lovelace",
+                "entity_name": "Ada Lovelace",
+                "results": [],
+                "total_count": 0,
+            }
+            resp = client.get("/api/v1/portfolio/public/patent-inventors?name=Ada%20Lovelace")
+
+        assert resp.status_code == 200
+        assert resp.json()["entity_type"] == "patent-inventor"
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["inventor_name"] == "Ada Lovelace"
+
+    def test_public_inventor_portfolio_csv_route_delegates(self, client):
+        with patch(
+            "services.patent_portfolio_service.build_public_inventor_portfolio_csv",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = JSONResponse(content={"ok": True})
+            resp = client.get("/api/v1/portfolio/public/patent-inventors/csv?name=Ada")
+
+        assert resp.status_code == 200
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["inventor_name"] == "Ada"
+        assert mock_impl.await_args.kwargs["current_user"].email == "test@example.com"
+
+    def test_public_patent_attorney_portfolio_route_delegates(self, client):
+        """GET /api/v1/portfolio/public/patent-attorneys threads
+        name + firm into run_public_patent_attorney_portfolio_lookup."""
+        with patch(
+            "services.patent_portfolio_service.run_public_patent_attorney_portfolio_lookup",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = {
+                "entity_type": "patent-attorney",
+                "entity_id": '{"name": "Ali Demir", "firm": "ABC Patent"}',
+                "entity_name": "Ali Demir - ABC Patent",
+                "results": [],
+                "total_count": 0,
+            }
+            resp = client.get(
+                "/api/v1/portfolio/public/patent-attorneys?name=Ali%20Demir&firm=ABC%20Patent"
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["entity_type"] == "patent-attorney"
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["attorney_name"] == "Ali Demir"
+        assert mock_impl.await_args.kwargs["attorney_firm"] == "ABC Patent"
+
+    def test_public_patent_attorney_portfolio_csv_route_delegates(self, client):
+        with patch(
+            "services.patent_portfolio_service.build_public_patent_attorney_portfolio_csv",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = JSONResponse(content={"ok": True})
+            resp = client.get(
+                "/api/v1/portfolio/public/patent-attorneys/csv?name=Ali&firm=ABC"
+            )
+
+        assert resp.status_code == 200
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["attorney_name"] == "Ali"
+        assert mock_impl.await_args.kwargs["attorney_firm"] == "ABC"
+        assert mock_impl.await_args.kwargs["current_user"].email == "test@example.com"
+
+    # ---- Cografi (GI) portfolio (Phase 3 of actor click-through) ----
+
+    def test_public_cografi_applicant_portfolio_route_delegates(self, client):
+        """GET /api/v1/portfolio/public/cografi-applicants threads
+        holder_id into run_public_cografi_applicant_portfolio_lookup."""
+        with patch(
+            "services.cografi_portfolio_service.run_public_cografi_applicant_portfolio_lookup",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = {
+                "entity_type": "cografi-applicant",
+                "entity_id": "TPE-CG-1",
+                "entity_name": "Mock GI Org",
+                "results": [],
+                "total_count": 0,
+            }
+            resp = client.get("/api/v1/portfolio/public/cografi-applicants?holder_id=TPE-CG-1")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["entity_type"] == "cografi-applicant"
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["holder_id"] == "TPE-CG-1"
+
+    def test_public_cografi_applicant_portfolio_csv_route_delegates(self, client):
+        with patch(
+            "services.cografi_portfolio_service.build_public_cografi_applicant_portfolio_csv",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = JSONResponse(content={"ok": True})
+            resp = client.get("/api/v1/portfolio/public/cografi-applicants/csv?holder_id=TPE-CG-1")
+
+        assert resp.status_code == 200
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["holder_id"] == "TPE-CG-1"
+        assert mock_impl.await_args.kwargs["current_user"].email == "test@example.com"
+
+    def test_public_cografi_agent_portfolio_route_delegates(self, client):
+        """GET /api/v1/portfolio/public/cografi-agents threads name into
+        run_public_cografi_agent_portfolio_lookup."""
+        with patch(
+            "services.cografi_portfolio_service.run_public_cografi_agent_portfolio_lookup",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = {
+                "entity_type": "cografi-agent",
+                "entity_id": "Mock Agent",
+                "entity_name": "Mock Agent",
+                "results": [],
+                "total_count": 0,
+            }
+            resp = client.get("/api/v1/portfolio/public/cografi-agents?name=Mock%20Agent")
+
+        assert resp.status_code == 200
+        assert resp.json()["entity_type"] == "cografi-agent"
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["agent_name"] == "Mock Agent"
+
+    def test_public_cografi_agent_portfolio_csv_route_delegates(self, client):
+        with patch(
+            "services.cografi_portfolio_service.build_public_cografi_agent_portfolio_csv",
+            new_callable=AsyncMock,
+        ) as mock_impl:
+            mock_impl.return_value = JSONResponse(content={"ok": True})
+            resp = client.get("/api/v1/portfolio/public/cografi-agents/csv?name=Mock")
+
+        assert resp.status_code == 200
+        assert mock_impl.await_count == 1
+        assert mock_impl.await_args.kwargs["agent_name"] == "Mock"
+        assert mock_impl.await_args.kwargs["current_user"].email == "test@example.com"
 
     def test_education_catalog_route_delegates_to_service(self, client):
         payload = {
@@ -2272,6 +2863,40 @@ class TestAccessControl:
         mock_activate_free_plan_data.assert_awaited_once()
         assert mock_activate_free_plan_data.await_args.kwargs["current_user"].email == "test@example.com"
 
+    def test_get_credit_packs_returns_three_packs(self, client):
+        resp = client.get("/api/v1/billing/credit-packs")
+        assert resp.status_code == 200
+        packs = resp.json()["packs"]
+        assert [p["id"] for p in packs] == ["small", "medium", "large"]
+        assert packs[0]["credits"] == 25
+        assert packs[0]["price_try"] == 200
+
+    def test_purchase_credits_route_uses_service(self, client):
+        payload = {
+            "checkout_form_content": "<form>iyzico</form>",
+            "token": "tok-cp-1",
+            "conversation_id": "conv-cp-1",
+            "payment_id": "pay-cp-1",
+            "pack_id": "small",
+            "credits": 25,
+            "amount_try": 200.0,
+        }
+        with patch(
+            "api.billing.initialize_credit_pack_purchase_data",
+            new_callable=AsyncMock,
+        ) as mock_init:
+            mock_init.return_value = payload
+            resp = client.post(
+                "/api/v1/billing/purchase-credits",
+                json={"pack_id": "small", "discount_code": "LAUNCH20"},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["token"] == "tok-cp-1"
+        kwargs = mock_init.await_args.kwargs
+        assert kwargs["payload"] == {"pack_id": "small", "discount_code": "LAUNCH20"}
+        assert kwargs["current_user"].email == "test@example.com"
+
     def test_pipeline_trigger_route_uses_service(self, superadmin_client):
         with patch(
             "api.pipeline.trigger_pipeline_run_data",
@@ -3274,13 +3899,13 @@ class TestSearchValidation:
 
     def test_quick_search_requires_query(self, client):
         """Quick search without 'query' param should fail."""
-        resp = client.get("/api/v1/search/quick")
+        resp = client.get("/api/v1/search")
         # Either 422 (validation) or 500 (unhandled)
         assert resp.status_code in (422, 500)
 
     def test_quick_search_with_query(self, client):
         """Quick search with a valid query should not return 422 (validation error)."""
-        resp = client.get("/api/v1/search/quick?query=NIKE")
+        resp = client.get("/api/v1/search?query=NIKE")
         # May get 500 (DB not available) but should not get 422 (bad input)
         assert resp.status_code != 422
 
@@ -3653,6 +4278,59 @@ async def test_extracted_public_portfolio_impl_delegates_to_service():
 
 
 @pytest.mark.asyncio
+async def test_extracted_public_design_portfolio_impl_delegates_to_service():
+    """The route-layer wrapper public_design_portfolio_impl forwards
+    holder_id straight to services.design_search_service.
+    run_public_design_portfolio_lookup and returns its payload."""
+    from app_public_portfolio_routes import public_design_portfolio_impl
+
+    expected = {
+        "entity_type": "design-holder",
+        "entity_name": "Vestel",
+        "entity_id": "TPE-999",
+        "results": [
+            {"id": "abc", "registry_type": "design", "application_no": "2022/00001"},
+        ],
+        "total_count": 1,
+    }
+    with patch(
+        "services.design_search_service.run_public_design_portfolio_lookup",
+        new=AsyncMock(return_value=expected),
+    ) as mock_lookup:
+        data = await public_design_portfolio_impl(holder_id="TPE-999", logger=MagicMock())
+
+    assert data == expected
+    assert mock_lookup.await_count == 1
+    assert mock_lookup.await_args.kwargs["holder_id"] == "TPE-999"
+
+
+@pytest.mark.asyncio
+async def test_extracted_public_design_portfolio_csv_impl_delegates_to_service():
+    """public_design_portfolio_csv_impl forwards holder_id + current_user
+    to services.design_search_service.build_public_design_portfolio_csv
+    so the plan-gate runs in the service layer."""
+    from fastapi.responses import StreamingResponse
+
+    from app_public_portfolio_routes import public_design_portfolio_csv_impl
+
+    fake_stream = StreamingResponse(iter([b"col1,col2\n"]), media_type="text/csv")
+    fake_user = SimpleNamespace(id=uuid.uuid4(), email="t@example.com")
+
+    with patch(
+        "services.design_search_service.build_public_design_portfolio_csv",
+        new=AsyncMock(return_value=fake_stream),
+    ) as mock_csv:
+        resp = await public_design_portfolio_csv_impl(
+            holder_id="TPE-999", logger=MagicMock(), current_user=fake_user,
+        )
+
+    assert resp is fake_stream
+    assert mock_csv.await_count == 1
+    assert mock_csv.await_args.kwargs["holder_id"] == "TPE-999"
+    assert mock_csv.await_args.kwargs["current_user"] is fake_user
+
+
+@pytest.mark.asyncio
 async def test_search_service_run_public_portfolio_lookup_maps_safe_fields():
     from services.search_service import run_public_portfolio_lookup
 
@@ -3969,8 +4647,7 @@ async def test_search_service_run_image_search_keeps_ocr_inside_visual_channel()
         "bulletin_no": "393",
         "image_path": "missing.jpg",
         "logo_ocr_text": "PATREMONTANA BERLIN",
-        "text_embedding": [1.0, 0.0],
-        "image_embedding": [1.0, 0.0],
+            "image_embedding": [1.0, 0.0],
         "dinov2_embedding": [1.0, 0.0],
         "color_histogram": [1.0, 0.0],
         "holder_name": "Holder",
@@ -4002,7 +4679,6 @@ async def test_search_service_run_image_search_keeps_ocr_inside_visual_channel()
             "textual_breakdown": {},
         }
     )
-    text_embedding_getter = MagicMock(return_value=[1.0, 0.0])
     name_similarity_fn = MagicMock(return_value=0.81)
 
     data = await run_image_search(
@@ -4039,7 +4715,6 @@ async def test_search_service_run_image_search_keeps_ocr_inside_visual_channel()
         get_image_embedding_handler=MagicMock(),
         extract_ocr_text_handler=MagicMock(),
         connect_fn=MagicMock(return_value=mock_conn),
-        text_embedding_getter=text_embedding_getter,
         name_similarity_fn=name_similarity_fn,
     )
 
@@ -4050,7 +4725,6 @@ async def test_search_service_run_image_search_keeps_ocr_inside_visual_channel()
     assert data["results"][0]["query_ocr_text_used"] is False
     assert data["results"][0]["text_similarity"] is None
     assert data["results"][0]["scores"]["query_text_source"] == "IMAGE_ONLY"
-    text_embedding_getter.assert_not_called()
     name_similarity_fn.assert_not_called()
     assert score_pair_fn.call_args.kwargs["query_name"] == ""
     assert score_pair_fn.call_args.kwargs["text_sim"] == 0.0
@@ -4073,7 +4747,6 @@ async def test_extracted_enhanced_search_impl_delegates_to_service():
     score_pair_fn = MagicMock()
     visual_similarity_fn = MagicMock()
     class_suggestions_handler = MagicMock()
-    text_embedding_getter = MagicMock()
     encode_query_image_handler = MagicMock()
     date_formatter = MagicMock()
     status_code_getter = MagicMock()
@@ -4135,7 +4808,6 @@ async def test_extracted_enhanced_search_impl_delegates_to_service():
             score_pair_fn=score_pair_fn,
             visual_similarity_fn=visual_similarity_fn,
             class_suggestions_handler=class_suggestions_handler,
-            text_embedding_getter=text_embedding_getter,
             encode_query_image_handler=encode_query_image_handler,
             date_formatter=date_formatter,
             status_code_getter=status_code_getter,
@@ -4154,7 +4826,6 @@ async def test_extracted_enhanced_search_impl_delegates_to_service():
         score_pair_fn=score_pair_fn,
         visual_similarity_fn=visual_similarity_fn,
         class_suggestions_handler=class_suggestions_handler,
-        text_embedding_getter=text_embedding_getter,
         encode_query_image_handler=encode_query_image_handler,
         date_formatter=date_formatter,
         status_code_getter=status_code_getter,
@@ -4188,7 +4859,6 @@ async def test_search_service_run_enhanced_search_auto_suggests_and_formats_resu
             "registration_no": "TR-9",
             "name_tr": "NAYK",
             "logo_ocr_text": None,
-            "text_embedding": None,
             "image_embedding": None,
             "dinov2_embedding": None,
             "color_histogram": None,
@@ -4236,7 +4906,6 @@ async def test_search_service_run_enhanced_search_auto_suggests_and_formats_resu
         score_pair_fn=score_pair_fn,
         visual_similarity_fn=MagicMock(return_value=0.0),
         class_suggestions_handler=class_suggestions_handler,
-        text_embedding_getter=MagicMock(return_value=None),
         encode_query_image_handler=MagicMock(),
         date_formatter=lambda value: value.strftime("%Y-%m-%d") if value else None,
         status_code_getter=lambda value: "registered" if value == "Tescil Edildi" else "unknown",
@@ -4311,7 +4980,6 @@ async def test_search_service_run_enhanced_search_auto_suggest_accepts_async_han
         score_pair_fn=MagicMock(return_value={"total": 0.0}),
         visual_similarity_fn=MagicMock(return_value=0.0),
         class_suggestions_handler=class_suggestions_handler,
-        text_embedding_getter=MagicMock(return_value=None),
         encode_query_image_handler=MagicMock(),
         date_formatter=lambda value: value.strftime("%Y-%m-%d") if value else None,
         status_code_getter=lambda value: "unknown",
@@ -4381,7 +5049,6 @@ async def test_search_service_run_enhanced_search_uses_risk_engine_when_unified(
         score_pair_fn=MagicMock(),
         visual_similarity_fn=MagicMock(),
         class_suggestions_handler=MagicMock(),
-        text_embedding_getter=MagicMock(),
         encode_query_image_handler=MagicMock(),
         date_formatter=lambda value: value.strftime("%Y-%m-%d") if value else None,
         status_code_getter=lambda value: "published" if value == "Yayınlandı" else "unknown",
@@ -4821,7 +5488,6 @@ async def test_watchlist_service_create_watchlist_item_record_uses_trademark_ai_
         "dinov2_embedding": "[0.3]",
         "color_histogram": "[0.4,0.5]",
         "logo_ocr_text": "NIKE",
-        "text_embedding": "[0.6]",
     }
 
     watchlist_crud = MagicMock()
@@ -4857,7 +5523,6 @@ async def test_watchlist_service_create_watchlist_item_record_uses_trademark_ai_
         logo_dinov2_embedding=[0.3],
         logo_color_histogram=[0.4, 0.5],
         logo_ocr_text="NIKE",
-        text_embedding=[0.6],
     )
     created_payload = watchlist_crud.create_with_embeddings.call_args.args[3]
     assert created_payload.brand_name == data.brand_name
@@ -5822,7 +6487,6 @@ async def test_watchlist_service_import_watchlist_items_from_portfolio_uses_embe
                 "dinov2_embedding": "[0.3]",
                 "color_histogram": "[0.4,0.5]",
                 "logo_ocr_text": "PORT",
-                "text_embedding": "[0.6]",
             },
             {
                 "application_no": "PORT-2",
@@ -5833,7 +6497,6 @@ async def test_watchlist_service_import_watchlist_items_from_portfolio_uses_embe
                 "dinov2_embedding": None,
                 "color_histogram": None,
                 "logo_ocr_text": None,
-                "text_embedding": None,
             },
         ],
         [],
@@ -5878,7 +6541,6 @@ async def test_watchlist_service_import_watchlist_items_from_portfolio_uses_embe
         logo_dinov2_embedding=[0.3],
         logo_color_histogram=[0.4, 0.5],
         logo_ocr_text="PORT",
-        text_embedding=[0.6],
         auto_commit=False,
     )
 
@@ -7453,7 +8115,7 @@ async def test_usage_service_get_usage_summary_data_aggregates_limits_and_counts
     assert first_call.args[1] == ("org-456",)
     second_call = mock_cursor.execute.call_args_list[1]
     assert "FROM generation_logs" in second_call.args[0]
-    assert second_call.args[1] == ("org-456",)
+    assert second_call.args[1] == (2, "org-456")
 
 
 @pytest.mark.asyncio
@@ -9416,7 +10078,7 @@ async def test_creative_service_get_generation_history_data_maps_logo_items():
                     "returned_count": 4,
                     "source_layout": "panel_2x2_split",
                 },
-                "credits_used": 1,
+                "credits_used": 0,
                 "created_at": created_at,
             }
         ],
@@ -9443,12 +10105,60 @@ async def test_creative_service_get_generation_history_data_maps_logo_items():
     assert response.page == 2
     assert response.total_pages == 1
     assert response.items[0].id == str(log_id)
+    assert response.items[0].credits_used == 5
     assert response.items[0].output_data["variations"] == 4
     assert response.items[0].output_data["source_layout"] == "panel_2x2_split"
     assert response.items[0].images[0]["image_id"] == str(image_id)
     assert response.items[0].images[0]["similarity_score"] == 72.4
     assert response.items[0].images[0]["is_safe"] is False
     assert mock_cursor.execute.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_creative_service_get_generation_history_data_maps_name_operation_cost():
+    from services.creative_service import get_generation_history_data
+
+    org_id = uuid.uuid4()
+    log_id = uuid.uuid4()
+    created_at = datetime(2026, 5, 12, 10, 9, tzinfo=timezone.utc)
+
+    mock_db_cm = MagicMock()
+    mock_db = MagicMock()
+    mock_cursor = MagicMock()
+    mock_db.cursor.return_value = mock_cursor
+    mock_db_cm.__enter__.return_value = mock_db
+    mock_db_cm.__exit__.return_value = False
+
+    mock_cursor.fetchone.side_effect = [{"total": 1}]
+    mock_cursor.fetchall.side_effect = [
+        [
+            {
+                "id": log_id,
+                "feature_type": "NAME",
+                "input_params": {"query": "IP Watch AI"},
+                "output_data": {
+                    "total_generated": 10,
+                    "safe_count": 4,
+                    "filtered_count": 6,
+                },
+                "credits_used": 0,
+                "created_at": created_at,
+            }
+        ]
+    ]
+
+    response = await get_generation_history_data(
+        page=1,
+        per_page=20,
+        feature_type="NAME",
+        current_user=SimpleNamespace(organization_id=org_id),
+        database_factory=MagicMock(return_value=mock_db_cm),
+    )
+
+    assert response.items[0].id == str(log_id)
+    assert response.items[0].credits_used == 2
+    assert response.items[0].output_data["safe_count"] == 4
+    assert mock_cursor.execute.call_count == 2
 
 
 @pytest.mark.asyncio
@@ -9564,8 +10274,9 @@ def test_creative_service_audit_generated_logo_image_updates_completed_status():
     assert final_params[4] == 42.0
     assert final_params[5] is True
     assert final_params[6] == "completed"
-    assert '"closest_match_name": "ACME OLD"' in final_params[3]
     assert '"llm_risk_score": 42.0' in final_params[3]
+    assert "closest_match_name" not in final_params[3]
+    assert "raw_combined" not in final_params[3]
     assert mock_db.commit.call_count == 2
 
 
@@ -9697,39 +10408,36 @@ def test_creative_service_audit_generated_logo_image_uses_visual_closest_match_n
     assert final_params[5] is True
     assert breakdown["llm_risk_score"] == 45.0
     assert breakdown["risk_source"] == "risk_report_llm"
-    assert breakdown["closest_match_name"] == "Visual Similar"
-    assert breakdown["closest_database_match"]["name"] == "Visual Similar"
     assert "deterministic_risk_score" not in breakdown
     assert "visual_similarity_score" not in breakdown
     assert "name_conflict_score" not in breakdown
     assert "overall_risk_score" not in breakdown
     assert "risk_driver" not in breakdown
+    assert "closest_match_name" not in breakdown
+    assert "closest_database_match" not in breakdown
 
 
 def test_creative_service_logo_visual_search_does_not_compare_ocr_to_registered_name():
     from services.creative_service import _full_visual_similarity_search
 
-    mock_cursor = MagicMock()
-    mock_conn = MagicMock()
-    mock_conn.cursor.return_value = mock_cursor
-    mock_cursor.fetchall.return_value = [
+    fake_engine = MagicMock()
+    fake_engine.collect_risk_candidates.return_value = [
         {
             "name": "SEYDOGLU BAKLAVALARI",
             "application_no": "2026/000001",
             "bulletin_no": "2026-01",
             "status": "registered",
-            "nice_class_numbers": [43],
-            "current_holder_name": "Existing Holder",
+            "classes": [43],
+            "holder_name": "Existing Holder",
             "image_path": "logos/seydoglu.png",
-            "logo_ocr_text": "",
-            "dinov2_embedding": None,
-            "raw_clip_sim": 0.31,
+            "scores": {
+                "visual_similarity": 0.31,
+                "visual_breakdown": {"total": 0.31},
+            },
         }
     ]
 
-    with patch("db.pool.get_connection", return_value=mock_conn), patch(
-        "db.pool.release_connection"
-    ), patch("services.creative_service.score_pair", side_effect=AssertionError("OCR must not be scored against name")):
+    with patch("services.creative_service._get_risk_engine", return_value=fake_engine):
         results = _full_visual_similarity_search(
             features={
                 "clip_embedding": [0.1, 0.2],
@@ -9737,14 +10445,19 @@ def test_creative_service_logo_visual_search_does_not_compare_ocr_to_registered_
                 "ocr_text": "seydoglu baklavalari",
             },
             nice_classes=[43],
+            brand_name="SEYDOGLU BAKLAVALARI",
+            image_path="generated/logo.png",
             top_k=5,
         )
 
     assert len(results) == 1
     assert results[0]["combined_sim"] == pytest.approx(0.31)
-    assert results[0]["overall_risk_score"] == pytest.approx(0.31)
+    fake_engine.collect_risk_candidates.assert_called_once()
+    assert fake_engine.collect_risk_candidates.call_args.kwargs["name"] == ""
+    assert fake_engine.collect_risk_candidates.call_args.kwargs["target_classes"] == [43]
+    assert fake_engine.collect_risk_candidates.call_args.kwargs["image_path"] == "generated/logo.png"
     assert "name_conflict_score" not in results[0]
-    assert "name_conflict_score" not in results[0]["visual_breakdown"]
+    assert "visual_breakdown" not in results[0]
 
 
 def test_creative_service_audit_generated_logo_image_splits_visual_risk():
@@ -9801,12 +10514,13 @@ def test_creative_service_audit_generated_logo_image_splits_visual_risk():
     assert final_params[4] == 91.0
     assert final_params[5] is False
     assert breakdown["llm_risk_score"] == 91.0
-    assert breakdown["closest_match_name"] == "Visual Twin"
     assert "deterministic_risk_score" not in breakdown
     assert "visual_similarity_score" not in breakdown
     assert "name_conflict_score" not in breakdown
     assert "overall_risk_score" not in breakdown
     assert "risk_driver" not in breakdown
+    assert "closest_match_name" not in breakdown
+    assert "raw_combined" not in breakdown
 
 
 @pytest.mark.asyncio
@@ -9841,7 +10555,7 @@ async def test_creative_service_status_data_marks_gemini_availability():
     )
 
     assert response["name_generator"]["available"] is True
-    assert response["name_generator"]["cost"] == 1
+    assert response["name_generator"]["cost"] == 2
     assert response["logo_studio"]["available"] is True
     assert response["logo_studio"]["cost"] == 5
     assert response["logo_studio"]["reason"] == ""
@@ -9849,6 +10563,42 @@ async def test_creative_service_status_data_marks_gemini_availability():
     assert response["logo_studio"]["audit_reason"] == "CLIP modeli yuklenmemis"
     assert response["logo_studio"]["providers"]["openai"]["available"] is False
     assert response["logo_studio"]["providers"]["gemini"]["available"] is True
+
+
+@pytest.mark.asyncio
+async def test_creative_service_status_data_marks_name_available_with_risk_report_provider():
+    from services.creative_service import creative_suite_status_data
+
+    qwen_provider = SimpleNamespace(
+        provider_name="qwen",
+        text_model="qwen-max",
+        is_available=lambda: True,
+    )
+    name_client = SimpleNamespace(
+        provider_name="risk_report_provider_chain",
+        text_model="unavailable",
+        providers=[qwen_provider],
+        is_available=lambda: True,
+    )
+    gemini_client = SimpleNamespace(
+        is_available=lambda: False,
+        image_model="gemini-3-pro-image-preview",
+        text_model="gemini-2.5-pro",
+    )
+    openai_client = SimpleNamespace(is_available=lambda: False, image_model="gpt-image-2")
+
+    response = await creative_suite_status_data(
+        feature_enabled_getter=lambda name: True,
+        openai_image_client_getter=lambda: openai_client,
+        gemini_client_getter=lambda: gemini_client,
+        name_generation_client_getter=lambda: name_client,
+        ai_module=SimpleNamespace(clip_model=None),
+    )
+
+    assert response["name_generator"]["available"] is True
+    assert response["name_generator"]["provider"] == "qwen"
+    assert response["name_generator"]["model"] == "qwen-max"
+    assert response["logo_studio"]["available"] is False
 
 
 @pytest.mark.asyncio
@@ -9891,6 +10641,7 @@ async def test_creative_service_status_data_marks_logo_available_when_openai_is_
         feature_enabled_getter=lambda name: True,
         openai_image_client_getter=lambda: openai_client,
         gemini_client_getter=lambda: gemini_client,
+        name_generation_client_getter=lambda: SimpleNamespace(is_available=lambda: False),
         ai_module=SimpleNamespace(clip_model=None),
     )
 
@@ -9906,10 +10657,22 @@ def test_creative_request_validation_rejects_invalid_classes_and_styles():
     from models.schemas import LogoGenerationRequest, NameSuggestionRequest
 
     with pytest.raises(Exception):
-        NameSuggestionRequest(query="Acme", nice_classes=[46])
+        NameSuggestionRequest(query="Acme", nice_classes=[46], industry="Footwear", style="modern", language="tr")
 
     with pytest.raises(Exception):
-        NameSuggestionRequest(query="Acme", style="luxury")
+        NameSuggestionRequest(query="Acme", nice_classes=[25], industry="Footwear", style="luxury", language="tr")
+
+    with pytest.raises(Exception):
+        NameSuggestionRequest(query="Acme", nice_classes=[], industry="Footwear", style="modern", language="tr")
+
+    with pytest.raises(Exception):
+        NameSuggestionRequest(query="Acme", nice_classes=[25], industry="   ", style="modern", language="tr")
+
+    with pytest.raises(Exception):
+        NameSuggestionRequest(query="Acme", nice_classes=[25], industry="Footwear", language="tr")
+
+    with pytest.raises(Exception):
+        NameSuggestionRequest(query="Acme", nice_classes=[25], industry="Footwear", style="modern")
 
     with pytest.raises(Exception):
         LogoGenerationRequest(brand_name="Acme", nice_classes=[99])
@@ -10795,12 +11558,14 @@ def test_ai_studio_name_risk_prompt_uses_database_candidates_without_scores():
     name_items = _coerce_name_results_to_risk_items([deterministic])
     name_items[0]["db_candidates"] = [
         {
-            "name": "ACME",
-            "application_no": "2026/000001",
+            "name": f"ACME {index}",
+            "name_tr": f"AKME {index}",
+            "application_no": f"2026/{index:06d}",
             "status": "registered",
             "nice_classes": [25],
             "owner": "Existing Holder",
         }
+        for index in range(1, 13)
     ]
 
     system_prompt, user_prompt, expected_ids = _build_ai_studio_name_risk_messages(
@@ -10814,12 +11579,151 @@ def test_ai_studio_name_risk_prompt_uses_database_candidates_without_scores():
 
     assert expected_ids == ["name_1"]
     assert "ACMIA" in user_prompt
-    assert "ACME" in user_prompt
+    assert "ACME 1" in user_prompt
+    assert "ACME 10" in user_prompt
+    assert "ACME 11" not in user_prompt
+    assert "AKME 1" in user_prompt
+    assert "AKME 10" in user_prompt
+    assert "AKME 11" not in user_prompt
     assert "2026/000001" in user_prompt
+    assert "2026/000010" in user_prompt
+    assert "2026/000011" not in user_prompt
     assert "deterministic" not in user_prompt
     assert "text_similarity" not in user_prompt
-    assert "prior similarity scores" in system_prompt
+    assert "semantic_similarity" not in user_prompt
+    assert "semantic candidates" in system_prompt
+    assert "similarity scores" in system_prompt
+    assert "strongest single conflict" in system_prompt
+    assert "Do not average" in system_prompt
+    assert "name_tr" in system_prompt
+    assert "direct translation conflicts" in system_prompt
     assert parsed_scores["name_1"] == 12.0
+
+
+def test_ai_studio_name_generation_prompt_uses_top_10_forbidden_conflicts_with_translations():
+    from models.schemas import NameSuggestionRequest
+    from services.creative_service import _build_ai_studio_name_generation_messages
+
+    request = NameSuggestionRequest(
+        query="Innoveil",
+        nice_classes=[9, 42],
+        industry="Technology",
+        style="modern",
+        language="mixed",
+        avoid_names=[],
+    )
+    forbidden_candidates = [
+        {
+            "name": f"INNOVELS {index}",
+            "name_tr": f"YENILIK {index}",
+            "application_no": f"2026/{index:06d}",
+            "status": "registered",
+            "nice_classes": [9, 42],
+            "owner": "Existing Holder",
+        }
+        for index in range(1, 13)
+    ]
+
+    system_prompt, user_prompt = _build_ai_studio_name_generation_messages(
+        request=request,
+        avoid_list=["Innoveil"],
+        count=10,
+        forbidden_candidates=forbidden_candidates,
+    )
+
+    assert "forbidden_database_candidates" in user_prompt
+    assert "INNOVELS 1" in user_prompt
+    assert "INNOVELS 10" in user_prompt
+    assert "INNOVELS 11" not in user_prompt
+    assert "YENILIK 1" in user_prompt
+    assert "YENILIK 10" in user_prompt
+    assert "YENILIK 11" not in user_prompt
+    assert "similarity_score" not in user_prompt
+    assert "deterministic" not in user_prompt
+    assert "negative conflict context" in system_prompt
+    assert "direct translations" in system_prompt
+    assert "name_tr" in system_prompt
+
+
+def test_ai_studio_name_retrieval_is_lexical_not_semantic():
+    import inspect
+    from services.creative_service import _collect_name_risk_inputs
+
+    source = inspect.getsource(_collect_name_risk_inputs)
+
+    assert "text_embedding" not in source
+    assert "get_text_embedding" not in source
+    assert "get_text_embeddings" not in source
+    assert "from pipeline import ai" not in source
+    assert "collect_risk_candidates" in source
+    assert "_get_risk_engine" in source
+
+
+def test_ai_studio_name_retrieval_uses_risk_engine_candidates_for_innoveil():
+    from services.creative_service import _collect_name_risk_inputs
+
+    fake_engine = MagicMock()
+    fake_engine.collect_risk_candidates.return_value = [
+        {
+            "name": "innovels",
+            "application_no": "2021/089838",
+            "status": "Tescil Edildi",
+            "classes": [9, 42],
+            "holder_name": "Existing Holder",
+            "image_path": "logos/innovels.png",
+            "scores": {"total": 0.91, "text_similarity": 0.91},
+        }
+    ]
+
+    with patch("services.creative_service._get_risk_engine", return_value=fake_engine):
+        name_items = _collect_name_risk_inputs(
+            candidate_names=["Innoveil"],
+            nice_classes=[9, 42],
+            avoid_names=[],
+            similarity_threshold=0.7,
+        )
+
+    fake_engine.collect_risk_candidates.assert_called_once_with(
+        name="Innoveil",
+        target_classes=[9, 42],
+        limit=10,
+    )
+    assert name_items[0]["db_candidates"][0]["name"] == "innovels"
+    assert name_items[0]["deterministic_risk_score"] == 91.0
+
+
+def test_ai_studio_pregeneration_conflicts_use_risk_engine_top_10_with_name_tr():
+    from services.creative_service import _collect_pregeneration_name_conflicts
+
+    fake_engine = MagicMock()
+    fake_engine.collect_risk_candidates.return_value = [
+        {
+            "name": f"innovels {index}",
+            "name_tr": f"yenilik {index}",
+            "application_no": f"2021/{index:06d}",
+            "status": "Tescil Edildi",
+            "classes": [9, 42],
+            "holder_name": "Existing Holder",
+        }
+        for index in range(1, 13)
+    ]
+
+    with patch("services.creative_service._get_risk_engine", return_value=fake_engine):
+        conflicts = _collect_pregeneration_name_conflicts(
+            query="Innoveil",
+            nice_classes=[9, 42],
+            limit=10,
+        )
+
+    fake_engine.collect_risk_candidates.assert_called_once_with(
+        name="Innoveil",
+        target_classes=[9, 42],
+        limit=10,
+    )
+    assert len(conflicts) == 10
+    assert conflicts[0]["name"] == "innovels 1"
+    assert conflicts[0]["name_tr"] == "yenilik 1"
+    assert conflicts[-1]["name"] == "innovels 10"
 
 
 @pytest.mark.asyncio
@@ -10854,10 +11758,7 @@ async def test_ai_studio_logo_risk_payload_is_visual_image_only(tmp_path):
     json_client_getter = MagicMock(side_effect=AssertionError("logo risk must not use text-only scoring"))
     with patch("services.search_risk_report_service._logo_path_from_url", return_value=str(candidate_path)):
         result = await _score_logo_with_risk_report_async(
-            brand_name="ACME",
-            nice_classes=[25],
             image_path=str(query_path),
-            ocr_text="acme",
             matches=[
                 {
                     "name": "ACME OLD",
@@ -11074,7 +11975,7 @@ async def test_creative_service_suggest_names_data_generates_and_logs_results():
     client.build_name_prompt.assert_called_once()
     assert client.build_name_prompt.call_args.kwargs["concept"] == "Acme"
     client.generate_names.assert_awaited_once_with(prompt="prompt", count=4)
-    deduct_name_credit_handler.assert_called_once_with(mock_db, str(org_id))
+    deduct_name_credit_handler.assert_called_once_with(mock_db, str(org_id), cost=2)
     increment_name_generation_usage_handler.assert_called_once_with(
         mock_db,
         str(user_id),
@@ -11088,6 +11989,303 @@ async def test_creative_service_suggest_names_data_generates_and_logs_results():
     generation_log_handler.assert_called_once()
     assert generation_log_handler.call_args.kwargs["output_data"]["risk_source"] == "risk_report_llm"
     audit_log_handler.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_creative_service_suggest_names_data_uses_risk_report_provider_for_generation():
+    from models.schemas import NameSuggestionRequest, SafeNameResult
+    from services.creative_service import suggest_names_data
+
+    org_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    current_user = SimpleNamespace(id=user_id, organization_id=org_id, is_superadmin=True)
+    request = NameSuggestionRequest(
+        query="Acme",
+        nice_classes=[25],
+        industry="Footwear",
+        style="modern",
+        language="tr",
+        avoid_names=["Nike"],
+    )
+
+    class _RiskReportNameGenerator:
+        provider_name = "risk_report_provider_chain"
+        text_model = "qwen:qwen-max"
+
+        def __init__(self):
+            self.calls = []
+
+        def is_available(self):
+            return True
+
+        async def generate_json(self, **kwargs):
+            self.calls.append(kwargs)
+            return {"names": ["ACMIA", "ACMEO"]}
+
+    generator = _RiskReportNameGenerator()
+    generation_log_handler = MagicMock()
+    audit_log_handler = MagicMock()
+    safe_result = SafeNameResult(
+        name="ACMIA",
+        risk_score=10.0,
+        text_similarity=0.1,
+        semantic_similarity=0.15,
+        phonetic_match=False,
+        closest_match="ACME",
+        is_safe=True,
+        translation_similarity=0.0,
+        risk_level="low",
+    )
+    filtered_result = SafeNameResult(
+        name="ACMEO",
+        risk_score=84.0,
+        text_similarity=0.8,
+        semantic_similarity=0.8,
+        phonetic_match=False,
+        closest_match="ACME",
+        is_safe=False,
+        translation_similarity=0.0,
+        risk_level="high",
+    )
+    pregeneration_conflict_collector = MagicMock(
+        return_value=[
+            {
+                "name": f"FORBIDMARK {index}",
+                "name_tr": f"YASAK {index}",
+                "application_no": f"2026/{index:06d}",
+                "status": "registered",
+                "nice_classes": [25],
+                "owner": "Existing Holder",
+            }
+            for index in range(1, 13)
+        ]
+    )
+
+    response = await suggest_names_data(
+        request=request,
+        current_user=current_user,
+        settings_obj=SimpleNamespace(
+            creative=SimpleNamespace(name_batch_size=4, name_similarity_threshold=0.7)
+        ),
+        name_generation_client_getter=lambda: generator,
+        session_count_getter=MagicMock(return_value=0),
+        cached_results_getter=MagicMock(return_value=None),
+        batch_validate_names_handler=MagicMock(return_value=[safe_result, filtered_result]),
+        pregeneration_conflict_collector_handler=pregeneration_conflict_collector,
+        name_risk_scorer_handler=AsyncMock(
+            return_value={
+                "name_1": {"llm_risk_score": 10.0, "risk_source": "risk_report_llm"},
+                "name_2": {"llm_risk_score": 84.0, "risk_source": "risk_report_llm"},
+            }
+        ),
+        session_count_incrementer=MagicMock(return_value=1),
+        cache_results_handler=MagicMock(),
+        generation_log_handler=generation_log_handler,
+        audit_log_handler=audit_log_handler,
+    )
+
+    assert response.total_generated == 2
+    assert [item.name for item in response.safe_names] == ["ACMIA"]
+    assert len(generator.calls) == 1
+    call = generator.calls[0]
+    assert call["temperature"] == 1.0
+    assert "ai_studio_name_generation" in call["user_prompt"]
+    assert '"required_name_count": 4' in call["user_prompt"]
+    assert '"primary_language": "tr"' in call["user_prompt"]
+    assert "Turkish-first" in call["user_prompt"]
+    assert "TechGuardian" in call["user_prompt"]
+    assert "forbidden_database_candidates" in call["user_prompt"]
+    assert "FORBIDMARK 1" in call["user_prompt"]
+    assert "FORBIDMARK 10" in call["user_prompt"]
+    assert "FORBIDMARK 11" not in call["user_prompt"]
+    assert "YASAK 1" in call["user_prompt"]
+    assert "YASAK 10" in call["user_prompt"]
+    assert "YASAK 11" not in call["user_prompt"]
+    assert "similarity_score" not in call["user_prompt"]
+    pregeneration_conflict_collector.assert_called_once_with(query="Acme", nice_classes=[25], limit=10)
+    log_kwargs = generation_log_handler.call_args.kwargs
+    assert log_kwargs["input_params"]["name_generation_provider"] == "qwen"
+    assert log_kwargs["input_params"]["name_generation_model"] == "qwen-max"
+    assert log_kwargs["input_params"]["pregeneration_forbidden_candidate_count"] == 10
+    assert log_kwargs["output_data"]["name_generation_provider"] == "qwen"
+    assert log_kwargs["output_data"]["name_generation_provider_chain"] == "risk_report_provider_chain"
+    assert log_kwargs["output_data"]["pregeneration_forbidden_candidate_count"] == 10
+    assert audit_log_handler.call_args.kwargs["metadata"]["name_generation_provider"] == "qwen"
+
+
+@pytest.mark.asyncio
+async def test_creative_service_suggest_names_data_retries_english_heavy_turkish_output():
+    from models.schemas import NameSuggestionRequest, SafeNameResult
+    from services.creative_service import suggest_names_data
+
+    org_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    current_user = SimpleNamespace(id=user_id, organization_id=org_id, is_superadmin=True)
+    request = NameSuggestionRequest(
+        query="IP Watch AI",
+        nice_classes=[9, 42],
+        industry="Technology",
+        style="modern",
+        language="tr",
+    )
+
+    class _RiskReportNameGenerator:
+        provider_name = "risk_report_provider_chain"
+        text_model = "qwen:qwen-max"
+
+        def __init__(self):
+            self.calls = []
+
+        def is_available(self):
+            return True
+
+        async def generate_json(self, **kwargs):
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                return {"names": ["TechGuardian", "CodeDefender", "CyberProtect", "DataShield"]}
+            return {"names": ["VeriKalkan", "MarkaNobet", "HakIz", "AkilKoru"]}
+
+    generator = _RiskReportNameGenerator()
+    batch_validate_names_handler = MagicMock(
+        side_effect=lambda candidate_names, **kwargs: [
+            SafeNameResult(
+                name=name,
+                risk_score=10.0,
+                text_similarity=0.1,
+                semantic_similarity=0.1,
+                phonetic_match=False,
+                closest_match=None,
+                is_safe=True,
+                translation_similarity=0.0,
+                risk_level="low",
+            )
+            for name in candidate_names
+        ]
+    )
+    generation_log_handler = MagicMock()
+
+    response = await suggest_names_data(
+        request=request,
+        current_user=current_user,
+        settings_obj=SimpleNamespace(
+            creative=SimpleNamespace(name_batch_size=4, name_similarity_threshold=0.7)
+        ),
+        name_generation_client_getter=lambda: generator,
+        session_count_getter=MagicMock(return_value=0),
+        cached_results_getter=MagicMock(return_value=None),
+        batch_validate_names_handler=batch_validate_names_handler,
+        name_risk_scorer_handler=AsyncMock(
+            return_value={
+                f"name_{idx}": {"llm_risk_score": 10.0, "risk_source": "risk_report_llm"}
+                for idx in range(1, 5)
+            }
+        ),
+        session_count_incrementer=MagicMock(return_value=4),
+        cache_results_handler=MagicMock(),
+        generation_log_handler=generation_log_handler,
+        audit_log_handler=MagicMock(),
+    )
+
+    assert len(generator.calls) == 2
+    assert "STRICT_LANGUAGE_RETRY" in generator.calls[1]["user_prompt"]
+    assert [item.name for item in response.safe_names] == ["VeriKalkan", "MarkaNobet", "HakIz", "AkilKoru"]
+    assert batch_validate_names_handler.call_args.kwargs["candidate_names"] == [
+        "VeriKalkan",
+        "MarkaNobet",
+        "HakIz",
+        "AkilKoru",
+    ]
+    log_kwargs = generation_log_handler.call_args.kwargs
+    assert log_kwargs["input_params"]["name_language_retry_used"] is True
+    assert log_kwargs["output_data"]["name_language_retry_used"] is True
+
+
+def test_creative_service_detects_english_heavy_turkish_name_batch():
+    from services.creative_service import _turkish_name_batch_is_english_heavy
+
+    assert _turkish_name_batch_is_english_heavy(
+        ["TechGuardian", "CodeDefender", "CyberProtect", "DataShield"]
+    ) is True
+    assert _turkish_name_batch_is_english_heavy(
+        ["VeriKalkan", "MarkaNobet", "HakIz", "AkilKoru"]
+    ) is False
+
+
+def test_creative_service_name_generation_supports_mixed_language_policy():
+    from models.schemas import NameSuggestionRequest
+    from services.creative_service import _build_ai_studio_name_generation_messages
+
+    request = NameSuggestionRequest(
+        query="IP Watch AI",
+        nice_classes=[9, 42],
+        industry="Technology",
+        style="modern",
+        language="mixed",
+    )
+
+    _, user_prompt = _build_ai_studio_name_generation_messages(
+        request=request,
+        avoid_list=["IP Watch AI"],
+        count=8,
+    )
+
+    assert '"primary_language": "mixed"' in user_prompt
+    assert "Mixed Turkish-English" in user_prompt
+    assert "Do not let one language dominate" in user_prompt
+
+
+@pytest.mark.parametrize(
+    ("language", "expected_policy"),
+    [
+        ("de", "German-first brand names"),
+        ("it", "Italian-first brand names"),
+        ("fr", "French-first brand names"),
+        ("ar", "Arabic-first brand names"),
+        ("ku", "Kurdish-first brand names"),
+        ("fa", "Persian-first brand names"),
+        ("zh", "Chinese-first brand names"),
+        ("ru", "Russian-first brand names"),
+    ],
+)
+def test_creative_service_name_generation_supports_additional_language_policies(language, expected_policy):
+    from models.schemas import NameSuggestionRequest
+    from services.creative_service import _build_ai_studio_name_generation_messages
+
+    request = NameSuggestionRequest(
+        query="IP Watch AI",
+        nice_classes=[9, 42],
+        industry="Technology",
+        style="modern",
+        language=language,
+    )
+
+    _, user_prompt = _build_ai_studio_name_generation_messages(
+        request=request,
+        avoid_list=[],
+        count=8,
+    )
+
+    assert f'"primary_language": "{language}"' in user_prompt
+    assert expected_policy in user_prompt
+
+
+def test_creative_service_parses_risk_report_name_generation_response():
+    from services.creative_service import _parse_ai_studio_name_generation_response
+
+    parsed = _parse_ai_studio_name_generation_response(
+        {
+            "names": [
+                "  1. ACMIA  ",
+                {"name": "ACMEO"},
+                {"brand_name": "Acmevo"},
+                "acmia",
+                "",
+            ]
+        },
+        max_count=4,
+    )
+
+    assert parsed == ["ACMIA", "ACMEO", "Acmevo"]
 
 
 @pytest.mark.asyncio
@@ -11238,7 +12436,7 @@ async def test_creative_service_suggest_names_data_superadmin_bypasses_credit_ga
     deduct_name_credit_handler.assert_not_called()
     increment_name_generation_usage_handler.assert_not_called()
     plan_credits_getter.assert_not_called()
-    assert generation_log_handler.call_args.kwargs["credits_used"] == 0
+    assert generation_log_handler.call_args.kwargs["credits_used"] == 2
 
 
 @pytest.mark.asyncio
@@ -11497,7 +12695,7 @@ async def test_creative_service_generate_logo_data_superadmin_bypasses_credit_ga
     deduct_logo_credit_handler.assert_not_called()
     refund_logo_credit_handler.assert_not_called()
     logo_credits_remaining_getter.assert_not_called()
-    assert generation_log_handler.call_args.kwargs["credits_used"] == 0
+    assert generation_log_handler.call_args.kwargs["credits_used"] == 5
 
 
 @pytest.mark.asyncio
@@ -14348,17 +15546,14 @@ async def test_payment_service_initialize_payment_data_creates_checkout_session(
     mock_db1.cursor.return_value = mock_cursor1
     mock_db1_cm.__enter__.return_value = mock_db1
     mock_db1_cm.__exit__.return_value = False
-    mock_cursor1.fetchone.side_effect = [
-        {
-            "tax_id": "12345678901",
-            "address": "Istanbul",
-            "city": "Istanbul",
-            "country": "Turkey",
-            "phone": "+90 555 000 0000",
-            "user_phone": None,
-        },
-        {"id": "pay-1"},
-    ]
+    mock_cursor1.fetchone.return_value = {
+        "tax_id": "12345678901",
+        "address": "Istanbul",
+        "city": "Istanbul",
+        "country": "Turkey",
+        "phone": "+90 555 000 0000",
+        "user_phone": None,
+    }
 
     mock_db2_cm = MagicMock()
     mock_db2 = MagicMock()
@@ -14366,6 +15561,14 @@ async def test_payment_service_initialize_payment_data_creates_checkout_session(
     mock_db2.cursor.return_value = mock_cursor2
     mock_db2_cm.__enter__.return_value = mock_db2
     mock_db2_cm.__exit__.return_value = False
+    mock_cursor2.fetchone.return_value = {"id": "pay-1"}
+
+    mock_db3_cm = MagicMock()
+    mock_db3 = MagicMock()
+    mock_cursor3 = MagicMock()
+    mock_db3.cursor.return_value = mock_cursor3
+    mock_db3_cm.__enter__.return_value = mock_db3
+    mock_db3_cm.__exit__.return_value = False
 
     checkout_result = MagicMock()
     checkout_result.read.return_value = (
@@ -14380,8 +15583,8 @@ async def test_payment_service_initialize_payment_data_creates_checkout_session(
         request=request,
         payload={"plan": "starter", "billing": "monthly"},
         current_user=current_user,
-        db_factory=MagicMock(side_effect=[mock_db1_cm, mock_db2_cm]),
-        db_connection_factory=MagicMock(side_effect=[object(), object()]),
+        db_factory=MagicMock(side_effect=[mock_db1_cm, mock_db2_cm, mock_db3_cm]),
+        db_connection_factory=MagicMock(side_effect=[object(), object(), object()]),
         settings_obj=settings_obj,
         plan_features={
             "starter": {
@@ -14402,9 +15605,9 @@ async def test_payment_service_initialize_payment_data_creates_checkout_session(
     assert request_data["buyer"]["ip"] == "198.51.100.9"
     assert request_data["callbackUrl"] == "https://example.com/callback"
     assert request_data["basketItems"][0]["id"] == "pay-1"
-    mock_db1.commit.assert_called_once()
     mock_db2.commit.assert_called_once()
-    assert mock_cursor2.execute.call_args.args[1] == ("tok-1", "pay-1")
+    mock_db3.commit.assert_called_once()
+    assert mock_cursor3.execute.call_args.args[1] == ("tok-1", "pay-1")
 
 
 def test_payment_service_activate_subscription_refreshes_monthly_ai_credits():
@@ -14471,6 +15674,84 @@ def test_payment_service_process_payment_result_marks_completed_and_activates_su
         "annual",
     )
     assert mock_db.commit.call_count == 1
+
+
+def test_payment_service_process_payment_result_credit_pack_branch():
+    """Credit-pack payments invoke the credit applier, not the subscription activator."""
+    from services.payment_service import process_payment_result
+
+    payment = _make_payment_row(
+        payment_id="pay-cp-1",
+        plan_name=None,
+        billing_period=None,
+        kind="credit_pack",
+        pack_id="small",
+        credits_amount=25,
+    )
+    mock_db = MagicMock()
+    mock_db.cursor.return_value = MagicMock()
+    subscription_activator = MagicMock(return_value=True)
+    credit_pack_applier = MagicMock(return_value=True)
+
+    success = process_payment_result(
+        mock_db,
+        payment,
+        {"status": "success", "paymentStatus": "SUCCESS", "paymentId": "iyz-cp-1"},
+        subscription_activator=subscription_activator,
+        credit_pack_applier=credit_pack_applier,
+    )
+
+    assert success is True
+    credit_pack_applier.assert_called_once_with(mock_db, payment)
+    subscription_activator.assert_not_called()
+
+
+def test_payment_service_apply_credit_pack_credits_org():
+    """apply_credit_pack_purchase looks up the pack and adds its credits."""
+    from services.payment_service import apply_credit_pack_purchase
+
+    payment = _make_payment_row(
+        plan_name=None,
+        billing_period=None,
+        kind="credit_pack",
+        pack_id="medium",
+        credits_amount=100,
+    )
+    mock_db = MagicMock()
+    credit_adder = MagicMock(return_value=True)
+
+    result = apply_credit_pack_purchase(
+        mock_db,
+        payment,
+        credit_adder=credit_adder,
+    )
+
+    assert result is True
+    credit_adder.assert_called_once_with(mock_db, str(payment["organization_id"]), 100)
+
+
+def test_payment_service_apply_credit_pack_rejects_missing_pack():
+    """Without a pack_id and zero credits_amount, the apply call refuses."""
+    from services.payment_service import apply_credit_pack_purchase
+
+    payment = _make_payment_row(
+        plan_name=None,
+        billing_period=None,
+        kind="credit_pack",
+        pack_id=None,
+        credits_amount=0,
+    )
+    mock_db = MagicMock()
+    credit_adder = MagicMock(return_value=True)
+
+    result = apply_credit_pack_purchase(
+        mock_db,
+        payment,
+        credit_adder=credit_adder,
+    )
+
+    assert result is False
+    credit_adder.assert_not_called()
 
 
 @pytest.mark.asyncio

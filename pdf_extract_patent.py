@@ -34,6 +34,7 @@ import argparse
 import json
 import logging
 import re
+import shutil
 import time
 from collections import Counter
 from dataclasses import asdict, dataclass, field
@@ -153,6 +154,20 @@ _BULLETIN_DATE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# 2023_03.pdf cover page rendered some digit glyphs as Coptic / Greek
+# letters because of a font-substitution glitch at TPMK publication time
+# (header reads ``Sayı ϮϬϮϯͲϬϯ`` / ``Ϯ1.03.202ϯ`` instead of
+# ``Sayı 2023-03`` / ``21.03.2023``). Normalise the handful of mapped
+# codepoints back to ASCII before regex matching. Other PDFs we have
+# don't trigger this — keep the table tiny and deliberate; expand only
+# when a new failing bulletin shows another glyph.
+_TR_DIGIT_GLYPH_FIX = str.maketrans({
+    "Ϭ": "0",  # Ϭ COPTIC CAPITAL LETTER SHIMA
+    "Ϯ": "2",  # Ϯ COPTIC CAPITAL LETTER DEI
+    "ϯ": "3",  # ϯ COPTIC SMALL LETTER DEI
+    "Ͳ": "-",  # Ͳ GREEK CAPITAL LETTER ARCHAIC SAMPI
+})
+
 
 def extract_bulletin_metadata_from_text(
     text: Optional[str],
@@ -166,6 +181,8 @@ def extract_bulletin_metadata_from_text(
     """
     if not text:
         return None, None
+
+    text = text.translate(_TR_DIGIT_GLYPH_FIX)
 
     bulletin_no: Optional[str] = None
     m = _BULLETIN_NO_RE.search(text)
@@ -479,6 +496,26 @@ def parse_application_no(value: Optional[str]) -> Optional[str]:
         return None
     m = _APPLICATION_NO_RE.search(value)
     return f"{m.group(1)}/{m.group(2)}" if m else None
+
+
+def derive_application_no_from_publication_no(
+    publication_no: Optional[str],
+) -> Optional[str]:
+    """Reconstruct the (21) application_no from a canonical (11) value.
+
+    For Turkish patents the publication number `TR YYYY NNNNNN K`
+    deterministically encodes the application number `YYYY/NNNNNN`.
+    Used as a fallback when the parser missed the (21) field — happens
+    on "Düzeltilmiş Yayın Sayfası" (corrected publication) pages where
+    the bibliographic block sits *before* the (11) boundary marker, so
+    the slice the parser sees only has (11) and the correction note.
+    """
+    if not publication_no:
+        return None
+    m = _PUBLICATION_NO_RE.search(publication_no)
+    if not m:
+        return None
+    return f"{m.group(1)}/{m.group(2)}"
 
 
 def parse_date_field(value: Optional[str]) -> Optional[str]:
@@ -856,6 +893,10 @@ def parse_full_bibliographic_record(
         record.publication_kind_label = clean_text(fields["12"][0]) or None
     if "21" in fields and fields["21"]:
         record.application_no = parse_application_no(fields["21"][0])
+    if record.application_no is None:
+        record.application_no = derive_application_no_from_publication_no(
+            record.publication_no
+        )
     if "22" in fields and fields["22"]:
         record.application_date = parse_date_field(fields["22"][0])
     if "43" in fields and fields["43"]:
@@ -1201,24 +1242,16 @@ _cli_logger = logging.getLogger("turkpatent.pdf_extract_cli")
 class CLIArgs:
     pdf_paths: List[Path]
     out_dir: Path
-    figures_root: Optional[Path]
     save_images: bool
     force: bool
 
 
-def metadata_filename(pdf_path: Path) -> str:
-    """``2025_08.pdf`` -> ``2025_08_pdf_metadata.json``.
-
-    The ``_pdf_`` infix distinguishes this from the CD-side
-    ``2025_12_metadata.json`` produced by ``cd_extract_patent`` so the
-    Stage 4 reconciler can read both as separate inputs.
-    """
-    return f"{pdf_path.stem}_pdf_metadata.json"
-
-
-def figures_dirname(pdf_path: Path) -> str:
-    """``2025_08.pdf`` -> ``2025_08_figures`` (folder name, no path)."""
-    return f"{pdf_path.stem}_figures"
+# PDF-side artifacts land in the bulletin parent folder
+# (PT_{YYYY}_{M}_{date}/) — see patent_paths.bulletin_folder_name.
+# These are the canonical filenames inside that folder.
+PDF_METADATA_FILENAME = "pdf_metadata.json"
+BULLETIN_PDF_FILENAME = "bulletin.pdf"
+FIGURES_DIRNAME = "figures"
 
 
 def _metadata_is_fresh(pdf_path: Path, json_path: Path) -> bool:
@@ -1266,17 +1299,9 @@ def parse_argv(argv: Optional[Sequence[str]] = None) -> CLIArgs:
         "--out-dir",
         type=Path,
         default=None,
-        help="Where to write {YYYY_M}_pdf_metadata.json files "
-             "(default: --bulletins-dir).",
-    )
-    parser.add_argument(
-        "--figures-root",
-        type=Path,
-        default=None,
-        help="Root directory for per-PDF figure folders. Defaults to "
-             "the same folder as the JSON sidecar; figures land in "
-             "{figures-root}/{YYYY_M}_figures/. Ignored when "
-             "--no-images is given.",
+        help="Bulletins root under which PT_{YYYY}_{M}_{date}/ folders "
+             "are created (default: --bulletins-dir). Each PDF's "
+             "outputs land in its bulletin's parent folder.",
     )
     parser.add_argument(
         "--no-images",
@@ -1288,8 +1313,8 @@ def parse_argv(argv: Optional[Sequence[str]] = None) -> CLIArgs:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Re-extract even when {YYYY_M}_pdf_metadata.json is "
-             "newer than the source PDF.",
+        help="Re-extract even when pdf_metadata.json in the bulletin "
+             "folder is newer than the source PDF.",
     )
     ns = parser.parse_args(argv)
 
@@ -1298,6 +1323,12 @@ def parse_argv(argv: Optional[Sequence[str]] = None) -> CLIArgs:
 
     if ns.all:
         candidates = sorted(ns.bulletins_dir.glob("*.pdf"))
+        # Skip legacy multi-UUID bundle parts. Despite their .pdf extension,
+        # these files are RAR archive payloads (TPMK serves the parts as
+        # application/octet-stream RAR data, the collector saves them as
+        # *_legacy_partNN.pdf). They belong to the deferred Stage-8 legacy
+        # ingestion path, not the modern bibliographic parser.
+        candidates = [p for p in candidates if "_legacy_part" not in p.stem]
         if not candidates:
             parser.error(f"--all matched no *.pdf files in {ns.bulletins_dir}")
         pdf_paths = candidates
@@ -1307,64 +1338,239 @@ def parse_argv(argv: Optional[Sequence[str]] = None) -> CLIArgs:
         parser.error("provide --pdf (one or more) or --all")
 
     out_dir = ns.out_dir if ns.out_dir is not None else ns.bulletins_dir
-    figures_root = ns.figures_root if ns.figures_root is not None else out_dir
 
     return CLIArgs(
         pdf_paths=pdf_paths,
         out_dir=out_dir,
-        figures_root=figures_root,
         save_images=not ns.no_images,
         force=ns.force,
     )
 
 
+_PDF_PNG_PREFIX_RE = re.compile(r"^(\d{4}_\d+)_p\d+_\d+$")
+_PDF_FILENAME_BULLETIN_RE = re.compile(r"^(\d{4})_(\d{1,2})$")
+
+
+def _resolve_cover_collision(
+    cover_parent: Path,
+    pdf: Path,
+    out_dir: Path,
+    cover_no: str,
+    cover_date: str,
+) -> Tuple[Path, str, str]:
+    """Decide where to write pdf_metadata.json + the bulletin_no/date
+    that should be recorded inside it. Cover-derived path is primary;
+    falls back to a filename-derived ``PT_{Y}_{M}_*`` folder when the
+    cover-derived folder already has a pdf_metadata.json from a
+    different source PDF.
+
+    Returns ``(folder, bulletin_no, bulletin_date)``. On the no-collision
+    path these are the cover-derived values unchanged. On the fallback
+    path the bulletin_no/date come from the resolved folder's
+    cd_metadata.json (the canonical source) so reconcile won't reject
+    the merge for a CD/PDF mismatch.
+
+    The fallback only fires for the rare case of a truly mislabeled
+    cover page (saw it on 2024_04 where the cover claimed "Sayı
+    2024-01"); correct PDFs keep the cover-page route untouched.
+    """
+    existing = cover_parent / PDF_METADATA_FILENAME
+    if not existing.is_file():
+        return cover_parent, cover_no, cover_date
+    try:
+        prior = json.loads(existing.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return cover_parent, cover_no, cover_date
+    prior_src = prior.get("source_pdf")
+    if not prior_src or prior_src == pdf.name:
+        return cover_parent, cover_no, cover_date
+
+    m = _PDF_FILENAME_BULLETIN_RE.match(pdf.stem)
+    if not m:
+        return cover_parent, cover_no, cover_date
+    year, month = m.group(1), m.group(2).lstrip("0") or "0"
+    matches = sorted(out_dir.glob(f"PT_{year}_{month}_*"))
+    if not matches:
+        _cli_logger.warning(
+            "[!] %s: cover-page bulletin conflicts with %s in %s, but no "
+            "PT_%s_%s_* fallback folder exists; keeping cover route",
+            pdf.name, prior_src, cover_parent.name, year, month,
+        )
+        return cover_parent, cover_no, cover_date
+    fallback = matches[0]
+    # Pull the canonical bulletin_no/date from the CD metadata in the
+    # fallback folder; that's what reconcile will compare against.
+    cd_path = fallback / "cd_metadata.json"
+    new_no, new_date = cover_no, cover_date
+    if cd_path.is_file():
+        try:
+            cd_doc = json.loads(cd_path.read_text(encoding="utf-8"))
+            if cd_doc.get("bulletin_no"):
+                new_no = cd_doc["bulletin_no"]
+            if cd_doc.get("bulletin_date"):
+                new_date = cd_doc["bulletin_date"]
+        except (OSError, ValueError):
+            pass
+    _cli_logger.warning(
+        "[!] %s: cover-page bulletin %r conflicts with %s already in %s; "
+        "using filename-derived %s with bulletin_no=%r instead",
+        pdf.name, cover_no, prior_src, cover_parent.name, fallback.name, new_no,
+    )
+    return fallback, new_no, new_date
+
+
+def _dedup_pdf_pngs_against_cd_tifs(
+    figures_dir: Path,
+    payload: Dict[str, Any],
+) -> int:
+    """Drop PDF PNGs whose ``{year}_{appno}`` prefix matches a CD TIFF
+    in the same dir, and remove the matching entries from
+    ``payload['records'][].figures``. The CD TIFF survives as the
+    canonical figure for that record.
+
+    Returns the count of PNGs deleted.
+
+    Mirrors ``cd_extract_patent._carry_cd_images`` dedup pass. The
+    earlier asymmetry meant: CD-first when CD runs LAST; nothing when
+    PDF runs after CD. This closes the gap.
+    """
+    cd_stems = {p.stem for p in figures_dir.glob("*.tif")}
+    if not cd_stems:
+        return 0
+
+    dropped_paths: set = set()
+    for png in list(figures_dir.glob("*.png")):
+        match = _PDF_PNG_PREFIX_RE.match(png.stem)
+        if not match:
+            continue
+        if match.group(1) in cd_stems:
+            png.unlink()
+            dropped_paths.add(f"{FIGURES_DIRNAME}/{png.name}")
+
+    if dropped_paths:
+        for record in payload.get("records", []):
+            figs = record.get("figures")
+            if not figs:
+                continue
+            record["figures"] = [
+                f for f in figs if f.get("image_path") not in dropped_paths
+            ]
+
+    return len(dropped_paths)
+
+
 def _process_one(
     pdf: Path,
     out_dir: Path,
-    figures_root: Optional[Path],
     *,
     save_images: bool,
     force: bool,
 ) -> Dict[str, Any]:
-    """Run parse_pdf for a single PDF and write its JSON sidecar.
+    """Run parse_pdf for a single PDF and write all outputs into its
+    bulletin's PT_{YYYY}_{M}_{date}/ parent folder.
+
+    Outputs:
+      - ``pdf_metadata.json`` — the parsed JSON
+      - ``bulletin.pdf`` — copy of the source PDF (Marka convention)
+      - ``figures/`` — extracted images (skipped when save_images=False)
 
     Returns a small status dict so the top-level loop can report
     succeeded / skipped / failed counts.
     """
+    from patent_paths import bulletin_folder_path  # local import; avoids cycles
+
     if not pdf.is_file():
         return {"status": "missing", "pdf": pdf.name}
 
-    json_path = out_dir / metadata_filename(pdf)
+    # Cheap probe of the cover page to learn bulletin_no + date BEFORE
+    # the full parse — the parent folder name depends on those, and the
+    # full parse needs to know where to write its figures.
+    fitz = _get_fitz()
+    with fitz.open(str(pdf)) as doc:
+        bulletin_no, bulletin_date = extract_bulletin_metadata(doc)
+
+    if not bulletin_no or not bulletin_date:
+        _cli_logger.error(
+            "[!] %s: could not extract bulletin_no/date from cover page "
+            "(no=%r, date=%r)", pdf.name, bulletin_no, bulletin_date,
+        )
+        return {"status": "failed", "pdf": pdf.name,
+                "error": "missing bulletin metadata on cover page"}
+
+    parent = bulletin_folder_path(out_dir, bulletin_no, bulletin_date)
+
+    # Defensive fallback: if the cover-derived folder already has a
+    # pdf_metadata.json from a *different* source PDF, the cover page is
+    # mislabeled (saw it on 2024_04.pdf — its cover claims "Sayı 2024-01"
+    # but the file is byte-distinct from 2024_01.pdf). Route to a folder
+    # derived from the *filename* instead, reusing the matching PT_*/
+    # folder created by Stage 2 if available so we don't strand the data
+    # in a date-less placeholder. ``bulletin_no`` and ``bulletin_date``
+    # are also corrected to the CD-canonical values so reconcile doesn't
+    # reject the merge as a CD/PDF mismatch.
+    parent, bulletin_no, bulletin_date = _resolve_cover_collision(
+        parent, pdf, out_dir, bulletin_no, bulletin_date
+    )
+    json_path = parent / PDF_METADATA_FILENAME
+
     if not force and _metadata_is_fresh(pdf, json_path):
         _cli_logger.info("[=] %s is fresh, skipping (use --force to override)",
                          pdf.name)
         return {"status": "skipped", "pdf": pdf.name, "out": json_path.name}
 
+    parent.mkdir(parents=True, exist_ok=True)
+
     figures_dir: Optional[Path] = None
-    if save_images and figures_root is not None:
-        figures_dir = figures_root / figures_dirname(pdf)
+    if save_images:
+        figures_dir = parent / FIGURES_DIRNAME
         figures_dir.mkdir(parents=True, exist_ok=True)
 
     started = time.time()
     payload = parse_pdf(pdf, figures_dir=figures_dir, save_images=save_images)
     payload["extract_duration_seconds"] = round(time.time() - started, 1)
+    # Override the cover-derived bulletin_no/date in the payload when the
+    # collision fallback corrected them. ``parse_pdf`` doesn't know about
+    # the resolution; it sets these from the (mislabeled) cover. Without
+    # this override the JSON would say one thing and the folder name
+    # another, and Stage 4 reconcile would reject the CD/PDF mismatch.
+    payload["bulletin_no"] = bulletin_no
+    payload["bulletin_date"] = bulletin_date
 
-    out_dir.mkdir(parents=True, exist_ok=True)
+    # CD-first dedup, PDF-side. Symmetric to cd_extract_patent's
+    # carry-time dedup: when PDF writes PNGs into a folder where a CD
+    # TIFF for the same {year}_{appno} already exists, drop the PNG
+    # and null its image_path in the payload (page/xref/bbox metadata
+    # preserved for traceability). Only fires when figures_dir is set
+    # (i.e., save_images=True). Visually verified on app 2023/018085
+    # (2026-05-09) that the CD TIFF and PDF first-figure are the same
+    # drawing in different formats.
+    if figures_dir is not None and figures_dir.is_dir():
+        dropped = _dedup_pdf_pngs_against_cd_tifs(figures_dir, payload)
+        if dropped:
+            payload["stats"]["pdf_pngs_dropped_for_cd_tifs"] = dropped
+
     json_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
+    # Copy source PDF as bulletin.pdf for self-containment of the parent
+    # folder. Skip the copy if the destination already matches in size —
+    # cheap idempotency that avoids the ~50 MB rewrite on re-runs.
+    bulletin_pdf = parent / BULLETIN_PDF_FILENAME
+    if not bulletin_pdf.is_file() or bulletin_pdf.stat().st_size != pdf.stat().st_size:
+        shutil.copy2(pdf, bulletin_pdf)
+
     s = payload["stats"]
     _cli_logger.info(
-        "[+] %s: %d records (EP=%d), %d figures, wrote %s in %.1fs",
+        "[+] %s: %d records (EP=%d), %d figures, wrote %s/%s in %.1fs",
         pdf.name, s["records"], s["ep_fascicles"], s["figures_total"],
-        json_path.name, payload["extract_duration_seconds"],
+        parent.name, json_path.name, payload["extract_duration_seconds"],
     )
     return {
         "status": "ok",
         "pdf": pdf.name,
-        "out": json_path.name,
+        "out": parent.name,
         "stats": s,
     }
 
@@ -1384,7 +1590,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             result = _process_one(
                 pdf,
                 args.out_dir,
-                args.figures_root,
                 save_images=args.save_images,
                 force=args.force,
             )

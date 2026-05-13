@@ -31,18 +31,8 @@ window.AppComponents.renderNameCard = function(name, index) {
     var closestHtml = '';
     if (name.closest_match) {
         closestHtml = '<div class="text-xs mt-1.5" style="color:var(--color-text-muted)">'
-            + t('studio.closest_label') + ' <span class="font-medium" style="color:var(--color-text-secondary)">' + escapeHtml(name.closest_match) + '</span>';
-        var maxSim = Math.max(name.text_similarity || 0, name.semantic_similarity || 0);
-        if (maxSim > 0) {
-            closestHtml += ' <span style="color:var(--color-text-faint)">(' + t('studio.similarity_pct', { pct: Math.round(maxSim * 100) }) + ')</span>';
-        }
-        closestHtml += '</div>';
-    }
-
-    var badgesHtml = window.AppComponents.renderSimilarityBadges(name);
-    // Phonetic match badge (binary signal, shown separately)
-    if (name.phonetic_match) {
-        badgesHtml += '<div class="mt-1"><span class="text-xs px-1.5 py-0.5 rounded" style="' + window.AppComponents.getScoreColor(90) + '">' + t('studio.phonetic_match') + '</span></div>';
+            + t('studio.closest_label') + ' <span class="font-medium" style="color:var(--color-text-secondary)">' + escapeHtml(name.closest_match) + '</span>'
+            + '</div>';
     }
 
     var useForLogoBtn = isSafe
@@ -60,7 +50,6 @@ window.AppComponents.renderNameCard = function(name, index) {
         + riskLevelHtml
         + '</div>'
         + closestHtml
-        + badgesHtml
         + useForLogoBtn
         + '</div>'
         + '<div class="flex-shrink-0">' + scoreRing + '</div>'

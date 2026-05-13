@@ -68,6 +68,7 @@ def _holders_table_exists(cur) -> bool:
 
 
 SQL_PATH = PROJECT_ROOT / "migrations" / "designs.sql"
+DESCRIPTIONS_SQL_PATH = PROJECT_ROOT / "migrations" / "locarno_descriptions.sql"
 
 DOWN_SQL = """
 DROP TABLE IF EXISTS design_events CASCADE;
@@ -98,6 +99,8 @@ def apply_up(verbose: bool = True) -> None:
             if verbose:
                 print(f"designs migration starting (already up = {already_up})")
             cur.execute(sql)
+            if DESCRIPTIONS_SQL_PATH.exists():
+                cur.execute(DESCRIPTIONS_SQL_PATH.read_text(encoding="utf-8"))
         conn.commit()
     if verbose:
         print("designs migration applied")

@@ -80,7 +80,6 @@ def test_process_single_folder_preserves_ai_fields_when_inputs_match(monkeypatch
                     "APPLICATIONNO": "2026 / 123456",
                     "IMAGE": "2026_123456",
                     "TRADEMARK": {"NAME": "ORION"},
-                    "text_embedding": [0.1],
                     "image_embedding": [0.2],
                     "dinov2_embedding": [0.3],
                     "color_histogram": [0.4],
@@ -116,7 +115,6 @@ def test_process_single_folder_preserves_ai_fields_when_inputs_match(monkeypatch
     saved = json.loads(metadata_path.read_text(encoding="utf-8"))[0]
 
     assert result["status"] == "success"
-    assert saved["text_embedding"] == [0.1]
     assert saved["image_embedding"] == [0.2]
     assert saved["logo_ocr_text"] == ""
     assert saved["name_tr_backend"] == "local"
@@ -133,7 +131,6 @@ def test_process_single_folder_does_not_preserve_stale_text_ai_when_name_changes
                     "APPLICATIONNO": "2026/123456",
                     "IMAGE": "2026_123456",
                     "TRADEMARK": {"NAME": "OLD"},
-                    "text_embedding": [0.1],
                     "image_embedding": [0.2],
                     "name_tr": "OLD",
                     "detected_lang": "tr",
@@ -163,7 +160,6 @@ def test_process_single_folder_does_not_preserve_stale_text_ai_when_name_changes
     saved = json.loads(metadata_path.read_text(encoding="utf-8"))[0]
 
     assert result["status"] == "success"
-    assert "text_embedding" not in saved
     assert "name_tr" not in saved
     assert "detected_lang" not in saved
     assert saved["image_embedding"] == [0.2]
@@ -260,7 +256,6 @@ def test_merge_scraped_records_clears_dependent_ai_fields_when_inputs_change():
             "APPLICATIONNO": "2026/123456",
             "IMAGE": "old_image",
             "TRADEMARK": {"NAME": "OLD NAME"},
-            "text_embedding": [0.1],
             "name_tr": "OLD NAME",
             "detected_lang": "tr",
             "image_embedding": [0.2],

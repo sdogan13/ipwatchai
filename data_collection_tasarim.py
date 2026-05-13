@@ -174,6 +174,48 @@ def issue_folder_is_complete(issue_folder: Path) -> bool:
         return False
 
 
+def _find_existing_issue_folder(
+    bulletins_root: Path,
+    card_id: str,
+) -> Optional[Path]:
+    """Find a single ``TS_{card_id}_*/`` folder under ``bulletins_root``.
+
+    Why this helper: the TÜRKPATENT bulletin page sometimes exposes a
+    bulletin's archive-ingestion date instead of its actual publication
+    date — empirically observed for old issues like 240 (page reports
+    ``2026-04-24``, the real publication date is ``2016-03-09``). Without
+    this helper, the collector would write a fresh ``TS_240_2026-04-24/``
+    folder beside the canonical ``TS_240_2016-03-09/`` that already
+    holds the CD-extracted output, splitting one bulletin into two
+    folders.
+
+    Returns:
+      - ``Path`` of the matching folder when exactly one ``TS_{card_id}_*/``
+        directory exists.
+      - ``None`` when no folder matches (caller falls back to creating
+        a fresh folder named from ``card_date``).
+
+    Raises ``RuntimeError`` when more than one ``TS_{card_id}_*/``
+    folder matches — that's a real ambiguity (e.g. an unresolved
+    drift case left around) and we'd rather fail loud than guess.
+    """
+    if not card_id:
+        return None
+    if not bulletins_root.is_dir():
+        return None
+    matches = sorted(
+        p for p in bulletins_root.glob(f"TS_{card_id}_*") if p.is_dir()
+    )
+    if not matches:
+        return None
+    if len(matches) == 1:
+        return matches[0]
+    raise RuntimeError(
+        f"multiple TS_{card_id}_* folders under {bulletins_root}: "
+        f"{[p.name for p in matches]}; resolve manually before re-running"
+    )
+
+
 def check_local_existence(
     category_folder: str | Path,
     card_id: str,
@@ -190,6 +232,18 @@ def check_local_existence(
     for name in candidates:
         if issue_folder_is_complete(root / name):
             return True
+    # Fallback: any TS_{card_id}_*/ folder with bulletin.pdf inside.
+    # Catches drift cases where the page reports a different date than
+    # the existing folder's suffix (the same drift that prompted P.1
+    # in cd_extract_tasarim).
+    try:
+        existing = _find_existing_issue_folder(root, card_id)
+    except RuntimeError:
+        # Multi-match: existence is ambiguous — treat as "not complete"
+        # so process_card surfaces the issue when it tries to download.
+        return False
+    if existing is not None and issue_folder_is_complete(existing):
+        return True
     return False
 
 
@@ -243,6 +297,8 @@ class CLIArgs:
     limit: Optional[int]
     headless: bool
     bulletins_root: Path
+    issue: Optional[str] = None
+    force: bool = False
 
 
 def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
@@ -250,6 +306,14 @@ def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
     parser = argparse.ArgumentParser(prog="data_collection_tasarim", add_help=True)
     parser.add_argument("--full", action="store_true", help="walk the entire archive")
     parser.add_argument("--limit", type=int, default=None, help="stop after N downloads")
+    parser.add_argument(
+        "--issue",
+        type=str,
+        default=None,
+        help="restrict to a single bulletin issue number (e.g. --issue 240). "
+             "Implies --full so the incremental tracker doesn't stop early "
+             "before reaching the targeted issue.",
+    )
     parser.add_argument(
         "--headless",
         type=_parse_bool,
@@ -262,12 +326,23 @@ def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
         default=_LOCAL_DEFAULT_BULLETINS_DIR,
         help=f"output root (default: {_LOCAL_DEFAULT_BULLETINS_DIR})",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="re-download a bulletin's PDF even if it already exists "
+             "locally (default: skip cards whose target folder is complete)",
+    )
     ns = parser.parse_args(argv)
+    # --issue implies --full: the incremental tracker would otherwise stop
+    # walking the archive before reaching old bulletins.
+    full = ns.full or ns.issue is not None
     return CLIArgs(
-        full=ns.full,
+        full=full,
         limit=ns.limit,
         headless=ns.headless,
         bulletins_root=ns.bulletins_root,
+        issue=ns.issue.strip() if ns.issue else None,
+        force=ns.force,
     )
 
 
@@ -663,10 +738,26 @@ async def process_card(
     bulletins_root: Path,
     card_id: str,
     card_date: Optional[str],
+    *,
+    force: bool = False,
 ) -> CollectionCounters:
-    target_folder = bulletins_root / build_issue_folder_name(card_id, card_date)
+    # Prefer an existing TS_{card_id}_*/ folder if exactly one exists —
+    # mirrors P.1 in cd_extract_tasarim. Falls back to a freshly-named
+    # TS_{card_id}_{card_date}/ when no folder is on disk yet (the
+    # standalone case for newly-published bulletins). Multi-match is
+    # caught and reported as a per-card failure so the rest of the
+    # walk continues unaffected.
+    try:
+        existing = _find_existing_issue_folder(bulletins_root, card_id)
+    except RuntimeError as e:
+        logger.error("[!] %s: %s", card_id, e)
+        return CollectionCounters(failed=1)
+    if existing is not None:
+        target_folder = existing
+    else:
+        target_folder = bulletins_root / build_issue_folder_name(card_id, card_date)
 
-    if check_local_existence(bulletins_root, card_id, card_date=card_date):
+    if not force and check_local_existence(bulletins_root, card_id, card_date=card_date):
         logger.info("[=] %s already complete locally, skipping", target_folder.name)
         return CollectionCounters(skipped=1)
 
@@ -730,6 +821,11 @@ async def run_collection(args: CLIArgs) -> CollectionCounters:
                     if not card_id or card_id in seen:
                         continue
 
+                    # --issue NNN: silently skip every other card on the page
+                    # so we focus the walk on just the targeted bulletin.
+                    if args.issue is not None and card_id != args.issue:
+                        continue
+
                     if tracker is not None:
                         if not tracker.observe(card_date=card_date):
                             seen.add(card_id)
@@ -738,21 +834,43 @@ async def run_collection(args: CLIArgs) -> CollectionCounters:
                                 card_id, card_date or "?",
                             )
                             continue
-                        if check_local_existence(args.bulletins_root, card_id, card_date=card_date):
+                        if not args.force and check_local_existence(args.bulletins_root, card_id, card_date=card_date):
                             seen.add(card_id)
                             counters.skipped += 1
                             logger.info("[=] %s [%s] already complete locally, skipping",
                                         card_id, card_date or "?")
                             continue
 
+                    # --issue NNN: skip the download if this bulletin is
+                    # already complete on disk (idempotent re-run friendly),
+                    # then stop after we've handled the targeted card.
+                    if args.issue is not None and not args.force and check_local_existence(
+                        args.bulletins_root, card_id, card_date=card_date,
+                    ):
+                        seen.add(card_id)
+                        counters.skipped += 1
+                        logger.info(
+                            "[=] %s [%s] already complete locally, --issue stop",
+                            card_id, card_date or "?",
+                        )
+                        return counters
+
                     issue_counters = await process_card(
                         page, context, clickable, args.bulletins_root, card_id, card_date,
+                        force=args.force,
                     )
                     counters.downloaded += issue_counters.downloaded
                     counters.failed += issue_counters.failed
                     counters.skipped += issue_counters.skipped
                     pass_downloads += issue_counters.downloaded
                     seen.add(card_id)
+
+                    # --issue NNN early-stop: we've now processed the one
+                    # bulletin we were targeting; no point walking further.
+                    if args.issue is not None:
+                        logger.info("[*] --issue %s handled, stopping walk", args.issue)
+                        return counters
+
                     await force_close_menus(page)
                     await page.wait_for_timeout(200)
 

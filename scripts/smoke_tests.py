@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 import urllib.request, urllib.error, json, sys, io, subprocess, os, tempfile
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -45,7 +45,7 @@ print("  >> " + results[1])
 print()
 
 print("=" * 60)
-print("TEST 2: Image search POST /api/v1/search/intelligent")
+print("TEST 2: Image search POST /api/v1/search")
 print("=" * 60)
 try:
     proc = subprocess.run(["docker", "exec", "ipwatch_backend", "sh", "-c", "find /app/bulletins -maxdepth 4 -type f -name '*.jpg' 2>/dev/null | head -1"], capture_output=True, text=True, timeout=30)
@@ -55,7 +55,7 @@ try:
         tmp_img = os.path.join(tempfile.gettempdir(), "test_logo.jpg")
         subprocess.run(["docker", "cp", "ipwatch_backend:" + img_path, tmp_img], capture_output=True, timeout=15)
         if os.path.exists(tmp_img):
-            proc = subprocess.run(["curl", "-s", "-H", "Authorization: Bearer " + token, "-F", "query=test", "-F", "image=@" + tmp_img, "-F", "per_page=3", BASE + "/api/v1/search/intelligent"], capture_output=True, text=True, timeout=120)
+            proc = subprocess.run(["curl", "-s", "-H", "Authorization: Bearer " + token, "-F", "query=test", "-F", "image=@" + tmp_img, "-F", "per_page=3", BASE + "/api/v1/search"], capture_output=True, text=True, timeout=120)
             print("  Response: " + proc.stdout[:500])
             try:
                 rj = json.loads(proc.stdout)
@@ -116,10 +116,10 @@ print("  >> " + results[5])
 print()
 
 print("=" * 60)
-print("TEST 6: /api/v1/search/quick NIKE")
+print("TEST 6: /api/v1/search NIKE")
 print("=" * 60)
 try:
-    status, body = api_get("/api/v1/search/quick?query=NIKE&per_page=3", headers)
+    status, body = api_get("/api/v1/search?query=NIKE&per_page=3", headers)
     if isinstance(body, dict) and "results" in body:
         r = body["results"]
         print("  Got " + str(len(r)) + " results")

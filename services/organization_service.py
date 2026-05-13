@@ -43,7 +43,7 @@ async def get_organization_stats_data(
         cur = db.cursor()
         cur.execute(
             """
-            SELECT COALESCE(SUM(au.quick_searches), 0) + COALESCE(SUM(au.live_searches), 0) as cnt
+            SELECT COALESCE(SUM(au.live_searches), 0) as cnt
             FROM api_usage au
             JOIN users u ON au.user_id = u.id
             WHERE u.organization_id = %s

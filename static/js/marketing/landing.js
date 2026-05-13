@@ -33,6 +33,49 @@ function landing() {
         riskReportError: '',
         riskReport: null,
 
+        // Registry switcher — which corpus the landing-page search hits.
+        // Mirrors dashboard's _search_panel.html switcher and persists via
+        // localStorage so a returning visitor lands on the same tab they
+        // last used. Risk-report flow only makes sense for trademarks.
+        searchView: (function() {
+            try { return localStorage.getItem('landingSearchView') || 'trademark'; }
+            catch (e) { return 'trademark'; }
+        })(),
+
+        // Patent filters (mirror /api/v1/patent-search/public)
+        patentIpc: '',
+        patentHolder: '',
+        patentDateFrom: '',
+        patentDateTo: '',
+        patentKindCode: '',
+
+        // Design filters (mirror /api/v1/design-search/public).
+        // `designLocarno` is the raw comma-joined string sent to the API.
+        // The Locarno class finder mirrors the trademark Nice picker:
+        // chips for selected codes, AI suggest, and a browse-all-32 grid
+        // backed by GET /api/v1/locarno-classes.
+        designLocarno: '',
+        selectedLocarnoClasses: [],
+        locarnoInput: '',
+        suggestedLocarno: [],
+        suggestingLocarno: false,
+        locarnoError: '',
+        allLocarnoClasses: [],
+        locarnoBrowseLoading: false,
+        locarnoBrowseFilter: '',
+
+        // Cografi filters (mirror /api/v1/cografi-search/public)
+        cografiSectionKeys: '',
+        cografiRecordTypes: '',
+        cografiGiType: '',
+        cografiRegion: '',
+        cografiDateFrom: '',
+        cografiDateTo: '',
+        // Sort mode for the results list — mirrors dashboard's sortMode.
+        // Public landing has no risk_report sort because risk report is a
+        // dashboard-only feature.
+        sortMode: 'risk_desc',
+
         // Search history state
         searchHistory: [],
         showSearchHistory: false,
@@ -101,8 +144,15 @@ function landing() {
         regLoading: false,
         regError: '',
 
-        // Stats
+        // Stats — per-registry corpus sizes pulled from /api/v1/status.
+        // `dbCount` keeps the trademark size as the default landing
+        // headline; the per-registry counts power the registry-aware
+        // stats line under the search box (dbCountLine).
         dbCount: 0,
+        dbTrademarkCount: 0,
+        dbDesignCount: 0,
+        dbPatentCount: 0,
+        dbCografiCount: 0,
 
         // Education state
         educationLoading: false,
@@ -210,10 +260,51 @@ function landing() {
                 .then(function (res) { return res.ok ? res.json() : null; })
                 .then(function (data) {
                     if (data && data.statistics) {
-                        self.dbCount = data.statistics.total_trademarks || 0;
+                        self.dbTrademarkCount = data.statistics.total_trademarks || 0;
+                        self.dbDesignCount = data.statistics.total_designs || 0;
+                        self.dbPatentCount = data.statistics.total_patents || 0;
+                        self.dbCografiCount = data.statistics.total_cografi || 0;
+                        self.dbCount = self.dbTrademarkCount;
                     }
                 })
                 .catch(function () { /* silent */ });
+        },
+
+        // Per-registry "analysis dimensions" tagline shown under the
+        // search box. Mirrors the dashboard's analysis_hint keys per
+        // subview so the landing visually echoes which corpus the
+        // current tab will search and how it scores matches.
+        analysisHint: function () {
+            switch (this.searchView) {
+                case 'patent':  return this.t('patent_search.analysis_hint');
+                case 'design':  return this.t('design_search.analysis_hint');
+                case 'cografi': return this.t('cografi_search.analysis_hint');
+                case 'trademark':
+                default:        return this.t('landing.search_hint');
+            }
+        },
+
+        // Per-registry "X records being analyzed live" line. Picks the
+        // right corpus count + the right registry-shaped label so the
+        // headline updates as the tab changes.
+        dbCountForView: function () {
+            switch (this.searchView) {
+                case 'patent':  return this.dbPatentCount;
+                case 'design':  return this.dbDesignCount;
+                case 'cografi': return this.dbCografiCount;
+                case 'trademark':
+                default:        return this.dbTrademarkCount;
+            }
+        },
+
+        dbCountLabel: function () {
+            switch (this.searchView) {
+                case 'patent':  return this.t('patent_search.stats_db_records');
+                case 'design':  return this.t('design_search.stats_db_records');
+                case 'cografi': return this.t('cografi_search.stats_db_records');
+                case 'trademark':
+                default:        return this.t('landing.stats_db_records');
+            }
         },
 
         // ==================== EDUCATION ====================
@@ -1551,13 +1642,35 @@ function landing() {
                 body: JSON.stringify({ description: desc, top_k: 5 })
             })
                 .then(function (res) {
-                    if (!res.ok) throw new Error('Suggestion failed');
-                    return res.json();
+                    if (res.ok) return res.json().then(function (d) { return { ok: true, data: d }; });
+                    return res.json().catch(function () { return {}; }).then(function (d) {
+                        return { ok: false, status: res.status, detail: d && d.detail };
+                    });
                 })
-                .then(function (data) {
-                    self.suggestedClasses = data.suggestions || [];
-                    if (self.suggestedClasses.length === 0) {
-                        self.classError = self.t('search.no_class_suggestions');
+                .then(function (r) {
+                    if (r.ok) {
+                        self.suggestedClasses = r.data.suggestions || [];
+                        if (self.suggestedClasses.length === 0) {
+                            self.classError = self.t('search.no_class_suggestions');
+                        }
+                        return;
+                    }
+                    self.suggestedClasses = [];
+                    if (r.status === 401 || r.status === 402 || r.status === 403) {
+                        var d = r.detail || {};
+                        var handled = window.AppUpgradeModal
+                            && typeof window.AppUpgradeModal.maybeHandle === 'function'
+                            && window.AppUpgradeModal.maybeHandle(d, 'class_suggestions');
+                        if (!handled) {
+                            var msg = (window.AppI18n && window.AppI18n.locale === 'en')
+                                ? (d.message_en || d.message)
+                                : (d.message || d.message_en);
+                            self.classError = msg || self.t('search.class_suggestion_upgrade_required');
+                        } else {
+                            self.classError = '';
+                        }
+                    } else {
+                        self.classError = self.t('search.class_suggestion_failed');
                     }
                 })
                 .catch(function () {
@@ -1639,6 +1752,188 @@ function landing() {
             this._syncClassInput();
         },
 
+        // ==================== LOCARNO CLASS FINDER (design tab) ====================
+        // Mirrors the Nice class picker for trademark search. Codes are
+        // stored as zero-padded strings (e.g. "06", "26") to match what
+        // the dashboard /design-search/quick + AI suggester expect.
+
+        _padLocarno: function (raw) {
+            var s = String(raw || '').trim();
+            if (!s) return '';
+            // Two-level codes like "06-01" pass through untouched.
+            if (s.indexOf('-') !== -1) return s;
+            // Top-level codes (1..32) zero-padded.
+            var n = parseInt(s, 10);
+            if (isNaN(n) || n < 1 || n > 32) return '';
+            return n < 10 ? '0' + n : String(n);
+        },
+
+        _syncLocarnoInput: function () {
+            // Mirror the Nice picker's pattern: keep the input populated
+            // with the comma-joined selection so users can edit freely.
+            this.locarnoInput = this.selectedLocarnoClasses.join(', ');
+            this.designLocarno = this.selectedLocarnoClasses.join(',');
+        },
+
+        submitLocarnoInput: function () {
+            var input = this.locarnoInput.trim();
+            if (!input) return;
+            this.locarnoError = '';
+
+            // Manual entry path: every comma-separated token parses as a
+            // valid Locarno code (numeric 1..32 or NN-NN form). Otherwise
+            // treat the input as a free-text description and hit AI.
+            var self = this;
+            var parts = input.split(/[,\s]+/).filter(function (p) { return p.length > 0; });
+            var normalised = parts.map(function (p) { return self._padLocarno(p); });
+            var allValid = normalised.length > 0 && normalised.every(function (n) { return !!n; });
+
+            if (allValid) {
+                var added = 0;
+                normalised.forEach(function (code) {
+                    if (self.selectedLocarnoClasses.indexOf(code) === -1) {
+                        self.selectedLocarnoClasses.push(code);
+                        added++;
+                    }
+                });
+                if (added === 0) {
+                    this.locarnoError = this.t('search.locarno_invalid_number');
+                }
+                this._syncLocarnoInput();
+            } else {
+                this.suggestLocarno();
+            }
+        },
+
+        suggestLocarno: function () {
+            var desc = this.locarnoInput.trim();
+            if (!desc) return;
+            if (desc.length < 3) {
+                this.locarnoError = this.t('search.description_too_short');
+                return;
+            }
+
+            this.suggestingLocarno = true;
+            this.locarnoError = '';
+            this.suggestedLocarno = [];
+            var self = this;
+
+            fetch('/api/v1/tools/suggest-locarno-classes', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    description: desc,
+                    language: (window.AppI18n && window.AppI18n.locale === 'en') ? 'en' : 'tr',
+                    count: 5,
+                })
+            })
+                .then(function (res) {
+                    if (res.ok) return res.json().then(function (d) { return { ok: true, data: d }; });
+                    return res.json().catch(function () { return {}; }).then(function (d) {
+                        return { ok: false, status: res.status, detail: d && d.detail };
+                    });
+                })
+                .then(function (r) {
+                    if (r.ok) {
+                        self.suggestedLocarno = r.data.suggestions || [];
+                        if (self.suggestedLocarno.length === 0) {
+                            self.locarnoError = self.t('search.no_locarno_suggestions');
+                        }
+                        return;
+                    }
+                    self.suggestedLocarno = [];
+                    if (r.status === 401 || r.status === 402 || r.status === 403) {
+                        var d = r.detail || {};
+                        var handled = window.AppUpgradeModal
+                            && typeof window.AppUpgradeModal.maybeHandle === 'function'
+                            && window.AppUpgradeModal.maybeHandle(d, 'class_suggestions');
+                        if (!handled) {
+                            var msg = (window.AppI18n && window.AppI18n.locale === 'en')
+                                ? (d.message_en || d.message)
+                                : (d.message || d.message_en);
+                            self.locarnoError = msg || self.t('search.class_suggestion_upgrade_required');
+                        } else {
+                            self.locarnoError = '';
+                        }
+                    } else {
+                        self.locarnoError = self.t('search.class_suggestion_failed');
+                    }
+                })
+                .catch(function () {
+                    self.suggestedLocarno = [];
+                    self.locarnoError = self.t('search.class_suggestion_failed');
+                })
+                .finally(function () {
+                    self.suggestingLocarno = false;
+                });
+        },
+
+        selectLocarno: function (cls) {
+            var code = this._padLocarno(cls.class_number);
+            if (!code) return;
+            var idx = this.selectedLocarnoClasses.indexOf(code);
+            if (idx === -1) {
+                this.selectedLocarnoClasses.push(code);
+            } else {
+                this.selectedLocarnoClasses.splice(idx, 1);
+            }
+            this._syncLocarnoInput();
+        },
+
+        loadAllLocarno: function () {
+            if (this.allLocarnoClasses.length > 0) return;
+            this.locarnoBrowseLoading = true;
+            var self = this;
+            fetch('/api/v1/locarno-classes')
+                .then(function (res) { return res.ok ? res.json() : { items: [] }; })
+                .then(function (data) {
+                    self.allLocarnoClasses = (data.items || []).map(function (it) {
+                        var raw = it.class_number;
+                        var code = self._padLocarno(raw);
+                        return {
+                            code: code,
+                            name_tr: it.name_tr,
+                            name_en: it.name_en,
+                        };
+                    }).filter(function (it) { return !!it.code; });
+                })
+                .catch(function () { self.allLocarnoClasses = []; })
+                .finally(function () { self.locarnoBrowseLoading = false; });
+        },
+
+        toggleBrowseLocarno: function (code) {
+            var idx = this.selectedLocarnoClasses.indexOf(code);
+            if (idx === -1) {
+                this.selectedLocarnoClasses.push(code);
+            } else {
+                this.selectedLocarnoClasses.splice(idx, 1);
+            }
+            this._syncLocarnoInput();
+        },
+
+        get filteredLocarnoClasses() {
+            var f = (this.locarnoBrowseFilter || '').trim().toLowerCase();
+            if (!f) return this.allLocarnoClasses;
+            return this.allLocarnoClasses.filter(function (cls) {
+                return cls.code.indexOf(f) !== -1
+                    || (cls.name_tr || '').toLowerCase().indexOf(f) !== -1
+                    || (cls.name_en || '').toLowerCase().indexOf(f) !== -1;
+            });
+        },
+
+        removeLocarno: function (code) {
+            var idx = this.selectedLocarnoClasses.indexOf(code);
+            if (idx !== -1) {
+                this.selectedLocarnoClasses.splice(idx, 1);
+            }
+            this._syncLocarnoInput();
+        },
+
+        clearAllLocarno: function () {
+            this.selectedLocarnoClasses = [];
+            this._syncLocarnoInput();
+        },
+
         // ==================== PUBLIC SEARCH ====================
         // ==================== SEARCH HISTORY ====================
         loadSearchHistory: function () {
@@ -1679,10 +1974,103 @@ function landing() {
             this.showSearchHistory = false;
         },
 
+        // Placeholder + uploader labels that swap to match the active
+        // registry's dashboard subview, so the search box and dropzone
+        // visually echo which corpus is selected. The user's typed
+        // query and uploaded image persist across switches — only the
+        // visual hints change. Falls back to the trademark wording for
+        // missing keys.
+        searchPlaceholder: function () {
+            switch (this.searchView) {
+                case 'patent':  return this.t('patent_search.query_placeholder');
+                case 'design':  return this.t('design_search.query_placeholder');
+                case 'cografi': return this.t('cografi_search.query_placeholder');
+                case 'trademark':
+                default:        return this.t('landing.search_placeholder');
+            }
+        },
+
+        imageDropTitle: function () {
+            switch (this.searchView) {
+                case 'patent':  return this.t('landing.drop_image_title_patent');
+                case 'design':  return this.t('landing.drop_image_title_design');
+                case 'cografi': return this.t('landing.drop_image_title_cografi');
+                case 'trademark':
+                default:        return this.t('landing.drop_logo_title');
+            }
+        },
+
+        imageDropHint: function () {
+            switch (this.searchView) {
+                case 'patent':  return this.t('landing.drop_image_hint_patent');
+                case 'design':  return this.t('landing.drop_image_hint_design');
+                case 'cografi': return this.t('landing.drop_image_hint_cografi');
+                case 'trademark':
+                default:        return this.t('landing.drop_logo_hint');
+            }
+        },
+
+        // Endpoint URL for the currently selected registry. All four
+        // public endpoints accept multipart POST with image + filters
+        // (see app_*_search_routes.py).
+        publicEndpointForView: function (view) {
+            switch (view) {
+                case 'patent':   return '/api/v1/patent-search/public';
+                case 'design':   return '/api/v1/design-search/public';
+                case 'cografi':  return '/api/v1/cografi-search/public';
+                case 'trademark':
+                default:         return '/api/v1/search/public';
+            }
+        },
+
+        // Build a FormData with the right filter fields for the active
+        // registry. Each public endpoint expects different Form() names
+        // (mirrors the dashboard /quick endpoint surface).
+        buildPublicSearchFormData: function (query) {
+            var view = this.searchView || 'trademark';
+            var fd = new FormData();
+            if (query) fd.append('query', query);
+            if (this.selectedImage) fd.append('image', this.selectedImage);
+
+            if (view === 'trademark') {
+                if (this.selectedClasses && this.selectedClasses.length > 0) {
+                    fd.append('classes', this.selectedClasses.join(','));
+                }
+            } else if (view === 'patent') {
+                if (this.patentIpc) fd.append('ipc', this.patentIpc.trim());
+                if (this.patentHolder) fd.append('holder', this.patentHolder.trim());
+                if (this.patentDateFrom) fd.append('date_from', this.patentDateFrom);
+                if (this.patentDateTo) fd.append('date_to', this.patentDateTo);
+                if (this.patentKindCode) fd.append('kind_code', this.patentKindCode.trim());
+            } else if (view === 'design') {
+                if (this.designLocarno) fd.append('locarno', this.designLocarno.trim());
+            } else if (view === 'cografi') {
+                if (this.cografiSectionKeys) fd.append('section_keys', this.cografiSectionKeys.trim());
+                if (this.cografiRecordTypes) fd.append('record_types', this.cografiRecordTypes.trim());
+                if (this.cografiGiType) fd.append('gi_type', this.cografiGiType.trim());
+                if (this.cografiRegion) fd.append('region', this.cografiRegion.trim());
+                if (this.cografiDateFrom) fd.append('date_from', this.cografiDateFrom);
+                if (this.cografiDateTo) fd.append('date_to', this.cografiDateTo);
+            }
+            return fd;
+        },
+
+        // Persist the chosen registry tab so a return visit lands on
+        // the same corpus. Also clears prior results so users don't see
+        // a trademark hit list after switching to patent.
+        setSearchView: function (view) {
+            if (this.searchView === view) return;
+            this.searchView = view;
+            try { localStorage.setItem('landingSearchView', view); } catch (e) {}
+            this.searchResults = [];
+            this.searchError = '';
+            this.expandedResult = null;
+            this.clearRiskReportState();
+        },
+
         publicSearch: function () {
             var query = this.searchQuery.trim();
             var hasImage = !!this.selectedImage;
-            var hasClasses = this.selectedClasses.length > 0;
 
             // Need at least text or image
             if (!hasImage && (!query || query.length < 2)) {
@@ -1701,92 +2089,43 @@ function landing() {
             else this._lastSearchType = 'text';
 
             var self = this;
+            var endpoint = this.publicEndpointForView(this.searchView);
+            var formData = this.buildPublicSearchFormData(query);
 
-            if (hasImage || hasClasses) {
-                // POST with FormData (image and/or classes)
-                var formData = new FormData();
-                if (query) {
-                    formData.append('query', query);
-                }
-                if (hasImage) {
-                    formData.append('image', this.selectedImage);
-                }
-                if (hasClasses) {
-                    formData.append('classes', this.selectedClasses.join(','));
-                }
-
-                fetch('/api/v1/search/public', {
-                    method: 'POST',
-                    body: formData
+            fetch(endpoint, { method: 'POST', body: formData })
+                .then(function (res) {
+                    if (res.status === 429) {
+                        return res.json().catch(function () { return {}; }).then(function (errData) {
+                            var detail = errData.detail || errData;
+                            if (window.AppUpgradeModal && typeof window.AppUpgradeModal.maybeHandle === 'function'
+                                && window.AppUpgradeModal.maybeHandle(detail, 'public_search')) {
+                                return null;
+                            }
+                            self.searchError = self.t('search.rate_limited');
+                            return null;
+                        });
+                    }
+                    if (!res.ok) throw new Error('Search failed');
+                    return res.json();
                 })
-                    .then(function (res) {
-                        if (res.status === 429) {
-                            return res.json().catch(function () { return {}; }).then(function (errData) {
-                                var detail = errData.detail || errData;
-                                if (window.AppUpgradeModal && typeof window.AppUpgradeModal.maybeHandle === 'function'
-                                    && window.AppUpgradeModal.maybeHandle(detail, 'public_search')) {
-                                    return null;
-                                }
-                                self.searchError = self.t('search.rate_limited');
-                                return null;
-                            });
+                .then(function (data) {
+                    if (data) {
+                        self.searchResults = (data.results || []).map(function (r) { r._showGoods = false; return r; });
+                        self.resultsAtBottom = false;
+                        self.expandedResult = null;
+                        self.saveSearchQuery(query);
+                        self.showSearchHistory = false;
+                        if (self.searchResults.length === 0) {
+                            self.searchError = self.t('search.no_results');
                         }
-                        if (!res.ok) throw new Error('Search failed');
-                        return res.json();
-                    })
-                    .then(function (data) {
-                        if (data) {
-                            self.searchResults = (data.results || []).map(function (r) { r._showGoods = false; return r; });
-                            self.resultsAtBottom = false;
-                            self.expandedResult = null;
-                            self.saveSearchQuery(query);
-                            self.showSearchHistory = false;
-                            if (self.searchResults.length === 0) {
-                                self.searchError = self.t('search.no_results');
-                            }
-                        }
-                    })
-                    .catch(function () {
-                        self.searchError = self.t('search.search_failed');
-                    })
-                    .finally(function () {
-                        self.searchLoading = false;
-                    });
-            } else {
-                // GET text-only search
-                fetch('/api/v1/search/public?query=' + encodeURIComponent(query))
-                    .then(function (res) {
-                        if (res.status === 429) {
-                            return res.json().catch(function () { return {}; }).then(function (errData) {
-                                var detail = errData.detail || errData;
-                                if (window.AppUpgradeModal && typeof window.AppUpgradeModal.maybeHandle === 'function'
-                                    && window.AppUpgradeModal.maybeHandle(detail, 'public_search')) {
-                                    return null;
-                                }
-                                self.searchError = self.t('search.rate_limited');
-                                return null;
-                            });
-                        }
-                        if (!res.ok) throw new Error('Search failed');
-                        return res.json();
-                    })
-                    .then(function (data) {
-                        if (data) {
-                            self.searchResults = (data.results || []).map(function (r) { r._showGoods = false; return r; });
-                            self.saveSearchQuery(query);
-                            self.showSearchHistory = false;
-                            if (self.searchResults.length === 0) {
-                                self.searchError = self.t('search.no_results');
-                            }
-                        }
-                    })
-                    .catch(function () {
-                        self.searchError = self.t('search.search_failed');
-                    })
-                    .finally(function () {
-                        self.searchLoading = false;
-                    });
-            }
+                    }
+                })
+                .catch(function () {
+                    self.searchError = self.t('search.search_failed');
+                })
+                .finally(function () {
+                    self.searchLoading = false;
+                });
         },
 
         buildRiskReportCandidate: function (r) {
@@ -2380,6 +2719,40 @@ function landing() {
                 if (this.searchResults[i].risk_score >= 0.65) return true;
             }
             return false;
+        },
+
+        // Mirror of dashboard's sortedResults getter — supports
+        // similarity (risk_desc/asc) and application date (date_desc/asc).
+        // The dashboard's risk_report_desc mode is omitted since the public
+        // landing page has no risk-report feature.
+        _getResultScore: function (r) {
+            if (r && r.scores && r.scores.total != null) return r.scores.total;
+            if (r && r.risk_score != null) return r.risk_score;
+            return 0;
+        },
+        _parseResultDate: function (s) {
+            if (!s) return 0;
+            var t = Date.parse(s);
+            return isNaN(t) ? 0 : t;
+        },
+        get sortedResults() {
+            var arr = (this.searchResults || []).slice();
+            var self = this;
+            var mode = this.sortMode;
+            if (mode === 'risk_desc') {
+                arr.sort(function (a, b) { return self._getResultScore(b) - self._getResultScore(a); });
+            } else if (mode === 'risk_asc') {
+                arr.sort(function (a, b) { return self._getResultScore(a) - self._getResultScore(b); });
+            } else if (mode === 'date_desc') {
+                arr.sort(function (a, b) { return self._parseResultDate(b.application_date) - self._parseResultDate(a.application_date); });
+            } else if (mode === 'date_asc') {
+                arr.sort(function (a, b) { return self._parseResultDate(a.application_date) - self._parseResultDate(b.application_date); });
+            }
+            return arr;
+        },
+        sortResults: function () {
+            // Reactivity touch — Alpine recomputes the getter when sortMode changes.
+            void this.sortMode;
         },
 
         getStudioCtaTitle: function () {

@@ -4,7 +4,7 @@ Subscription Plan Gating & Usage Credits
 Checks user's subscription plan and tracks usage for:
 - Agentic Search credits
 - Lead access credits
-- Creative Suite: Unified AI credits (1 credit = name gen, 5 credits = logo gen)
+- Creative Suite: Unified AI credits (2 credits = name gen, 5 credits = logo gen)
 - Trademark application limits
 
 Usage:
@@ -26,6 +26,9 @@ from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger(__name__)
 
+NAME_GENERATION_AI_CREDIT_COST = 2
+LOGO_GENERATION_AI_CREDIT_COST = 5
+
 # ===========================================================================
 # Single source of truth for ALL plan limits
 # ===========================================================================
@@ -33,7 +36,7 @@ PLAN_FEATURES = {
     "free": {
         "price_monthly": 0,
         "price_annual_monthly": 0,
-        "monthly_live_searches": 0,
+        "max_daily_live_searches": 5,
         "daily_lead_views": 0,
         "monthly_reports": 1,
         "can_export_reports": True,
@@ -44,10 +47,8 @@ PLAN_FEATURES = {
         "can_view_holder_portfolio": True,
         "can_download_portfolio": False,
         "can_export_csv_leads": False,
-        "can_use_live_scraping": False,
         "max_users": 1,
         "max_watchlist_items": 3,
-        "max_daily_quick_searches": 5,
         "auto_scan_max_items": 0,
         "auto_scan_frequency": None,
         "priority_support": False,
@@ -57,7 +58,7 @@ PLAN_FEATURES = {
     "starter": {
         "price_monthly": 499,
         "price_annual_monthly": 399,
-        "monthly_live_searches": 10,
+        "max_daily_live_searches": 50,
         "daily_lead_views": 0,
         "monthly_reports": 10,
         "can_export_reports": True,
@@ -68,10 +69,8 @@ PLAN_FEATURES = {
         "can_view_holder_portfolio": True,
         "can_download_portfolio": True,
         "can_export_csv_leads": True,
-        "can_use_live_scraping": True,
         "max_users": 3,
         "max_watchlist_items": 15,
-        "max_daily_quick_searches": 50,
         "auto_scan_max_items": 15,
         "auto_scan_frequency": "daily",
         "priority_support": False,
@@ -81,7 +80,7 @@ PLAN_FEATURES = {
     "professional": {
         "price_monthly": 1999,
         "price_annual_monthly": 1599,
-        "monthly_live_searches": 100,
+        "max_daily_live_searches": 2000,
         "daily_lead_views": 10,
         "monthly_reports": 30,
         "can_export_reports": True,
@@ -92,10 +91,8 @@ PLAN_FEATURES = {
         "can_view_holder_portfolio": True,
         "can_download_portfolio": True,
         "can_export_csv_leads": True,
-        "can_use_live_scraping": True,
         "max_users": 10,
         "max_watchlist_items": 1000,
-        "max_daily_quick_searches": 2000,
         "auto_scan_max_items": 100,
         "auto_scan_frequency": "daily",
         "priority_support": True,
@@ -105,7 +102,7 @@ PLAN_FEATURES = {
     "enterprise": {
         "price_monthly": 4999,
         "price_annual_monthly": 3999,
-        "monthly_live_searches": 999999,
+        "max_daily_live_searches": 999999,
         "daily_lead_views": 999999,
         "monthly_reports": 999999,
         "can_export_reports": True,
@@ -116,10 +113,8 @@ PLAN_FEATURES = {
         "can_view_holder_portfolio": True,
         "can_download_portfolio": True,
         "can_export_csv_leads": True,
-        "can_use_live_scraping": True,
         "max_users": 999999,
         "max_watchlist_items": 999999,
-        "max_daily_quick_searches": 999999,
         "auto_scan_max_items": 999999,
         "auto_scan_frequency": "daily",
         "priority_support": True,
@@ -129,7 +124,7 @@ PLAN_FEATURES = {
     "superadmin": {
         "price_monthly": 0,
         "price_annual_monthly": 0,
-        "monthly_live_searches": 999999,
+        "max_daily_live_searches": 999999,
         "daily_lead_views": 999999,
         "monthly_reports": 999999,
         "can_export_reports": True,
@@ -140,10 +135,8 @@ PLAN_FEATURES = {
         "can_view_holder_portfolio": True,
         "can_download_portfolio": True,
         "can_export_csv_leads": True,
-        "can_use_live_scraping": True,
         "max_users": 999999,
         "max_watchlist_items": 999999,
-        "max_daily_quick_searches": 999999,
         "auto_scan_max_items": 999999,
         "auto_scan_frequency": "daily",
         "priority_support": True,
@@ -156,6 +149,43 @@ PLAN_FEATURES = {
 PLAN_ALIASES = {
     "business": "professional",
 }
+
+# ===========================================================================
+# AI Credit Packs (one-shot top-ups, never expire, available to every plan)
+# Pricing: $0.20 per credit @ 40 TRY/USD.
+# ===========================================================================
+CREDIT_PACKS = {
+    "small": {
+        "id": "small",
+        "credits": 25,
+        "price_try": 200,
+        "label_key": "studio.buy_credits.pack_small",
+    },
+    "medium": {
+        "id": "medium",
+        "credits": 100,
+        "price_try": 800,
+        "label_key": "studio.buy_credits.pack_medium",
+    },
+    "large": {
+        "id": "large",
+        "credits": 500,
+        "price_try": 4000,
+        "label_key": "studio.buy_credits.pack_large",
+    },
+}
+
+
+def get_credit_pack(pack_id: Optional[str]) -> Optional[dict]:
+    """Return the credit pack definition or None if pack_id is unknown."""
+    if not pack_id:
+        return None
+    return CREDIT_PACKS.get(str(pack_id).strip().lower())
+
+
+def list_credit_packs() -> list:
+    """Return credit packs in display order (smallest → largest)."""
+    return [CREDIT_PACKS[k] for k in ("small", "medium", "large")]
 
 
 def _canonical_plan_name(plan_name: Optional[str]) -> str:
@@ -204,10 +234,10 @@ def _credit_balances_from_row(row, cost: int) -> tuple[int, int]:
     monthly_keys = ["ai_credits_monthly", "monthly"]
     purchased_keys = ["ai_credits_purchased", "purchased"]
 
-    if cost == 5:
+    if cost == LOGO_GENERATION_AI_CREDIT_COST:
         monthly_keys.append("logo_credits_monthly")
         purchased_keys.append("logo_credits_purchased")
-    elif cost == 1:
+    elif cost in (1, NAME_GENERATION_AI_CREDIT_COST):
         purchased_keys.append("name_credits_purchased")
 
     monthly = _int_value(_row_value(row, *monthly_keys, default=0))
@@ -245,14 +275,13 @@ def get_user_plan(db, user_id: str) -> dict:
         user_id: UUID string of the user
 
     Returns:
-        dict with keys: plan_name, can_use_live_search, monthly_limit, display_name
+        dict with keys: plan_name, can_use_live_search, daily_limit, display_name
     """
     cur = db.cursor(cursor_factory=RealDictCursor)
     cur.execute("""
         SELECT
             COALESCE(sp_user.name, sp_org.name, 'free') as plan_name,
             COALESCE(sp_user.display_name, sp_org.display_name, 'Free Trial') as display_name,
-            COALESCE(sp_user.can_use_live_search, sp_org.can_use_live_search, FALSE) as can_use_live_search,
             COALESCE(u.is_superadmin, FALSE) as is_superadmin,
             o.subscription_end_date
         FROM users u
@@ -267,8 +296,8 @@ def get_user_plan(db, user_id: str) -> dict:
         return {
             'plan_name': 'free',
             'display_name': 'Free Trial',
-            'can_use_live_search': False,
-            'monthly_limit': 0,
+            'can_use_live_search': True,
+            'daily_limit': PLAN_FEATURES['free']['max_daily_live_searches'],
         }
 
     plan_name = _canonical_plan_name(_row_value(row, 'plan_name', default='free'))
@@ -290,42 +319,36 @@ def get_user_plan(db, user_id: str) -> dict:
                 plan_name = 'free'
                 display_name = 'Free Trial'
 
-    monthly_limit = get_plan_limit(plan_name, 'monthly_live_searches')
-    can_use_live_search = bool(_row_value(row, 'is_superadmin', default=False)) or (
-        bool(get_plan_limit(plan_name, 'can_use_live_scraping')) and monthly_limit > 0
-    )
+    daily_limit = get_plan_limit(plan_name, 'max_daily_live_searches')
+    can_use_live_search = daily_limit > 0
 
     return {
         'plan_name': plan_name,
         'display_name': display_name,
         'can_use_live_search': can_use_live_search,
-        'monthly_limit': monthly_limit,
+        'daily_limit': daily_limit,
     }
 
 
-def get_live_search_usage(db, user_id: str) -> int:
+def get_daily_live_search_usage(db, user_id: str) -> int:
     """
-    Get current month's Agentic Search usage count.
-    Sums api_usage.live_searches for all rows in the current month.
+    Get today's Agentic Search usage count for a user.
 
     Args:
         db: Database context manager instance
         user_id: UUID string
 
     Returns:
-        Total Agentic Searches this month
+        Today's Agentic Search count
     """
     cur = db.cursor(cursor_factory=RealDictCursor)
-
-    # First day of current month
     today = date.today()
-    month_start = today.replace(day=1)
 
     cur.execute("""
-        SELECT COALESCE(SUM(live_searches), 0) as total
+        SELECT COALESCE(live_searches, 0) as total
         FROM api_usage
-        WHERE user_id = %s AND usage_date >= %s
-    """, (user_id, month_start))
+        WHERE user_id = %s AND usage_date = %s
+    """, (user_id, today))
 
     row = cur.fetchone()
     return row['total'] if row else 0
@@ -364,7 +387,7 @@ def increment_live_search_usage(db, user_id: str, org_id: str = None) -> int:
 
 def check_live_search_eligibility(db, user_id: str) -> Tuple[bool, str, dict]:
     """
-    Check if user can perform an Agentic Search.
+    Check if user can perform an Agentic Search today.
 
     Args:
         db: Database context manager instance
@@ -375,119 +398,33 @@ def check_live_search_eligibility(db, user_id: str) -> Tuple[bool, str, dict]:
 
     Reasons:
         - "ok": User can search
-        - "upgrade_required": Plan doesn't include Agentic Search
-        - "limit_exceeded": Monthly limit reached
+        - "daily_limit_exceeded": Daily limit reached
     """
     plan = get_user_plan(db, user_id)
     plan_name = plan['plan_name']
-    can_use = plan['can_use_live_search']
-    monthly_limit = plan['monthly_limit']
+    daily_limit = plan['daily_limit']
 
-    if not can_use:
-        logger.info(f"Feature denied: user={user_id} plan={plan_name} feature=live_search reason=upgrade_required")
-        return False, "upgrade_required", {
-            "error": "upgrade_required",
-            "current_plan": plan_name,
-            "display_name": plan['display_name'],
-            "required_plan": "live_search_enabled_plan",
-            "message": "Agentic Search, planinda Agentic Search hakki bulunan kullanicilar icindir. Agentic Search'i destekleyen bir plana yukseltmeniz gerekiyor.",
-            "message_en": "Agentic Search is only available on plans with Agentic Search access. Upgrade to a plan that includes Agentic Search.",
-        }
+    current_usage = get_daily_live_search_usage(db, user_id)
 
-    current_usage = get_live_search_usage(db, user_id)
-
-    if current_usage >= monthly_limit:
-        logger.info(f"Plan limit reached: user={user_id} plan={plan_name} feature=live_search limit={monthly_limit}")
-        return False, "limit_exceeded", {
-            "error": "limit_exceeded",
-            "current_plan": plan_name,
-            "display_name": plan['display_name'],
-            "monthly_limit": monthly_limit,
-            "current_usage": current_usage,
-            "remaining": 0,
-            "message": f"Bu ay {monthly_limit} Agentic Search hakkinin tamamini kullandiniz.",
-            "message_en": f"You've used all {monthly_limit} Agentic Searches this month.",
-        }
-
-    remaining = monthly_limit - current_usage
-    return True, "ok", {
-        "current_plan": plan_name,
-        "display_name": plan['display_name'],
-        "monthly_limit": monthly_limit,
-        "current_usage": current_usage,
-        "remaining": remaining,
-    }
-
-
-def get_daily_quick_searches(db, user_id: str) -> int:
-    """Get today's quick search count for a user."""
-    cur = db.cursor(cursor_factory=RealDictCursor)
-    today = date.today()
-
-    cur.execute("""
-        SELECT COALESCE(quick_searches, 0) as total
-        FROM api_usage
-        WHERE user_id = %s AND usage_date = %s
-    """, (user_id, today))
-
-    row = cur.fetchone()
-    return row['total'] if row else 0
-
-
-def increment_quick_search_usage(db, user_id: str, org_id: str = None) -> int:
-    """Increment quick search counter for today. Returns new count."""
-    cur = db.cursor(cursor_factory=RealDictCursor)
-    today = date.today()
-
-    cur.execute("""
-        INSERT INTO api_usage (user_id, organization_id, usage_date, quick_searches)
-        VALUES (%s, %s, %s, 1)
-        ON CONFLICT (user_id, usage_date)
-        DO UPDATE SET
-            quick_searches = api_usage.quick_searches + 1,
-            updated_at = CURRENT_TIMESTAMP
-        RETURNING quick_searches
-    """, (user_id, org_id, today))
-
-    db.commit()
-    row = cur.fetchone()
-    return row['quick_searches'] if row else 1
-
-
-def check_quick_search_eligibility(db, user_id: str) -> Tuple[bool, str, dict]:
-    """
-    Check if user can perform a quick search today.
-
-    Returns:
-        (can_search, reason, details)
-    """
-    plan = get_user_plan(db, user_id)
-    plan_name = plan['plan_name']
-    daily_limit = get_plan_limit(plan_name, 'max_daily_quick_searches')
-    used_today = get_daily_quick_searches(db, user_id)
-
-    if used_today >= daily_limit:
-        logger.info(f"Plan limit reached: user={user_id} plan={plan_name} feature=quick_search limit={daily_limit}")
+    if current_usage >= daily_limit:
+        logger.info(f"Plan limit reached: user={user_id} plan={plan_name} feature=live_search limit={daily_limit}")
         return False, "daily_limit_exceeded", {
             "error": "daily_limit_exceeded",
             "current_plan": plan_name,
+            "display_name": plan['display_name'],
             "daily_limit": daily_limit,
-            "used_today": used_today,
+            "used_today": current_usage,
             "remaining": 0,
-            "message": f"Gunluk {daily_limit} arama limitinize ulastiniz. Yarin tekrar deneyebilirsiniz.",
-            "message_en": f"You've reached your daily limit of {daily_limit} searches. Try again tomorrow.",
+            "message": f"Gunluk {daily_limit} Agentic Search hakkinizin tamamini kullandiniz. Yarin tekrar deneyebilirsiniz.",
+            "message_en": f"You've used all {daily_limit} Agentic Searches today. Try again tomorrow.",
         }
 
-    remaining = daily_limit - used_today
-
-    # Abuse indicator: 80% of daily cap consumed
-    if daily_limit > 0 and used_today >= daily_limit * 0.8:
-        logger.info(f"High usage: user={user_id} plan={plan_name} feature=quick_search used={used_today}/{daily_limit}")
-
+    remaining = daily_limit - current_usage
     return True, "ok", {
         "current_plan": plan_name,
+        "display_name": plan['display_name'],
         "daily_limit": daily_limit,
-        "used_today": used_today,
+        "used_today": current_usage,
         "remaining": remaining,
     }
 
@@ -579,7 +516,7 @@ def get_org_plan(db, org_id: str) -> dict:
 
 
 # ============================================================
-# Unified AI Credits (1 credit = name gen, 5 credits = logo gen)
+# Unified AI Credits (2 credits = name gen, 5 credits = logo gen)
 # ============================================================
 
 def _reset_monthly_ai_credits_if_needed(db, org_id: str) -> None:
@@ -626,7 +563,7 @@ def check_ai_credit_eligibility(db, org_id: str, cost: int) -> Tuple[bool, str, 
     Args:
         db: Database context manager instance
         org_id: Organization UUID string
-        cost: Number of credits required (1 for name gen, 5 for logo gen)
+        cost: Number of credits required (2 for name gen, 5 for logo gen)
 
     Returns:
         (can_use, reason, details)
@@ -743,6 +680,34 @@ def deduct_ai_credits(db, org_id: str, cost: int) -> bool:
     return False
 
 
+def add_purchased_ai_credits(db, org_id: str, credits: int) -> bool:
+    """
+    Add credits to the organization's purchased AI credit pool.
+    Called after a successful credit-pack purchase. Never expires.
+
+    Returns:
+        True if credits were added, False on bad input or missing org.
+    """
+    credits = _int_value(credits, default=0)
+    if credits <= 0:
+        return False
+
+    cur = db.cursor(cursor_factory=RealDictCursor)
+    cur.execute("""
+        UPDATE organizations
+        SET ai_credits_purchased = COALESCE(ai_credits_purchased, 0) + %s,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = %s
+        RETURNING ai_credits_purchased
+    """, (credits, org_id))
+    db.commit()
+    row = cur.fetchone()
+    if row is None:
+        return False
+    logger.info(f"Added {credits} purchased AI credits for org {org_id}")
+    return True
+
+
 def refund_ai_credits(db, org_id: str, cost: int) -> bool:
     """
     Refund AI credits to the organization's monthly pool.
@@ -772,7 +737,7 @@ def refund_ai_credits(db, org_id: str, cost: int) -> bool:
 
 
 # ============================================================
-# Creative Suite: Name Generation (uses AI credits, cost=1)
+# Creative Suite: Name Generation (uses AI credits, cost=2)
 # ============================================================
 
 def get_monthly_name_generations(db, org_id: str) -> int:
@@ -823,7 +788,7 @@ def increment_name_generation_usage(db, user_id: str, org_id: str) -> int:
 def check_name_generation_eligibility(db, org_id: str, session_count: int) -> Tuple[bool, str, dict]:
     """
     Check if an organization can generate more name suggestions.
-    Enforces per-session cap first, then checks unified AI credits (cost=1).
+    Enforces per-session cap first, then checks unified AI credits (cost=2).
 
     Args:
         db: Database context manager instance
@@ -862,8 +827,12 @@ def check_name_generation_eligibility(db, org_id: str, session_count: int) -> Tu
                 "message_en": f"You've used all {session_limit} name suggestions for this session. Upgrade for more.",
             }
 
-    # --- Check unified AI credits (cost=1 per name generation) ---
-    can_use, reason, details = check_ai_credit_eligibility(db, org_id, cost=1)
+    # --- Check unified AI credits (cost=2 per name generation) ---
+    can_use, reason, details = check_ai_credit_eligibility(
+        db,
+        org_id,
+        cost=NAME_GENERATION_AI_CREDIT_COST,
+    )
     if not can_use:
         return False, "monthly_limit_exceeded", {
             "error": "credits_exhausted",
@@ -884,25 +853,25 @@ def check_name_generation_eligibility(db, org_id: str, session_count: int) -> Tu
     }
 
 
-def deduct_name_credit(db, org_id: str) -> bool:
+def deduct_name_credit(db, org_id: str, cost: int = 1) -> bool:
     """
-    Deduct one AI credit for name generation (cost=1).
+    Deduct AI credits for name-like generation.
     Falls back to purchased name credits if AI credits insufficient.
 
     Returns:
-        True if a credit was deducted
+        True if credits were deducted
     """
-    if deduct_ai_credits(db, org_id, cost=1):
+    if deduct_ai_credits(db, org_id, cost=cost):
         return True
 
     # Fall back to legacy purchased name credits
     cur = db.cursor(cursor_factory=RealDictCursor)
     cur.execute("""
         UPDATE organizations
-        SET name_credits_purchased = name_credits_purchased - 1
-        WHERE id = %s AND name_credits_purchased > 0
+        SET name_credits_purchased = name_credits_purchased - %s
+        WHERE id = %s AND name_credits_purchased >= %s
         RETURNING name_credits_purchased
-    """, (org_id,))
+    """, (cost, org_id, cost))
     db.commit()
     row = cur.fetchone()
     return row is not None
@@ -968,13 +937,20 @@ def check_name_generation_eligibility(db, org_id: str, session_count: int) -> Tu
     if session_limit < 999999 and session_count >= session_limit:
         cur = db.cursor(cursor_factory=RealDictCursor)
         cur.execute("""
-            SELECT COALESCE(name_credits_purchased, 0) as name_credits_purchased
+            SELECT
+                COALESCE(name_credits_purchased, 0) as name_credits_purchased,
+                COALESCE(ai_credits_purchased, 0) as ai_credits_purchased
             FROM organizations WHERE id = %s
         """, (org_id,))
         row = cur.fetchone()
         legacy_purchased = _int_value(_row_value(row, 'name_credits_purchased', default=0))
+        ai_purchased = _int_value(_row_value(row, 'ai_credits_purchased', default=0))
 
-        if legacy_purchased <= 0:
+        # Users who have paid for credits (either legacy name credits or new
+        # unified AI credits) should be able to keep generating past the
+        # per-session cap — the cap is a Free-tier UX nudge, not a hard limit
+        # for paying users.
+        if legacy_purchased < NAME_GENERATION_AI_CREDIT_COST and ai_purchased < NAME_GENERATION_AI_CREDIT_COST:
             return False, "upgrade_required", {
                 "error": "upgrade_required",
                 "upgrade_context": "name_suggestions",
@@ -989,24 +965,18 @@ def check_name_generation_eligibility(db, org_id: str, session_count: int) -> Tu
                 "message_en": f"You've used all {session_limit} name suggestions for this session. Upgrade for more.",
             }
 
-    if monthly_limit < 999999 and monthly_used >= monthly_limit and legacy_purchased <= 0:
-        return False, "monthly_limit_exceeded", {
-            "error": "credits_exhausted",
-            "upgrade_context": "ai_credits",
-            "required_feature": "monthly_ai_credits",
-            "required_feature_value": 1,
-            "current_plan": plan_name,
-            "display_name": plan['display_name'],
-            "monthly_limit": monthly_limit,
-            "monthly_used": monthly_used,
-            "remaining": 0,
-            "message": "Bu ayki isim onerisi limitinize ulastiniz.",
-            "message_en": "You have reached your monthly name generation limit.",
-        }
-
-    can_use, _, details = check_ai_credit_eligibility(db, org_id, cost=1)
+    # The historic monthly_used / monthly_limit pre-check used to short-circuit
+    # here, but it ignored `ai_credits_purchased` and would block users who had
+    # bought a credit pack but had 0 monthly allowance (e.g. Free tier). The
+    # canonical eligibility decision lives in `check_ai_credit_eligibility`,
+    # which already considers monthly + purchased credits together.
+    can_use, _, details = check_ai_credit_eligibility(
+        db,
+        org_id,
+        cost=NAME_GENERATION_AI_CREDIT_COST,
+    )
     if not can_use:
-        if legacy_purchased <= 0:
+        if legacy_purchased < NAME_GENERATION_AI_CREDIT_COST:
             cur = db.cursor(cursor_factory=RealDictCursor)
             cur.execute("""
                 SELECT COALESCE(name_credits_purchased, 0) as name_credits_purchased
@@ -1015,12 +985,12 @@ def check_name_generation_eligibility(db, org_id: str, session_count: int) -> Tu
             row = cur.fetchone()
             legacy_purchased = _int_value(_row_value(row, 'name_credits_purchased', default=0))
 
-        if legacy_purchased <= 0:
+        if legacy_purchased < NAME_GENERATION_AI_CREDIT_COST:
             return False, "monthly_limit_exceeded", {
                 "error": "credits_exhausted",
                 "upgrade_context": "ai_credits",
                 "required_feature": "monthly_ai_credits",
-                "required_feature_value": 1,
+                "required_feature_value": NAME_GENERATION_AI_CREDIT_COST,
                 "current_plan": plan_name,
                 "display_name": plan['display_name'],
                 "remaining": 0,

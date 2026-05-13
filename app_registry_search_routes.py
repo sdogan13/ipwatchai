@@ -164,7 +164,7 @@ async def _do_unified_search(
         )
 
 
-async def registry_search_quick(
+async def registry_search_authenticated(
     *,
     query: Optional[str],
     image: Optional[UploadFile],
@@ -183,9 +183,9 @@ async def registry_search_quick(
 
     if user_id:
         from database.crud import Database
-        from utils.subscription import check_quick_search_eligibility
+        from utils.subscription import check_live_search_eligibility
         with Database() as db:
-            can_search, reason, details = check_quick_search_eligibility(db, user_id)
+            can_search, reason, details = check_live_search_eligibility(db, user_id)
             if not can_search:
                 raise HTTPException(status_code=429, detail=details)
 
@@ -223,9 +223,9 @@ async def registry_search_quick(
 
     if user_id:
         from database.crud import Database
-        from utils.subscription import increment_quick_search_usage
+        from utils.subscription import increment_live_search_usage
         with Database() as db:
-            increment_quick_search_usage(db, user_id, organization_id)
+            increment_live_search_usage(db, user_id, organization_id)
 
     return result
 
@@ -291,9 +291,9 @@ def register_registry_search_routes(app, limiter):
             query=query, nice=nice, locarno=locarno, registries=registries,
         )
 
-    @app.post("/api/v1/registry-search/quick", tags=["Registry Search"])
+    @app.post("/api/v1/registry-search", tags=["Registry Search"])
     @limiter.limit("60/minute")
-    async def quick_registry_search(
+    async def registry_search(
         request: Request,
         query: Optional[str] = Form(None),
         image: Optional[UploadFile] = File(None),
@@ -310,7 +310,7 @@ def register_registry_search_routes(app, limiter):
             user_id = str(uid) if uid is not None else None
             oid = getattr(current_user, "organization_id", None)
             org_id = str(oid) if oid is not None else None
-        return await registry_search_quick(
+        return await registry_search_authenticated(
             query=query, image=image, nice=nice, locarno=locarno,
             registries=registries, limit=limit,
             user_id=user_id, organization_id=org_id,

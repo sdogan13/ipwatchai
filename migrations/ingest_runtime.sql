@@ -70,7 +70,6 @@ ALTER TABLE trademarks ADD COLUMN IF NOT EXISTS expiry_date DATE;
 ALTER TABLE trademarks ADD COLUMN IF NOT EXISTS image_path TEXT;
 ALTER TABLE trademarks ADD COLUMN IF NOT EXISTS image_embedding halfvec(512);
 ALTER TABLE trademarks ADD COLUMN IF NOT EXISTS dinov2_embedding halfvec(768);
-ALTER TABLE trademarks ADD COLUMN IF NOT EXISTS text_embedding halfvec(384);
 ALTER TABLE trademarks ADD COLUMN IF NOT EXISTS color_histogram halfvec(512);
 ALTER TABLE trademarks ADD COLUMN IF NOT EXISTS logo_ocr_text TEXT;
 ALTER TABLE trademarks ADD COLUMN IF NOT EXISTS name_tr VARCHAR(500);

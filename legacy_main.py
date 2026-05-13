@@ -51,6 +51,14 @@ from app_enhanced_search_routes import (
     register_enhanced_search_routes,
 )
 from app_design_search_routes import register_design_search_routes
+from app_patent_search_routes import register_patent_search_routes
+from app_patent_watchlist_routes import register_patent_watchlist_routes
+from app_patent_alert_routes import register_patent_alert_routes
+from app_patent_lead_routes import register_patent_lead_routes
+from app_patent_detail_routes import register_patent_detail_routes
+from app_design_detail_routes import register_design_detail_routes
+from app_cografi_search_routes import register_cografi_search_routes
+from app_cografi_watchlist_routes import register_cografi_watchlist_routes
 from app_registry_search_routes import register_registry_search_routes
 from app_design_watchlist_routes import register_design_watchlist_routes
 from app_design_alert_routes import register_design_alert_routes
@@ -131,7 +139,7 @@ _step("register_admin_scoring_routes")
 register_admin_scoring_routes(app)
 
 _step("register_nice_class_routes")
-register_nice_class_routes(app)
+register_nice_class_routes(app, limiter)
 
 _step("register_public_portfolio_routes")
 public_portfolio, public_portfolio_csv = register_public_portfolio_routes(app, limiter, logger)
@@ -191,12 +199,39 @@ public_search, public_search_post, _do_public_search = register_public_search_ro
 # Design (Tasarım) search routes — sister to the trademark search above.
 register_design_search_routes(app, limiter)
 
+# Patent / Faydalı Model search routes — sister to design + trademark search.
+register_patent_search_routes(app, limiter)
+
+# Patent watchlist (CRUD) — sister to design watchlist. Scanner + alerts
+# routes register separately later in the patent watchlist series.
+register_patent_watchlist_routes(app, limiter)
+register_patent_alert_routes(app, limiter)
+
+# Patent leads — derived from patent_events on-the-fly. No new schema.
+register_patent_lead_routes(app, limiter)
+
+# Patent detail — full hydrated record for the detail modal.
+register_patent_detail_routes(app, limiter)
+
+# Coğrafi İşaret search + detail + autocomplete + figure-serving — sister
+# to patent + design + trademark. Detail and image routes are registered
+# alongside search inside register_cografi_search_routes for cohesion.
+register_cografi_search_routes(app, limiter)
+
+# Coğrafi İşaret watchlist + alerts — four watch types (holder /
+# reference / region / lifecycle), backed by the cografi_watchlist_mt +
+# cografi_alerts_mt tables.
+register_cografi_watchlist_routes(app, limiter)
+
 # Cross-registry unified search — discovery surface across both registries.
 register_registry_search_routes(app, limiter)
 
 # Design (Tasarım) watchlist + alerts — sister to the trademark watchlist+alerts.
 register_design_watchlist_routes(app, limiter)
 register_design_alert_routes(app, limiter)
+
+# Design detail modal — full record + events timeline.
+register_design_detail_routes(app, limiter)
 
 # Lazy load AI models only when needed
 _ai_models_loaded = False

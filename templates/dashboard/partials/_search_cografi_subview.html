@@ -1,0 +1,292 @@
+{# ============================================================
+   COĞRAFI İŞARET (GI) SEARCH — sub-view inside the unified
+   Search tab (peer to Marka + Tasarım + Patent sub-views via
+   the searchView toggle in _search_panel.html).
+
+   Visual structure mirrors _search_patent_subview.html: nested
+   rounded-xl cards, the same image drag-drop zone styling, a
+   collapsible Filters section, submit button with icon spinner
+   swap, idle/loading hints, live DB count, and a detached
+   results card.
+
+   Cografi-specific deltas vs patent:
+     - GI-specific filters: gi_type select, region trigram,
+       section_keys multi-select, application_no, registration_no,
+       include_admin checkbox.
+     - Autocomplete returns {names, regions} (not IPC items).
+     - Result cards show: name, region (geographical_boundary),
+       gi_type, applicant, bulletin date + similarity badge.
+============================================================ #}
+<div>
+<div x-data="{ cografiDragOver: false, cografiImageName: '', cografiImagePreview: '',
+               cografiSetFile(file){
+                 if(!file) return;
+                 this.cografiImageName = file.name;
+                 const r = new FileReader();
+                 r.onload = e => { this.cografiImagePreview = e.target.result; };
+                 r.readAsDataURL(file);
+               },
+               cografiClearImage(){
+                 this.cografiImageName = ''; this.cografiImagePreview = '';
+                 const inp = document.getElementById('cografi-search-image');
+                 if(inp){ inp.value = ''; inp.dispatchEvent(new Event('change', {bubbles:true})); }
+               },
+               cografiHandleDrop(e){
+                 this.cografiDragOver = false;
+                 const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+                 if(!f) return;
+                 try { const dt = new DataTransfer(); dt.items.add(f);
+                       document.getElementById('cografi-search-image').files = dt.files; } catch(_){}
+                 this.cografiSetFile(f);
+               },
+               cografiHandleSelect(e){
+                 const f = e.target.files && e.target.files[0];
+                 this.cografiSetFile(f);
+               } }">
+
+  {# ===== Search form card — text input + image dropzone are
+     served by the shared block at the top of _search_panel.html.
+     The hidden #cografi-search-input + #cografi-search-image
+     elements stay so cografi_search.js can read by id; an
+     x-effect in the parent panel mirrors the shared
+     searchQuery + selectedImage into them. ===== #}
+  <input type="text" id="cografi-search-input" class="hidden" autocomplete="off" maxlength="200" />
+  <input type="file" id="cografi-search-image" accept="image/png,image/jpeg,image/webp,image/tiff" class="hidden" />
+  <div>
+
+    {# ---------- Filters (collapsible) ---------- #}
+    <div class="mb-3"
+         x-data="{
+           cografiFiltersOpen: false,
+           get cografiActiveFilterCount() {
+             let n = 0;
+             const fields = ['cografi-search-region','cografi-search-date-from','cografi-search-date-to',
+                             'cografi-search-gi-type','cografi-search-application-no','cografi-search-registration-no'];
+             fields.forEach(id => {
+               const el = document.getElementById(id);
+               if (el && (el.value || '').trim()) n++;
+             });
+             const sk = document.querySelectorAll('.cografi-section-key:checked');
+             if (sk && sk.length > 0) n++;
+             const adm = document.getElementById('cografi-search-include-admin');
+             if (adm && adm.checked) n++;
+             return n;
+           }
+         }">
+
+      <button @click="cografiFiltersOpen = !cografiFiltersOpen" type="button"
+              class="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all"
+              :style="'background:' + (cografiFiltersOpen || cografiActiveFilterCount > 0 ? 'var(--color-primary-light)' : 'var(--color-bg-muted)') + ';border:1px solid ' + (cografiFiltersOpen ? 'var(--color-primary)' : 'var(--color-border)') + ';color:' + (cografiFiltersOpen || cografiActiveFilterCount > 0 ? 'var(--color-primary)' : 'var(--color-text-secondary)')">
+        <div class="flex items-center gap-2 min-w-0 flex-1">
+          <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/>
+          </svg>
+          <span x-show="cografiActiveFilterCount === 0"
+                x-text="t('cografi_search.filters_toggle')">Filters</span>
+          <span x-show="cografiActiveFilterCount > 0" x-cloak
+                class="inline-flex items-center gap-1.5">
+            <span x-text="t('cografi_search.filters_toggle')">Filters</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold text-white"
+                  style="background:var(--color-primary)"
+                  x-text="cografiActiveFilterCount"></span>
+          </span>
+        </div>
+        <svg class="w-4 h-4 shrink-0 transition-transform" :class="cografiFiltersOpen ? 'rotate-180' : ''"
+             fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+
+      <div x-show="cografiFiltersOpen" x-cloak x-collapse class="mt-2 rounded-xl overflow-hidden"
+           style="border:1px solid var(--color-border);background:var(--color-bg-card)">
+        <div class="p-4 space-y-3">
+
+          {# Region + GI type row #}
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium mb-1"
+                     style="color:var(--color-text-faint)"
+                     x-text="t('cografi_search.region_label')">Region</label>
+              <input type="text" id="cografi-search-region"
+                     :placeholder="t('cografi_search.region_placeholder')"
+                     class="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                     style="border:1px solid var(--color-border);color:var(--color-text-primary);background:var(--color-bg-input,var(--color-bg-card))"
+                     autocomplete="off" maxlength="100"/>
+            </div>
+            <div>
+              <label class="block text-xs font-medium mb-1"
+                     style="color:var(--color-text-faint)"
+                     x-text="t('cografi_search.gi_type_label')">GI type</label>
+              <select id="cografi-search-gi-type"
+                      class="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                      style="border:1px solid var(--color-border);color:var(--color-text-primary);background:var(--color-bg-input,var(--color-bg-card))">
+                <option value="" x-text="t('cografi_search.gi_type_any')">Any</option>
+                <option value="Mahreç işareti" x-text="t('cografi_search.gi_type_mahrec')">Mahreç işareti</option>
+                <option value="Menşe adı" x-text="t('cografi_search.gi_type_mensei')">Menşe adı</option>
+                <option value="Geleneksel ürün adı" x-text="t('cografi_search.gi_type_geleneksel')">Traditional product name</option>
+              </select>
+            </div>
+          </div>
+
+          {# Application no + Registration no row #}
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium mb-1"
+                     style="color:var(--color-text-faint)"
+                     x-text="t('cografi_search.application_no_label')">Application no</label>
+              <input type="text" id="cografi-search-application-no"
+                     :placeholder="t('cografi_search.application_no_placeholder')"
+                     class="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                     style="border:1px solid var(--color-border);color:var(--color-text-primary);background:var(--color-bg-input,var(--color-bg-card))"
+                     autocomplete="off" maxlength="40"/>
+            </div>
+            <div>
+              <label class="block text-xs font-medium mb-1"
+                     style="color:var(--color-text-faint)"
+                     x-text="t('cografi_search.registration_no_label')">Registration no</label>
+              <input type="text" id="cografi-search-registration-no"
+                     :placeholder="t('cografi_search.registration_no_placeholder')"
+                     class="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                     style="border:1px solid var(--color-border);color:var(--color-text-primary);background:var(--color-bg-input,var(--color-bg-card))"
+                     inputmode="numeric" autocomplete="off" maxlength="10"/>
+            </div>
+          </div>
+
+          {# Date range #}
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium mb-1"
+                     style="color:var(--color-text-faint)"
+                     x-text="t('cografi_search.date_from_label')">Bulletin from</label>
+              <input type="date" id="cografi-search-date-from"
+                     class="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                     style="border:1px solid var(--color-border);color:var(--color-text-primary);background:var(--color-bg-input,var(--color-bg-card))"/>
+            </div>
+            <div>
+              <label class="block text-xs font-medium mb-1"
+                     style="color:var(--color-text-faint)"
+                     x-text="t('cografi_search.date_to_label')">Bulletin to</label>
+              <input type="date" id="cografi-search-date-to"
+                     class="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                     style="border:1px solid var(--color-border);color:var(--color-text-primary);background:var(--color-bg-input,var(--color-bg-card))"/>
+            </div>
+          </div>
+
+          {# Section keys (multi-select via checkboxes) #}
+          <div>
+            <label class="block text-xs font-medium mb-1.5"
+                   style="color:var(--color-text-faint)"
+                   x-text="t('cografi_search.section_keys_label')">Sections</label>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+              {% for key, label_key in [
+                ('examined', 'cografi_search.section_examined'),
+                ('registered', 'cografi_search.section_registered'),
+                ('article_40_modified', 'cografi_search.section_art40_modified'),
+                ('article_42_change_requests', 'cografi_search.section_art42_change_requests'),
+                ('article_42_finalized', 'cografi_search.section_art42_finalized'),
+                ('article_43_modified', 'cografi_search.section_art43_modified'),
+              ] %}
+              <label class="inline-flex items-center gap-2 text-xs cursor-pointer">
+                <input type="checkbox" class="cografi-section-key"
+                       value="{{ key }}"
+                       style="accent-color:var(--color-primary)"/>
+                <span style="color:var(--color-text-primary)"
+                      x-text="t('{{ label_key }}')"></span>
+              </label>
+              {% endfor %}
+            </div>
+          </div>
+
+          {# Include admin records toggle #}
+          <div>
+            <label class="inline-flex items-center gap-2 text-xs cursor-pointer">
+              <input type="checkbox" id="cografi-search-include-admin"
+                     style="accent-color:var(--color-primary)"/>
+              <span style="color:var(--color-text-secondary)"
+                    x-text="t('cografi_search.include_admin_label')">Include admin records</span>
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {# ---------- Submit (with icon spinner swap) ---------- #}
+    <div class="flex flex-col sm:flex-row gap-3">
+      <button type="button" id="cografi-search-submit"
+              class="flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-semibold text-sm bg-indigo-600 text-white hover:bg-indigo-700 transition-all shadow-sm disabled:opacity-50">
+        <svg data-cografi-submit-icon="search" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+        </svg>
+        <svg data-cografi-submit-icon="spinner" class="w-5 h-5 animate-spin hidden" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+        </svg>
+        <span x-text="t('cografi_search.submit')">Search</span>
+      </button>
+    </div>
+
+    {# Idle hint / loading hint #}
+    <p id="cografi-search-hint" class="mt-2 text-center text-sm px-1"
+       style="color:var(--color-text-muted)"
+       x-text="t('cografi_search.analysis_hint')">Name • Region • Product group • GI type</p>
+    <div id="cografi-search-hint-loading" class="hidden mt-2 flex items-center justify-center gap-2 text-sm font-medium"
+         style="color:var(--color-primary)">
+      <span class="animate-pulse">&#9203;</span>
+      <span x-text="t('landing.ai_analysis_started')">AI analizi başlatıldı...</span>
+    </div>
+
+    {# Live cografi DB count — mirrors patent/design subviews #}
+    <div x-show="cografiCount > 0" x-cloak
+         class="flex items-center justify-center gap-2 mt-4 text-sm"
+         style="color:var(--color-text-muted)">
+      <span class="inline-block w-2 h-2 rounded-full animate-pulse" style="background:#22c55e"></span>
+      <span x-text="cografiCount.toLocaleString() + ' ' + t('cografi_search.stats_db_records')"></span>
+    </div>
+
+    {# Status (errors / empty-query messages from JS) #}
+    <p id="cografi-search-status" class="text-xs mt-2 text-center"
+       style="color:var(--color-text-muted)"></p>
+  </div>
+
+  {# ===== Results card ===== #}
+  <div id="cografi-search-results-card" class="hidden mt-4 rounded-xl shadow-sm border p-5"
+       style="background:var(--color-bg-card);border-color:var(--color-border)">
+
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="text-sm font-semibold" style="color:var(--color-text-primary)">
+        <span x-text="t('cografi_search.results_title')">Results</span>
+        <span id="cografi-search-total-badge"
+              class="ml-2 text-xs px-2 py-0.5 rounded-full"
+              style="background:var(--color-bg-muted);color:var(--color-text-secondary)">0</span>
+      </h3>
+      <span id="cografi-search-duration" class="text-xs"
+            style="color:var(--color-text-faint)"></span>
+    </div>
+
+    <div id="cografi-search-loading" class="hidden py-12 text-center">
+      <div class="inline-block animate-spin rounded-full h-8 w-8 border-2 border-indigo-600 border-t-transparent"></div>
+      <p class="text-sm mt-3" style="color:var(--color-text-muted)"
+         x-text="t('cografi_search.loading')">Searching…</p>
+    </div>
+
+    <div id="cografi-search-empty" class="hidden py-12 text-center">
+      <svg class="w-12 h-12 mx-auto mb-2" style="color:var(--color-text-faint)"
+           fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+              d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+      </svg>
+      <p class="text-sm font-medium" style="color:var(--color-text-secondary)"
+         x-text="t('cografi_search.empty_title')">No results</p>
+      <p class="text-xs mt-1" style="color:var(--color-text-faint)"
+         x-text="t('cografi_search.empty_body')">Try a different query or relax filters.</p>
+    </div>
+
+    <div id="cografi-search-error" class="hidden p-4 rounded-lg text-sm"
+         style="background:var(--color-bg-error,#fee2e2);color:var(--color-text-error,#991b1b)"></div>
+
+    <div id="cografi-search-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+  </div>
+</div><!-- /cografi alpine x-data wrap -->
+</div><!-- /cografi rounded-xl card -->

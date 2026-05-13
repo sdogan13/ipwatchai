@@ -16,8 +16,11 @@ upload an image via the route layer to populate the embedding columns.
 """
 from __future__ import annotations
 
+import csv
+import io
+import json
 import logging
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -84,21 +87,15 @@ def _row_to_dict(row) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def _combined_watchlist_count(cur, organization_id: UUID) -> int:
-    cur.execute(
-        """
-        SELECT
-            (SELECT COUNT(*) FROM watchlist_mt
-             WHERE organization_id = %(org)s AND is_active = TRUE)
-          + (SELECT COUNT(*) FROM design_watchlist_mt
-             WHERE organization_id = %(org)s AND is_active = TRUE)
-            AS total
-        """,
-        {"org": str(organization_id)},
-    )
-    row = cur.fetchone()
-    if row is None:
-        return 0
-    return int(row.get("total") if isinstance(row, dict) else row[0])
+    """Active watchlist item count across trademarks + designs + patents.
+
+    Delegates to ``services.patent_watchlist_service.combined_watchlist_count``
+    so all three registry watchlists share one canonical count function and
+    the ``max_watchlist_items`` plan bucket stays consistent regardless of
+    which surface created the row.
+    """
+    from services.patent_watchlist_service import combined_watchlist_count
+    return combined_watchlist_count(cur, organization_id)
 
 
 def _check_watchlist_quota(db, current_user) -> None:
@@ -486,3 +483,655 @@ def update_last_scan_at(*, item_id: UUID, db) -> None:
         "UPDATE design_watchlist_mt SET last_scan_at = NOW() WHERE id = %s",
         (str(item_id),),
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — bulk operations + stats
+# ---------------------------------------------------------------------------
+
+def get_design_watchlist_stats(*, current_user, db_factory=Database) -> Dict[str, Any]:
+    """Return totals for the Watchlist tab's Tasarım stats cards.
+
+    Shape: ``{total, threatened, critical, new_alerts}``.
+        * total       — active watchlist items for the org
+        * threatened  — items with ≥1 active (status='new') alert
+        * critical    — alerts with severity='critical' AND status='new'
+        * new_alerts  — alerts with status='new' (any severity)
+    """
+    org_id = str(current_user.organization_id)
+    with db_factory() as db:
+        cur = db.cursor()
+        cur.execute(
+            """
+            SELECT
+              (SELECT COUNT(*) FROM design_watchlist_mt
+               WHERE organization_id = %(org)s AND is_active = TRUE)
+                AS total,
+              (SELECT COUNT(DISTINCT a.watchlist_item_id)
+               FROM design_alerts_mt a
+               JOIN design_watchlist_mt w ON w.id = a.watchlist_item_id
+               WHERE w.organization_id = %(org)s
+                 AND w.is_active = TRUE
+                 AND a.status = 'new')
+                AS threatened,
+              (SELECT COUNT(*) FROM design_alerts_mt
+               WHERE organization_id = %(org)s
+                 AND status = 'new' AND severity = 'critical')
+                AS critical,
+              (SELECT COUNT(*) FROM design_alerts_mt
+               WHERE organization_id = %(org)s AND status = 'new')
+                AS new_alerts
+            """,
+            {"org": org_id},
+        )
+        row = cur.fetchone() or {}
+    if isinstance(row, dict):
+        return {
+            "total": int(row.get("total", 0) or 0),
+            "threatened": int(row.get("threatened", 0) or 0),
+            "critical": int(row.get("critical", 0) or 0),
+            "new_alerts": int(row.get("new_alerts", 0) or 0),
+        }
+    # Fallback for tuple-style rows
+    return {
+        "total": int(row[0] or 0),
+        "threatened": int(row[1] or 0),
+        "critical": int(row[2] or 0),
+        "new_alerts": int(row[3] or 0),
+    }
+
+
+def list_active_item_ids_for_org(*, current_user, db_factory=Database) -> List[str]:
+    """IDs of every active design-watchlist item for the org. Used by
+    scan-all (routes layer queues a background task per id)."""
+    org_id = str(current_user.organization_id)
+    with db_factory() as db:
+        cur = db.cursor()
+        cur.execute(
+            """
+            SELECT id FROM design_watchlist_mt
+            WHERE organization_id = %s AND is_active = TRUE
+            ORDER BY created_at ASC
+            """,
+            (org_id,),
+        )
+        rows = cur.fetchall() or []
+    out: List[str] = []
+    for r in rows:
+        v = r.get("id") if isinstance(r, dict) else r[0]
+        if v is not None:
+            out.append(str(v))
+    return out
+
+
+def delete_all_design_watchlist_items(*, current_user, db_factory=Database) -> Dict[str, Any]:
+    """Delete every design-watchlist item for the org. The FK on
+    design_alerts_mt cascades, so all related alerts disappear too.
+    Returns ``{deleted: int}``."""
+    org_id = str(current_user.organization_id)
+    with db_factory() as db:
+        cur = db.cursor()
+        cur.execute(
+            """
+            DELETE FROM design_watchlist_mt
+            WHERE organization_id = %s
+            RETURNING id
+            """,
+            (org_id,),
+        )
+        deleted = len(cur.fetchall() or [])
+        db.commit()
+    return {"success": True, "deleted": deleted}
+
+
+def update_all_design_watchlist_thresholds(
+    *,
+    current_user,
+    threshold: float,
+    db_factory=Database,
+) -> Dict[str, Any]:
+    """Apply a single similarity_threshold to every active item for the org.
+    Bound-checked 0.0..1.0 here (the route also validates via Pydantic)."""
+    if threshold < 0.0 or threshold > 1.0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="threshold must be between 0.0 and 1.0",
+        )
+    org_id = str(current_user.organization_id)
+    with db_factory() as db:
+        cur = db.cursor()
+        cur.execute(
+            """
+            UPDATE design_watchlist_mt
+            SET similarity_threshold = %s, updated_at = NOW()
+            WHERE organization_id = %s AND is_active = TRUE
+            RETURNING id
+            """,
+            (float(threshold), org_id),
+        )
+        updated = len(cur.fetchall() or [])
+        db.commit()
+    return {"success": True, "updated": updated, "threshold": float(threshold)}
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — CSV bulk upload (Excel deferred; Phase-1 said CSV-only)
+# ---------------------------------------------------------------------------
+
+# Column-name aliases the auto-detector tries when matching user CSV headers
+# to the canonical design-watchlist field set.
+_DWL_FIELD_ALIASES: Dict[str, List[str]] = {
+    "product_name": [
+        "product_name", "product name", "ürün adı", "urun adi",
+        "tasarım adı", "tasarim adi", "name",
+    ],
+    "locarno_classes": [
+        "locarno_classes", "locarno classes", "locarno",
+        "locarno sınıfları", "locarno siniflari", "classes", "sınıflar",
+    ],
+    "description": ["description", "açıklama", "aciklama", "notes", "notlar"],
+    "customer_application_no": [
+        "customer_application_no", "application_no", "app no", "başvuru no",
+        "basvuru no", "kendi başvuru no", "kendi basvuru no",
+    ],
+    "customer_registration_no": [
+        "customer_registration_no", "registration_no", "tescil no", "kendi tescil no",
+    ],
+    "similarity_threshold": [
+        "similarity_threshold", "threshold", "eşik", "esik",
+    ],
+    "priority": ["priority", "öncelik", "oncelik"],
+    "tags": ["tags", "etiketler"],
+    "alert_email": [
+        "alert_email", "email_alert", "e-posta uyarı", "email", "mail",
+    ],
+    "alert_frequency": [
+        "alert_frequency", "frequency", "bildirim sıklığı", "bildirim sikligi",
+    ],
+}
+
+
+_DWL_TEMPLATE_HEADERS: List[str] = [
+    "product_name",
+    "locarno_classes",
+    "description",
+    "customer_application_no",
+    "customer_registration_no",
+    "similarity_threshold",
+    "priority",
+    "tags",
+    "alert_email",
+    "alert_frequency",
+]
+
+
+def build_design_csv_template() -> bytes:
+    """Return a UTF-8 BOM CSV (Excel-friendly) containing only the header row
+    plus a single example row. Used by GET /upload/template."""
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(_DWL_TEMPLATE_HEADERS)
+    writer.writerow([
+        "Lamba",
+        "26-05;26-04",
+        "Modern masa lambası",
+        "2024/00123",
+        "",
+        "0.7",
+        "medium",
+        "iç-mekan;aydınlatma",
+        "true",
+        "daily",
+    ])
+    # UTF-8 BOM so Excel opens Turkish chars correctly.
+    return ("﻿" + buf.getvalue()).encode("utf-8")
+
+
+def _normalize_header(s: str) -> str:
+    return (s or "").strip().lower().replace(" ", " ")
+
+
+def _suggest_mapping(headers: List[str]) -> Dict[str, Optional[str]]:
+    """For each canonical field, pick the first matching CSV header (or None)."""
+    norm_headers = {_normalize_header(h): h for h in headers if h}
+    out: Dict[str, Optional[str]] = {}
+    for field, aliases in _DWL_FIELD_ALIASES.items():
+        match: Optional[str] = None
+        for alias in aliases:
+            n = _normalize_header(alias)
+            if n in norm_headers:
+                match = norm_headers[n]
+                break
+        out[field] = match
+    return out
+
+
+def _decode_csv_bytes(content: bytes) -> str:
+    """Decode an uploaded CSV file as UTF-8, stripping BOM if present.
+    Falls back to latin-1 only if UTF-8 decoding fails."""
+    if content.startswith(b"\xef\xbb\xbf"):
+        content = content[3:]
+    try:
+        return content.decode("utf-8")
+    except UnicodeDecodeError:
+        return content.decode("latin-1", errors="replace")
+
+
+def detect_design_csv_columns(content: bytes) -> Dict[str, Any]:
+    """Read uploaded CSV bytes and return columns + sample rows + a suggested
+    field-to-header mapping. Used by POST /upload/detect-columns."""
+    text = _decode_csv_bytes(content)
+    reader = csv.reader(io.StringIO(text))
+    rows = [r for r in reader if r]
+    if not rows:
+        return {"columns": [], "sample_rows": [], "total_rows": 0, "suggested_mapping": {}}
+    headers = [c.strip() for c in rows[0]]
+    sample_rows: List[Dict[str, str]] = []
+    for r in rows[1:4]:  # up to 3 sample rows
+        d: Dict[str, str] = {}
+        for i, h in enumerate(headers):
+            d[h] = r[i] if i < len(r) else ""
+        sample_rows.append(d)
+    return {
+        "columns": headers,
+        "sample_rows": sample_rows,
+        "total_rows": max(0, len(rows) - 1),
+        "suggested_mapping": _suggest_mapping(headers),
+    }
+
+
+def _coerce_bool(v) -> Optional[bool]:
+    if v is None:
+        return None
+    s = str(v).strip().lower()
+    if s in ("true", "1", "yes", "evet", "y", "on"):
+        return True
+    if s in ("false", "0", "no", "hayır", "hayir", "n", "off"):
+        return False
+    return None
+
+
+def _split_list(v) -> List[str]:
+    """Split a free-text cell on `,` or `;` into a stripped non-empty list."""
+    if not v:
+        return []
+    s = str(v)
+    parts: List[str] = []
+    for chunk in s.replace(";", ",").split(","):
+        t = chunk.strip()
+        if t:
+            parts.append(t)
+    return parts
+
+
+def _coerce_threshold(v) -> Optional[float]:
+    if v is None or str(v).strip() == "":
+        return None
+    try:
+        f = float(str(v).strip().replace(",", "."))
+    except ValueError:
+        return None
+    if 0.0 <= f <= 1.0:
+        return f
+    # accept percent-style values (50, 70) for usability
+    if 0.0 <= f <= 100.0:
+        return f / 100.0
+    return None
+
+
+def _row_to_create_payload(row: Dict[str, str], mapping: Dict[str, str]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Project a CSV row through the mapping to a DesignWatchlistCreate-shape
+    dict. Returns (payload, error). On error payload is None."""
+    def _val(field: str) -> Optional[str]:
+        col = mapping.get(field)
+        if not col:
+            return None
+        v = row.get(col)
+        return v.strip() if isinstance(v, str) else v
+
+    name = (_val("product_name") or "").strip()
+    if not name:
+        return None, "product_name is required"
+    payload: Dict[str, Any] = {"product_name": name}
+    locarno = _split_list(_val("locarno_classes"))
+    if locarno:
+        payload["locarno_classes"] = locarno
+    desc = _val("description")
+    if desc:
+        payload["description"] = desc
+    app_no = _val("customer_application_no")
+    if app_no:
+        payload["customer_application_no"] = app_no
+    reg_no = _val("customer_registration_no")
+    if reg_no:
+        payload["customer_registration_no"] = reg_no
+    threshold = _coerce_threshold(_val("similarity_threshold"))
+    if threshold is not None:
+        payload["similarity_threshold"] = threshold
+    priority = (_val("priority") or "").strip().lower()
+    if priority in ("low", "medium", "high"):
+        payload["priority"] = priority
+    tags = _split_list(_val("tags"))
+    if tags:
+        payload["tags"] = tags
+    alert_email = _coerce_bool(_val("alert_email"))
+    if alert_email is not None:
+        payload["alert_email"] = alert_email
+    freq = (_val("alert_frequency") or "").strip().lower()
+    if freq in ("immediate", "daily", "weekly"):
+        payload["alert_frequency"] = freq
+    return payload, None
+
+
+def _existing_app_nos_for_org(cur, organization_id: str) -> set:
+    cur.execute(
+        """
+        SELECT customer_application_no FROM design_watchlist_mt
+        WHERE organization_id = %s AND customer_application_no IS NOT NULL
+        """,
+        (organization_id,),
+    )
+    out: set = set()
+    for r in cur.fetchall() or []:
+        v = r.get("customer_application_no") if isinstance(r, dict) else r[0]
+        if v:
+            out.add(str(v).strip())
+    return out
+
+
+def import_design_csv_with_mapping(
+    *,
+    content: bytes,
+    column_mapping,
+    current_user,
+    db_factory=Database,
+) -> Dict[str, Any]:
+    """Apply ``column_mapping`` to the rows of an uploaded CSV and create
+    design watchlist items. Mirrors trademark side semantics:
+        * dedup by customer_application_no within the org
+        * combined plan limit (trademark + design) via _check_watchlist_quota
+        * returns {added, skipped, errors, total, limit_reached, scan_item_ids}
+    """
+    if isinstance(column_mapping, str):
+        try:
+            mapping = json.loads(column_mapping)
+        except json.JSONDecodeError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="column_mapping must be valid JSON",
+            )
+    else:
+        mapping = dict(column_mapping or {})
+
+    if not isinstance(mapping, dict) or not mapping:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="column_mapping must be a non-empty object",
+        )
+
+    text = _decode_csv_bytes(content)
+    reader = csv.DictReader(io.StringIO(text))
+    rows = list(reader)
+    if not rows:
+        return {"added": 0, "skipped": 0, "errors": 0, "total": 0,
+                "limit_reached": False, "errors_detail": [], "scan_item_ids": []}
+
+    org_id = str(current_user.organization_id)
+    plan_limit: Optional[int] = None
+    current_count = 0
+    with db_factory() as db:
+        # Determine plan capacity using the same combined trademark+design
+        # quota that single-add already enforces.
+        from utils.subscription import get_plan_limit, get_user_plan
+        plan_info = get_user_plan(db, str(current_user.id))
+        plan_name = plan_info.get("plan_name", "free")
+        plan_limit = int(get_plan_limit(plan_name, "max_watchlist_items") or 0)
+        cur = db.cursor()
+        current_count = _combined_watchlist_count(cur, current_user.organization_id)
+        existing_app_nos = _existing_app_nos_for_org(cur, org_id)
+
+        added = 0
+        skipped = 0
+        errors_detail: List[Dict[str, Any]] = []
+        limit_reached = False
+        scan_item_ids: List[str] = []
+        # Use a single connection: insert items in one transaction.
+        for idx, row in enumerate(rows, start=2):  # row 1 is the header
+            payload, err = _row_to_create_payload(row, mapping)
+            if err:
+                errors_detail.append({"row": idx, "error": err})
+                continue
+            app_no = (payload.get("customer_application_no") or "").strip()
+            if app_no and app_no in existing_app_nos:
+                skipped += 1
+                continue
+            if plan_limit and current_count >= plan_limit:
+                limit_reached = True
+                break
+
+            cur.execute(
+                """
+                INSERT INTO design_watchlist_mt (
+                    organization_id, user_id, product_name, locarno_classes,
+                    description, customer_application_no, customer_registration_no,
+                    similarity_threshold, priority, tags, alert_email,
+                    alert_frequency
+                ) VALUES (
+                    %(org)s, %(uid)s, %(product_name)s, %(locarno)s,
+                    %(description)s, %(app_no)s, %(reg_no)s,
+                    %(threshold)s, %(priority)s, %(tags)s, %(alert_email)s,
+                    %(alert_frequency)s
+                )
+                RETURNING id
+                """,
+                {
+                    "org": org_id,
+                    "uid": str(current_user.id),
+                    "product_name": payload["product_name"],
+                    "locarno": payload.get("locarno_classes") or [],
+                    "description": payload.get("description"),
+                    "app_no": payload.get("customer_application_no"),
+                    "reg_no": payload.get("customer_registration_no"),
+                    "threshold": payload.get("similarity_threshold", 0.5),
+                    "priority": payload.get("priority", "medium"),
+                    "tags": payload.get("tags") or [],
+                    "alert_email": payload.get("alert_email", True),
+                    "alert_frequency": payload.get("alert_frequency", "daily"),
+                },
+            )
+            new_row = cur.fetchone()
+            if new_row:
+                new_id = new_row.get("id") if isinstance(new_row, dict) else new_row[0]
+                if new_id:
+                    scan_item_ids.append(str(new_id))
+                    if app_no:
+                        existing_app_nos.add(app_no)
+                    added += 1
+                    current_count += 1
+        db.commit()
+
+    return {
+        "added": added,
+        "skipped": skipped,
+        "errors": len(errors_detail),
+        "total": len(rows),
+        "limit_reached": limit_reached,
+        "errors_detail": errors_detail[:25],
+        "scan_item_ids": scan_item_ids,
+        "plan_limit": plan_limit,
+        "current_count": current_count,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Bulk import from a holder's design portfolio. Mirrors the trademark
+# watchlist /bulk-from-portfolio endpoint: pulls the holder's full
+# design list, calls create_design_watchlist_item per row (which
+# handles dedupe, plan quota, and reference-design embedding clone),
+# and returns the {added/skipped/errors/scan_item_ids} shape.
+# ---------------------------------------------------------------------------
+
+async def import_design_watchlist_from_portfolio(
+    *,
+    holder_id: Optional[str] = None,
+    designer_name: Optional[str] = None,
+    attorney_name: Optional[str] = None,
+    attorney_firm: Optional[str] = None,
+    current_user,
+    db_factory=Database,
+) -> Dict[str, Any]:
+    provided = sum(1 for v in (holder_id, designer_name, attorney_name) if v)
+    if provided == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="holder_id, designer_name, or attorney_name is required",
+        )
+    if provided > 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="pass exactly one of holder_id, designer_name, or attorney_name",
+        )
+
+    # PRO gate (mirrors trademark portfolio access policy).
+    from utils.subscription import get_plan_limit, get_user_plan
+
+    with db_factory() as db:
+        plan = get_user_plan(db, str(current_user.id))
+        if not get_plan_limit(plan["plan_name"], "can_view_holder_portfolio"):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "pro_feature",
+                    "message": "Sahip portföyü PRO özelliğidir",
+                    "upgrade_url": "/pricing",
+                },
+            )
+
+        cur = db.cursor()
+
+        if holder_id:
+            # Resolve by either internal UUID or public tpe_client_id
+            # — matches the public design portfolio endpoint so the
+            # bulk-add flow works for holders without a TPE client ID
+            # (~10% of designs, mostly foreign-corporate).
+            from services.design_search_service import _resolve_holder_row
+            h = _resolve_holder_row(cur, str(holder_id).strip())
+            if not h:
+                raise HTTPException(status_code=404, detail="Holder not found")
+            cur.execute(
+                """
+                SELECT d.id::text AS design_id,
+                       d.application_no,
+                       d.product_name_tr, d.product_name_en,
+                       d.locarno_classes
+                FROM designs d
+                WHERE d.holder_id = %s
+                ORDER BY d.application_date DESC NULLS LAST, d.application_no DESC
+                """,
+                (h["id"],),
+            )
+        elif designer_name:
+            # Designer path: match the conservative-normalization GIN
+            # index on designs.designers (idx_des_designers_normalized_gin).
+            cur.execute(
+                """
+                SELECT d.id::text AS design_id,
+                       d.application_no,
+                       d.product_name_tr, d.product_name_en,
+                       d.locarno_classes
+                FROM designs d
+                WHERE d.designers IS NOT NULL
+                  AND normalize_designer_name_array(d.designers)
+                      @> ARRAY[normalize_designer_name(%s)]::text[]
+                ORDER BY d.application_date DESC NULLS LAST, d.application_no DESC
+                """,
+                (str(designer_name).strip(),),
+            )
+        else:
+            # Attorney path: match (attorney_name, attorney_firm) pair
+            # via idx_des_attorney_normalized. Empty firm matches NULL.
+            attorney_firm_in = (attorney_firm or "").strip() or None
+            cur.execute(
+                """
+                SELECT d.id::text AS design_id,
+                       d.application_no,
+                       d.product_name_tr, d.product_name_en,
+                       d.locarno_classes
+                FROM designs d
+                WHERE d.attorney_name IS NOT NULL
+                  AND normalize_designer_name(d.attorney_name)
+                      = normalize_designer_name(%s)
+                  AND COALESCE(normalize_designer_name(d.attorney_firm), '')
+                      = COALESCE(normalize_designer_name(%s), '')
+                ORDER BY d.application_date DESC NULLS LAST, d.application_no DESC
+                """,
+                (str(attorney_name).strip(), attorney_firm_in),
+            )
+        rows = cur.fetchall()
+
+    if not rows:
+        return {
+            "created": 0, "skipped": 0, "errors": 0, "total": 0,
+            "limit_reached": False, "errors_detail": [], "scan_item_ids": [],
+        }
+
+    created = 0
+    skipped = 0
+    errors_detail: List[Dict[str, Any]] = []
+    limit_reached = False
+    scan_item_ids: List[str] = []
+
+    for d in rows:
+        product_name = (
+            d.get("product_name_tr") or d.get("product_name_en")
+            or d.get("application_no") or ""
+        )
+        if not product_name:
+            errors_detail.append({"application_no": d.get("application_no"), "reason": "missing_product_name"})
+            continue
+
+        payload = {
+            "product_name": product_name,
+            "customer_application_no": d.get("application_no"),
+            "locarno_classes": list(d.get("locarno_classes") or []),
+            "reference_design_id": d["design_id"],
+        }
+        try:
+            item = create_design_watchlist_item(
+                data=payload, current_user=current_user, db_factory=db_factory,
+            )
+            new_id = item.get("id") if isinstance(item, dict) else None
+            if new_id:
+                scan_item_ids.append(str(new_id))
+                created += 1
+        except HTTPException as exc:
+            # 409 = duplicate (already watching); 402/403 = plan/quota
+            # limit reached → stop trying further inserts so the caller
+            # can surface "limit reached" to the user.
+            if exc.status_code == status.HTTP_409_CONFLICT:
+                skipped += 1
+            elif exc.status_code in (402, 403):
+                limit_reached = True
+                errors_detail.append({
+                    "application_no": d.get("application_no"),
+                    "reason": "plan_limit_reached",
+                })
+                break
+            else:
+                errors_detail.append({
+                    "application_no": d.get("application_no"),
+                    "reason": str(exc.detail)[:200],
+                })
+
+    return {
+        # Field name mirrors the trademark watchlist bulk service so
+        # the shared bulk-confirm modal in _modals.html can read
+        # data.created without branching on registry.
+        "created": created,
+        "skipped": skipped,
+        "errors": len(errors_detail),
+        "total": len(rows),
+        "limit_reached": limit_reached,
+        "errors_detail": errors_detail[:25],
+        "scan_item_ids": scan_item_ids,
+    }

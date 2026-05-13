@@ -114,7 +114,7 @@ def get_public_search_daily_limit(plan_features=None) -> int:
 
     free_plan = plan_features.get("free", {})
     try:
-        return int(free_plan.get("max_daily_quick_searches", 5))
+        return int(free_plan.get("max_daily_live_searches", 5))
     except (TypeError, ValueError):
         return 5
 
@@ -318,14 +318,14 @@ async def run_public_search(
     logger=None,
     searcher_factory=None,
 ):
-    """Run the public landing-page search flow."""
+    """Run the public landing-page search flow against the live Agentic pipeline."""
     if searcher_factory is None:
         from agentic_search import AgenticTrademarkSearch
 
         searcher_factory = AgenticTrademarkSearch
 
     try:
-        with searcher_factory(auto_scrape=False) as searcher:
+        with searcher_factory(auto_scrape=True) as searcher:
             result = searcher.search(
                 query=query,
                 nice_classes=nice_classes,
@@ -757,7 +757,6 @@ async def run_enhanced_search(
     score_pair_fn,
     visual_similarity_fn,
     class_suggestions_handler,
-    text_embedding_getter,
     encode_query_image_handler,
     date_formatter,
     status_code_getter,
@@ -945,7 +944,6 @@ async def run_enhanced_search(
                 t.registration_no,
                 t.name_tr,
                 t.logo_ocr_text,
-                t.text_embedding,
                 t.image_embedding,
                 t.dinov2_embedding,
                 t.color_histogram,
@@ -999,8 +997,6 @@ async def run_enhanced_search(
         cur.execute(base_select + where_clause + order_limit, base_params + where_params)
         rows = cur.fetchall()
 
-        query_text_vec = text_embedding_getter(search_request.name)
-
         query_img_data = None
         if search_request.image_url and use_unified:
             try:
@@ -1033,31 +1029,6 @@ async def run_enhanced_search(
 
             pg_text_sim = float(row["score"]) if row["score"] else 0.0
             phon_match = bool(row.get("phonetic_match"))
-
-            semantic_sim = 0.0
-            cand_text_emb = row.get("text_embedding")
-            if query_text_vec and cand_text_emb:
-                try:
-                    import numpy as np
-
-                    query_array = np.array(
-                        query_text_vec
-                        if isinstance(query_text_vec, list)
-                        else list(query_text_vec),
-                        dtype=np.float32,
-                    )
-                    if isinstance(cand_text_emb, str):
-                        candidate_array = np.array(
-                            [float(value) for value in cand_text_emb.strip("[]").split(",")],
-                            dtype=np.float32,
-                        )
-                    else:
-                        candidate_array = np.array(list(cand_text_emb), dtype=np.float32)
-                    dot = np.dot(query_array, candidate_array)
-                    norms = np.linalg.norm(query_array) * np.linalg.norm(candidate_array)
-                    semantic_sim = float(dot / norms) if norms > 0 else 0.0
-                except Exception:
-                    semantic_sim = 0.0
 
             vis_sim = 0.0
             if query_img_data:
@@ -1107,7 +1078,7 @@ async def run_enhanced_search(
                 query_name=search_request.name,
                 candidate_name=target_name,
                 text_sim=pg_text_sim,
-                semantic_sim=semantic_sim,
+                semantic_sim=0.0,
                 visual_sim=vis_sim,
                 phonetic_sim=1.0 if phon_match else 0.0,
                 candidate_translations={"name_tr": row.get("name_tr") or ""},
@@ -1120,7 +1091,7 @@ async def run_enhanced_search(
                 logger.error(
                     "DEBUG_API_INJECT_PATENT | score_val: "
                     f"{score_val} | similarity_pct: {similarity_pct} | "
-                    f"semantic_sim: {semantic_sim} | pg_text_sim: {pg_text_sim} | "
+                    f"pg_text_sim: {pg_text_sim} | "
                     f"phon_match: {phon_match}"
                 )
 
@@ -1212,7 +1183,6 @@ async def run_image_search(
     get_image_embedding_handler,
     extract_ocr_text_handler,
     connect_fn=None,
-    text_embedding_getter=None,
     name_similarity_fn=None,
 ):
     """Run the public image-search flow used by the upload endpoint."""
@@ -1318,7 +1288,7 @@ async def run_image_search(
         clip_sql = f"""
             SELECT t.id, t.name, t.application_no, t.final_status, t.nice_class_numbers,
                    t.bulletin_no, t.image_path, t.logo_ocr_text, t.name_tr,
-                   t.text_embedding, t.image_embedding, t.dinov2_embedding, t.color_histogram,
+                   t.image_embedding, t.dinov2_embedding, t.color_histogram,
                    t.holder_name, t.holder_tpe_client_id,
                    t.attorney_name, t.attorney_no, t.registration_no,
                    t.application_date, t.expiry_date,
@@ -1339,8 +1309,8 @@ async def run_image_search(
         if use_unified and dino_vec_str:
             dino_sql = f"""
                 SELECT t.id, t.name, t.application_no, t.final_status, t.nice_class_numbers,
-                       t.bulletin_no, t.image_path, t.logo_ocr_text, t.name_tr,
-                       t.text_embedding, t.image_embedding, t.dinov2_embedding, t.color_histogram,
+                   t.bulletin_no, t.image_path, t.logo_ocr_text, t.name_tr,
+                   t.image_embedding, t.dinov2_embedding, t.color_histogram,
                        t.holder_name, t.holder_tpe_client_id,
                        t.attorney_name, t.attorney_no, t.registration_no,
                        t.application_date, t.expiry_date,
@@ -1359,16 +1329,10 @@ async def run_image_search(
 
         merged = {**dino_rows, **clip_rows}
 
-        query_text_vec = None
         has_typed_name = bool(name and name.strip())
         query_name = (name or "").strip()
         query_text_source = "USER_TEXT" if has_typed_name else "IMAGE_ONLY"
         if has_typed_name:
-            if text_embedding_getter is None:
-                from ai import get_text_embedding_cached
-
-                text_embedding_getter = get_text_embedding_cached
-            query_text_vec = text_embedding_getter(query_name)
             if name_similarity_fn is None:
                 from risk_engine import calculate_name_similarity
 
@@ -1427,17 +1391,15 @@ async def run_image_search(
                 )
 
                 text_sim = 0.0
-                semantic_sim = 0.0
                 phon_sim = 0.0
                 if has_typed_name:
                     text_sim = name_similarity_fn(query_name, candidate_name)
-                    semantic_sim = _cosine(query_text_vec, row.get("text_embedding"))
 
                 score_breakdown = score_pair_fn(
                     query_name=query_name if has_typed_name else "",
                     candidate_name=candidate_name,
                     text_sim=text_sim,
-                    semantic_sim=semantic_sim,
+                    semantic_sim=0.0,
                     visual_sim=vis_sim,
                     phonetic_sim=phon_sim,
                     candidate_translations={"name_tr": row.get("name_tr") or ""},

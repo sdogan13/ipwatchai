@@ -6,7 +6,7 @@ pure helpers: status mapping, opposition window, halfvec serialization,
 date parsing, and row-shaping.
 """
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -14,6 +14,8 @@ from pipeline.ingest_designs import (
     SECTION_STATUS_MAP,
     _design_row,
     _first_applicant,
+    _folder_already_ingested,
+    _truncate_500,
     opposition_end_date,
     parse_date_safe,
     status_for_section,
@@ -91,6 +93,37 @@ def test_to_halfvec_literal_handles_iterable():
 def test_to_halfvec_literal_empty_or_none():
     assert to_halfvec_literal(None) is None
     assert to_halfvec_literal([]) is None
+
+
+# ---------------------------------------------------------------------------
+# _truncate_500 — fits product_name_* into VARCHAR(500)
+# ---------------------------------------------------------------------------
+
+def test_truncate_500_short_string_passthrough():
+    assert _truncate_500("Lamba") == "Lamba"
+    assert _truncate_500("a" * 500) == "a" * 500
+
+
+def test_truncate_500_strips_whitespace():
+    assert _truncate_500("  Lamba  ") == "Lamba"
+
+
+def test_truncate_500_clips_at_500_chars():
+    """Real-world Phase-1 finding: 13 Hague designs ship product_name_en
+    over 500 chars (longest 1373) describing multi-part designs as
+    comma-joined lists. Truncate so the row fits VARCHAR(500)."""
+    s = "Hood for vehicle, " * 100   # ~1800 chars
+    out = _truncate_500(s)
+    assert out is not None
+    assert len(out) == 500
+    assert out.startswith("Hood for vehicle,")
+
+
+def test_truncate_500_handles_none_and_empty():
+    assert _truncate_500(None) is None
+    assert _truncate_500("") is None
+    assert _truncate_500("   ") is None
+    assert _truncate_500(42) is None  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +206,57 @@ def test_design_row_basic_fields():
     assert row["clip_vitb32_mean"].startswith("[") and row["clip_vitb32_mean"].endswith("]")
 
 
+def test_design_row_pulls_bulletin_from_doc_level_fallback():
+    """Real-world PDF metadata.json carries bulletin_no/bulletin_date at
+    the DOC level (payload["bulletin_no"]), NOT inside each record. Phase 1
+    found 410K design rows shipped with NULL bulletin_no because the
+    ingest only looked at record level. The fix: callers pass payload's
+    doc-level values as kwargs; _design_row falls back to them when the
+    record doesn't carry its own."""
+    rec = _sample_record_with_one_design()
+    # Strip the record-level bulletin fields to simulate real PDF data shape.
+    rec.pop("bulletin_no", None)
+    rec.pop("bulletin_date", None)
+    row = _design_row(
+        rec, rec["designs"][0],
+        holder_id=None, source_folder="TS_483_2026-04-24",
+        doc_bulletin_no=483,
+        doc_bulletin_date="2026-04-24",
+    )
+    assert row["bulletin_no"] == "483"
+    assert row["bulletin_date"] == date(2026, 4, 24)
+    assert row["opposition_end"] == date(2026, 7, 23)
+
+
+def test_design_row_record_level_bulletin_wins_over_doc_level():
+    """If a record happens to carry its own bulletin_no (e.g. a future
+    pipeline that tags records), prefer it over the doc-level fallback."""
+    rec = _sample_record_with_one_design()
+    rec["bulletin_no"] = 999          # record's own value
+    rec["bulletin_date"] = "2099-01-01"
+    row = _design_row(
+        rec, rec["designs"][0],
+        holder_id=None, source_folder="TS_483",
+        doc_bulletin_no=483, doc_bulletin_date="2026-04-24",
+    )
+    assert row["bulletin_no"] == "999"
+    assert row["bulletin_date"] == date(2099, 1, 1)
+
+
+def test_design_row_no_bulletin_anywhere_yields_null():
+    """When neither side has bulletin_no, the row carries None — same
+    behavior as before the fix; no spurious 'False'/'0' coercion."""
+    rec = _sample_record_with_one_design()
+    rec.pop("bulletin_no", None)
+    rec.pop("bulletin_date", None)
+    row = _design_row(
+        rec, rec["designs"][0],
+        holder_id=None, source_folder="TS_483",
+    )
+    assert row["bulletin_no"] is None
+    assert row["bulletin_date"] is None
+
+
 def test_design_row_deferred_section_maps_to_deferred_status():
     rec = _sample_record_with_one_design()
     rec["section"] = "deferred"
@@ -214,3 +298,87 @@ def test_design_row_multi_designers():
     rec["designers"] = [{"name": "A"}, {"name": "B"}, {"name": "C"}]
     row = _design_row(rec, rec["designs"][0], holder_id=None, source_folder="TS_483")
     assert row["designers"] == ["A", "B", "C"]
+
+
+# ---------------------------------------------------------------------------
+# _folder_already_ingested — folder-level skip-when-DB-current
+# ---------------------------------------------------------------------------
+
+class _FakeCursor:
+    """Minimal cursor stub that returns a single canned row from fetchone()."""
+    def __init__(self, row):
+        self._row = row
+        self.last_query = None
+        self.last_params = None
+
+    def execute(self, query, params=None):
+        self.last_query = query
+        self.last_params = params
+
+    def fetchone(self):
+        return self._row
+
+
+def test_folder_already_ingested_no_rows_returns_false():
+    """No DB rows yet for this folder → must ingest."""
+    cur = _FakeCursor((0, None))
+    mtime = datetime(2026, 5, 10, tzinfo=timezone.utc)
+    assert _folder_already_ingested(cur, "TS_483_2026-04-24", mtime) is False
+    assert "designs" in cur.last_query
+    assert cur.last_params == ("TS_483_2026-04-24",)
+
+
+def test_folder_already_ingested_all_rows_post_mtime_returns_true():
+    """Every row was updated after the latest input mtime → skip."""
+    mtime = datetime(2026, 5, 10, tzinfo=timezone.utc)
+    min_updated = mtime + timedelta(hours=2)  # all rows newer than file
+    cur = _FakeCursor((905, min_updated))
+    assert _folder_already_ingested(cur, "TS_482_2026-04-09", mtime) is True
+
+
+def test_folder_already_ingested_oldest_row_pre_mtime_returns_false():
+    """At least one row predates the latest input mtime → must re-ingest
+    so the stale row gets refreshed."""
+    mtime = datetime(2026, 5, 10, tzinfo=timezone.utc)
+    min_updated = mtime - timedelta(hours=2)  # stale row exists
+    cur = _FakeCursor((905, min_updated))
+    assert _folder_already_ingested(cur, "TS_482_2026-04-09", mtime) is False
+
+
+def test_folder_already_ingested_exact_mtime_match_returns_true():
+    """Edge case: row's updated_at == input mtime. The comparison is
+    inclusive (>=) so this counts as 'current' — running ingest again
+    would just rewrite the same data."""
+    mtime = datetime(2026, 5, 10, 12, 0, 0, tzinfo=timezone.utc)
+    cur = _FakeCursor((1, mtime))
+    assert _folder_already_ingested(cur, "TS_482_2026-04-09", mtime) is True
+
+
+def test_folder_already_ingested_null_min_updated_returns_false():
+    """Defensive: SELECT returning (count>0, NULL) shouldn't happen, but
+    if it does, treat it as 'unknown state' and re-ingest."""
+    cur = _FakeCursor((5, None))
+    mtime = datetime(2026, 5, 10, tzinfo=timezone.utc)
+    assert _folder_already_ingested(cur, "TS_482_2026-04-09", mtime) is False
+
+
+def test_folder_already_ingested_handles_naive_db_timestamp():
+    """Postgres TIMESTAMP (without TZ) columns return naive datetimes
+    via psycopg2; file mtime is tz-aware UTC. Comparing them directly
+    raises 'offset-naive vs offset-aware'. The helper must normalize
+    both sides so re-runs don't crash. Caught in live smoke against
+    TS_246 — without this fix every ingest re-run blows up."""
+    mtime = datetime(2026, 5, 10, 12, 0, 0, tzinfo=timezone.utc)
+    naive_db_min = mtime.replace(tzinfo=None) + timedelta(hours=1)  # newer, naive
+    cur = _FakeCursor((905, naive_db_min))
+    # Must not raise — and must return True since DB is newer.
+    assert _folder_already_ingested(cur, "TS_246_2026-04-24", mtime) is True
+
+
+def test_folder_already_ingested_handles_naive_input_mtime():
+    """Symmetric case: the helper also accepts a naive ``latest_input_mtime``
+    (e.g. if a future caller passes datetime.now() without tz)."""
+    naive_mtime = datetime(2026, 5, 10, 12, 0, 0)  # no tz
+    db_min = datetime(2026, 5, 10, 14, 0, 0, tzinfo=timezone.utc)
+    cur = _FakeCursor((1, db_min))
+    assert _folder_already_ingested(cur, "TS_246_2026-04-24", naive_mtime) is True

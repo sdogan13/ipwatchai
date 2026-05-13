@@ -1,4 +1,4 @@
-"""
+﻿"""
 Live HTTP suite for the public visitor persona.
 
 Run directly:
@@ -96,8 +96,8 @@ def test_public_pages():
 
 
 def test_quick_search_auth_gate():
-    name = "GET /api/v1/search/quick requires auth"
-    response = CLIENT.get("/api/v1/search/quick", params={"query": "wosen"}, token=False)
+    name = "GET /api/v1/search requires auth"
+    response = CLIENT.get("/api/v1/search", params={"query": "wosen"}, token=False)
     if response.status_code in (401, 403):
         REPORTER.ok(f"{name} -> {response.status_code}")
         REPORTER.record(name, True)

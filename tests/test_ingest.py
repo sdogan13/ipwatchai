@@ -73,7 +73,6 @@ UPDATE_ROW_KEYS = [
     "reg_date",
     "img_emb",
     "dino_emb",
-    "txt_emb",
     "color_emb",
     "ocr_text",
     "name_tr",
@@ -675,7 +674,7 @@ class TestCoalesceDirection:
             sql = _build_update_sql(source_type)
             assert "name, clear_name, clear_text_features, status" in sql
             assert "name = CASE WHEN v.clear_name THEN NULL ELSE" in sql
-            assert "text_embedding = CASE WHEN v.clear_text_features THEN NULL ELSE" in sql
+            assert "text_embedding" not in sql
 
     def test_update_sql_preserves_richer_db_classes_from_exact_six_input(self):
         """Known scraper truncation must not replace richer DB class arrays."""
@@ -1673,7 +1672,6 @@ class TestProcessFileBatchBehavior:
         assert updated["name"] is None
         assert updated["clear_name"] is True
         assert updated["clear_text_features"] is True
-        assert updated["txt_emb"] is None
         assert updated["name_tr"] is None
 
     def test_shape_only_source_name_does_not_clear_real_existing_name(self):
@@ -1700,10 +1698,9 @@ class TestProcessFileBatchBehavior:
         assert updated["clear_name"] is False
         assert updated["clear_text_features"] is False
 
-    def test_mixed_shape_descriptor_invalidates_stale_text_features(self):
+    def test_mixed_shape_descriptor_invalidates_stale_translation_features(self):
         with temp_dir() as tmp:
             record = make_metadata_record(trademark_name="ALPHA SEKIL")
-            record["text_embedding"] = [0.1] * 384
             metadata_path = write_metadata_file(tmp, "BLT_490_2026-04-13", records=[record])
             conn = FakeConnection(
                 existing_trademarks={
@@ -1723,7 +1720,6 @@ class TestProcessFileBatchBehavior:
         assert result["updated"] == 1
         assert updated["name"] == "ALPHA"
         assert updated["clear_text_features"] is True
-        assert updated["txt_emb"] is None
         assert updated["name_tr"] is None
 
 
@@ -1772,15 +1768,13 @@ class TestAiNameFeatureCleanup:
 
         assert "from pipeline.ingest_rules import clean_name" in source
         assert "_prepare_name_derived_ai_features(rec)" in source
-        assert "names_to_encode = [_clean_ai_trademark_name(r) or \"\"" in source
         assert "names = [_clean_ai_trademark_name(r) or \"\"" in source
-        assert "_TEXT_EMBEDDING_SOURCE_NAME_KEY" in source
         assert "_TRANSLATION_SOURCE_NAME_KEY" in source
 
 
 class TestInsertPayloadShape:
     def test_insert_column_list_matches_expected_runtime_shape(self):
-        assert len(ingest._INSERT_COLUMNS) == 33
+        assert len(ingest._INSERT_COLUMNS) == 32
         assert ingest._INSERT_COLUMNS[:3] == ["application_no", "name", "current_status"]
         assert ingest._INSERT_COLUMNS[-3:] == ["attorney_name", "attorney_no", "status_source"]
 
@@ -2587,3 +2581,113 @@ class TestSameFamilyOverwrite:
         rank_2, _ = get_source_rank("APP_scraped_2")
         assert rank_1 >= rank_2
         assert rank_2 >= rank_1
+
+
+# ============================================================
+# pipeline.holder_helpers.find_holder_id_by_normalized_name
+# Tests that the SQL the helper sends matches the conservative
+# normalization used by holders_consolidate_dups_no_tpe.sql and
+# by the migrations/holders_normalized_name_index.sql functional
+# index. Without this alignment, future ingest runs would recreate
+# the duplicate-holder rows the consolidation migration cleaned up.
+# ============================================================
+
+
+class _CursorStub:
+    """Captures (sql, params) of the last cur.execute() call and
+    returns a configurable fetchone() result. Just enough to verify
+    the helper sends the expected SQL shape."""
+
+    def __init__(self, fetchone_value=None):
+        self.last_sql = None
+        self.last_params = None
+        self._fetchone_value = fetchone_value
+
+    def execute(self, sql, params=None):
+        self.last_sql = sql
+        self.last_params = params
+
+    def fetchone(self):
+        return self._fetchone_value
+
+
+def test_find_holder_returns_none_for_empty_name():
+    """Short-circuit on empty/None: never hit the DB."""
+    from pipeline.holder_helpers import find_holder_id_by_normalized_name
+    cur = _CursorStub(fetchone_value=("00000000-0000-0000-0000-000000000001",))
+    assert find_holder_id_by_normalized_name(cur, "") is None
+    assert find_holder_id_by_normalized_name(cur, None) is None
+    # No execute call was made.
+    assert cur.last_sql is None
+
+
+def test_find_holder_uses_conservative_normalization_in_sql():
+    """The dedup SELECT must use lower + strip punct + collapse
+    whitespace on BOTH the column and the parameter, and must filter
+    to tpe_client_id IS NULL. Drift from this exact normalization
+    silently re-opens the dup-creation bug.
+    """
+    from pipeline.holder_helpers import find_holder_id_by_normalized_name
+    cur = _CursorStub(fetchone_value=None)
+    find_holder_id_by_normalized_name(cur, "SAMSUNG ELECTRONICS CO., LTD.")
+    sql = cur.last_sql
+    # Both sides of the equality use the same normalization.
+    assert sql.count("REGEXP_REPLACE") == 4  # 2 per side × 2 sides
+    assert "'[[:space:]]+'" in sql
+    assert "'[[:punct:]]'" in sql
+    assert "LOWER(" in sql
+    # The dedup is gated to no-TPE-ID rows.
+    assert "tpe_client_id IS NULL" in sql
+
+
+def test_find_holder_returns_row_id_when_match_found():
+    """A non-None fetchone() returns the first column verbatim."""
+    from pipeline.holder_helpers import find_holder_id_by_normalized_name
+    fake_uuid = "11111111-1111-1111-1111-111111111111"
+    cur = _CursorStub(fetchone_value=(fake_uuid,))
+    assert find_holder_id_by_normalized_name(cur, "ARKEMA INC.") == fake_uuid
+
+
+# ============================================================
+# services.design_search_service._resolve_holder_row
+# Asserts the dual-lookup picks the right WHERE clause based on
+# whether the parameter is a 36-char hyphenated UUID. Without this
+# branch, the ~10% of designs whose holders have no TPE client ID
+# would not be clickable from the dashboard "Sahip" link.
+# ============================================================
+
+
+def test_resolve_holder_uses_tpe_client_id_for_short_param():
+    """A short non-UUID string is treated as a public TPE client ID."""
+    from services.design_search_service import _resolve_holder_row
+    cur = _CursorStub(fetchone_value=None)
+    _resolve_holder_row(cur, "1234567")
+    assert "WHERE tpe_client_id = %s" in cur.last_sql
+    assert "::uuid" not in cur.last_sql
+    assert cur.last_params == ("1234567",)
+
+
+def test_resolve_holder_uses_internal_id_for_uuid_param():
+    """A canonical UUID is treated as an internal holders.id and cast
+    to ::uuid in the WHERE clause so Postgres uses the PK index."""
+    from services.design_search_service import _resolve_holder_row
+    cur = _CursorStub(fetchone_value=None)
+    _resolve_holder_row(cur, "a8f72b3c-7e91-4d2a-8e6b-1234567890ab")
+    assert "WHERE id = %s::uuid" in cur.last_sql
+    assert "tpe_client_id" not in cur.last_sql.split("WHERE")[1]
+    assert cur.last_params == ("a8f72b3c-7e91-4d2a-8e6b-1234567890ab",)
+
+
+def test_resolve_holder_rejects_uuid_lookalikes():
+    """A string that looks vaguely like a UUID but isn't 8-4-4-4-12 hex
+    must fall back to tpe_client_id (don't risk passing it to ::uuid
+    which would raise InvalidTextRepresentation)."""
+    from services.design_search_service import _resolve_holder_row
+    cur = _CursorStub(fetchone_value=None)
+    # Wrong group lengths
+    _resolve_holder_row(cur, "abc-def-ghi-jkl-mno")
+    assert "WHERE tpe_client_id = %s" in cur.last_sql
+    # Non-hex character inside the right shape
+    cur2 = _CursorStub(fetchone_value=None)
+    _resolve_holder_row(cur2, "zzzzzzzz-7e91-4d2a-8e6b-1234567890ab")
+    assert "WHERE tpe_client_id = %s" in cur2.last_sql

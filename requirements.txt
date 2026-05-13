@@ -69,6 +69,7 @@ tzlocal>=5.0
 
 # Payment Gateway
 iyzipay>=1.0.44
+stripe>=15.0.0
 
 # Rate Limiting
 slowapi>=0.1.9

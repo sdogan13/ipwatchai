@@ -8,6 +8,8 @@ section filtering, and the HSV histogram on a synthetic image.
 
 import pytest
 
+from pathlib import Path
+
 from embeddings_tasarim import (
     DINOV2_DIM,
     CLIP_DIM,
@@ -15,6 +17,7 @@ from embeddings_tasarim import (
     aggregate_design_embeddings,
     design_already_aggregated,
     mean_pool,
+    resolve_view_image_path,
     select_embeddable_records,
     view_already_embedded,
 )
@@ -146,6 +149,42 @@ def test_aggregate_design_embeddings_skips_missing():
 def test_aggregate_design_embeddings_empty():
     assert aggregate_design_embeddings([], "dinov2_vitl14") == []
     assert aggregate_design_embeddings([{"image_path": "x.jpg"}], "dinov2_vitl14") == []
+
+
+# ---------------------------------------------------------------------------
+# resolve_view_image_path — routing under cd_images/ vs images/
+# ---------------------------------------------------------------------------
+
+def test_resolve_view_image_path_cd_source():
+    """image_source='cd' routes under cd_images/ (the locked stage-3
+    convention). Without this routing the embedder would look at
+    issue_folder/{key} and find nothing."""
+    issue = Path("/fake/TS_240_2016-03-09")
+    view = {"image_path": "2016_01059/1_1.jpg", "image_source": "cd"}
+    assert resolve_view_image_path(issue, view) == issue / "cd_images" / "2016_01059" / "1_1.jpg"
+
+
+def test_resolve_view_image_path_pdf_source():
+    """image_source='pdf' routes under images/."""
+    issue = Path("/fake/TS_483_2026-04-24")
+    view = {"image_path": "2024_007254/1_1.jpg", "image_source": "pdf"}
+    assert resolve_view_image_path(issue, view) == issue / "images" / "2024_007254" / "1_1.jpg"
+
+
+def test_resolve_view_image_path_legacy_no_source_tag():
+    """Pre-stage-B.1 metadata.json files shipped image_path with the
+    'images/' prefix baked in and no image_source field. Resolving
+    against the issue folder root works for those."""
+    issue = Path("/fake/TS_483_2026-04-24")
+    view = {"image_path": "images/2024_007254_1_1.jpg"}  # legacy flat shape
+    assert resolve_view_image_path(issue, view) == issue / "images/2024_007254_1_1.jpg"
+
+
+def test_resolve_view_image_path_returns_none_for_missing_path():
+    """Hague views and image-less rows return None, signaling 'skip'."""
+    assert resolve_view_image_path(Path("/x"), {"image_path": ""}) is None
+    assert resolve_view_image_path(Path("/x"), {"image_path": None}) is None
+    assert resolve_view_image_path(Path("/x"), {}) is None
 
 
 # ---------------------------------------------------------------------------

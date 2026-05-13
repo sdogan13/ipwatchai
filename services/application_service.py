@@ -64,17 +64,22 @@ async def list_applications_data(
     organization_id: UUID,
     status=None,
     application_type=None,
+    registry_kind=None,
     page: int = 1,
     page_size: int = 20,
     db_factory=Database,
 ):
-    """Return a paginated application list for an organization."""
+    """Return a paginated application list for an organization.
+
+    registry_kind filters by registry ('trademark' default if None).
+    """
     with db_factory() as db:
         rows, total = ApplicationCRUD.get_by_organization(
             db,
             organization_id,
             status=status,
             application_type=application_type,
+            registry_kind=registry_kind,
             page=page,
             page_size=page_size,
         )

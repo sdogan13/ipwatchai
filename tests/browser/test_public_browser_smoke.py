@@ -63,6 +63,7 @@ def _get_body_state(page):
                 selectedClasses: state ? (state.selectedClasses || []) : [],
                 imageName: state ? (state.imageName || '') : '',
                 searchQuery: state ? (state.searchQuery || '') : '',
+                searchView: state ? (state.searchView || '') : '',
                 upgradeModalVisible: !!(upgradeModal && !upgradeModal.classList.contains('hidden'))
             };
         }"""
@@ -805,6 +806,205 @@ def main() -> None:
                 public_search_with_image,
                 allow_console_errors=("status of 429",),
                 allow_request_failures=(f"429 POST {CONFIG.base_url}/api/v1/search/public",),
+            )
+
+            def landing_registry_switcher_state() -> None:
+                """Click each of the 4 registry tabs and confirm Alpine
+                state flips + the matching filter strip becomes visible.
+                Validates the wiring between the switcher buttons in
+                landing.html and the searchView state in landing.js."""
+                page.evaluate("() => localStorage.removeItem('landingSearchView')")
+                open_url(page, CONFIG, "/")
+                page.locator("#search-input").wait_for(state="visible")
+
+                # Default tab should be trademark — confirms localStorage
+                # was cleared and the IIFE fell back to the default.
+                initial = _get_body_state(page)
+                if initial["searchView"] != "trademark":
+                    raise AssertionError(
+                        f"expected default searchView=trademark, got {initial['searchView']!r}"
+                    )
+
+                tab_specs = [
+                    ("design", 'input[data-testid="landing-design-locarno"]'),
+                    ("patent", 'input[data-testid="landing-patent-ipc"]'),
+                    ("cografi", 'input[data-testid="landing-cografi-section"]'),
+                    ("trademark", None),
+                ]
+                for tab, filter_selector in tab_specs:
+                    page.locator(f'[data-testid="landing-switch-{tab}"]').click()
+                    page.wait_for_function(
+                        """(expected) => {
+                            const state = document.body._x_dataStack && document.body._x_dataStack[0];
+                            return !!(state && state.searchView === expected);
+                        }""",
+                        arg=tab,
+                        timeout=CONFIG.timeout_ms,
+                    )
+                    if filter_selector:
+                        page.locator(filter_selector).wait_for(
+                            state="visible", timeout=CONFIG.timeout_ms,
+                        )
+                    # Risk-report button is trademark-only — verify it
+                    # disappears for the other 3 registries.
+                    risk_btn_visible = page.evaluate(
+                        """() => {
+                            const btn = document.getElementById('landing-risk-report-btn');
+                            if (!btn) return false;
+                            const style = window.getComputedStyle(btn);
+                            return style.display !== 'none' && btn.offsetParent !== null;
+                        }"""
+                    )
+                    if tab == "trademark" and not risk_btn_visible:
+                        raise AssertionError("risk-report button must be visible on trademark tab")
+                    if tab != "trademark" and risk_btn_visible:
+                        raise AssertionError(
+                            f"risk-report button must hide on {tab} tab (got visible)"
+                        )
+
+            run_browser_step(
+                "landing registry switcher state",
+                REPORTER,
+                page,
+                monitor,
+                CONFIG,
+                landing_registry_switcher_state,
+            )
+
+            def landing_registry_switcher_persistence() -> None:
+                """Pick a non-default tab, reload, and confirm the choice
+                survives via localStorage.landingSearchView — the same
+                pattern dashboard's _search_panel.html uses."""
+                open_url(page, CONFIG, "/")
+                page.locator('[data-testid="landing-switch-patent"]').click()
+                page.wait_for_function(
+                    """() => {
+                        const state = document.body._x_dataStack && document.body._x_dataStack[0];
+                        return !!(state && state.searchView === 'patent');
+                    }""",
+                    timeout=CONFIG.timeout_ms,
+                )
+                stored = page.evaluate("() => localStorage.getItem('landingSearchView')")
+                if stored != "patent":
+                    raise AssertionError(
+                        f"expected localStorage.landingSearchView=patent, got {stored!r}"
+                    )
+                open_url(page, CONFIG, "/")
+                page.locator("#search-input").wait_for(state="visible")
+                page.wait_for_function(
+                    """() => {
+                        const state = document.body._x_dataStack && document.body._x_dataStack[0];
+                        return !!(state && state.searchView === 'patent');
+                    }""",
+                    timeout=CONFIG.timeout_ms,
+                )
+                state = _get_body_state(page)
+                if state["searchView"] != "patent":
+                    raise AssertionError(
+                        f"expected searchView=patent to persist across reload, got {state['searchView']!r}"
+                    )
+
+            run_browser_step(
+                "landing registry switcher persistence",
+                REPORTER,
+                page,
+                monitor,
+                CONFIG,
+                landing_registry_switcher_persistence,
+            )
+
+            def landing_multi_registry_dispatch() -> None:
+                """End-to-end: switch to each non-trademark registry,
+                fill the matching filter, submit, and assert publicSearch()
+                contacts the correct /api/v1/{registry}-search/public URL.
+                Result count is tolerated as 0 since the dev corpus may
+                not contain matches for the chosen query."""
+                # Reset state so prior steps don't carry filters or an
+                # exhausted quota cookie into this one.
+                context.clear_cookies()
+                page.evaluate(
+                    """() => {
+                        localStorage.removeItem('landingSearchView');
+                        localStorage.removeItem('search_history');
+                    }"""
+                )
+                open_url(page, CONFIG, "/")
+                page.locator("#search-input").wait_for(state="visible")
+
+                dispatch_specs = [
+                    {
+                        "tab": "design",
+                        "endpoint": "/api/v1/design-search/public",
+                        "query": "sandalye",
+                        "filter_selector": 'input[data-testid="landing-design-locarno"]',
+                        "filter_value": "06-01",
+                    },
+                    {
+                        "tab": "patent",
+                        "endpoint": "/api/v1/patent-search/public",
+                        "query": "elektrik motoru",
+                        "filter_selector": 'input[data-testid="landing-patent-ipc"]',
+                        "filter_value": "H02",
+                    },
+                    {
+                        "tab": "cografi",
+                        "endpoint": "/api/v1/cografi-search/public",
+                        "query": "konya",
+                        "filter_selector": 'input[data-testid="landing-cografi-region"]',
+                        "filter_value": "Konya",
+                    },
+                ]
+                for spec in dispatch_specs:
+                    page.locator(f'[data-testid="landing-switch-{spec["tab"]}"]').click()
+                    page.wait_for_function(
+                        """(tab) => {
+                            const state = document.body._x_dataStack && document.body._x_dataStack[0];
+                            return !!(state && state.searchView === tab);
+                        }""",
+                        arg=spec["tab"],
+                        timeout=CONFIG.timeout_ms,
+                    )
+                    page.fill("#search-input", spec["query"])
+                    page.fill(spec["filter_selector"], spec["filter_value"])
+                    response = _submit_with_rate_limit_retry(
+                        page,
+                        monitor,
+                        spec["endpoint"],
+                        _invoke_public_search,
+                        success_statuses=(200,),
+                    )
+                    if response.status != 200:
+                        raise AssertionError(
+                            f"{spec['tab']} dispatch: expected 200 from {spec['endpoint']}, got {response.status}"
+                        )
+                    _wait_for_public_search_idle(
+                        page, timeout_ms=max(CONFIG.timeout_ms, 60000)
+                    )
+                    state = _get_body_state(page)
+                    if state["searchView"] != spec["tab"]:
+                        raise AssertionError(
+                            f"{spec['tab']} dispatch: searchView slipped to {state['searchView']!r}"
+                        )
+                    # Either non-zero hits OR an error message ('no_results').
+                    # A hard failure is searchResults < 0 (Alpine state missing).
+                    if state["searchResults"] < 0:
+                        raise AssertionError(
+                            f"{spec['tab']} dispatch: Alpine state unavailable after search"
+                        )
+
+            run_browser_step(
+                "landing multi-registry dispatch",
+                REPORTER,
+                page,
+                monitor,
+                CONFIG,
+                landing_multi_registry_dispatch,
+                allow_console_errors=("status of 429",),
+                allow_request_failures=(
+                    f"429 POST {CONFIG.base_url}/api/v1/design-search/public",
+                    f"429 POST {CONFIG.base_url}/api/v1/patent-search/public",
+                    f"429 POST {CONFIG.base_url}/api/v1/cografi-search/public",
+                ),
             )
 
             def upgrade_modal_plan_handoff_rules() -> None:

@@ -25,12 +25,14 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     File,
+    Form,
     HTTPException,
     Query,
     Request,
     UploadFile,
     status,
 )
+from fastapi.responses import StreamingResponse
 from PIL import Image
 from pydantic import BaseModel, Field
 
@@ -84,6 +86,15 @@ class DesignWatchlistUpdate(BaseModel):
     tags: Optional[List[str]] = None
     priority: Optional[str] = None
     is_active: Optional[bool] = None
+
+
+class DesignWatchlistBulkThreshold(BaseModel):
+    """Body for the PUT /design-watchlist/bulk-threshold endpoint.
+
+    Defined at module level (not inside register_design_watchlist_routes)
+    so FastAPI's body-vs-query introspection picks it up correctly.
+    """
+    threshold: float = Field(..., ge=0.0, le=1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -166,6 +177,148 @@ def register_design_watchlist_routes(app, limiter):
             is_active=is_active,
         )
         result["items"] = [_serialize_item(it) for it in result["items"]]
+        return result
+
+    # ---------------------------------------------------------------
+    # Bulk + stats endpoints (registered BEFORE the /{item_id} block so
+    # FastAPI dispatches `/stats`, `/scan-all`, etc. to the static-path
+    # handlers rather than treating them as UUIDs).
+    # ---------------------------------------------------------------
+
+    @app.get("/api/v1/design-watchlist/stats", tags=["Design Watchlist"])
+    @limiter.limit("60/minute")
+    async def design_watchlist_stats(
+        request: Request,
+        current_user=Depends(get_current_user),
+    ):
+        return svc.get_design_watchlist_stats(current_user=current_user)
+
+    @app.post("/api/v1/design-watchlist/scan-all", tags=["Design Watchlist"])
+    @limiter.limit("5/minute")
+    async def design_watchlist_scan_all(
+        request: Request,
+        background_tasks: BackgroundTasks,
+        current_user=Depends(get_current_user),
+    ):
+        ids = svc.list_active_item_ids_for_org(current_user=current_user)
+        for item_id_str in ids:
+            background_tasks.add_task(_run_single_scan_safe, UUID(item_id_str))
+        return {"queued": len(ids)}
+
+    @app.delete("/api/v1/design-watchlist/all", tags=["Design Watchlist"])
+    @limiter.limit("5/minute")
+    async def design_watchlist_delete_all(
+        request: Request,
+        current_user=Depends(get_current_user),
+    ):
+        return svc.delete_all_design_watchlist_items(current_user=current_user)
+
+    @app.put("/api/v1/design-watchlist/bulk-threshold", tags=["Design Watchlist"])
+    @limiter.limit("10/minute")
+    async def design_watchlist_bulk_threshold(
+        request: Request,
+        body: DesignWatchlistBulkThreshold,
+        current_user=Depends(get_current_user),
+    ):
+        return svc.update_all_design_watchlist_thresholds(
+            current_user=current_user,
+            threshold=float(body.threshold),
+        )
+
+    # ---------------------------------------------------------------
+    # Bulk import from a holder's design portfolio. Mirrors the
+    # trademark /api/v1/watchlist/bulk-from-portfolio endpoint so the
+    # dashboard portfolio modal can "Add all to watchlist" with one
+    # click. Queues background scans for each newly created item.
+    # ---------------------------------------------------------------
+
+    @app.post("/api/v1/design-watchlist/bulk-from-portfolio", tags=["Design Watchlist"])
+    @limiter.limit("5/minute")
+    async def design_watchlist_bulk_from_portfolio(
+        request: Request,
+        body: dict,
+        background_tasks: BackgroundTasks,
+        current_user=Depends(get_current_user),
+    ):
+        holder_id = (body or {}).get("holder_id") or (body or {}).get("id")
+        designer_name = (body or {}).get("designer_name")
+        attorney_name = (body or {}).get("attorney_name")
+        attorney_firm = (body or {}).get("attorney_firm")
+        if not (holder_id or designer_name or attorney_name):
+            raise HTTPException(
+                status_code=422,
+                detail="holder_id, designer_name, or attorney_name is required",
+            )
+        result = await svc.import_design_watchlist_from_portfolio(
+            holder_id=str(holder_id) if holder_id else None,
+            designer_name=str(designer_name) if designer_name else None,
+            attorney_name=str(attorney_name) if attorney_name else None,
+            attorney_firm=str(attorney_firm) if attorney_firm else None,
+            current_user=current_user,
+        )
+        for item_id_str in result.get("scan_item_ids", []):
+            background_tasks.add_task(_run_single_scan_safe, UUID(item_id_str))
+        result["queued_scans"] = len(result.get("scan_item_ids", []))
+        return result
+
+    # ---------------------------------------------------------------
+    # Phase 3 — CSV bulk upload
+    # ---------------------------------------------------------------
+
+    @app.get("/api/v1/design-watchlist/upload/template", tags=["Design Watchlist"])
+    @limiter.limit("30/minute")
+    async def design_watchlist_upload_template(
+        request: Request,
+        current_user=Depends(get_current_user),
+    ):
+        content = svc.build_design_csv_template()
+        return StreamingResponse(
+            iter([content]),
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": 'attachment; filename="tasarim_takibi_sablon.csv"',
+            },
+        )
+
+    @app.post("/api/v1/design-watchlist/upload/detect-columns", tags=["Design Watchlist"])
+    @limiter.limit("10/minute")
+    async def design_watchlist_upload_detect(
+        request: Request,
+        file: UploadFile = File(...),
+        current_user=Depends(get_current_user),
+    ):
+        if not (file.filename or "").lower().endswith(".csv"):
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail="CSV file required (Excel support coming soon)",
+            )
+        content = await file.read()
+        return svc.detect_design_csv_columns(content)
+
+    @app.post("/api/v1/design-watchlist/upload/with-mapping", tags=["Design Watchlist"])
+    @limiter.limit("5/minute")
+    async def design_watchlist_upload_with_mapping(
+        request: Request,
+        background_tasks: BackgroundTasks,
+        file: UploadFile = File(...),
+        column_mapping: str = Form(...),
+        current_user=Depends(get_current_user),
+    ):
+        if not (file.filename or "").lower().endswith(".csv"):
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail="CSV file required (Excel support coming soon)",
+            )
+        content = await file.read()
+        result = svc.import_design_csv_with_mapping(
+            content=content,
+            column_mapping=column_mapping,
+            current_user=current_user,
+        )
+        # Queue a single full-corpus scan per newly-created item (mirrors
+        # what create_design_watchlist does for the single-add path).
+        for new_id in result.get("scan_item_ids", []):
+            background_tasks.add_task(_run_single_scan_safe, UUID(new_id))
         return result
 
     @app.get("/api/v1/design-watchlist/{item_id}", tags=["Design Watchlist"])

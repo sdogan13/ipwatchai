@@ -31,7 +31,7 @@ import threading
 import psycopg2
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from dotenv import load_dotenv
 from config.settings import settings
 
@@ -583,7 +583,7 @@ class AgenticTrademarkSearch:
         return formatted
 
     def _generate_embeddings(self, records: List[Dict]) -> int:
-        """Generate AI embeddings + translations for scraped records using pipeline.ai."""
+        """Generate translations for scraped records using pipeline.ai."""
         try:
             from pipeline import ai
 
@@ -593,28 +593,20 @@ class AgenticTrademarkSearch:
 
                 if name:
                     try:
-                        # Generate text embedding
-                        text_emb = ai.get_text_embedding_cached(name)
-                        if text_emb:
-                            record["text_embedding"] = text_emb
-                            enriched_count += 1
-                    except Exception as e:
-                        logger.debug(f"Failed to generate embedding for {name}: {e}")
-
-                    try:
                         # Generate Turkish translation + language detection
                         trans = ai.get_translations(name)
                         if trans.get("name_tr"):
                             record["name_tr"] = trans["name_tr"]
                         if trans.get("detected_lang"):
                             record["detected_lang"] = trans["detected_lang"]
+                        enriched_count += 1
                     except Exception as e:
                         logger.debug(f"Failed to translate {name}: {e}")
 
             return enriched_count
 
         except ImportError:
-            logger.warning("pipeline.ai not available, skipping embedding generation")
+            logger.warning("pipeline.ai not available, skipping translation generation")
             return 0
 
     def _ingest_to_database(self, records: List[Dict], query: str) -> int:
@@ -731,12 +723,10 @@ from utils.settings_manager import get_rate_limit_value
 from utils.feature_flags import is_feature_enabled
 from utils.subscription import (
     check_live_search_eligibility,
-    check_quick_search_eligibility,
     check_report_eligibility,
     increment_live_search_usage,
-    increment_quick_search_usage,
     get_user_plan,
-    get_live_search_usage,
+    get_daily_live_search_usage,
 )
 
 _search_limiter = Limiter(key_func=get_remote_address)
@@ -924,17 +914,17 @@ async def get_search_credits(
     """
     with Database() as db:
         plan = get_user_plan(db, str(current_user.id))
-        current_usage = get_live_search_usage(db, str(current_user.id))
-        monthly_limit = plan['monthly_limit']
+        current_usage = get_daily_live_search_usage(db, str(current_user.id))
+        daily_limit = plan['daily_limit']
 
         return {
             "plan": plan['plan_name'],
             "display_name": plan['display_name'],
             "can_use_live_search": plan['can_use_live_search'],
-            "monthly_limit": monthly_limit,
-            "used_this_month": current_usage,
-            "remaining": max(0, monthly_limit - current_usage),
-            "resets_on": datetime.now().strftime('%Y-%m') + "-01",
+            "daily_limit": daily_limit,
+            "used_today": current_usage,
+            "remaining": max(0, daily_limit - current_usage),
+            "resets_on": (date.today() + timedelta(days=1)).isoformat(),
         }
 
 
@@ -987,7 +977,7 @@ async def public_search_risk_report(request: Request):
 
 
 @router.post("/risk-report/claim")
-@_search_limiter.limit(lambda: get_rate_limit_value("rate_limit.quick_search", "60/minute"))
+@_search_limiter.limit(lambda: get_rate_limit_value("rate_limit.intelligent_search", "60/minute"))
 async def claim_search_risk_report(
     request: Request,
     claim_request: SearchRiskReportClaimRequest,
@@ -1001,7 +991,7 @@ async def claim_search_risk_report(
 
 
 @router.post("/risk-report", response_model=SearchRiskReportResponse)
-@_search_limiter.limit(lambda: get_rate_limit_value("rate_limit.quick_search", "60/minute"))
+@_search_limiter.limit(lambda: get_rate_limit_value("rate_limit.intelligent_search", "60/minute"))
 async def search_risk_report(
     request: Request,
     current_user: CurrentUser = Depends(get_current_user),
@@ -1228,148 +1218,8 @@ async def public_intelligent_risk_report(
                 pass
 
 
-@router.get("/quick")
-@_search_limiter.limit(lambda: get_rate_limit_value("rate_limit.quick_search", "60/minute"))
-async def quick_search(
-    request: Request,
-    query: str = Query(..., description="Trademark name to search"),
-    classes: Optional[str] = Query(None, description="Nice classes (comma-separated)"),
-    attorney_no: Optional[str] = Query(None, description="Filter by attorney number"),
-    current_user: CurrentUser = Depends(get_current_user)
-):
-    """
-    Quick database-only search (no live scraping).
-    Returns results from local database only.
-    Subject to daily search cap per plan.
-    """
-    # Daily search cap check
-    with Database() as db:
-        can_search, reason, details = check_quick_search_eligibility(
-            db, str(current_user.id)
-        )
-        if not can_search:
-            raise HTTPException(status_code=429, detail=details)
-
-    nice_classes = []
-    if classes:
-        nice_classes = [int(c.strip()) for c in classes.split(",") if c.strip().isdigit()]
-
-    try:
-        with AgenticTrademarkSearch(auto_scrape=False) as searcher:
-            result = searcher.search(
-                query=query,
-                nice_classes=nice_classes,
-                attorney_no=attorney_no
-            )
-
-        # Normalize results to match public search format
-        _normalize_search_results(result)
-
-        # Increment daily counter after successful search
-        with Database() as db:
-            increment_quick_search_usage(
-                db, str(current_user.id), str(current_user.organization_id)
-            )
-
-        # Free cached CUDA tensors after search
-        try:
-            import torch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        except Exception:
-            pass
-
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Quick search failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/quick")
-@_search_limiter.limit(lambda: get_rate_limit_value("rate_limit.quick_search", "60/minute"))
-async def quick_search_with_image(
-    request: Request,
-    query: Optional[str] = Form(None, description="Trademark name to search"),
-    image: Optional[UploadFile] = File(None, description="Optional logo image for visual search"),
-    classes: Optional[str] = Form(None, description="Nice classes (comma-separated)"),
-    attorney_no: Optional[str] = Form(None, description="Filter by attorney number"),
-    current_user: CurrentUser = Depends(get_current_user)
-):
-    """
-    Quick database-only search with optional image upload for visual scoring.
-    No live scraping. Subject to daily search cap per plan.
-    """
-    has_image = image is not None and image.filename
-    has_query = query and len(query.strip()) >= 2
-    if not has_query and not has_image:
-        raise HTTPException(status_code=422, detail="Provide a brand name (min 2 chars) or upload a logo image")
-    query = query.strip() if query else ""
-
-    # Daily search cap check
-    with Database() as db:
-        can_search, reason, details = check_quick_search_eligibility(
-            db, str(current_user.id)
-        )
-        if not can_search:
-            raise HTTPException(status_code=429, detail=details)
-
-    nice_classes = []
-    if classes:
-        nice_classes = [int(c.strip()) for c in classes.split(",") if c.strip().isdigit()]
-
-    image_path = None
-    try:
-        # Save uploaded image to temp file if provided
-        if has_image:
-            suffix = os.path.splitext(image.filename)[1] or ".png"
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix, dir=tempfile.gettempdir()) as tmp:
-                content = await image.read()
-                tmp.write(content)
-                image_path = tmp.name
-            logger.info(f"Quick search image uploaded: {image.filename} ({len(content)} bytes)")
-
-        with AgenticTrademarkSearch(auto_scrape=False) as searcher:
-            result = searcher.search(
-                query=query,
-                nice_classes=nice_classes,
-                image_path=image_path,
-                attorney_no=attorney_no
-            )
-
-        # Normalize results to match public search format
-        _normalize_search_results(result)
-
-        # Increment daily counter after successful search
-        with Database() as db:
-            increment_quick_search_usage(
-                db, str(current_user.id), str(current_user.organization_id)
-            )
-
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Quick search with image failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        if image_path and os.path.exists(image_path):
-            try:
-                os.unlink(image_path)
-            except OSError:
-                pass
-        # Free cached CUDA tensors after search
-        try:
-            import torch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        except Exception:
-            pass
-
-
-@router.get("/intelligent")
-@_search_limiter.limit(lambda: get_rate_limit_value("rate_limit.intelligent_search", "10/minute"))
+@router.get("")
+@_search_limiter.limit(lambda: get_rate_limit_value("rate_limit.intelligent_search", "60/minute"))
 async def intelligent_search(
     request: Request,
     query: str = Query(..., description="Trademark name to search"),
@@ -1429,7 +1279,7 @@ async def intelligent_search(
                 str(current_user.organization_id)
             )
         result['credits_used'] = 1
-        result['credits_remaining'] = details['monthly_limit'] - (details['current_usage'] + 1)
+        result['credits_remaining'] = details['daily_limit'] - (details['used_today'] + 1)
 
         # Normalize results to match public search format
         _normalize_search_results(result)
@@ -1450,8 +1300,8 @@ async def intelligent_search(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/intelligent")
-@_search_limiter.limit(lambda: get_rate_limit_value("rate_limit.intelligent_search", "10/minute"))
+@router.post("")
+@_search_limiter.limit(lambda: get_rate_limit_value("rate_limit.intelligent_search", "60/minute"))
 async def intelligent_search_with_image(
     request: Request,
     query: str = Form(..., description="Trademark name to search"),
@@ -1517,7 +1367,7 @@ async def intelligent_search_with_image(
                 str(current_user.organization_id)
             )
         result['credits_used'] = 1
-        result['credits_remaining'] = details['monthly_limit'] - (details['current_usage'] + 1)
+        result['credits_remaining'] = details['daily_limit'] - (details['used_today'] + 1)
 
         # Normalize results to match public search format
         _normalize_search_results(result)
@@ -1587,7 +1437,7 @@ async def post_search(
                     str(current_user.organization_id)
                 )
             result['credits_used'] = 1
-            result['credits_remaining'] = details['monthly_limit'] - (details['current_usage'] + 1)
+            result['credits_remaining'] = details['daily_limit'] - (details['used_today'] + 1)
         else:
             result['credits_used'] = 0
 

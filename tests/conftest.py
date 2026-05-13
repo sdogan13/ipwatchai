@@ -107,6 +107,7 @@ if "sentence_transformers" not in sys.modules:
 _ensure_mock("apscheduler")
 _ensure_mock("apscheduler.schedulers")
 _ensure_mock("apscheduler.schedulers.asyncio")
+_ensure_mock("apscheduler.schedulers.background")
 _ensure_mock("apscheduler.triggers")
 _ensure_mock("apscheduler.triggers.cron")
 _ensure_mock("playwright")

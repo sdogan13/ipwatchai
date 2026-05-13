@@ -4,6 +4,7 @@ Built one helper at a time. Each step adds its own test block so failures
 point cleanly at the unit under test.
 """
 
+import json
 from pathlib import Path
 
 import pytest
@@ -15,7 +16,10 @@ from cd_extract_patent import (
     decode_hsqldb_escapes,
     extract_cd_archive,
     main,
-    metadata_filename,
+    CD_FIGURES_DIRNAME,
+    CD_METADATA_FILENAME,
+    RAW_HSQLDB_FILES,
+    _carry_cd_images,
     parse_argv,
     parse_bulletin_inf,
     parse_hsqldb_log,
@@ -671,6 +675,45 @@ def test_extract_cd_archive_raises_when_seven_zip_missing(tmp_path):
         extract_cd_archive(fake_rar, tmp_path / "out", seven_zip=bad_seven)
 
 
+def test_extract_cd_archive_returns_scratch_when_archive_has_no_wrapper(tmp_path):
+    """Some older CDs (verified 2015_12_CD.rar, 2016_1_CD.rar) flatten
+    the archive — `data/` lands directly in the scratch dir with no
+    bulletin-month wrapper. Without this case handled, the caller's
+    `cd_root / "data"` would double-up to `data/data/` and miss the
+    HSQLDB log. Regression for the FileNotFoundError observed during
+    bulk extraction on 2026-05-08.
+
+    This test fakes the scratch layout (no actual 7-Zip call) so it
+    runs in CI even when no real .rar is present. The 7-Zip step is
+    covered separately by the live smoke below.
+    """
+    scratch = tmp_path / "scratch"
+    (scratch / "data").mkdir(parents=True)
+    (scratch / "data" / "ptbulletin.log").write_text("mock", encoding="utf-8")
+
+    fake_rar = tmp_path / "fake.rar"
+    fake_rar.write_bytes(b"\x00")
+
+    # Skip 7-Zip invocation by patching subprocess.run
+    import subprocess as _sub
+    real_run = _sub.run
+    class _Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+    _sub.run = lambda *a, **k: _Result()
+    try:
+        cd_root = extract_cd_archive(fake_rar, scratch, seven_zip=Path(DEFAULT_SEVEN_ZIP))
+    finally:
+        _sub.run = real_run
+
+    # Critical assertion: cd_root is the scratch dir itself, NOT scratch/data.
+    # A wrong return value would make `cd_root / "data" / "ptbulletin.log"`
+    # resolve to `scratch/data/data/ptbulletin.log` — which doesn't exist.
+    assert cd_root == scratch
+    assert (cd_root / "data" / "ptbulletin.log").is_file()
+
+
 # ----- Live integration smoke test (skipped if the real CD is absent) -----
 
 _REAL_CD = Path(
@@ -843,18 +886,229 @@ def test_cd_to_metadata_real_2025_12_smoke(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Step 2.8 — metadata_filename + parse_argv + main
+# Step 2.8 — output filenames + parse_argv + main
 # ---------------------------------------------------------------------------
 
-def test_metadata_filename_strips_cd_suffix():
-    """A CD .rar's metadata sidecar matches its sibling PDF's stem."""
-    assert metadata_filename(Path("2025_12_CD.rar")) == "2025_12_metadata.json"
-    assert metadata_filename(Path("/abs/path/2024_07_CD.rar")) == "2024_07_metadata.json"
+def test_cd_metadata_filename_constant():
+    """The CD-side JSON always lands at ``cd_metadata.json`` inside the
+    bulletin's parent folder. The folder name varies (PT_{Y}_{M}_{date})
+    but the inner filename is fixed — Stage 5 ingest can rely on it."""
+    assert CD_METADATA_FILENAME == "cd_metadata.json"
 
 
-def test_metadata_filename_passthrough_when_no_cd_suffix():
-    """Defensive: .rar without _CD still gets a sensible name."""
-    assert metadata_filename(Path("legacy_bundle.rar")) == "legacy_bundle_metadata.json"
+def test_raw_hsqldb_filenames_constant():
+    """The raw HSQLDB files copied alongside cd_metadata.json. Used by
+    Stage 5 (DB ingest) for re-extraction without re-unzipping."""
+    assert RAW_HSQLDB_FILES == ("ptbulletin.log", "ptbulletin.script", "ptbulletin.properties")
+
+
+def test_cd_figures_dirname_constant():
+    """CD TIFFs land in the same ``figures/`` directory as PDF-side
+    images so reconcile can dedup on a shared {year}_{appno} prefix."""
+    assert CD_FIGURES_DIRNAME == "figures"
+
+
+def _make_fake_cd_root_with_tiffs(tmp_path, year_to_appnos):
+    """Create a fake cd_root with data/images/{year}/{appno}.tif files."""
+    cd_root = tmp_path / "scratch" / "2025_8"
+    images_root = cd_root / "data" / "images"
+    for year, appnos in year_to_appnos.items():
+        (images_root / year).mkdir(parents=True, exist_ok=True)
+        for appno in appnos:
+            (images_root / year / f"{appno}.tif").write_bytes(b"TIFF FAKE\x00")
+    return cd_root
+
+
+def test_carry_cd_images_moves_tiffs_and_rewrites_paths(tmp_path):
+    """Happy path: TIFFs move from cd_root/data/images/{year}/{appno}.tif
+    into parent/figures/{year}_{appno}.tif (flat naming, matches PDF
+    prefix convention); image_path values rewritten to the relative
+    ``figures/{year}_{appno}.tif`` shape."""
+    cd_root = _make_fake_cd_root_with_tiffs(
+        tmp_path, {"2017": ["15048"], "2018": ["13083"]},
+    )
+    parent = tmp_path / "PT_2025_8_2025-08-21"
+    parent.mkdir()
+    doc = {
+        "bulletin_no": "2025/8",
+        "bulletin_date": "2025-08-21",
+        "patents": [
+            {"application_no": "2017/15048", "image_path": "data/images/2017/15048.tif"},
+            {"application_no": "2018/13083", "image_path": "data/images/2018/13083.tif"},
+        ],
+    }
+
+    result = _carry_cd_images(doc, cd_root, parent)
+
+    assert result == {"moved": 2, "pdf_dups_dropped": 0}
+    # Files moved into parent/figures/{year}_{appno}.tif (flat)
+    assert (parent / "figures" / "2017_15048.tif").is_file()
+    assert (parent / "figures" / "2018_13083.tif").is_file()
+    # Year subfolder is gone — naming is flat to match PDF convention
+    assert not (parent / "figures" / "2017").exists()
+    # Source TIFFs gone from cd_root (move, not copy)
+    assert not (cd_root / "data" / "images" / "2017" / "15048.tif").exists()
+    # image_path values rewritten to flat relative paths under figures/
+    assert doc["patents"][0]["image_path"] == "figures/2017_15048.tif"
+    assert doc["patents"][1]["image_path"] == "figures/2018_13083.tif"
+
+
+def test_carry_cd_images_path_matches_pdf_prefix(tmp_path):
+    """Regression for the consistency goal: CD's image_path prefix
+    must match the PDF's image_path prefix on the same application_no
+    so a future merge step can dedup on the shared {year}_{appno} key.
+
+    Concrete: app 2023/018085 -> CD writes 'figures/2023_018085.tif',
+    PDF writes 'figures/2023_018085_p1847_2.png'. Both filenames
+    start with '2023_018085'. Without the flatten here, CD would
+    produce 'images/2023/018085.tif' which has no shared prefix.
+    """
+    cd_root = _make_fake_cd_root_with_tiffs(tmp_path, {"2023": ["018085"]})
+    parent = tmp_path / "PT_2025_8_2025-08-21"
+    parent.mkdir()
+    doc = {"patents": [
+        {"application_no": "2023/018085", "image_path": "data/images/2023/018085.tif"},
+    ]}
+
+    _carry_cd_images(doc, cd_root, parent)
+
+    cd_image_path = doc["patents"][0]["image_path"]
+    pdf_image_path = "figures/2023_018085_p1847_2.png"
+
+    cd_stem = Path(cd_image_path).stem        # "2023_018085"
+    pdf_stem = Path(pdf_image_path).stem      # "2023_018085_p1847_2"
+    assert pdf_stem.startswith(cd_stem + "_") or pdf_stem == cd_stem
+
+
+def test_carry_cd_images_handles_missing_tiff_by_nulling_path(tmp_path):
+    """Defensive: if image_path points to a TIFF that doesn't exist on
+    disk (HSQLDB row references a missing figure), null the path so
+    downstream code doesn't follow a dead reference."""
+    cd_root = _make_fake_cd_root_with_tiffs(tmp_path, {"2017": ["15048"]})
+    parent = tmp_path / "PT_x"
+    parent.mkdir()
+    doc = {
+        "patents": [
+            {"application_no": "2017/15048", "image_path": "data/images/2017/15048.tif"},
+            {"application_no": "2018/99999", "image_path": "data/images/2018/99999.tif"},
+            {"application_no": "2019/00001", "image_path": None},
+        ],
+    }
+
+    result = _carry_cd_images(doc, cd_root, parent)
+
+    assert result == {"moved": 1, "pdf_dups_dropped": 0}        # only the present one
+    assert doc["patents"][0]["image_path"] == "figures/2017_15048.tif"
+    assert doc["patents"][1]["image_path"] is None             # missing -> nulled
+    assert doc["patents"][2]["image_path"] is None             # was None, stays None
+
+
+def test_carry_cd_images_drops_pdf_png_duplicates(tmp_path):
+    """CD-first dedup: when a CD TIFF for app X is carried in, any
+    pre-existing PDF PNG in figures/ matching ``{year}_{appno}_p*.png``
+    is deleted. Visually verified on app 2023/018085 that the CD TIFF
+    and the PDF first-figure are the same drawing."""
+    cd_root = _make_fake_cd_root_with_tiffs(tmp_path, {"2023": ["018085"]})
+    parent = tmp_path / "PT_2025_8_2025-08-21"
+    figures_dir = parent / "figures"
+    figures_dir.mkdir(parents=True)
+
+    # Pre-existing PDF PNGs from an earlier pdf_extract run, plus an
+    # unrelated PNG for a different app that must NOT be touched.
+    duplicate_png = figures_dir / "2023_018085_p1847_2.png"
+    duplicate_png.write_bytes(b"\x89PNG\x00")
+    extra_png = figures_dir / "2023_018085_p1850_3.png"
+    extra_png.write_bytes(b"\x89PNG\x00")
+    unrelated_png = figures_dir / "2024_000702_p100_1.png"
+    unrelated_png.write_bytes(b"\x89PNG\x00")
+
+    doc = {
+        "patents": [
+            {"application_no": "2023/018085",
+             "image_path": "data/images/2023/018085.tif"},
+        ],
+    }
+
+    result = _carry_cd_images(doc, cd_root, parent)
+
+    assert result == {"moved": 1, "pdf_dups_dropped": 2}
+    # CD TIFF in place
+    assert (figures_dir / "2023_018085.tif").is_file()
+    # All PDF PNGs sharing the {year}_{appno} prefix were dropped...
+    assert not duplicate_png.exists()
+    assert not extra_png.exists()
+    # ...but PNGs for other apps stayed.
+    assert unrelated_png.exists()
+
+
+def test_carry_cd_images_nulls_pdf_metadata_paths_for_dropped_pngs(tmp_path):
+    """When PDF PNGs get dedup'd, the sibling pdf_metadata.json's
+    figure entries must have their image_path values nulled so they
+    don't point at deleted files. Other figure metadata (page, xref,
+    bbox) stays intact."""
+    cd_root = _make_fake_cd_root_with_tiffs(tmp_path, {"2023": ["018085"]})
+    parent = tmp_path / "PT_x"
+    figures_dir = parent / "figures"
+    figures_dir.mkdir(parents=True)
+    (figures_dir / "2023_018085_p1847_2.png").write_bytes(b"PNG")
+
+    pdf_meta_path = parent / "pdf_metadata.json"
+    pdf_meta_path.write_text(json.dumps({
+        "records": [
+            {
+                "application_no": "2023/018085",
+                "figures": [
+                    {"page": 1847, "xref": 555,
+                     "image_path": "figures/2023_018085_p1847_2.png"},
+                ],
+            },
+            {
+                "application_no": "2024/000702",
+                "figures": [
+                    {"page": 100, "xref": 100,
+                     "image_path": "figures/2024_000702_p100_1.png"},
+                ],
+            },
+        ],
+    }), encoding="utf-8")
+
+    doc = {"patents": [
+        {"application_no": "2023/018085",
+         "image_path": "data/images/2023/018085.tif"},
+    ]}
+
+    _carry_cd_images(doc, cd_root, parent)
+
+    pdf_after = json.loads(pdf_meta_path.read_text(encoding="utf-8"))
+    # The dropped PNG's image_path was nulled, but page/xref preserved
+    fig = pdf_after["records"][0]["figures"][0]
+    assert fig["image_path"] is None
+    assert fig["page"] == 1847
+    assert fig["xref"] == 555
+    # Unrelated figure entry stayed intact
+    other_fig = pdf_after["records"][1]["figures"][0]
+    assert other_fig["image_path"] == "figures/2024_000702_p100_1.png"
+
+
+def test_carry_cd_images_clears_unexpected_path_shape(tmp_path):
+    """Any image_path that isn't under ``data/images/`` is cleared
+    rather than silently kept as-is."""
+    cd_root = tmp_path / "cd_root"
+    (cd_root / "weird").mkdir(parents=True)
+    parent = tmp_path / "PT_x"
+    parent.mkdir()
+    doc = {
+        "patents": [
+            {"application_no": "X", "image_path": "weird/somewhere/15048.tif"},
+            {"application_no": "Y", "image_path": "/abs/path/15048.tif"},
+        ],
+    }
+
+    result = _carry_cd_images(doc, cd_root, parent)
+
+    assert result == {"moved": 0, "pdf_dups_dropped": 0}
+    assert doc["patents"][0]["image_path"] is None
+    assert doc["patents"][1]["image_path"] is None
 
 
 def test_parse_argv_with_explicit_rar(tmp_path):
@@ -950,7 +1204,8 @@ def test_main_returns_nonzero_on_missing_archive(tmp_path):
 )
 def test_main_real_2025_12_smoke(tmp_path):
     """End-to-end CLI smoke: run main() against the real CD and verify
-    the metadata.json sidecar lands with the documented shape."""
+    the bulletin parent folder lands with cd_metadata.json + raw HSQLDB
+    files."""
     out_dir = tmp_path / "out"
     scratch = tmp_path / "scratch"
     rc = main([
@@ -960,9 +1215,40 @@ def test_main_real_2025_12_smoke(tmp_path):
     ])
     assert rc == 0
 
-    out_file = out_dir / "2025_12_metadata.json"
-    assert out_file.is_file()
-    assert out_file.stat().st_size > 100_000  # several MB expected
+    # 2025_12_CD.rar carries bulletin 2025/12 (no offset for this month —
+    # see patent_cd_filename_offset memory).
+    parent = out_dir / "PT_2025_12_2025-12-22"
+    assert parent.is_dir()
+
+    cd_meta = parent / "cd_metadata.json"
+    assert cd_meta.is_file()
+    assert cd_meta.stat().st_size > 100_000  # several MB expected
+
+    # Raw HSQLDB files alongside, ready for Stage 5 re-ingest
+    assert (parent / "ptbulletin.log").is_file()
+    assert (parent / "ptbulletin.script").is_file()
+    assert (parent / "ptbulletin.properties").is_file()
+
+    # CD TIFFs carried into figures/ (same dir as future PDF figures
+    # would land, naming consistent with PDF prefix convention).
+    figures_dir = parent / "figures"
+    assert figures_dir.is_dir()
+    tif_count = sum(1 for _ in figures_dir.glob("*.tif"))
+    assert tif_count > 100, f"expected >100 TIFFs carried, got {tif_count}"
+
+    # image_path values inside cd_metadata.json point at the new
+    # figures/{year}_{appno}.tif location, not the dead scratch path.
+    import json as _json
+    payload = _json.loads(cd_meta.read_text(encoding="utf-8"))
+    paths_with_image = [
+        p["image_path"] for p in payload["patents"] if p.get("image_path")
+    ]
+    assert len(paths_with_image) > 100
+    assert all(p.startswith("figures/") and p.endswith(".tif")
+               for p in paths_with_image), (
+        "image_path must be figures/{year}_{appno}.tif relative to "
+        "the parent folder"
+    )
 
     # Scratch should be cleaned by default
     assert not (scratch / "2025_12_CD").exists()

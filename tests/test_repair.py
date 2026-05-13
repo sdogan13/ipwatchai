@@ -1,3 +1,5 @@
+from datetime import date
+
 from pipeline import repair
 from pipeline.ingest_rules import (
     DB_STATUS_PUBLISHED,
@@ -84,7 +86,7 @@ def test_name_repair_removes_exact_sekil_word(monkeypatch):
 
     assert summary["repaired"] == 1
     assert summary["samples"][0]["to"] == "alpha beta"
-    assert updates == [("11111111-1111-1111-1111-111111111111", "alpha beta", True, True)]
+    assert updates == [("11111111-1111-1111-1111-111111111111", "alpha beta", True)]
     assert conn.commits == 1
 
 
@@ -132,8 +134,8 @@ def test_name_repair_removes_terminal_attached_sekil_suffix(monkeypatch):
         },
     ]
     assert updates == [
-        ("11111111-1111-1111-1111-111111111111", "cansigorta", True, True),
-        ("22222222-2222-2222-2222-222222222222", "g81", True, True),
+        ("11111111-1111-1111-1111-111111111111", "cansigorta", True),
+        ("22222222-2222-2222-2222-222222222222", "g81", True),
     ]
     assert conn.commits == 1
 
@@ -202,7 +204,7 @@ def test_name_tr_repair_clears_shape_only_translation(monkeypatch):
 
     assert summary["repaired"] == 1
     assert summary["samples"][0]["to"] is None
-    assert updates == [("11111111-1111-1111-1111-111111111111", None, True, True)]
+    assert updates == [("11111111-1111-1111-1111-111111111111", None, True)]
     assert conn.commits == 1
 
 
@@ -248,7 +250,7 @@ def test_name_tr_repair_removes_plus_sekil_and_preserves_embedded_terms(monkeypa
             "to": "+cafesebastian",
         }
     ]
-    assert updates == [("11111111-1111-1111-1111-111111111111", "+cafesebastian", False, True)]
+    assert updates == [("11111111-1111-1111-1111-111111111111", "+cafesebastian", True)]
     assert conn.commits == 1
 
 
@@ -277,7 +279,7 @@ def test_name_tr_repair_removes_empty_parens_after_shape_descriptor(monkeypatch)
 
     assert summary["repaired"] == 1
     assert summary["samples"][0]["to"] == "bitkisel çayı"
-    assert updates == [("11111111-1111-1111-1111-111111111111", "bitkisel çayı", False, True)]
+    assert updates == [("11111111-1111-1111-1111-111111111111", "bitkisel çayı", True)]
 
 
 def test_name_tr_repair_does_not_trim_separator_for_embedded_sekilde(monkeypatch):
@@ -308,7 +310,7 @@ def test_name_tr_repair_does_not_trim_separator_for_embedded_sekilde(monkeypatch
     assert conn.commits == 0
 
 
-def test_name_tr_repair_preserves_text_embedding_when_original_name_is_real(monkeypatch):
+def test_name_tr_repair_clears_translation_features_when_original_name_is_real(monkeypatch):
     conn = DummyConnection()
     updates = []
 
@@ -333,7 +335,7 @@ def test_name_tr_repair_preserves_text_embedding_when_original_name_is_real(monk
     summary = repair.run_name_tr_repair(conn=conn)
 
     assert summary["repaired"] == 1
-    assert updates == [("11111111-1111-1111-1111-111111111111", None, False, True)]
+    assert updates == [("11111111-1111-1111-1111-111111111111", None, True)]
     assert summary["text_embeddings_cleared"] == 0
 
 
@@ -354,7 +356,7 @@ def test_logo_only_text_feature_repair_clears_stale_name_derived_features(monkey
 
     def fake_execute_values(cur, sql, rows):
         updates.extend(rows)
-        assert "text_embedding = NULL" in sql
+        assert "text_embedding" not in sql
         assert "logo_ocr_text" not in sql
         assert "image_embedding" not in sql
 
@@ -363,7 +365,7 @@ def test_logo_only_text_feature_repair_clears_stale_name_derived_features(monkey
     summary = repair.run_logo_only_text_feature_repair(conn=conn)
 
     assert summary["repaired"] == 1
-    assert summary["text_embeddings_cleared"] == 1
+    assert summary["text_embeddings_cleared"] == 0
     assert updates == [("11111111-1111-1111-1111-111111111111",)]
     assert conn.commits == 1
 
@@ -626,6 +628,65 @@ def test_live_status_candidates_can_include_older_priority_records():
     sql = conn.last_cursor.sql
     assert "INTERVAL '4 months'" in sql
     assert sql.count("tm.application_date >= CURRENT_DATE - INTERVAL '11 years'") == 1
+
+
+def test_live_status_candidates_can_use_frozen_max_bulletin_date():
+    conn = CaptureConnection()
+
+    repair._live_status_candidates(
+        conn,
+        limit=10,
+        max_bulletin_date_exclusive=date(2026, 1, 13),
+    )
+
+    sql = conn.last_cursor.sql
+    assert "CURRENT_DATE - INTERVAL '4 months'" not in sql
+    assert "tm.bulletin_date < %s::date" in sql
+    assert date(2026, 1, 13) in conn.last_cursor.params
+    assert "tm.bulletin_date DESC NULLS LAST" in sql
+
+
+def test_live_status_skip_counts_can_use_frozen_max_bulletin_date():
+    conn = CaptureConnection()
+
+    repair._live_status_skip_counts(
+        conn,
+        max_bulletin_date_exclusive="2026-01-13",
+    )
+
+    sql = conn.last_cursor.sql
+    assert "CURRENT_DATE - INTERVAL '4 months'" not in sql
+    assert sql.count("%s::date") == 2
+    assert conn.last_cursor.params[:2] == [date(2026, 1, 13), date(2026, 1, 13)]
+
+
+def test_live_status_repair_reports_frozen_max_bulletin_date(monkeypatch):
+    conn = DummyConnection()
+    candidate_kwargs = []
+    skip_kwargs = []
+
+    monkeypatch.setattr(repair, "_ensure_live_check_table", lambda conn: None)
+    monkeypatch.setattr(
+        repair,
+        "_live_status_candidates",
+        lambda conn, **kwargs: candidate_kwargs.append(kwargs) or [],
+    )
+    monkeypatch.setattr(
+        repair,
+        "_live_status_skip_counts",
+        lambda conn, **kwargs: skip_kwargs.append(kwargs)
+        or {"skipped_no_name": 0, "skipped_recent": 0, "skipped_older_than_11_years": 0},
+    )
+
+    summary = repair.run_live_status_repair(
+        conn=conn,
+        max_bulletin_date_exclusive="2026-01-13",
+        live_fetcher=lambda candidate: {},
+    )
+
+    assert summary["status_max_bulletin_date_exclusive"] == "2026-01-13"
+    assert candidate_kwargs[0]["max_bulletin_date_exclusive"] == date(2026, 1, 13)
+    assert skip_kwargs[0]["max_bulletin_date_exclusive"] == date(2026, 1, 13)
 
 
 def test_live_status_provisional_mark_uses_same_pending_filter(monkeypatch):

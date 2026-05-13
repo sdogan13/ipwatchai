@@ -409,6 +409,8 @@ class CLIArgs:
     headless: bool
     bulletins_root: Path
     tracks: Set[Track]
+    no_legacy: bool = False
+    force: bool = False
 
 
 def _parse_bool(value: str) -> bool:
@@ -450,6 +452,16 @@ def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
         action="store_true",
         help="only download the CD .rar, skip the sidecar PDF",
     )
+    parser.add_argument(
+        "--no-legacy",
+        action="store_true",
+        help="skip legacy multi-UUID bundle cards (1996_6, 2015_4 era)",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="ignore on-disk completeness and re-download every wanted track",
+    )
     ns = parser.parse_args(argv)
 
     if ns.pdf_only:
@@ -465,6 +477,8 @@ def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
         headless=ns.headless,
         bulletins_root=ns.bulletins_root,
         tracks=tracks,
+        no_legacy=ns.no_legacy,
+        force=ns.force,
     )
 
 
@@ -863,13 +877,15 @@ async def _download_legacy_multipart(
     multi_uuid_href: str,
     bulletins_root: Path,
     card_id: str,
+    *,
+    force: bool = False,
 ) -> CollectionCounters:
     """Download a legacy multi-UUID bundle as separate part files.
 
     Splits the comma-separated UUIDs in the href, streams each one to
     ``{card_id}_legacy_part##.pdf``. Parts already present on disk are
-    skipped. If every expected part is present the card is reported as a
-    single ``skipped=1`` outcome so re-runs are quiet.
+    skipped unless ``force=True``. If every expected part is present the
+    card is reported as a single ``skipped=1`` outcome so re-runs are quiet.
     """
     abs_url = urljoin(page.url, multi_uuid_href)
     try:
@@ -886,7 +902,7 @@ async def _download_legacy_multipart(
     for idx, single_url in enumerate(single_urls, start=1):
         out_name = legacy_part_filename(card_id, idx, total)
         out_path = bulletins_root / out_name
-        if _part_present(out_path):
+        if _part_present(out_path) and not force:
             already_present += 1
         else:
             plan.append((idx, single_url, out_path, out_name))
@@ -934,8 +950,11 @@ async def process_card(
     card_id: str,
     card_date: Optional[str],
     wanted: Set[Track],
+    *,
+    no_legacy: bool = False,
+    force: bool = False,
 ) -> CollectionCounters:
-    missing = tracks_missing(bulletins_root, card_id, wanted)
+    missing = wanted if force else tracks_missing(bulletins_root, card_id, wanted)
     if not missing:
         logger.info("[=] %s already complete (%s), skipping",
                     card_id, sorted(t.value for t in wanted))
@@ -955,12 +974,17 @@ async def process_card(
         # rejects the multi-UUID request with a connection reset, but each
         # UUID is independently downloadable. Fan out and save each part
         # as {card_id}_legacy_part##.pdf.
+        if no_legacy:
+            logger.info("[i] %s: legacy multi-part bundle, --no-legacy set, skipping",
+                        card_id)
+            return CollectionCounters(skipped=1)
         if Track.PDF not in wanted:
             logger.info("[i] %s: legacy multi-part bundle but PDF track not wanted, skipping",
                         card_id)
             return CollectionCounters(skipped=1)
         return await _download_legacy_multipart(
             page, context, direct_href, bulletins_root, card_id,
+            force=force,
         )
     if direct_href:
         is_direct_href_card = True
@@ -1079,7 +1103,9 @@ async def run_collection(args: CLIArgs) -> CollectionCounters:
                                 card_id, card_date or "?",
                             )
                             continue
-                        if card_is_complete(args.bulletins_root, card_id, args.tracks):
+                        if not args.force and card_is_complete(
+                            args.bulletins_root, card_id, args.tracks
+                        ):
                             seen.add(card_id)
                             counters.skipped += 1
                             logger.info("[=] %s [%s] already complete locally, skipping",
@@ -1089,6 +1115,8 @@ async def run_collection(args: CLIArgs) -> CollectionCounters:
                     issue_counters = await process_card(
                         page, context, clickable, args.bulletins_root,
                         card_id, card_date, args.tracks,
+                        no_legacy=args.no_legacy,
+                        force=args.force,
                     )
                     counters.downloaded += issue_counters.downloaded
                     counters.failed += issue_counters.failed

@@ -1,32 +1,82 @@
 <!-- ============================================ -->
-<!-- Tab: Opposition Radar                        -->
+<!-- Tab: Radar                        -->
+<!-- Registry-first switcher mirrors Search/Watchlist:
+       Marka | Tasarım | Patent | Coğrafi             -->
 <!-- ============================================ -->
-<div id="tab-content-opposition-radar" class="hidden max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+<div id="tab-content-radar"
+     x-data="{ radarView: (function () {
+         try {
+             var v = localStorage.getItem('radarView');
+             if (v === 'tasarim' || v === 'patent' || v === 'cografi') return v;
+         } catch (_) {}
+         return 'marka';
+     })() }"
+     x-init="$watch('radarView', v => {
+         try { localStorage.setItem('radarView', v); } catch (_) {}
+         if (v === 'patent' && typeof window.loadPatentLeadsFeed === 'function') {
+             window.loadPatentLeadsFeed(1);
+         }
+     });
+     if (radarView === 'patent' && typeof window.loadPatentLeadsFeed === 'function') {
+         window.loadPatentLeadsFeed(1);
+     }"
+     class="hidden max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
-    <!-- Mode Toggle: Conflicts / Renewals -->
-    <div class="mb-4 flex items-center gap-1 p-1 rounded-lg w-fit" style="background:var(--color-bg-muted);border:1px solid var(--color-border)">
+    <!-- Registry switcher: Marka | Tasarım | Patent | Coğrafi
+         Same pattern as Search and Watchlist tabs. -->
+    <div class="mb-5 inline-flex rounded-xl p-1"
+         style="background:var(--color-bg-muted);border:1px solid var(--color-border)">
+        <button type="button" @click="radarView = 'marka'"
+                class="px-3 sm:px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                :class="radarView === 'marka' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
+                :style="radarView === 'marka' ? '' : 'color:var(--color-text-muted)'"
+                x-text="t('leads.radar_registry_marka')">Marka</button>
+        <button type="button" @click="radarView = 'tasarim'"
+                class="px-3 sm:px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                :class="radarView === 'tasarim' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
+                :style="radarView === 'tasarim' ? '' : 'color:var(--color-text-muted)'"
+                x-text="t('leads.radar_registry_tasarim')">Tasarım</button>
+        <button type="button" @click="radarView = 'patent'"
+                class="px-3 sm:px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                :class="radarView === 'patent' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
+                :style="radarView === 'patent' ? '' : 'color:var(--color-text-muted)'"
+                x-text="t('leads.radar_registry_patent')">Patent</button>
+        <button type="button" @click="radarView = 'cografi'"
+                class="px-3 sm:px-5 py-1.5 rounded-lg text-sm font-medium transition-all"
+                :class="radarView === 'cografi' ? 'bg-indigo-600 text-white shadow' : 'hover:opacity-80'"
+                :style="radarView === 'cografi' ? '' : 'color:var(--color-text-muted)'"
+                x-text="t('leads.radar_registry_cografi')">Coğrafi</button>
+    </div>
+
+    <!-- ===========================================
+         MARKA REGISTRY — sub-modes: Conflicts / Renewals / Cancellations / Transfers / Bankruptcies
+         =========================================== -->
+    <div x-show="radarView === 'marka'" x-cloak>
+
+    <!-- Sub-mode chips (Marka lead types) -->
+    <div class="mb-4 flex flex-wrap items-center gap-1 p-1 rounded-lg w-fit" style="background:var(--color-bg-muted);border:1px solid var(--color-border)">
         <button id="radar-mode-conflicts" onclick="switchRadarMode('conflicts')"
-                class="px-4 py-2 rounded-md text-sm font-medium transition-all"
+                class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-all"
                 style="background:var(--color-primary);color:white">
             <span x-text="t('leads.mode_conflicts')">Itiraz Firsatlari</span>
         </button>
         <button id="radar-mode-renewals" onclick="switchRadarMode('renewals')"
-                class="px-4 py-2 rounded-md text-sm font-medium transition-all"
+                class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-all"
                 style="color:var(--color-text-secondary)">
             <span x-text="t('leads.mode_renewals')">Yenileme Firsatlari</span>
         </button>
         <button id="radar-mode-cancellations" onclick="switchRadarMode('cancellations')"
-                class="px-4 py-2 rounded-md text-sm font-medium transition-all"
+                class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-all"
                 style="color:var(--color-text-secondary)">
             <span x-text="t('leads.mode_cancellations')">Iptal Firsatlari</span>
         </button>
         <button id="radar-mode-transfers" onclick="switchRadarMode('transfers')"
-                class="px-4 py-2 rounded-md text-sm font-medium transition-all"
+                class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-all"
                 style="color:var(--color-text-secondary)">
             <span x-text="t('leads.mode_transfers')">Devir Firsatlari</span>
         </button>
         <button id="radar-mode-bankruptcies" onclick="switchRadarMode('bankruptcies')"
-                class="px-4 py-2 rounded-md text-sm font-medium transition-all"
+                class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-all"
                 style="color:var(--color-text-secondary)">
             <span x-text="t('leads.mode_bankruptcies')">Iflas Firsatlari</span>
         </button>
@@ -38,7 +88,7 @@
         <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
             <div>
                 <h2 class="text-2xl font-bold flex items-center gap-3" style="color:var(--color-text-primary)">
-                    <span x-text="t('leads.title')">Opposition Radar</span>
+                    <span x-text="t('leads.title')">Radar</span>
                 </h2>
                 <p class="mt-1" style="color:var(--color-text-muted)" x-text="t('leads.subtitle')">Potansiyel musteriler - Itiraz hizmeti firsatlari</p>
                 <div id="lead-last-scan" class="mt-0.5"></div>
@@ -624,13 +674,171 @@
         </div>
     </div> <!-- end radar-bankruptcies-section -->
 
+    </div> <!-- end marka registry (x-show='marka') -->
+
+    <!-- ============================================ -->
+    <!-- PATENT REGISTRY                              -->
+    <!-- Patent leads (lapse / transfer / license / rejected) -->
+    <!-- Backed by /api/v1/patent-leads — derived from patent_events -->
+    <!-- ============================================ -->
+    <div x-show="radarView === 'patent'" x-cloak>
+    <div id="radar-patent-section">
+        {# Patent sub-category chips — mirrors the Marka sub-mode strip #}
+        <div class="mb-4 flex flex-wrap items-center gap-1 p-1 rounded-lg w-fit"
+             style="background:var(--color-bg-muted);border:1px solid var(--color-border)">
+            <button id="patent-cat-lapse" onclick="switchPatentLeadsCategory('lapse')"
+                    class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-all"
+                    style="background:var(--color-primary);color:white">
+                <span x-text="t('patent_leads.cat_lapse')">Düşmüş Patentler</span>
+            </button>
+            <button id="patent-cat-transfer" onclick="switchPatentLeadsCategory('transfer')"
+                    class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-all"
+                    style="color:var(--color-text-secondary)">
+                <span x-text="t('patent_leads.cat_transfer')">Devir / Atama</span>
+            </button>
+            <button id="patent-cat-license" onclick="switchPatentLeadsCategory('license')"
+                    class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-all"
+                    style="color:var(--color-text-secondary)">
+                <span x-text="t('patent_leads.cat_license')">Lisans Teklifi</span>
+            </button>
+            <button id="patent-cat-rejected" onclick="switchPatentLeadsCategory('rejected')"
+                    class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-all"
+                    style="color:var(--color-text-secondary)">
+                <span x-text="t('patent_leads.cat_rejected')">Reddedilen / Lapsus Başvurular</span>
+            </button>
+        </div>
+
+        {# Title + subtitle, beneath the category chips #}
+        <div class="mb-6">
+            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
+                <div>
+                    <h2 class="text-2xl font-bold flex items-center gap-3" style="color:var(--color-text-primary)">
+                        <span x-text="t('patent_leads.title')">Patent Fırsatları</span>
+                    </h2>
+                    <p class="mt-1" style="color:var(--color-text-muted)"
+                       x-text="t('patent_leads.subtitle')">Lapsus / devir / lisans / red — patent_events üzerinden türetilmiş fırsatlar.</p>
+                </div>
+            </div>
+        </div>
+
+        {# Watchlist scope + holder filter + actions #}
+        <div class="rounded-xl shadow-sm p-3 sm:p-4 mb-6"
+             style="background:var(--color-bg-card);border:1px solid var(--color-border)">
+            <div class="flex flex-wrap items-center gap-2 sm:gap-3">
+                <label class="flex items-center gap-1.5 text-xs"
+                       style="color:var(--color-text-secondary)">
+                    <input id="patent-leads-watchlist-scope" type="checkbox" class="accent-indigo-600">
+                    <span x-text="t('patent_leads.scope_watchlist')">Sadece takip ettiğim hak sahipleri</span>
+                </label>
+                <input id="patent-leads-holder" type="text" maxlength="100"
+                       :placeholder="t('patent_leads.holder_placeholder')"
+                       class="rounded-lg px-2 sm:px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 min-h-[38px] flex-1 min-w-[160px]"
+                       style="border:1px solid var(--color-border-input);color:var(--color-text-secondary);background:var(--color-bg-input)"/>
+                <button id="patent-leads-refresh"
+                        class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium btn-press min-h-[38px]"
+                        x-text="t('patent_leads.refresh')">Yenile</button>
+                <button id="patent-leads-export-csv"
+                        class="px-3 py-2 rounded-lg flex items-center gap-1.5 text-sm font-medium btn-press min-h-[38px] border"
+                        style="background:var(--color-bg-muted);color:var(--color-text-secondary);border-color:var(--color-border)"
+                        :title="t('patent_leads.export_csv_title')">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                    </svg>
+                    <span x-text="t('patent_leads.export_csv')">CSV İndir</span>
+                </button>
+            </div>
+        </div>
+
+        {# Stats summary chips #}
+        <div id="patent-leads-stats" class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4"></div>
+
+        {# Feed container #}
+        <div id="patent-leads-container">
+            <div id="patent-leads-loading" class="text-center py-16">
+                <div class="space-y-1 max-w-4xl mx-auto mb-6">
+                    <div class="skeleton h-8 rounded"></div>
+                    <div class="skeleton h-8 rounded"></div>
+                    <div class="skeleton h-8 rounded"></div>
+                </div>
+                <p style="color:var(--color-text-faint)" x-text="t('patent_leads.loading')">Yükleniyor...</p>
+            </div>
+            <div id="patent-leads-empty" class="hidden text-center py-16">
+                <p style="color:var(--color-text-faint)" x-text="t('patent_leads.empty')">Bu kategoride fırsat bulunamadı.</p>
+            </div>
+            <div id="patent-leads-cards" class="hidden space-y-2"></div>
+        </div>
+
+        {# Pagination #}
+        <div id="patent-leads-pagination" class="hidden flex items-center justify-between mt-4">
+            <span id="patent-leads-total-info" class="text-xs" style="color:var(--color-text-faint)"></span>
+            <div class="flex items-center gap-3">
+                <button id="patent-leads-prev"
+                        class="px-3 py-1.5 rounded-lg disabled:opacity-50 text-sm btn-press min-h-[36px]"
+                        style="background:var(--color-bg-card);border:1px solid var(--color-border);color:var(--color-text-secondary)">
+                    <span x-text="t('pagination.prev')">&larr; Önceki</span>
+                </button>
+                <span id="patent-leads-page-info" class="text-sm" style="color:var(--color-text-muted)">1</span>
+                <button id="patent-leads-next"
+                        class="px-3 py-1.5 rounded-lg disabled:opacity-50 text-sm btn-press min-h-[36px]"
+                        style="background:var(--color-bg-card);border:1px solid var(--color-border);color:var(--color-text-secondary)">
+                    <span x-text="t('pagination.next')">Sonraki &rarr;</span>
+                </button>
+            </div>
+        </div>
+    </div> <!-- end radar-patent-section -->
+
+    </div> <!-- end patent registry (x-show='patent') -->
+
+    <!-- ============================================ -->
+    <!-- TASARIM REGISTRY — placeholder                -->
+    <!-- ============================================ -->
+    <div x-show="radarView === 'tasarim'" x-cloak class="py-16">
+        <div class="rounded-2xl p-8 max-w-lg mx-auto shadow-sm text-center"
+             style="background:var(--color-bg-card);border:1px solid var(--color-border)">
+            <div class="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"
+                 style="background:var(--color-bg-muted)">
+                <svg class="h-8 w-8" style="color:var(--color-text-muted)" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+                </svg>
+            </div>
+            <h3 class="text-xl font-semibold mb-2"
+                style="color:var(--color-text-primary)"
+                x-text="t('leads.radar_coming_soon_title')">Yakında</h3>
+            <p class="text-sm" style="color:var(--color-text-muted)"
+               x-text="t('leads.radar_coming_soon_tasarim')">Tasarım fırsat radarı yol haritamızda.</p>
+        </div>
+    </div>
+
+    <!-- ============================================ -->
+    <!-- COĞRAFİ REGISTRY — placeholder                -->
+    <!-- ============================================ -->
+    <div x-show="radarView === 'cografi'" x-cloak class="py-16">
+        <div class="rounded-2xl p-8 max-w-lg mx-auto shadow-sm text-center"
+             style="background:var(--color-bg-card);border:1px solid var(--color-border)">
+            <div class="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"
+                 style="background:var(--color-bg-muted)">
+                <svg class="h-8 w-8" style="color:var(--color-text-muted)" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+            </div>
+            <h3 class="text-xl font-semibold mb-2"
+                style="color:var(--color-text-primary)"
+                x-text="t('leads.radar_coming_soon_title')">Yakında</h3>
+            <p class="text-sm" style="color:var(--color-text-muted)"
+               x-text="t('leads.radar_coming_soon_cografi')">Coğrafi İşaret fırsat radarı yol haritamızda.</p>
+        </div>
+    </div>
+
     <!-- Upgrade Prompt (for non-Pro users) -->
     <div id="lead-upgrade-prompt" class="hidden text-center py-16">
         <div class="rounded-2xl p-8 max-w-lg mx-auto shadow-sm" style="background:var(--color-bg-card);border:1px solid var(--color-border)">
             <div class="w-16 h-16 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-4">
                 <svg class="h-8 w-8 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
             </div>
-            <h3 class="text-2xl font-bold mb-2" style="color:var(--color-text-primary)" x-text="t('leads.upgrade_title')">Opposition Radar</h3>
+            <h3 class="text-2xl font-bold mb-2" style="color:var(--color-text-primary)" x-text="t('leads.upgrade_title')">Radar</h3>
             <p class="mb-6" style="color:var(--color-text-muted)" x-text="t('leads.upgrade_desc')">
             </p>
             <div class="rounded-xl p-4 mb-6 text-left" style="background:var(--color-bg-muted)">

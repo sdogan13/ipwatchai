@@ -381,6 +381,20 @@
                         <span class="text-right text-sm font-bold text-slate-900" x-text="planDisplayName"></span>
                     </div>
 
+                    <!-- Billing region -->
+                    <div class="mb-4">
+                        <label for="checkout-billing-region" class="mb-2 block text-sm text-slate-600" x-text="t('pricing.region_label')">Billing region</label>
+                        <select id="checkout-billing-region"
+                                x-model="region"
+                                @change="setRegion(region)"
+                                class="min-h-[44px] w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100">
+                            <option value="UK" x-text="t('pricing.region_uk')">United Kingdom</option>
+                            <option value="EU" x-text="t('pricing.region_eu')">Europe</option>
+                            <option value="TR" x-text="t('pricing.region_tr')">Turkey</option>
+                        </select>
+                        <p class="mt-2 text-xs leading-5 text-slate-500" x-text="t('pricing.region_help')">Prices update by billing region.</p>
+                    </div>
+
                     <!-- Billing period toggle -->
                     <template x-if="plan !== 'free'">
                         <div class="mb-4">
@@ -453,7 +467,7 @@
                                 <svg class="w-3.5 h-3.5 text-green-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
                                 <span x-text="summaryFeatureText('watchlist')"></span>
                             </li>
-                            <template x-if="planData.monthly_live_searches > 0">
+                            <template x-if="planData.max_daily_live_searches > 0">
                                 <li class="flex items-start gap-1.5">
                                     <svg class="w-3.5 h-3.5 text-green-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
                                     <span x-text="summaryFeatureText('live')"></span>
@@ -470,7 +484,7 @@
 
                     <!-- Change plan link -->
                     <div class="mt-5 text-center">
-                        <a href="/pricing" class="inline-flex items-center rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-indigo-600 hover:text-indigo-800" x-text="t('checkout.change_plan')">Plani Degistir</a>
+                        <a href="/pricing" :href="'/pricing?region=' + encodeURIComponent(region || 'UK')" class="inline-flex items-center rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-indigo-600 hover:text-indigo-800" x-text="t('checkout.change_plan')">Plani Degistir</a>
                     </div>
                 </div>
             </div>
@@ -480,12 +494,14 @@
     </div>
 
     <!-- i18n -->
-    <script src="/static/js/utils/i18n.js?v=51"></script>
+    <script src="/static/js/utils/i18n.js?v=63"></script>
     <script>
     // Plan data from server (Jinja2)
     var SERVER_PLANS = {{ plans | tojson }};
+    var SERVER_BILLING_CATALOG = {{ billing_catalog | tojson }};
     var SELECTED_PLAN = '{{ selected_plan }}';
     var SELECTED_BILLING = '{{ selected_billing }}';
+    var SELECTED_REGION = '{{ selected_region }}';
     function checkoutPage() {
         return {
             lang_code: window.AppI18n ? window.AppI18n.getLocale() : 'tr',
@@ -494,6 +510,9 @@
             step: 'account',
             plan: SELECTED_PLAN,
             billing: SELECTED_BILLING,
+            region: SELECTED_REGION || (SERVER_BILLING_CATALOG && SERVER_BILLING_CATALOG.region) || 'UK',
+            billingCatalog: SERVER_BILLING_CATALOG || {},
+            catalogLoading: false,
             isLoggedIn: false,
             userEmail: '',
             authTab: 'register',
@@ -527,6 +546,10 @@
             get planData() {
                 return SERVER_PLANS[this.plan] || SERVER_PLANS['free'] || {};
             },
+            get catalogPlan() {
+                var plans = (this.billingCatalog && this.billingCatalog.plans) || {};
+                return plans[this.plan] || {};
+            },
             get planDisplayName() {
                 var names = {
                     free: 'pricing.free_name',
@@ -547,15 +570,15 @@
             },
             get monthlyPrice() {
                 if (this.billing === 'annual') {
-                    return this.planData.price_annual_monthly || 0;
+                    return this.catalogPlan.price_annual_monthly || 0;
                 }
-                return this.planData.price_monthly || 0;
+                return this.catalogPlan.price_monthly || 0;
             },
             get totalPrice() {
                 if (this.billing === 'annual') {
-                    return (this.planData.price_annual_monthly || 0) * 12;
+                    return (this.catalogPlan.price_annual_monthly || 0) * 12;
                 }
-                return this.planData.price_monthly || 0;
+                return this.catalogPlan.price_monthly || 0;
             },
 
             refreshLocale() {
@@ -576,6 +599,16 @@
                     });
                 }
                 this.refreshLocale();
+
+                try {
+                    var storedRegion = window.localStorage ? window.localStorage.getItem('billing_region') : null;
+                    var urlRegion = new URLSearchParams(window.location.search).get('region');
+                    var requestedRegion = urlRegion || storedRegion;
+                    if (requestedRegion && requestedRegion !== this.region) {
+                        this.region = requestedRegion;
+                        this.loadCatalog(requestedRegion);
+                    }
+                } catch (err) {}
 
                 // Check for existing auth
                 var token = window.AppAuth && window.AppAuth.getAuthToken
@@ -604,7 +637,17 @@
                 void this.locale_nonce;
                 var locale = window.AppI18n ? window.AppI18n.getLocale() : 'tr';
                 var numberLocale = locale === 'ar' ? 'ar-SA' : (locale === 'en' ? 'en-US' : 'tr-TR');
-                return '\u20BA' + Number(amount || 0).toLocaleString(numberLocale);
+                var value = Number(amount || 0);
+                var currency = (this.billingCatalog && this.billingCatalog.currency) || 'TRY';
+                try {
+                    return new Intl.NumberFormat(numberLocale, {
+                        style: 'currency',
+                        currency: currency,
+                        maximumFractionDigits: value % 1 === 0 ? 0 : 2
+                    }).format(value);
+                } catch (err) {
+                    return currency + ' ' + value.toLocaleString(numberLocale);
+                }
             },
 
             billingDisplayName() {
@@ -617,20 +660,15 @@
 
             summaryFeatureText(kind) {
                 var planData = this.planData || {};
-                if (kind === 'search') {
-                    return this.isUnlimitedLimit(planData.max_daily_quick_searches)
+                if (kind === 'search' || kind === 'live') {
+                    return this.isUnlimitedLimit(planData.max_daily_live_searches)
                         ? this.t('pricing.f_unlimited_searches')
-                        : this.t('checkout.feat_search', { n: planData.max_daily_quick_searches || 5 });
+                        : this.t('pricing.f_daily_searches', { n: planData.max_daily_live_searches || 5 });
                 }
                 if (kind === 'watchlist') {
                     return this.isUnlimitedLimit(planData.max_watchlist_items)
                         ? this.t('pricing.f_unlimited_watchlist')
                         : this.t('checkout.feat_watchlist', { n: planData.max_watchlist_items || 3 });
-                }
-                if (kind === 'live') {
-                    return this.isUnlimitedLimit(planData.monthly_live_searches)
-                        ? this.t('pricing.f_unlimited_live')
-                        : this.t('checkout.feat_live', { n: planData.monthly_live_searches || 0 });
                 }
                 if (kind === 'logo') {
                     return this.isUnlimitedLimit(planData.monthly_logo_runs)
@@ -679,10 +717,51 @@
                 // Update URL
                 var url = new URL(window.location);
                 url.searchParams.set('billing', period);
+                url.searchParams.set('region', this.region || 'UK');
                 window.history.replaceState({}, '', url);
                 if (this.step === 'payment' && this.plan !== 'free') {
                     this.initializePayment();
                 }
+            },
+
+            setRegion(region) {
+                this.region = ['UK', 'EU', 'TR'].indexOf(region) >= 0 ? region : 'UK';
+                this.checkoutFormHtml = '';
+                this.paymentError = '';
+                try {
+                    if (window.localStorage) {
+                        window.localStorage.setItem('billing_region', this.region);
+                    }
+                    var url = new URL(window.location);
+                    url.searchParams.set('region', this.region);
+                    window.history.replaceState({}, '', url);
+                } catch (err) {}
+                var self = this;
+                this.loadCatalog(this.region).then(function () {
+                    if (self.step === 'payment' && self.plan !== 'free') {
+                        self.initializePayment();
+                    }
+                });
+            },
+
+            loadCatalog(region) {
+                var self = this;
+                self.catalogLoading = true;
+                return fetch('/api/v1/billing/catalog?region=' + encodeURIComponent(region), { credentials: 'same-origin' })
+                    .then(function (response) {
+                        if (!response.ok) {
+                            throw new Error('catalog');
+                        }
+                        return response.json();
+                    })
+                    .then(function (catalog) {
+                        self.billingCatalog = catalog || self.billingCatalog;
+                        self.region = (catalog && catalog.region) || self.region;
+                    })
+                    .catch(function () {})
+                    .finally(function () {
+                        self.catalogLoading = false;
+                    });
             },
 
             goToPayment() {
@@ -990,7 +1069,7 @@
                         'Authorization': 'Bearer ' + token,
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ plan: this.plan, billing: this.billing })
+                    body: JSON.stringify({ plan: this.plan, billing: this.billing, region: this.region })
                 })
                 .then(function(res) {
                     if (res.status === 401 && window.AppAuth && window.AppAuth.handleUnauthorized) {
@@ -1003,7 +1082,9 @@
                 })
                 .then(function(data) {
                     self.paymentLoading = false;
-                    if (data.checkout_form_content) {
+                    if (data.checkout_url) {
+                        window.location.href = data.checkout_url;
+                    } else if (data.checkout_form_content) {
                         self.checkoutFormHtml = data.checkout_form_content;
                         // iyzico scripts in the HTML need to execute
                         self.$nextTick(function() {

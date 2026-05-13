@@ -1,0 +1,299 @@
+<!-- ==========================================================
+     Design watchlist sub-view (Tasarım Takibi)
+     Mirrors the Trademark watchlist toolbar + stats + filter
+     bar + rich item rows + pagination, adapted to the
+     design-watchlist API surface (no phonetic, no Nice classes).
+     IDs prefixed `design-watchlist-` / `dwl-` so design_watchlist.js
+     selectors don't collide with trademark IDs.
+     ========================================================== -->
+<div class="pt-2 pb-4">
+
+    <!-- ==================================================
+         HEADER + TOOLBAR
+         ================================================== -->
+    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-3">
+        <div>
+            <h2 class="text-xl font-bold" style="color:var(--color-text-primary)"
+                x-text="t('design_watchlist.panel_title')">Tasarım Takibi</h2>
+            <p class="text-sm mt-1" style="color:var(--color-text-muted)"
+               x-text="t('design_watchlist.monitoring_active')">Monitoring</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+            <!-- Risk threshold (filters alerts client-side) -->
+            <div class="flex items-center gap-1.5">
+                <label class="text-xs font-medium whitespace-nowrap" style="color:var(--color-text-muted)"
+                       x-text="t('design_watchlist.filter_threshold')"></label>
+                <select id="dwl-threshold-slider" class="text-xs px-2 py-1.5 rounded-lg"
+                        style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
+                    <option value="90">90%</option>
+                    <option value="80">80%</option>
+                    <option value="70" selected>70%</option>
+                    <option value="60">60%</option>
+                    <option value="50">50%</option>
+                </select>
+            </div>
+
+            <!-- Scan All — icon-only, mirrors Sil styling -->
+            <button id="dwl-btn-scan-all"
+                    class="px-3 py-2 text-sm font-medium rounded-lg transition-colors flex items-center border disabled:opacity-50"
+                    style="color:var(--color-primary);border-color:var(--color-primary);background:transparent"
+                    :title="t('design_watchlist.scan_all_title')">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+            </button>
+
+            <!-- Bulk Upload — icon-only -->
+            <button id="dwl-btn-bulk-upload"
+                    class="px-3 py-2 text-sm font-medium rounded-lg transition-colors flex items-center border"
+                    style="color:var(--color-text-secondary);border-color:var(--color-border)"
+                    :title="t('design_watchlist.bulk_upload')">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                </svg>
+            </button>
+
+            <!-- Delete All -->
+            <button id="dwl-btn-delete-all"
+                    class="px-3 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5 border border-red-200 text-red-500 hover:bg-red-50"
+                    :title="t('design_watchlist.delete_all_title')">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                </svg>
+            </button>
+
+            <!-- Add New (existing button, kept) -->
+            <button type="button" id="design-watchlist-add-toggle"
+                    class="px-3 py-2 text-sm font-medium rounded-lg transition-colors flex items-center bg-indigo-600 text-white hover:bg-indigo-700"
+                    :title="t('design_watchlist.add_button')">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                </svg>
+            </button>
+        </div>
+    </div>
+
+    <!-- ==================================================
+         STATS SUMMARY (4 cards: Total / Threatened / Critical / New Alerts)
+         Nearest Deadline + Renewal omitted — no design semantics.
+         ================================================== -->
+    <div id="dwl-stats-bar" class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+        <div class="rounded-xl border p-3 flex items-center gap-3"
+             style="background:var(--color-bg-card);border-color:var(--color-border)">
+            <div class="w-9 h-9 rounded-lg flex items-center justify-center bg-blue-100">
+                <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                </svg>
+            </div>
+            <div>
+                <div id="dwl-stat-total" class="text-lg font-bold" style="color:var(--color-text-primary)">-</div>
+                <div class="text-xs" style="color:var(--color-text-muted)"
+                     x-text="t('design_watchlist.stat_total_items')">Total Items</div>
+            </div>
+        </div>
+        <div class="rounded-xl border p-3 flex items-center gap-3"
+             style="background:var(--color-bg-card);border-color:var(--color-border)">
+            <div class="w-9 h-9 rounded-lg flex items-center justify-center bg-red-100">
+                <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z"/>
+                </svg>
+            </div>
+            <div>
+                <div id="dwl-stat-threatened" class="text-lg font-bold" style="color:var(--color-text-primary)">-</div>
+                <div class="text-xs" style="color:var(--color-text-muted)"
+                     x-text="t('design_watchlist.stat_threatened')">Threatened</div>
+            </div>
+        </div>
+        <div class="rounded-xl border p-3 flex items-center gap-3"
+             style="background:var(--color-bg-card);border-color:var(--color-border)">
+            <div class="w-9 h-9 rounded-lg flex items-center justify-center bg-red-100">
+                <svg class="w-5 h-5 text-red-600 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+            </div>
+            <div>
+                <div id="dwl-stat-critical" class="text-lg font-bold"
+                     style="color:var(--color-risk-critical-text, #dc2626)">-</div>
+                <div class="text-xs" style="color:var(--color-text-muted)"
+                     x-text="t('design_watchlist.stat_critical')">Critical</div>
+            </div>
+        </div>
+        <div class="rounded-xl border p-3 flex items-center gap-3"
+             style="background:var(--color-bg-card);border-color:var(--color-border)">
+            <div class="w-9 h-9 rounded-lg flex items-center justify-center bg-orange-100">
+                <svg class="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+                </svg>
+            </div>
+            <div>
+                <div id="dwl-stat-new-alerts" class="text-lg font-bold" style="color:var(--color-text-primary)">-</div>
+                <div class="text-xs" style="color:var(--color-text-muted)"
+                     x-text="t('design_watchlist.stat_new_alerts')">New Alerts</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================================================
+         SEARCH + SORT BAR
+         ================================================== -->
+    <div class="flex flex-wrap items-center gap-3 mb-4">
+        <!-- Search -->
+        <div class="relative flex-1 min-w-[200px] max-w-sm">
+            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style="color:var(--color-text-faint)"
+                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+            </svg>
+            <input id="dwl-search-input" type="text"
+                   class="w-full pl-9 pr-8 py-2 text-sm rounded-lg"
+                   style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)"
+                   :placeholder="t('design_watchlist.search_placeholder')">
+            <button id="dwl-search-clear" class="absolute right-2 top-1/2 -translate-y-1/2 hidden p-1 rounded-full hover:bg-gray-200"
+                    style="color:var(--color-text-faint)">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+            </button>
+        </div>
+
+        <!-- Sort -->
+        <div class="flex items-center gap-1.5">
+            <label class="text-xs font-medium whitespace-nowrap" style="color:var(--color-text-muted)"
+                   x-text="t('design_watchlist.filter_sort')">Sort</label>
+            <select id="dwl-sort-select" class="text-xs px-2 py-1.5 rounded-lg"
+                    style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
+                <option value="date_desc" x-text="t('design_watchlist.sort_newest')">Newest</option>
+                <option value="date_asc" x-text="t('design_watchlist.sort_oldest')">Oldest</option>
+                <option value="conflicts_desc" selected x-text="t('design_watchlist.sort_most_conflicts')">Most Conflicts</option>
+                <option value="name_asc" x-text="t('design_watchlist.sort_name_az')">A-Z</option>
+            </select>
+        </div>
+
+        <span id="dwl-count-info" class="text-sm ml-auto" style="color:var(--color-text-faint)"></span>
+    </div>
+
+    <!-- ==================================================
+         STATUS / ERROR BARS (kept from old subview for inline messages)
+         ================================================== -->
+    <div id="design-watchlist-status" class="hidden mb-3 p-3 rounded-lg text-sm"
+         style="background:var(--color-bg-card);color:var(--color-text-secondary);border:1px solid var(--color-border)"></div>
+    <div id="design-watchlist-error" class="hidden mb-3 p-3 rounded-lg text-sm"
+         style="background:var(--color-bg-error,#fee2e2);color:var(--color-text-error,#991b1b)"></div>
+
+    <!-- ==================================================
+         INLINE ADD-FORM (kept; the +Yeni Takip button toggles it)
+         ================================================== -->
+    <div id="design-watchlist-add-card" class="hidden rounded-xl shadow-sm border p-5 mb-4"
+         style="background:var(--color-bg-card);border-color:var(--color-border)">
+        <h3 class="text-sm font-semibold mb-3" style="color:var(--color-text-primary)"
+            x-text="t('design_watchlist.add_form_title')">Yeni Takip Ekle</h3>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div class="md:col-span-2">
+                <label class="block text-xs font-medium mb-1" style="color:var(--color-text-secondary)"
+                       x-text="t('design_watchlist.product_name_label')">Ürün Adı</label>
+                <input type="text" id="design-watchlist-product-name"
+                       :placeholder="t('design_watchlist.product_name_placeholder')"
+                       class="w-full px-3 py-2 rounded-lg outline-none text-sm"
+                       style="background:var(--color-bg-card);border:1px solid var(--color-border);color:var(--color-text-primary)"
+                       maxlength="500"/>
+            </div>
+
+            <div>
+                <label class="block text-xs font-medium mb-1" style="color:var(--color-text-secondary)"
+                       x-text="t('design_watchlist.locarno_label')">Locarno Sınıfları</label>
+                <input type="text" id="design-watchlist-locarno"
+                       :placeholder="t('design_watchlist.locarno_placeholder')"
+                       class="w-full px-3 py-2 rounded-lg outline-none text-sm"
+                       style="background:var(--color-bg-card);border:1px solid var(--color-border);color:var(--color-text-primary)"/>
+                <p class="text-xs mt-1" style="color:var(--color-text-faint)"
+                   x-text="t('design_watchlist.locarno_hint')">Örn: 06-01, 26-05</p>
+            </div>
+
+            <div>
+                <label class="block text-xs font-medium mb-1" style="color:var(--color-text-secondary)"
+                       x-text="t('design_watchlist.customer_app_no_label')">Kendi Başvuru No (opsiyonel)</label>
+                <input type="text" id="design-watchlist-app-no"
+                       :placeholder="t('design_watchlist.customer_app_no_placeholder')"
+                       class="w-full px-3 py-2 rounded-lg outline-none text-sm"
+                       style="background:var(--color-bg-card);border:1px solid var(--color-border);color:var(--color-text-primary)"/>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-2 mt-4">
+            <button type="button" id="design-watchlist-submit"
+                    class="px-4 py-2 rounded-lg font-medium text-sm bg-indigo-600 text-white hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                    x-text="t('design_watchlist.submit')">Kaydet</button>
+            <button type="button" id="design-watchlist-cancel"
+                    class="px-4 py-2 rounded-lg font-medium text-sm hover:opacity-80 transition-colors"
+                    style="background:var(--color-bg-muted);color:var(--color-text-secondary)"
+                    x-text="t('design_watchlist.cancel')">İptal</button>
+        </div>
+    </div>
+
+    <!-- ==================================================
+         LIST CARD + PAGINATION
+         ================================================== -->
+    <div class="rounded-xl shadow-sm border p-5"
+         style="background:var(--color-bg-card);border-color:var(--color-border)">
+
+        <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-semibold" style="color:var(--color-text-primary)">
+                <span x-text="t('design_watchlist.list_title')">Takip Listesi</span>
+                <span id="design-watchlist-total-badge"
+                      class="ml-2 text-xs px-2 py-0.5 rounded-full"
+                      style="background:var(--color-bg-muted);color:var(--color-text-secondary)">0</span>
+            </h3>
+        </div>
+
+        <!-- Loading -->
+        <div id="design-watchlist-loading" class="hidden py-12 text-center">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-2 border-indigo-600 border-t-transparent"></div>
+            <p class="text-sm mt-3" style="color:var(--color-text-muted)"
+               x-text="t('design_watchlist.loading')">Yükleniyor…</p>
+        </div>
+
+        <!-- Empty -->
+        <div id="design-watchlist-empty" class="hidden py-12 text-center">
+            <svg class="w-12 h-12 mx-auto mb-2" style="color:var(--color-text-faint)"
+                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+            </svg>
+            <p class="text-sm font-medium" style="color:var(--color-text-secondary)"
+               x-text="t('design_watchlist.empty_title')">Henüz takip kaydı yok</p>
+            <p class="text-xs mt-1" style="color:var(--color-text-faint)"
+               x-text="t('design_watchlist.empty_body')">Yukarıdaki butonla ilk kaydı ekleyin.</p>
+        </div>
+
+        <!-- Items list (rendered by design_watchlist.js) -->
+        <div id="design-watchlist-list" class="space-y-3 max-h-[600px] overflow-y-auto pr-1"
+             style="scrollbar-width:thin"></div>
+
+        <!-- Pagination -->
+        <div id="dwl-pagination" class="hidden flex items-center justify-between pt-3 mt-3"
+             style="border-top:1px solid var(--color-border)">
+            <button id="dwl-prev-btn" class="px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors disabled:opacity-40"
+                    style="color:var(--color-text-secondary);border-color:var(--color-border)" disabled>
+                <span x-text="t('common.previous')">Previous</span>
+            </button>
+            <div id="dwl-page-buttons" class="flex items-center gap-1"></div>
+            <button id="dwl-next-btn" class="px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors disabled:opacity-40"
+                    style="color:var(--color-text-secondary);border-color:var(--color-border)" disabled>
+                <span x-text="t('common.next')">Next</span>
+            </button>
+        </div>
+        <div id="dwl-page-info" class="text-xs text-center mt-2 hidden" style="color:var(--color-text-faint)"></div>
+    </div>
+
+    <!-- Hidden file input for image uploads (used by design_watchlist.js per-row image attach) -->
+    <input type="file" id="design-watchlist-image-input" accept="image/*" class="hidden"/>
+</div>

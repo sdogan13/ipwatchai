@@ -1,4 +1,4 @@
-"""Unit tests for the design search service + route helpers.
+﻿"""Unit tests for the design search service + route helpers.
 
 Pure helpers and SQL-builder behavior are tested here. End-to-end DB
 queries are exercised by manual smoke runs against the live Postgres
@@ -182,6 +182,42 @@ def test_resolve_design_image_returns_path_when_file_exists(tmp_path, monkeypatc
     assert Path(resolved).is_file()
 
 
+def test_resolve_design_image_falls_back_to_cd_images(tmp_path, monkeypatch):
+    """DB-stored paths shape ``{source}/{design_id}/{view}.jpg`` need to
+    resolve under ``cd_images/{design_id}/{view}.jpg`` because the
+    on-disk layout puts CD-sourced views inside the cd_images/ subdir."""
+    from app_design_search_routes import _resolve_design_image
+    import app_design_search_routes as routes
+    fake_root = tmp_path / "Tasarim"
+    design_dir = fake_root / "TS_test/cd_images/2024_004342"
+    design_dir.mkdir(parents=True)
+    target = design_dir / "62_1.jpg"
+    target.write_bytes(b"\xff\xd8\xff\xe0")
+    monkeypatch.setattr(routes, "DESIGN_BULLETINS_ROOT", fake_root)
+
+    # image_path stored as "{source}/{design_id}/{view}.jpg" — resolver
+    # should locate it under cd_images/ via fallback.
+    resolved = _resolve_design_image("TS_test/2024_004342/62_1.jpg")
+    assert resolved is not None
+    assert Path(resolved).samefile(target)
+
+
+def test_resolve_design_image_falls_back_to_images(tmp_path, monkeypatch):
+    """Same fallback also covers PDF-sourced files under images/."""
+    from app_design_search_routes import _resolve_design_image
+    import app_design_search_routes as routes
+    fake_root = tmp_path / "Tasarim"
+    design_dir = fake_root / "TS_test/images/2024_009999"
+    design_dir.mkdir(parents=True)
+    target = design_dir / "1_1.jpg"
+    target.write_bytes(b"\xff\xd8\xff\xe0")
+    monkeypatch.setattr(routes, "DESIGN_BULLETINS_ROOT", fake_root)
+
+    resolved = _resolve_design_image("TS_test/2024_009999/1_1.jpg")
+    assert resolved is not None
+    assert Path(resolved).samefile(target)
+
+
 # ---------------------------------------------------------------------------
 # Smoke: search_designs with mocked cursor returns a sensible response shape
 # ---------------------------------------------------------------------------
@@ -351,7 +387,7 @@ def test_register_design_search_routes_attaches_three_paths():
         ("/api/v1/design-image/{image_path:path}", ("GET",)),
         ("/api/v1/design-search/public", ("GET",)),
         ("/api/v1/design-search/public", ("POST",)),
-        ("/api/v1/design-search/quick", ("POST",)),
+        ("/api/v1/design-search", ("POST",)),
     }
     for path, methods in expected:
         # FastAPI may include HEAD on GET routes; check subset relation

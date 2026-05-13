@@ -948,7 +948,7 @@ class PipelineWorker:
         result.duration_seconds = round(time.time() - t0, 1)
         return result
 
-    # ---- Step 7: Conflict Scan (Opposition Radar) ----
+    # ---- Step 7: Conflict Scan (Radar) ----
 
     def run_step_conflict_scan(self) -> StepResult:
         """
@@ -956,13 +956,13 @@ class PipelineWorker:
 
         Uses the UniversalScanner to find conflicts between new trademark
         applications (within appeal deadline) and existing registered marks.
-        Results populate the Opposition Radar lead feed.
+        Results populate the Radar lead feed.
         """
         result = StepResult(step_name="conflict_scan")
         t0 = time.time()
 
         try:
-            logger.info("[Step 8/8] Starting conflict scan (Opposition Radar)...")
+            logger.info("[Step 8/8] Starting conflict scan (Radar)...")
 
             conn = _get_db_connection()
             try:
@@ -1273,7 +1273,7 @@ class PipelineWorker:
             if single_step == "final_status_repair":
                 abort = True
 
-            # --- Step 8: Conflict Scan (Opposition Radar) ---
+            # --- Step 8: Conflict Scan (Radar) ---
             if not abort:
                 if single_step and single_step != "conflict_scan":
                     pass
@@ -1383,7 +1383,7 @@ Examples:
     # Run only final status repair
     python -m workers.pipeline_worker --step final_status_repair
 
-    # Run only conflict scan (Opposition Radar)
+    # Run only conflict scan (Radar)
     python -m workers.pipeline_worker --step conflict_scan
         """,
     )

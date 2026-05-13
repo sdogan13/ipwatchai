@@ -1,4 +1,4 @@
-"""
+﻿"""
 Live HTTP suite for the authenticated member persona.
 
 Run directly:
@@ -103,8 +103,8 @@ def test_search_credits():
 
 
 def test_quick_search_text():
-    name = "GET /api/v1/search/quick"
-    response = CLIENT.get("/api/v1/search/quick", params={"query": "wosen"})
+    name = "GET /api/v1/search"
+    response = CLIENT.get("/api/v1/search", params={"query": "wosen"})
     if _record_daily_limit_skip(name, response):
         return
     if REPORTER.expect_status(name, response, 200):
@@ -118,8 +118,8 @@ def test_quick_search_text():
 
 
 def test_quick_search_with_classes():
-    name = "GET /api/v1/search/quick with classes"
-    response = CLIENT.get("/api/v1/search/quick", params={"query": "wosen", "classes": "9,35"})
+    name = "GET /api/v1/search with classes"
+    response = CLIENT.get("/api/v1/search", params={"query": "wosen", "classes": "9,35"})
     if _record_daily_limit_skip(name, response):
         return
     if REPORTER.expect_status(name, response, 200):
@@ -129,10 +129,10 @@ def test_quick_search_with_classes():
 
 
 def test_quick_search_with_image():
-    name = "POST /api/v1/search/quick with image"
+    name = "POST /api/v1/search with image"
     files = {"image": ("test.png", io.BytesIO(PNG_1X1), "image/png")}
     response = CLIENT.post(
-        "/api/v1/search/quick",
+        "/api/v1/search",
         data={"query": "wosen", "classes": "9,35"},
         files=files,
     )

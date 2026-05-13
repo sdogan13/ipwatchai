@@ -320,7 +320,9 @@ class RiskEngine:
         Returns:
             tuple: (text_vec, img_vec, dino_vec, color_vec, ocr_text)
         """
-        text_vec = self.text_model.encode(name).tolist()
+        # Trademark name retrieval is lexical/phonetic/translation based. Text
+        # embeddings are intentionally not generated for trademark risk scoring.
+        text_vec = None
         img_vec, dino_vec, color_vec, ocr_text = None, None, None, ""
         self._last_query_logo_profile = None
 
@@ -797,26 +799,6 @@ class RiskEngine:
                 if remaining_limit <= 0:
                     break
 
-        try:
-            q_text_vec = self.text_model.encode(name_input).tolist()
-            vec_sql = """
-                SELECT id, application_no, name, nice_class_numbers, image_path,
-                       (1 - (text_embedding <=> %s::halfvec)) as lexical_score
-                FROM trademarks
-                WHERE text_embedding IS NOT NULL
-                  AND COALESCE(NULLIF(BTRIM(name), ''), NULLIF(BTRIM(name_tr), '')) IS NOT NULL
-            """
-            vec_params = [str(q_text_vec)]
-            vec_sql, vec_params = apply_common_filters(vec_sql, vec_params)
-            vec_sql += " ORDER BY text_embedding <=> %s::halfvec LIMIT 50;"
-            vec_params.append(str(q_text_vec))
-            run_stage(vec_sql, vec_params, "semantic", "text_embedding", fallback_fields=["semantic"])
-        except Exception as e:
-            logger.warning(
-                "Text vector search stage failed, continuing without",
-                extra={"error": str(e)},
-            )
-
         if q_img_vec:
             try:
                 img_sql = """
@@ -991,12 +973,6 @@ class RiskEngine:
                 t.name_tr, t.application_date, t.expiry_date,
                 t.holder_name, t.holder_tpe_client_id,
                 t.attorney_name, t.attorney_no, t.registration_no,
-                CASE
-                    WHEN t.text_embedding IS NOT NULL
-                     AND COALESCE(NULLIF(BTRIM(t.name), ''), NULLIF(BTRIM(t.name_tr), '')) IS NOT NULL
-                    THEN (1 - (t.text_embedding <=> %s::halfvec))
-                    ELSE 0.0
-                END as score_semantic,
                 similarity(t.name, %s) as score_lexical,
                 {clip_col} as score_clip,
                 {dino_col} as score_dinov2,
@@ -1014,7 +990,7 @@ class RiskEngine:
             WHERE t.id = ANY(%s::uuid[])
         """
 
-        params = [str(query_text_vec), name_input]
+        params = [name_input]
         if query_img_vec:
             params.append(str(query_img_vec))
         if query_dino_vec:
@@ -1040,15 +1016,14 @@ class RiskEngine:
             candidate_attorney_name = r[10]
             candidate_attorney_no = r[11]
             candidate_registration_no = r[12]
-            sem = float(r[13]) if r[13] is not None else 0.0
-            lex_postgres = float(r[14]) if r[14] is not None else 0.0
-            clip_sim = float(r[15]) if r[15] is not None else 0.0
-            dino_sim = float(r[16]) if r[16] is not None else 0.0
-            color_sim = float(r[17]) if r[17] is not None else 0.0
-            candidate_ocr = (r[18] or "").strip()
-            bool(r[20]) if len(r) > 20 and r[20] is not None else False
-            has_eg = bool(r[21]) if len(r) > 21 and r[21] is not None else False
-            raw_extracted_goods = r[22] if len(r) > 22 else None
+            lex_postgres = float(r[13]) if r[13] is not None else 0.0
+            clip_sim = float(r[14]) if r[14] is not None else 0.0
+            dino_sim = float(r[15]) if r[15] is not None else 0.0
+            color_sim = float(r[16]) if r[16] is not None else 0.0
+            candidate_ocr = (r[17] or "").strip()
+            bool(r[19]) if len(r) > 19 and r[19] is not None else False
+            has_eg = bool(r[20]) if len(r) > 20 and r[20] is not None else False
+            raw_extracted_goods = r[21] if len(r) > 21 else None
             query_logo_profile = getattr(self, "_last_query_logo_profile", None)
             candidate_logo_profile = None
             if (query_img_vec or query_dino_vec) and candidate_image_path:
@@ -1077,7 +1052,7 @@ class RiskEngine:
                 query_name=name_input,
                 candidate_name=candidate_name,
                 text_sim=lex_postgres,
-                semantic_sim=sem,
+                semantic_sim=0.0,
                 visual_sim=vis,
                 phonetic_sim=calculate_phonetic_similarity(name_input, candidate_name),
                 candidate_translations={
@@ -1085,7 +1060,7 @@ class RiskEngine:
                 },
                 visual_breakdown=visual_breakdown,
             )
-            candidate_trademark_id = str(r[23]) if len(r) > 23 and r[23] else None
+            candidate_trademark_id = str(r[22]) if len(r) > 22 and r[22] else None
             retrieval_metadata = getattr(self, "_candidate_retrieval_metadata", {}).get(
                 candidate_trademark_id,
                 {},
@@ -1118,18 +1093,69 @@ class RiskEngine:
                 "attorney_name": candidate_attorney_name,
                 "attorney_no": candidate_attorney_no,
                 "registration_no": candidate_registration_no,
-                "bulletin_no": r[19] if len(r) > 19 else None,
+                "bulletin_no": r[18] if len(r) > 18 else None,
                 "exact_match": score_breakdown.get("exact_match", False),
                 "scores": score_breakdown,
                 "has_extracted_goods": has_eg,
                 "extracted_goods": raw_extracted_goods if has_eg else None,
                 "trademark_id": candidate_trademark_id,
-                "holder_id": str(r[24]) if len(r) > 24 and r[24] else None,
+                "holder_id": str(r[23]) if len(r) > 23 and r[23] else None,
             })
 
         # Sort: exact matches first, then by total score
         results.sort(key=lambda x: (x.get('exact_match', False), x['scores']['total']), reverse=True)
         return results
+
+    def collect_risk_candidates(
+        self,
+        name,
+        image_path=None,
+        target_classes=None,
+        attorney_no=None,
+        limit=10,
+        precomputed_features=None,
+    ):
+        """Return ranked trademark candidates from the canonical RiskEngine path."""
+        name = name or ""
+        if precomputed_features:
+            q_text_vec = None
+            q_img_vec = precomputed_features.get("clip_embedding")
+            q_dino_vec = precomputed_features.get("dino_embedding")
+            q_color_vec = precomputed_features.get("color_histogram")
+            q_ocr_text = precomputed_features.get("ocr_text") or ""
+            self._last_query_logo_profile = (
+                build_logo_image_profile(image_path, q_ocr_text)
+                if image_path and os.path.exists(image_path)
+                else None
+            )
+        else:
+            q_text_vec, q_img_vec, q_dino_vec, q_color_vec, q_ocr_text = self.get_query_vectors(
+                name,
+                image_path,
+            )
+
+        # For image-only/logo flows, OCR is retrieval-only against
+        # logo_ocr_text. Do not promote OCR into the trademark-name path.
+        screen_name = name if name.strip() else ""
+        raw_candidates = self.pre_screen_candidates(
+            screen_name,
+            target_classes,
+            limit=max(500, int(limit or 10)),
+            attorney_no=attorney_no,
+            q_img_vec=q_img_vec,
+            q_dino_vec=q_dino_vec,
+            q_ocr_text=q_ocr_text,
+        )
+        final_results = self.calculate_hybrid_risk(
+            raw_candidates,
+            name,
+            q_text_vec,
+            q_img_vec,
+            q_dino_vec,
+            q_color_vec,
+            query_ocr_text=q_ocr_text,
+        )
+        return final_results[: int(limit or 10)]
 
     def assess_brand_risk(self, name, image_path=None, target_classes=None, description=None, attorney_no=None):
         """
@@ -1160,56 +1186,17 @@ class RiskEngine:
                 },
             )
 
-        # Vector encoding
-        vec_start = time.perf_counter()
-        q_text_vec, q_img_vec, q_dino_vec, q_color_vec, q_ocr_text = self.get_query_vectors(name, image_path)
-        vec_duration = (time.perf_counter() - vec_start) * 1000
-        logger.debug(
-            "Query vectors generated",
-            extra={
-                "duration_ms": round(vec_duration, 2),
-                "has_image_vec": q_img_vec is not None,
-                "has_ocr": bool(q_ocr_text),
-            },
-        )
-
-        screen_start = time.perf_counter()
-        logger.debug(
-            "Pre-screen decision",
-            extra={
-                "name_empty": not name.strip(),
-                "has_img_vec": q_img_vec is not None,
-                "has_dino_vec": q_dino_vec is not None,
-                "has_ocr": bool(q_ocr_text),
-            },
-        )
-        if not name.strip() and (q_img_vec or q_dino_vec):
-            ocr_name = q_ocr_text.strip() if q_ocr_text else ""
-            raw_candidates = self.pre_screen_candidates(ocr_name, target_classes, limit=500, attorney_no=attorney_no, q_img_vec=q_img_vec, q_dino_vec=q_dino_vec, q_ocr_text=q_ocr_text)
-            logger.info(
-                "Pre-screening by IMAGE+OCR",
-                extra={"candidates": len(raw_candidates), "ocr_text": ocr_name[:50]},
-            )
-        else:
-            raw_candidates = self.pre_screen_candidates(name, target_classes, limit=500, attorney_no=attorney_no, q_img_vec=q_img_vec, q_dino_vec=q_dino_vec, q_ocr_text=q_ocr_text)
-        screen_duration = (time.perf_counter() - screen_start) * 1000
-        logger.debug(
-            "Pre-screening complete",
-            extra={
-                "candidates": len(raw_candidates),
-                "duration_ms": round(screen_duration, 2),
-            },
-        )
-
-        # Hybrid risk calculation
         risk_start = time.perf_counter()
-        final_results = self.calculate_hybrid_risk(
-            raw_candidates, name, q_text_vec, q_img_vec, q_dino_vec, q_color_vec,
-            query_ocr_text=q_ocr_text
+        final_results = self.collect_risk_candidates(
+            name=name,
+            image_path=image_path,
+            target_classes=target_classes,
+            attorney_no=attorney_no,
+            limit=500,
         )
         risk_duration = (time.perf_counter() - risk_start) * 1000
         logger.debug(
-            "Hybrid risk calculated",
+            "Risk candidates collected",
             extra={
                 "results": len(final_results),
                 "duration_ms": round(risk_duration, 2),
@@ -1311,9 +1298,12 @@ class RiskEngine:
             raise
 
         # Recalculate with new data (text-only, no image)
-        q_text_vec, _, _, _, _ = self.get_query_vectors(name, None)
-        raw_candidates = self.pre_screen_candidates(name, target_classes, limit=500, attorney_no=attorney_no)
-        final_results = self.calculate_hybrid_risk(raw_candidates, name, q_text_vec, None)
+        final_results = self.collect_risk_candidates(
+            name=name,
+            target_classes=target_classes,
+            attorney_no=attorney_no,
+            limit=500,
+        )
 
         report(100, "Complete")
 

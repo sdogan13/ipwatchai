@@ -37,15 +37,10 @@
                             role="tab" aria-selected="false" style="color:var(--color-text-muted)">
                         <span x-text="t('tabs.search')">Arama</span>
                     </button>
-                    <button onclick="showDashboardTab('design-watchlist')" id="tab-btn-design-watchlist"
-                            class="dashboard-tab-btn nav-tab-btn px-3 lg:px-4 py-1.5 rounded-lg text-sm font-medium transition-all whitespace-nowrap"
-                            role="tab" aria-selected="false" style="color:var(--color-text-muted)">
-                        <span x-text="t('tabs.design_watchlist')">Tasarım Takibi</span>
-                    </button>
-                    <button onclick="showDashboardTab('opposition-radar')" id="tab-btn-opposition-radar"
+                    <button onclick="showDashboardTab('radar')" id="tab-btn-radar"
                             class="dashboard-tab-btn nav-tab-btn px-3 lg:px-4 py-1.5 rounded-lg text-sm font-medium transition-all flex items-center gap-1.5 whitespace-nowrap"
                             role="tab" aria-selected="false" style="color:var(--color-text-muted)">
-                        <span x-text="t('tabs.opposition_radar')">Opposition Radar</span>
+                        <span x-text="t('tabs.radar')">Radar</span>
                         <span class="text-[10px] bg-gradient-to-r from-amber-500 to-orange-500 text-white px-1.5 py-0.5 rounded font-bold leading-none" x-text="t('tabs.pro')">PRO</span>
                     </button>
                     <button onclick="showDashboardTab('ai-studio')" id="tab-btn-ai-studio"
@@ -241,13 +236,9 @@
                 <svg class="w-5 h-5" style="color:var(--color-text-muted)" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                 <span x-text="t('tabs.search')">Arama</span>
             </button>
-            <button onclick="showDashboardTab('design-watchlist'); closeMobileDrawer();" class="w-full flex items-center gap-3 px-4 py-3 text-sm min-h-[48px]" style="color:var(--color-text-primary)">
-                <svg class="w-5 h-5" style="color:var(--color-text-muted)" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h6.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2H7a2 2 0 01-2-2V5zM9 9h6m-6 4h6m-6 4h3"/></svg>
-                <span x-text="t('tabs.design_watchlist')">Tasarım Takibi</span>
-            </button>
-            <button onclick="showDashboardTab('opposition-radar'); closeMobileDrawer();" class="w-full flex items-center gap-3 px-4 py-3 text-sm min-h-[48px]" style="color:var(--color-text-primary)">
+            <button onclick="showDashboardTab('radar'); closeMobileDrawer();" class="w-full flex items-center gap-3 px-4 py-3 text-sm min-h-[48px]" style="color:var(--color-text-primary)">
                 <svg class="w-5 h-5" style="color:var(--color-text-muted)" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-                <span x-text="t('tabs.opposition_radar')">Opposition Radar</span>
+                <span x-text="t('tabs.radar')">Radar</span>
                 <span class="text-xs bg-gradient-to-r from-amber-500 to-orange-500 text-white px-1.5 py-0.5 rounded font-bold ml-auto" x-text="t('tabs.pro')">PRO</span>
             </button>
             <button onclick="showDashboardTab('ai-studio'); closeMobileDrawer();" class="w-full flex items-center gap-3 px-4 py-3 text-sm min-h-[48px]" style="color:var(--color-text-primary)">
@@ -312,7 +303,7 @@
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
             <span class="text-[10px] font-medium" x-text="t('tabs.search')">Arama</span>
         </button>
-        <button onclick="showDashboardTab('opposition-radar');" id="bottom-tab-radar" class="bottom-tab-btn flex flex-col items-center justify-center gap-0.5 min-h-[48px] min-w-[44px] px-2 py-1 rounded-lg transition-colors" style="color:var(--color-text-muted)">
+        <button onclick="showDashboardTab('radar');" id="bottom-tab-radar" class="bottom-tab-btn flex flex-col items-center justify-center gap-0.5 min-h-[48px] min-w-[44px] px-2 py-1 rounded-lg transition-colors" style="color:var(--color-text-muted)">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
             <span class="text-[10px] font-medium">Radar</span>
         </button>
@@ -376,7 +367,7 @@ function updateBottomTabActive(tabName) {
         'overview': 'bottom-tab-overview',
         'watchlist': 'bottom-tab-watchlist',
         'search': 'bottom-tab-search',
-        'opposition-radar': 'bottom-tab-radar',
+        'radar': 'bottom-tab-radar',
         'ai-studio': 'bottom-tab-ai-studio',
         'reports': 'bottom-tab-reports',
         'applications': 'bottom-tab-applications'

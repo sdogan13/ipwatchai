@@ -1,4 +1,4 @@
-"""Tests for plan feature configuration. Runs without server."""
+﻿"""Tests for plan feature configuration. Runs without server."""
 
 # Add project root to path
 
@@ -78,14 +78,12 @@ def test_enterprise_csv_export_enabled():
     assert get_plan_limit("enterprise", "can_export_csv_leads") is True
 
 
-def test_free_has_no_live_search():
-    assert get_plan_limit("free", "monthly_live_searches") == 0
-    assert get_plan_limit("free", "can_use_live_scraping") is False
+def test_free_has_live_search():
+    assert get_plan_limit("free", "max_daily_live_searches") == 5
 
 
 def test_starter_has_live_search():
-    assert get_plan_limit("starter", "monthly_live_searches") == 10
-    assert get_plan_limit("starter", "can_use_live_scraping") is True
+    assert get_plan_limit("starter", "max_daily_live_searches") == 50
 
 
 def test_free_auto_scan_disabled():
@@ -93,9 +91,9 @@ def test_free_auto_scan_disabled():
     assert get_plan_limit("free", "auto_scan_frequency") is None
 
 
-def test_daily_quick_search_limits_ascending():
+def test_daily_live_search_limits_ascending():
     plans = ["free", "starter", "professional", "enterprise"]
-    limits = [get_plan_limit(p, "max_daily_quick_searches") for p in plans]
+    limits = [get_plan_limit(p, "max_daily_live_searches") for p in plans]
     assert limits == sorted(limits), f"Quick search limits not ascending: {limits}"
 
 
@@ -120,7 +118,7 @@ def test_can_track_logos():
 
 def test_professional_updated_limits():
     assert get_plan_limit("professional", "max_watchlist_items") == 1000
-    assert get_plan_limit("professional", "max_daily_quick_searches") == 2000
+    assert get_plan_limit("professional", "max_daily_live_searches") == 2000
 
 
 def test_free_no_applications():

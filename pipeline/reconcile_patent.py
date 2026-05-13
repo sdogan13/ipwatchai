@@ -402,35 +402,22 @@ def normalize_pdf_record(pdf_record: Dict[str, Any]) -> CanonicalRecord:
 # Step 4.4 — merge_records (CD ↔ PDF precedence)
 # ---------------------------------------------------------------------------
 #
-# Precedence rules (locked decisions: bulletins/Patent__Faydali_Model/
-# PROCESSING_PLAN.md §d.2):
+# Precedence rule: **CD wins on every overlapping field.** PDF only fills
+# gaps and supplies fields CD doesn't carry. Rationale: PDF text comes
+# from PyMuPDF extraction which is noisy (encoding glitches, page-banner
+# contamination, ligature splits). CD is a typed HSQLDB row — clean even
+# when truncated. See ``patent_cd_first_precedence`` memory.
 #
 #                          | Source of truth
 #   -----------------------+-------------------------------------------
-#   structured fields      | CD  (HSQLDB rows are typed; PDF is regex)
-#   abstract               | PDF (CD truncates to VARCHAR(2000))
-#   title                  | longer of the two (CD truncates sometimes)
-#   kind_code, record_type | PDF (already classified upstream); CD as
-#                          | fallback when PDF didn't see this app
-#   grant_date             | PDF (CD has no grant_date concept)
+#   every overlapping      | CD  (PDF used only when CD is empty/None)
+#   field                  |
+#   grant_date             | PDF only (CD has no grant_date concept)
 #   page_range             | PDF only
 #   patent_type            | CD only
 #   figures                | union — CD TIFFs primary, PDF JPEGs added
 #                          | (paths never collide: .tif vs .jpg)
 #   source_format          | 'BOTH'
-
-
-def _pick_longer_title(cd_title: Optional[str], pdf_title: Optional[str]) -> Optional[str]:
-    """Return the longer non-empty title; tiebreak goes to CD.
-
-    CD is a clean DB row, PDF is text-extraction with possible OCR
-    artefacts — a tied length usually means CD got the canonical form.
-    """
-    if not pdf_title:
-        return cd_title
-    if not cd_title:
-        return pdf_title
-    return pdf_title if len(pdf_title) > len(cd_title) else cd_title
 
 
 def _merge_figures(
@@ -485,10 +472,10 @@ def merge_records(cd: CanonicalRecord, pdf: CanonicalRecord) -> CanonicalRecord:
         publication_no=cd.publication_no or pdf.publication_no,
         publication_date=cd.publication_date or pdf.publication_date,
         grant_date=pdf.grant_date,                     # PDF-only field
-        kind_code=pdf.kind_code or cd.kind_code,
-        record_type=pdf.record_type or cd.record_type,
-        title=_pick_longer_title(cd.title, pdf.title),
-        abstract=pdf.abstract or cd.abstract,          # PDF wins (CD truncates)
+        kind_code=cd.kind_code or pdf.kind_code,        # CD-first
+        record_type=cd.record_type or pdf.record_type,  # CD-first
+        title=cd.title or pdf.title,                    # CD-first
+        abstract=cd.abstract or pdf.abstract,           # CD-first (PyMuPDF noise)
         ipc_classes=cd.ipc_classes or pdf.ipc_classes,
         holders=cd.holders or pdf.holders,
         inventors=cd.inventors or pdf.inventors,
@@ -724,87 +711,236 @@ class CLIArgs:
     force: bool
 
 
-def unified_filename(bulletin_no: Optional[str]) -> str:
-    """Derive the canonical unified output filename from bulletin_no.
-
-    Examples:
-      ``"2025/8"``  -> ``"2025_08_metadata.json"``
-      ``"2025-08"`` -> ``"2025_08_metadata.json"``
-      ``"2025/12"`` -> ``"2025_12_metadata.json"``
-
-    Raises ``ValueError`` if bulletin_no can't be parsed — the CLI must
-    not silently write to a wrong filename.
-    """
-    canonical = _normalise_bulletin_no(bulletin_no)
-    if not canonical:
-        raise ValueError(f"cannot derive filename from bulletin_no={bulletin_no!r}")
-    match = re.match(r"^(\d{4})/(\d{1,2})$", canonical)
-    if not match:
-        raise ValueError(f"cannot derive filename from bulletin_no={bulletin_no!r}")
-    year, month = match.group(1), match.group(2).zfill(2)
-    return f"{year}_{month}_metadata.json"
+# The unified output lives inside its bulletin's PT_{Y}_{M}_{date}/
+# parent folder, so it can use the simple canonical filename without
+# any infix — no collision is possible since each bulletin has its own
+# folder. Stage 5 ingest reads metadata.json from each PT_ folder.
+UNIFIED_METADATA_FILENAME = "metadata.json"
+CD_METADATA_FILENAME = "cd_metadata.json"
+PDF_METADATA_FILENAME = "pdf_metadata.json"
 
 
 def classify_metadata_json(path: Path) -> str:
-    """Discriminate file type by top-level keys.
+    """Discriminate file type by canonical filename inside a bulletin folder.
 
-    Returns ``"cd"``, ``"pdf"``, or ``"unified"``. ``"pdf"`` is for
-    files matching the ``_pdf_metadata.json`` stem (handled by filename
-    since the file_classify_metadata test below could collide with
-    unified). Used by --all to skip already-reconciled outputs on
-    re-runs.
+    Returns ``"cd"``, ``"pdf"``, or ``"unified"``.
 
-    Raises ``ValueError`` for files that don't look like any known
-    metadata shape.
+    The Marka-style folder layout (one bulletin per PT_{Y}_{M}_{date}/)
+    means every JSON in the pipeline has a fixed canonical name:
+      - ``cd_metadata.json``      → ``"cd"``
+      - ``pdf_metadata.json``     → ``"pdf"``
+      - ``metadata.json``         → ``"unified"``
+
+    Raises ``ValueError`` for any other filename so flat-layout
+    leftovers (``*_pdf_metadata.json`` from a pre-refactor run) fail
+    loudly instead of being silently misclassified.
     """
-    if path.name.endswith("_pdf_metadata.json"):
-        return "pdf"
-    try:
-        doc = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as e:
-        raise ValueError(f"{path}: cannot read JSON ({e})")
-    if not isinstance(doc, dict):
-        raise ValueError(f"{path}: top-level JSON is not an object")
-    if "patents" in doc:
+    name = path.name
+    if name == CD_METADATA_FILENAME:
         return "cd"
-    if "records" in doc:
-        # Distinguish unified output (has reconciled_at) from a stray
-        # PDF-shaped doc renamed without _pdf_ infix.
-        return "unified" if "reconciled_at" in doc else "pdf"
-    raise ValueError(f"{path}: not a recognised CD/PDF/unified metadata doc")
+    if name == PDF_METADATA_FILENAME:
+        return "pdf"
+    if name == UNIFIED_METADATA_FILENAME:
+        return "unified"
+    raise ValueError(
+        f"{path}: not a canonical metadata filename "
+        f"(expected one of {CD_METADATA_FILENAME!r}, "
+        f"{PDF_METADATA_FILENAME!r}, {UNIFIED_METADATA_FILENAME!r})"
+    )
 
 
 def _group_by_bulletin(
     bulletins_dir: Path,
-) -> Dict[str, Dict[str, Path]]:
-    """Walk a bulletins dir, group CD + PDF JSONs by canonical bulletin_no.
+) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    """Walk PT_*/ folders under bulletins_dir, group CD + PDF docs by bulletin_no.
 
-    Returns ``{bulletin_no: {"cd": Path, "pdf": Path}}``. Unified outputs
-    from prior runs are skipped — a re-run produces the same output and
-    using the prior unified file as input would compound stats blocks
-    incorrectly.
+    Returns ``{bulletin_no: {"cd": <doc>, "pdf": <doc>}}`` mapping each
+    bulletin's canonical number to its loaded source docs. Each
+    ``PT_{Y}_{M}_{date}/`` folder may contain ``cd_metadata.json``,
+    ``pdf_metadata.json``, and (after a prior reconcile) ``metadata.json``
+    — the unified file is skipped here because feeding a previous
+    unified back as input would compound stats blocks.
+
+    The function pre-loads every doc into memory (rather than storing
+    paths) because Stage 4's --all loop writes back into each PT_
+    folder — re-reading paths after writes produces a unified doc when
+    we wanted the original CD/PDF source.
+
+    Memory cost: ~500 MB across the full 113-bulletin archive,
+    acceptable for a dev workflow.
     """
-    groups: Dict[str, Dict[str, Path]] = {}
-    for path in sorted(bulletins_dir.glob("*_metadata.json")):
-        try:
-            kind = classify_metadata_json(path)
-        except ValueError as exc:
-            logger.warning("[skip] %s: %s", path.name, exc)
+    groups: Dict[str, Dict[str, Dict[str, Any]]] = {}
+
+    for parent in sorted(p for p in bulletins_dir.iterdir() if p.is_dir()):
+        if not parent.name.startswith("PT_"):
             continue
-        if kind == "unified":
-            continue
-        # Read enough to extract bulletin_no without re-classifying.
-        try:
-            doc = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("[skip] %s: cannot read JSON (%s)", path.name, exc)
-            continue
-        bulletin = _normalise_bulletin_no(doc.get("bulletin_no"))
-        if not bulletin:
-            logger.warning("[skip] %s: missing bulletin_no", path.name)
-            continue
-        groups.setdefault(bulletin, {})[kind] = path
+        for kind, fname in (("cd", CD_METADATA_FILENAME),
+                             ("pdf", PDF_METADATA_FILENAME)):
+            path = parent / fname
+            if not path.is_file():
+                continue
+            try:
+                doc = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                logger.warning("[skip] %s: cannot read JSON (%s)", path, exc)
+                continue
+            bulletin = _normalise_bulletin_no(doc.get("bulletin_no"))
+            if not bulletin:
+                logger.warning("[skip] %s: missing bulletin_no", path)
+                continue
+            groups.setdefault(bulletin, {})[kind] = doc
+
     return groups
+
+
+_EMBEDDING_RECORD_FIELDS = (
+    "title_abstract_embedding",
+    "primary_figure_embedding",
+)
+
+
+def _carry_forward_embeddings(unified: Dict[str, Any], out_path: Path) -> int:
+    """Copy embedding fields from a prior unified metadata.json into the
+    fresh ``unified`` doc, matching by ``publication_no`` for records
+    and by ``image_path`` for figures.
+
+    Stage 6 writes embeddings (DINOv2 / CLIP / E5) into metadata.json
+    after reconcile finishes. If reconcile re-runs because an upstream
+    cd_metadata.json mtime bumped, we'd otherwise wipe Stage 6's work
+    on every cycle. This carry-forward keeps embeddings stable as long
+    as the records / figures they describe are still present and
+    matched. When a record's title or abstract changes the embedding
+    is preserved verbatim — that's a small staleness risk but vastly
+    cheaper than re-embedding 280k records on every reconcile sweep;
+    Stage 6 will recompute when called explicitly with --force.
+
+    Returns the number of records that received any carry-forward.
+    """
+    if not out_path.is_file():
+        return 0
+    try:
+        prior = json.loads(out_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    prior_records = prior.get("records") or []
+    if not prior_records:
+        return 0
+
+    by_pub: Dict[str, Dict[str, Any]] = {}
+    for r in prior_records:
+        pub = r.get("publication_no")
+        if pub:
+            by_pub[pub] = r
+
+    carried = 0
+    for new_rec in unified.get("records", []):
+        pub = new_rec.get("publication_no")
+        if not pub:
+            continue
+        prior_rec = by_pub.get(pub)
+        if prior_rec is None:
+            continue
+        touched = False
+        for field in _EMBEDDING_RECORD_FIELDS:
+            if field not in new_rec and field in prior_rec:
+                new_rec[field] = prior_rec[field]
+                touched = True
+        # Per-figure embeddings (DINOv2 / CLIP). Match by image_path —
+        # stable across reconciles unless the source CD TIFF / PDF PNG
+        # changed.
+        prior_figs = {
+            f.get("image_path"): f for f in (prior_rec.get("figures") or [])
+            if f.get("image_path")
+        }
+        for new_fig in new_rec.get("figures") or []:
+            ip = new_fig.get("image_path")
+            if not ip:
+                continue
+            prior_fig = prior_figs.get(ip)
+            if prior_fig is None:
+                continue
+            if "embeddings" not in new_fig and "embeddings" in prior_fig:
+                new_fig["embeddings"] = prior_fig["embeddings"]
+                touched = True
+        if touched:
+            carried += 1
+    return carried
+
+
+def _is_unified_fresh(out_path: Path, parent: Path) -> bool:
+    """True when ``out_path`` (the unified metadata.json) is at least as
+    recent as every cd_metadata.json / pdf_metadata.json sibling in the
+    same parent folder. Used by ``_process_pair`` to skip a bulletin
+    whose inputs haven't changed since the last reconcile, so ``--all``
+    re-runs are idempotent without needing ``--force``.
+    """
+    try:
+        out_mtime = out_path.stat().st_mtime
+    except OSError:
+        return False
+    for src_name in ("cd_metadata.json", "pdf_metadata.json"):
+        src = parent / src_name
+        if not src.is_file():
+            continue
+        try:
+            if src.stat().st_mtime > out_mtime:
+                return False
+        except OSError:
+            return False
+    return True
+
+
+def _process_pair(
+    cd_doc: Optional[Dict[str, Any]],
+    pdf_doc: Optional[Dict[str, Any]],
+    out_dir: Path,
+    force: bool,
+) -> Dict[str, Any]:
+    """Reconcile already-loaded CD + PDF docs and write the unified output.
+
+    Writes ``out_dir/PT_{Y}_{M}_{date}/metadata.json``. The parent
+    folder is created if needed; existing CD / PDF metadata in the same
+    folder is left untouched. Returns ``{"status": "skipped", ...}``
+    when the unified output is at least as recent as both source JSONs
+    (no work needed); ``--force`` re-runs even when fresh.
+
+    At least one of ``cd_doc`` / ``pdf_doc`` must be set. Returns a
+    summary dict so ``main`` can report aggregate progress.
+    """
+    from patent_paths import bulletin_folder_path  # local import; avoids cycles
+
+    unified = reconcile_metadata(cd_doc=cd_doc, pdf_doc=pdf_doc)
+
+    parent = bulletin_folder_path(
+        out_dir, unified["bulletin_no"], unified["bulletin_date"],
+    )
+    out_path = parent / UNIFIED_METADATA_FILENAME
+
+    if not force and _is_unified_fresh(out_path, parent):
+        return {
+            "status": "skipped",
+            "out": f"{parent.name}/{out_path.name}",
+            "bulletin_no": unified["bulletin_no"],
+            "stats": unified["stats"],
+        }
+
+    # Carry forward Stage 6 embedding fields from the prior unified
+    # metadata.json, if any — see _carry_forward_embeddings docstring.
+    carried = _carry_forward_embeddings(unified, out_path)
+    if carried:
+        unified.setdefault("stats", {})["embeddings_carried_forward"] = carried
+
+    parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(
+        json.dumps(unified, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return {
+        "status": "ok",
+        "out": f"{parent.name}/{out_path.name}",
+        "bulletin_no": unified["bulletin_no"],
+        "stats": unified["stats"],
+    }
 
 
 def _process_one(
@@ -813,33 +949,10 @@ def _process_one(
     out_dir: Path,
     force: bool,
 ) -> Dict[str, Any]:
-    """Reconcile one (cd, pdf) pair and write the unified output.
-
-    At least one of ``cd_path`` / ``pdf_path`` must be set. Returns a
-    summary dict so ``main`` can report aggregate progress.
-    """
+    """Single-pair reconcile entry point used by --cd-json/--pdf-json mode."""
     cd_doc = load_cd_metadata(cd_path) if cd_path else None
     pdf_doc = load_pdf_metadata(pdf_path) if pdf_path else None
-    unified = reconcile_metadata(cd_doc=cd_doc, pdf_doc=pdf_doc)
-
-    out_path = out_dir / unified_filename(unified["bulletin_no"])
-    if out_path.exists() and not force:
-        # The CD intermediate uses the same filename pattern; overwriting
-        # silently would surprise the caller.
-        raise FileExistsError(
-            f"{out_path} already exists; pass --force to overwrite"
-        )
-
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(
-        json.dumps(unified, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    return {
-        "out": out_path.name,
-        "bulletin_no": unified["bulletin_no"],
-        "stats": unified["stats"],
-    }
+    return _process_pair(cd_doc, pdf_doc, out_dir, force)
 
 
 def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
@@ -886,26 +999,37 @@ def main(argv: Optional[List[str]] = None) -> int:
     args.out_dir.mkdir(parents=True, exist_ok=True)
     started = time.time()
     succeeded: List[str] = []
+    skipped: List[str] = []
     failed: List[Tuple[str, str]] = []
+
+    def _record(label: str, result: Dict[str, Any]) -> None:
+        if result.get("status") == "skipped":
+            skipped.append(label)
+            logger.info(
+                "[=] %s -> %s is fresh, skipping (use --force to override)",
+                label, result["out"],
+            )
+        else:
+            succeeded.append(label)
+            logger.info(
+                "[+] %s -> %s (%d records: %s)",
+                label, result["out"], result["stats"]["records"],
+                result["stats"]["by_source_format"],
+            )
 
     if args.all_mode:
         groups = _group_by_bulletin(args.bulletins_dir)
         if not groups:
             logger.warning("--all: no metadata JSON files found in %s", args.bulletins_dir)
             return 1
-        for bulletin, paths in sorted(groups.items()):
+        for bulletin, docs in sorted(groups.items()):
             label = f"bulletin {bulletin}"
             try:
-                result = _process_one(
-                    paths.get("cd"), paths.get("pdf"),
+                result = _process_pair(
+                    docs.get("cd"), docs.get("pdf"),
                     args.out_dir, args.force,
                 )
-                succeeded.append(label)
-                logger.info(
-                    "[+] %s -> %s (%d records: %s)",
-                    label, result["out"], result["stats"]["records"],
-                    result["stats"]["by_source_format"],
-                )
+                _record(label, result)
             except Exception as exc:
                 failed.append((label, str(exc)))
                 logger.error("[!] %s: %r", label, exc)
@@ -913,20 +1037,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         label = f"{args.cd_json or '(no CD)'} + {args.pdf_json or '(no PDF)'}"
         try:
             result = _process_one(args.cd_json, args.pdf_json, args.out_dir, args.force)
-            succeeded.append(label)
-            logger.info(
-                "[+] %s -> %s (%d records: %s)",
-                label, result["out"], result["stats"]["records"],
-                result["stats"]["by_source_format"],
-            )
+            _record(label, result)
         except Exception as exc:
             failed.append((label, str(exc)))
             logger.error("[!] %s: %r", label, exc)
 
     duration = time.time() - started
     logger.info(
-        "Done in %.1fs: %d succeeded, %d failed", duration,
-        len(succeeded), len(failed),
+        "Done in %.1fs: %d succeeded, %d skipped, %d failed", duration,
+        len(succeeded), len(skipped), len(failed),
     )
     return 0 if not failed else 1
 

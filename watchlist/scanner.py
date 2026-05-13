@@ -306,8 +306,11 @@ class WatchlistScanner:
         if not wl_item:
             raise ValueError(f"Watchlist item {watchlist_id} not found")
 
-        # Generate embedding if not exists
-        if not wl_item.get('text_embedding'):
+        # Generate logo embeddings only when a watched logo exists without
+        # visual vectors. Trademark text embeddings are no longer used.
+        if wl_item.get('logo_path') and not (
+            wl_item.get('logo_embedding') or wl_item.get('logo_dinov2_embedding')
+        ):
             self._update_watchlist_embedding(wl_item)
             wl_item = WatchlistCRUD.get_by_id_internal(self.db, watchlist_id)
 
@@ -422,20 +425,13 @@ class WatchlistScanner:
         scoring_result = calculate_comprehensive_score(wl_name, tm_name)
         text_sim = scoring_result['final_score']
 
-        # 2b. Semantic similarity (cosine of pre-computed text embeddings)
-        semantic_sim = 0.0
-        tm_emb = trademark.get('text_embedding')
-        wl_emb = watchlist_item.get('text_embedding')
-        if tm_emb and wl_emb:
-            semantic_sim = self._cosine_sim(tm_emb, wl_emb)
-
         # 2c. Visual similarity (combined CLIP/DINOv2/OCR — logo text vs logo text)
         visual_sim, visual_breakdown = self._compute_visual_breakdown(
             trademark,
             watchlist_item,
         )
 
-        # 2d. Phonetic similarity (graduated 0.0-1.0)
+        # 2c. Phonetic similarity (graduated 0.0-1.0)
         phonetic_sim = self._phonetic_sim(tm_name, wl_name)
 
         # 3. DELEGATE TO CENTRALIZED SCORING
@@ -443,7 +439,7 @@ class WatchlistScanner:
             query_name=watchlist_item.get('brand_name') or '',
             candidate_name=trademark.get('name') or '',
             text_sim=text_sim,
-            semantic_sim=semantic_sim,
+            semantic_sim=0.0,
             visual_sim=visual_sim,
             phonetic_sim=phonetic_sim,
             candidate_translations={
@@ -605,40 +601,22 @@ class WatchlistScanner:
         return results
 
     def _update_watchlist_embedding(self, watchlist_item: Dict):
-        """Generate and store embedding for watchlist item"""
-        brand_name = watchlist_item.get('brand_name', '')
-
-        # Generate text embedding using shared ai module
-        text_emb = ai.text_model.encode(brand_name).tolist()
-
-        # Generate logo embeddings if logo_path exists
+        """Generate and store missing visual embeddings for a watchlist logo."""
         logo_path = watchlist_item.get('logo_path')
-        logo_emb = None
-        logo_ocr = None
 
         if logo_path:
             logo_result = generate_logo_embeddings(logo_path)
             if logo_result:
-                logo_emb = logo_result.get('clip_embedding')
-                logo_ocr = logo_result.get('ocr_text')
                 # Store full visual embeddings
                 WatchlistCRUD.update_logo(
                     self.db,
                     UUID(watchlist_item['id']),
                     logo_path=logo_path,
-                    logo_embedding=logo_emb,
+                    logo_embedding=logo_result.get('clip_embedding'),
                     dino_embedding=logo_result.get('dino_embedding'),
                     color_histogram=logo_result.get('color_histogram'),
-                    logo_ocr_text=logo_ocr,
+                    logo_ocr_text=logo_result.get('ocr_text'),
                 )
-
-        WatchlistCRUD.update_embedding(
-            self.db,
-            UUID(watchlist_item['id']),
-            text_emb,
-            logo_emb,
-            logo_ocr_text=logo_ocr,
-        )
 
 
 # ==========================================

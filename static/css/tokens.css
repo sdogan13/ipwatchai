@@ -1356,6 +1356,32 @@ body.modal-open {
     animation: studio-brush-shimmer 1.6s ease-in-out infinite;
     border-radius: 0.25rem;
 }
+.studio-loading-note {
+    display: flex;
+    width: 100%;
+    align-items: baseline;
+    justify-content: center;
+}
+.studio-loading-dots {
+    display: inline-flex;
+    width: 1.05em;
+    margin-left: 1px;
+}
+.studio-loading-dots span {
+    opacity: 0.25;
+    animation: studio-loading-dot 1.2s ease-in-out infinite;
+}
+.studio-loading-dots span:nth-child(2) {
+    animation-delay: 0.16s;
+}
+.studio-loading-dots span:nth-child(3) {
+    animation-delay: 0.32s;
+}
+@keyframes studio-loading-dot {
+    0%, 20% { opacity: 0.2; transform: translateY(0); }
+    45% { opacity: 1; transform: translateY(-0.08em); }
+    75%, 100% { opacity: 0.2; transform: translateY(0); }
+}
 :root.dark .studio-loading-area .skeleton {
     background:
         linear-gradient(90deg,
@@ -1374,6 +1400,7 @@ body.modal-open {
 /* Honour reduced-motion preferences */
 @media (prefers-reduced-motion: reduce) {
     .studio-loading-area .skeleton { animation: none; }
+    .studio-loading-dots span { animation: none; opacity: 1; transform: none; }
     .studio-color-swatch span,
     .studio-color-swatch:hover span,
     .studio-color-swatch.is-selected span,

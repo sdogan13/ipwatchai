@@ -1,5 +1,5 @@
 /**
- * Design search tab — driver for /api/v1/design-search/quick.
+ * Design search tab — driver for /api/v1/design-search.
  *
  * Vanilla JS to avoid extending the 8K-line Alpine app.js with reactive
  * state. Mounts when the user clicks the Search tab; lazy-attaches event
@@ -19,7 +19,7 @@
 (function () {
   "use strict";
 
-  var API_QUICK = "/api/v1/design-search/quick";
+  var API_QUICK = "/api/v1/design-search";
   var API_LOCARNO_LIST = "/api/v1/locarno-classes";
   var API_LOCARNO_SUGGEST = "/api/v1/tools/suggest-locarno-classes";
   var HISTORY_KEY = "design_search_history";
@@ -263,11 +263,35 @@
     );
   }
 
+  // 3-column score breakdown grid cell — mirrors the trademark
+  // result card's expanded score grid. Each cell shows a label on
+  // top + the percentage in a risk-colored bold number below.
+  function _scoreGridCell(label, value01) {
+    var v = Math.round(Math.max(0, Math.min(1, Number(value01) || 0)) * 100);
+    var risk = _riskBucket(v);
+    var colorMap = { critical: "#dc2626", high: "#ea580c", medium: "#d97706", low: "#0891b2" };
+    return (
+      '<div class="text-center p-2 rounded-lg" style="background:var(--color-bg-muted)">' +
+        '<div class="text-[10px] uppercase tracking-wide mb-1" style="color:var(--color-text-muted)">' +
+          escapeHtml(label) +
+        '</div>' +
+        '<div class="text-sm font-bold" style="color:' + colorMap[risk] + '">' + v + '%</div>' +
+      '</div>'
+    );
+  }
+
   function renderResultCard(row) {
     var title = row.product_name_tr || row.product_name_en
               || row.application_no || row.registration_no || "—";
     var holder = (row.holder && row.holder.name) ? row.holder.name : "";
-    var holderTpe = (row.holder && row.holder.tpe_client_id) ? row.holder.tpe_client_id : "";
+    // Prefer the public TPE client ID; fall back to the internal
+    // holders.id UUID when this holder was never assigned a TPE ID
+    // (foreign entities + legacy records — ~10% of designs).
+    // Backend resolves either via _resolve_holder_row.
+    var holderRef = (row.holder
+        && (row.holder.tpe_client_id || row.holder.id))
+        ? (row.holder.tpe_client_id || row.holder.id)
+        : "";
     var locarno = row.locarno_classes || [];
     var designers = row.designers || [];
     var simNum = typeof row.similarity === "number" ? Number(row.similarity) : 0;
@@ -311,18 +335,21 @@
           : '') +
       '</div>';
 
-    // Score breakdown bars (per-signal: dinov2/clip/color/text)
+    // Score breakdown — 3-column grid mirroring the trademark
+    // card. For design, the three meaningful dimensions are
+    // Visual (max of DINOv2 + CLIP, since both encode visual
+    // similarity), Color (HSV histogram), Text (product-name
+    // trigram). The backend (services/design_search_service.py
+    // line 397-399) returns breakdown as { text, dinov2, clip,
+    // color } floats in [0,1] — no `_sim` suffix.
     var bd = row.similarity_breakdown || {};
-    var bdHtml = "";
-    if (bd && (bd.dinov2_sim || bd.clip_sim || bd.color_sim || bd.text_sim)) {
-      bdHtml =
-        '<div class="mt-2 space-y-1 pt-2" style="border-top:1px solid var(--color-border-light, var(--color-border))">' +
-          (bd.dinov2_sim ? _signalBar("DINOv2", bd.dinov2_sim) : "") +
-          (bd.clip_sim   ? _signalBar("CLIP",   bd.clip_sim)   : "") +
-          (bd.color_sim  ? _signalBar("Color",  bd.color_sim)  : "") +
-          (bd.text_sim   ? _signalBar("Text",   bd.text_sim)   : "") +
-        '</div>';
-    }
+    var visualSim = Math.max(Number(bd.dinov2) || 0, Number(bd.clip) || 0);
+    var bdHtml =
+      '<div class="grid grid-cols-3 gap-2 mb-3">' +
+        _scoreGridCell(t("design_search.score_visual", "Görsel"), visualSim) +
+        _scoreGridCell(t("design_search.score_color", "Renk"), bd.color) +
+        _scoreGridCell(t("design_search.score_text", "Metin"), bd.text) +
+      '</div>';
 
     // Locarno chips
     var locarnoChips = locarno.length === 0 ? "" :
@@ -334,28 +361,96 @@
         }).join("") +
       '</div>';
 
-    // Designer chips
-    var designerChips = designers.length === 0 ? "" :
-      '<div class="mt-1 text-xs" style="color:var(--color-text-secondary)">' +
-        '<span style="color:var(--color-text-faint)">' +
-          escapeHtml(t("design_search.designer_label", "Designer")) + ':</span> ' +
-        escapeHtml(designers.slice(0, 2).join(", ")) +
-        (designers.length > 2 ? ' <span style="color:var(--color-text-faint)">+' + (designers.length - 2) + '</span>' : '') +
-      '</div>';
+    // Designer chips — each name is a separate clickable button so
+    // the user can drill into that designer's portfolio of designs.
+    // window.openDesignerPortfolio is wired in static/js/dashboard/
+    // app.js and forwards to the same portfolio modal the holder
+    // click uses (portfolioType = 'design-designer').
+    var designerChips = "";
+    if (designers.length > 0) {
+      var shownDesigners = designers.slice(0, 2);
+      var designerBtns = shownDesigners.map(function (d) {
+        var name = String(d || "").trim();
+        if (!name) return "";
+        // Strip any concatenated address for display. The FULL name
+        // is still the onclick argument so backend matching works.
+        var display = (window._stripTurkishAddress
+          ? window._stripTurkishAddress(name)
+          : name);
+        if (typeof window.openDesignerPortfolio === "function") {
+          return '<button type="button" ' +
+            'onclick="window.openDesignerPortfolio(' +
+              JSON.stringify(name).replace(/"/g, '&quot;') + ', this)" ' +
+            'class="text-left hover:underline" style="color:var(--color-primary)">' +
+            escapeHtml(display) + '</button>';
+        }
+        return '<span>' + escapeHtml(display) + '</span>';
+      }).filter(function (s) { return s.length > 0; }).join(', ');
+      designerChips =
+        '<div class="mt-1 text-xs" style="color:var(--color-text-secondary)">' +
+          '<span style="color:var(--color-text-faint)">' +
+            escapeHtml(t("design_search.designer_label", "Designer")) + ':</span> ' +
+          designerBtns +
+          (designers.length > 2 ? ' <span style="color:var(--color-text-faint)">+' + (designers.length - 2) + '</span>' : '') +
+        '</div>';
+    }
 
     // Holder line — clickable when modal helper exists
     var holderHtml = "";
     if (holder) {
-      var holderInner = '<span style="color:var(--color-text-secondary)">' + escapeHtml(holder) + '</span>';
-      if (holderTpe && typeof window.openHolderPortfolio === "function") {
+      // Some rows store name + address concatenated ("DİDEM GÖKGÖZ
+      // Merkez Mah. ... TÜRKİYE"). Strip the address tail for display.
+      // The portfolio lookup still uses the FULL string (via the
+      // backend's normalize_designer_name on the stored column), so
+      // clicking the link still finds the right designs.
+      var holderDisplay = (window._stripTurkishAddress
+        ? window._stripTurkishAddress(holder)
+        : holder);
+      var holderInner = '<span style="color:var(--color-text-secondary)">' + escapeHtml(holderDisplay) + '</span>';
+      if (holderRef && typeof window.openHolderPortfolio === "function") {
         holderInner = '<button type="button" onclick="window.openHolderPortfolio(' +
-          JSON.stringify(holderTpe).replace(/"/g, '&quot;') + ', this)" ' +
+          JSON.stringify(holderRef).replace(/"/g, '&quot;') + ', this)" ' +
           'class="text-left hover:underline" style="color:var(--color-primary)">' +
-          escapeHtml(holder) + '</button>';
+          escapeHtml(holderDisplay) + '</button>';
       }
       holderHtml = '<div class="text-xs"><span style="color:var(--color-text-faint)">' +
         escapeHtml(t("design_search.holder_label", "Holder")) + ':</span> ' +
         holderInner + '</div>';
+    }
+
+    // Attorney row — name + firm pair, clickable via
+    // window.openAttorneyPortfolio (defined in app.js). When the firm
+    // is missing the click still works; the backend uses
+    // COALESCE(...,'') to match NULL-firm rows.
+    var attorneyHtml = "";
+    var attName = (row.attorney_name || "").trim();
+    var attFirm = (row.attorney_firm || "").trim();
+    if (attName) {
+      // Some ingest rows have the postal address concatenated to the
+      // attorney name. Strip for display only — the raw name still
+      // goes through to openAttorneyPortfolio so the backend's
+      // normalize_designer_name match finds the right record.
+      var attNameDisplay = window._stripTurkishAddress
+        ? window._stripTurkishAddress(attName)
+        : attName;
+      // Most design rows have the firm baked into the attorney_name
+      // already (e.g. "ALPER AKSU (SEMBOL PATENT ... LTD. ŞTİ.)") and
+      // ALSO carry it on attorney_firm — concatenating with " — "
+      // would duplicate the firm. Skip the join when the (stripped)
+      // name already contains the firm string.
+      var attFirmInName = attFirm && attNameDisplay.toLowerCase().indexOf(attFirm.toLowerCase()) !== -1;
+      var attDisplay = (attFirm && !attFirmInName) ? (attNameDisplay + " — " + attFirm) : attNameDisplay;
+      var attInner = '<span style="color:var(--color-text-secondary)">' + escapeHtml(attDisplay) + '</span>';
+      if (typeof window.openAttorneyPortfolio === "function") {
+        attInner = '<button type="button" onclick="window.openAttorneyPortfolio(' +
+          JSON.stringify(attName).replace(/"/g, '&quot;') + ', ' +
+          JSON.stringify(attFirm).replace(/"/g, '&quot;') + ', this)" ' +
+          'class="text-left hover:underline" style="color:var(--color-primary)">' +
+          escapeHtml(attDisplay) + '</button>';
+      }
+      attorneyHtml = '<div class="text-xs"><span style="color:var(--color-text-faint)">' +
+        escapeHtml(t("design_search.attorney_label", "Attorney")) + ':</span> ' +
+        attInner + '</div>';
     }
 
     // Bulletin chip
@@ -383,23 +478,18 @@
         escapeHtml(row.registration_no) + '</span></div>'
       : "";
 
-    // Action row: TÜRKPATENT external link + Add to design watchlist
-    var tpBtn = tpUrl
-      ? '<a href="' + tpUrl + '" target="_blank" rel="noopener" ' +
-        'class="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded hover:opacity-80 transition-opacity" ' +
-        'style="background:var(--color-bg-muted);color:var(--color-text-secondary);border:1px solid var(--color-border)" ' +
-        'onclick="event.stopPropagation()">' +
-          '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>' +
-          'TÜRKPATENT' +
-        '</a>'
-      : "";
-
+    // Action row — styles + order match the trademark card
+    // (_search_panel.html:885-912): watchlist FIRST in risk-high
+    // (red) theme with the "eye" icon, Türkpatent SECOND in the
+    // primary (indigo) theme with the external-link icon. Both
+    // use the same px-3 py-1.5 / text-xs / rounded-lg / gap-1.5
+    // sizing as trademark for visual parity.
     var watchlistBtn = "";
     if (row.application_no) {
       if (isAlreadyWatched) {
-        watchlistBtn = '<span class="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded" ' +
+        watchlistBtn = '<span class="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg" ' +
           'style="background:#dcfce7;color:#166534">' +
-          '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>' +
+          '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>' +
           escapeHtml(t("watchlist.already_watching", "Already watching")) + '</span>';
       } else {
         var wlPayload = JSON.stringify({
@@ -409,54 +499,109 @@
         }).replace(/"/g, '&quot;');
         watchlistBtn = '<button type="button" data-design-add-watchlist ' +
           'data-payload="' + wlPayload + '" ' +
-          'class="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded hover:opacity-80 transition-opacity" ' +
-          'style="background:#dbeafe;color:#1e40af">' +
-          '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>' +
+          'class="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors" ' +
+          'style="color:var(--color-risk-high-text);background:var(--color-risk-high-bg)">' +
+          '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>' +
+            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>' +
+          '</svg>' +
           escapeHtml(t("watchlist.add_to_watchlist", "Add to watchlist")) + '</button>';
       }
     }
 
-    var actionRow = (tpBtn || watchlistBtn)
-      ? '<div class="mt-2 flex flex-wrap items-center gap-1.5">' + tpBtn + watchlistBtn + '</div>'
+    var tpBtn = tpUrl
+      ? '<a href="' + tpUrl + '" target="_blank" rel="noopener" ' +
+        'class="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors cursor-pointer" ' +
+        'style="color:var(--color-primary);background:var(--color-primary-light)" ' +
+        'onclick="event.stopPropagation()">' +
+          '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>' +
+          escapeHtml(t("landing.view_on_turkpatent", "Türkpatent'te Gör")) +
+        '</a>'
       : "";
 
-    return (
-      '<article class="rounded-lg border-2 p-3 transition-shadow hover:shadow" ' +
-      'style="' + _riskBorderStyle(risk) + ';background:var(--color-bg-card)" ' +
-      'data-design-id="' + escapeHtml(row.id || "") + '">' +
-        imgHtml +
+    // Detail button — opens the design detail modal (events timeline,
+    // holder, designers, views grid). Mirrors the Patent details button.
+    var detailBtn = row.id
+      ? '<button type="button" data-dd-open="' + escapeHtml(row.id) + '" ' +
+        'class="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors" ' +
+        'style="color:var(--color-text-primary);background:var(--color-bg-muted)">' +
+          '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>' +
+          '</svg>' +
+          escapeHtml(t("design_search.view_detail", "Tasarım detayları")) +
+        '</button>'
+      : "";
 
-        // Title + similarity badge row
+    var actionRow = (tpBtn || watchlistBtn || detailBtn)
+      ? '<div class="mt-3 flex flex-wrap items-center gap-2">' + watchlistBtn + detailBtn + tpBtn + '</div>'
+      : "";
+
+    // App-no identity row (always visible inside the collapsed header)
+    var appLineHtml = appLine
+      ? '<div class="text-xs"><span style="color:var(--color-text-faint)">' +
+        escapeHtml(t("design_search.appno_label", "App")) + ':</span> ' +
+        '<span class="font-mono" style="color:var(--color-text-secondary)">' + escapeHtml(appLine) + '</span></div>'
+      : "";
+
+    // Header: image, title + sim badge, status pill + bulletin
+    // chip, app no, and an expand chevron. Click anywhere on the
+    // header (outside inner buttons/links) toggles the details
+    // below. Mirrors the trademark result card UX.
+    var headerHtml =
+      '<div data-design-card-header class="p-3 cursor-pointer">' +
+        imgHtml +
         '<div class="mt-2 flex items-start justify-between gap-2">' +
           '<h4 class="text-sm font-semibold leading-snug min-w-0 truncate" ' +
             'style="color:var(--color-text-primary)" title="' + escapeHtml(title) + '">' +
             escapeHtml(title) + '</h4>' +
           simBadge +
         '</div>' +
-
-        // Status badge + bulletin chip row
         '<div class="mt-1 flex flex-wrap items-center gap-1.5">' +
           (row.current_status
             ? '<span class="text-[10px] px-2 py-0.5 rounded-full font-medium" ' +
               'style="background:' + statusColors.bg + ';color:' + statusColors.color + '">' +
-              escapeHtml(row.current_status) + '</span>'
+              escapeHtml(window.translateStatus ? window.translateStatus(row.current_status) : row.current_status) + '</span>'
             : '') +
           bulletinHtml +
         '</div>' +
+        (appLineHtml ? '<div class="mt-1.5">' + appLineHtml + '</div>' : '') +
+        '<div class="mt-2 flex items-center justify-center gap-1 text-[11px]" ' +
+          'style="color:var(--color-text-faint)">' +
+          '<span data-design-card-expand-label>' +
+            escapeHtml(t("design_search.expand_details", "Show details")) +
+          '</span>' +
+          '<svg data-design-card-chevron class="w-3.5 h-3.5 transition-transform" ' +
+            'fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>' +
+          '</svg>' +
+        '</div>' +
+      '</div>';
 
-        // Identity rows
-        (appLine
-          ? '<div class="mt-1.5 text-xs"><span style="color:var(--color-text-faint)">' +
-            escapeHtml(t("design_search.appno_label", "App")) + ':</span> ' +
-            '<span class="font-mono" style="color:var(--color-text-secondary)">' + escapeHtml(appLine) + '</span></div>'
-          : '') +
-        regNoHtml +
-        appDateHtml +
-        holderHtml +
-        designerChips +
-        locarnoChips +
+    // Details: score grid + remaining fields + action buttons.
+    // Hidden by default; toggled by the header click handler in
+    // the document-level event delegation.
+    var detailsHtml =
+      '<div data-design-card-details hidden class="px-3 pb-3 pt-2" ' +
+        'style="border-top:1px solid var(--color-border)">' +
         bdHtml +
+        '<div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5 mb-2">' +
+          regNoHtml +
+          appDateHtml +
+          holderHtml +
+          designerChips +
+          attorneyHtml +
+        '</div>' +
+        locarnoChips +
         actionRow +
+      '</div>';
+
+    return (
+      '<article class="rounded-lg border-2 overflow-hidden transition-shadow hover:shadow" ' +
+      'style="' + _riskBorderStyle(risk) + ';background:var(--color-bg-card)" ' +
+      'data-design-id="' + escapeHtml(row.id || "") + '" ' +
+      'data-design-card-expanded="false">' +
+        headerHtml +
+        detailsHtml +
       '</article>'
     );
   }
@@ -587,6 +732,11 @@
         if (window.AppToast && typeof window.AppToast.success === "function") {
           window.AppToast.success(t("watchlist.add_to_watchlist", "Added to watchlist"));
         }
+        // Land the user on the Tasarım Takibi tab so they immediately see
+        // the new row (toast persists across the tab switch).
+        if (typeof window.showDashboardTab === "function") {
+          window.showDashboardTab("design-watchlist");
+        }
       } else {
         var detail = null;
         try { detail = (await resp.json()).detail; } catch (e) {}
@@ -656,6 +806,32 @@
           addDesignToWatchlist(addBtn, payload);
         } catch (err) {
           // Fail silently — invalid payload, shouldn't happen
+        }
+        return;
+      }
+
+      // Result card: toggle expand/collapse on header click.
+      // Don't toggle if the click hit an inner button or link
+      // (so action buttons still work as expected).
+      var hdr = t.closest("[data-design-card-header]");
+      if (hdr && !t.closest("button, a")) {
+        var card = hdr.closest("article[data-design-card-expanded]");
+        if (card) {
+          var details = card.querySelector("[data-design-card-details]");
+          var chevron = card.querySelector("[data-design-card-chevron]");
+          var label = card.querySelector("[data-design-card-expand-label]");
+          var nowExpanded = card.getAttribute("data-design-card-expanded") !== "true";
+          card.setAttribute("data-design-card-expanded", nowExpanded ? "true" : "false");
+          if (details) {
+            if (nowExpanded) details.removeAttribute("hidden");
+            else details.setAttribute("hidden", "");
+          }
+          if (chevron) chevron.style.transform = nowExpanded ? "rotate(180deg)" : "";
+          if (label) {
+            label.textContent = nowExpanded
+              ? t("design_search.hide_details", "Hide details")
+              : t("design_search.expand_details", "Show details");
+          }
         }
         return;
       }

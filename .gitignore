@@ -8,6 +8,9 @@
 !.env.example
 .token
 
+# EUIPO API spike outputs (contains JWT tokens + raw API responses)
+scripts/euipo_spike_output/
+
 # Cloudflare credentials (contains tunnel secret)
 cloudflared/*.json
 
@@ -99,3 +102,6 @@ pgsql/
 
 # Chisel tunnel binary
 scripts/chisel*
+
+# DB backups taken before destructive migrations — do not commit
+backups/

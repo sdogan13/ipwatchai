@@ -2,7 +2,7 @@
 Universal Scanner Worker
 ========================
 Scans new trademark applications against the entire database
-to detect conflicts for the Opposition Radar feature.
+to detect conflicts for the Radar feature.
 
 Usage:
     # Process queue continuously
@@ -547,7 +547,7 @@ class UniversalScanner:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Universal Scanner - Opposition Radar Worker",
+        description="Universal Scanner - Radar Worker",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

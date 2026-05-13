@@ -28,6 +28,7 @@ import argparse
 import json
 import logging
 import re
+import shutil
 import time
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -145,6 +146,13 @@ class View:
     image_xref: Optional[int] = None
     bbox: Optional[List[float]] = None
     image_path: Optional[str] = None
+    # Provenance tag for image_path resolution at consumer time:
+    #   "pdf" -> resolve under images/{image_path}
+    #   "cd"  -> resolve under cd_images/{image_path} (CD already had the
+    #            image and we deliberately skipped the PDF write to avoid
+    #            a duplicate; key is canonical so reconcile can match)
+    #   None  -> no image was located/persisted for this view
+    image_source: Optional[str] = None
 
 
 @dataclass
@@ -387,6 +395,22 @@ def normalize_appno_for_filename(application_no: Optional[str]) -> str:
     if not application_no:
         return "unknown"
     return application_no.replace("/", "_").replace(" ", "_")
+
+
+def view_image_key(application_no_normalized: str, design_idx: int, view_idx: int) -> str:
+    """Canonical image key shape used in metadata.json::
+
+        ``{appno_norm}/{design_idx}_{view_idx}.jpg``
+
+    No leading ``images/`` prefix — the prefix is ``cd_images/`` for CD
+    output and ``images/`` for PDF output, and the JSON key is
+    deliberately the same string in both so a future stage-3 reconciler
+    can match PDF and CD images by a single key.
+
+    Consumer resolves: ``Path(ts_folder) / "images" / image_path``
+    (or ``"cd_images"`` for the CD JSON).
+    """
+    return f"{application_no_normalized}/{design_idx}_{view_idx}.jpg"
 
 
 # ---------------------------------------------------------------------------
@@ -657,10 +681,22 @@ def populate_designs_for_tr_record(
                     bbox=list(ibox) if ibox else None,
                 )
                 if extract_images and xref_val is not None:
-                    fname = f"{appno_norm}_{d_idx}_{v_idx}.jpg"
-                    dest = images_dir / fname
-                    if _save_pixmap_jpeg(doc, xref_val, dest):
-                        view.image_path = f"images/{fname}"
+                    key = view_image_key(appno_norm, d_idx, v_idx)
+                    # Proactive dedup: if the CD-side already persisted this
+                    # exact view image at cd_images/{key}, skip the PDF write
+                    # entirely. CD wins on duplicates per the locked stage-3
+                    # precedence rule. The key is canonical so reconcile can
+                    # match this view to the CD-side record by image_path
+                    # alone.
+                    cd_dest = images_dir.parent / "cd_images" / key
+                    if cd_dest.is_file():
+                        view.image_path = key
+                        view.image_source = "cd"
+                    else:
+                        dest = images_dir / key
+                        if _save_pixmap_jpeg(doc, xref_val, dest):
+                            view.image_path = key
+                            view.image_source = "pdf"
                 located_views[(d_idx, v_idx)] = view
 
     # Attach views (located + any unlocated canonical views) to their designs
@@ -943,6 +979,12 @@ def extract_issue(issue_folder: Path, *, force: bool = False, extract_images: bo
     if not force and metadata_is_fresh(issue_folder):
         logger.info("[=] %s already up to date", issue_folder.name)
         return {"status": "skipped", "issue": issue_folder.name}
+
+    # Clean slate on --force: wipe any prior images/ tree so old flat-named
+    # files (legacy "{appno}_{d}_{v}.jpg" layout) don't coexist with new
+    # per-application subfolder layout.
+    if force and images_dir.exists():
+        shutil.rmtree(images_dir)
 
     logger.info("[*] parsing %s", issue_folder.name)
     started = time.time()

@@ -25,6 +25,35 @@ WATCHLIST_SCAN_HOUR = 0
 UNIVERSAL_SCAN_HOUR = 0
 WATCHLIST_SCAN_JOB_ID = "weekly_watchlist_scan"
 UNIVERSAL_SCAN_JOB_ID = "weekly_universal_scan"
+
+# Cografi / Patent / Design weekly watchlist sweeps — all on Wednesday,
+# staggered an hour apart so the multi-registry sweep doesn't pile DB
+# load on a single hour. Each registry's cron complements (not replaces)
+# its existing post-ingest hook: the hook catches NEW records when a
+# bulletin lands; the weekly cron catches drift from retroactively-
+# added watchlist items against the existing corpus.
+#
+# Day-of-week is uniform Wed across all three registry crons to avoid
+# Mon/Tue collisions with the trademark watchlist scan (Mon 00:00) and
+# the universal radar (Tue 00:00).
+COGRAFI_SCAN_DAY = "wed"
+COGRAFI_SCAN_DAY_LABEL = "Wednesday"
+COGRAFI_SCAN_HOUR = 2
+COGRAFI_SCAN_MINUTE = 0
+COGRAFI_SCAN_JOB_ID = "weekly_cografi_watchlist_scan"
+
+PATENT_SCAN_DAY = "wed"
+PATENT_SCAN_DAY_LABEL = "Wednesday"
+PATENT_SCAN_HOUR = 3
+PATENT_SCAN_MINUTE = 0
+PATENT_SCAN_JOB_ID = "weekly_patent_watchlist_scan"
+
+DESIGN_SCAN_DAY = "wed"
+DESIGN_SCAN_DAY_LABEL = "Wednesday"
+DESIGN_SCAN_HOUR = 4
+DESIGN_SCAN_MINUTE = 0
+DESIGN_SCAN_JOB_ID = "weekly_design_watchlist_scan"
+
 SCAN_TIMEZONE_NAME = "Europe/London"
 SCAN_TIMEZONE = ZoneInfo(SCAN_TIMEZONE_NAME)
 
@@ -64,7 +93,7 @@ def start_scheduler():
         replace_existing=True,
     )
 
-    # Weekly universal conflict scan on Tuesday at 00:00 (Opposition Radar).
+    # Weekly universal conflict scan on Tuesday at 00:00 (Radar).
     scheduler.add_job(
         weekly_universal_scan,
         trigger=CronTrigger(
@@ -75,6 +104,48 @@ def start_scheduler():
         ),
         id=UNIVERSAL_SCAN_JOB_ID,
         name='Weekly Universal Conflict Scan',
+        replace_existing=True,
+    )
+
+    # Weekly cografi watchlist sweep on Wednesday at 02:00.
+    scheduler.add_job(
+        weekly_cografi_watchlist_scan,
+        trigger=CronTrigger(
+            day_of_week=COGRAFI_SCAN_DAY,
+            hour=COGRAFI_SCAN_HOUR,
+            minute=COGRAFI_SCAN_MINUTE,
+            timezone=SCAN_TIMEZONE,
+        ),
+        id=COGRAFI_SCAN_JOB_ID,
+        name='Weekly Cografi Watchlist Auto-Scan',
+        replace_existing=True,
+    )
+
+    # Weekly patent watchlist sweep on Wednesday at 03:00.
+    scheduler.add_job(
+        weekly_patent_watchlist_scan,
+        trigger=CronTrigger(
+            day_of_week=PATENT_SCAN_DAY,
+            hour=PATENT_SCAN_HOUR,
+            minute=PATENT_SCAN_MINUTE,
+            timezone=SCAN_TIMEZONE,
+        ),
+        id=PATENT_SCAN_JOB_ID,
+        name='Weekly Patent Watchlist Auto-Scan',
+        replace_existing=True,
+    )
+
+    # Weekly design (tasarım) watchlist sweep on Wednesday at 04:00.
+    scheduler.add_job(
+        weekly_design_watchlist_scan,
+        trigger=CronTrigger(
+            day_of_week=DESIGN_SCAN_DAY,
+            hour=DESIGN_SCAN_HOUR,
+            minute=DESIGN_SCAN_MINUTE,
+            timezone=SCAN_TIMEZONE,
+        ),
+        id=DESIGN_SCAN_JOB_ID,
+        name='Weekly Design Watchlist Auto-Scan',
         replace_existing=True,
     )
 
@@ -90,7 +161,16 @@ def start_scheduler():
     scheduler.start()
     next_run = scheduler.get_job(WATCHLIST_SCAN_JOB_ID).next_run_time
     next_universal = scheduler.get_job(UNIVERSAL_SCAN_JOB_ID).next_run_time
-    logger.info(f"Scheduler started - next watchlist scan: {next_run}, next universal scan: {next_universal}")
+    next_cografi = scheduler.get_job(COGRAFI_SCAN_JOB_ID).next_run_time
+    next_patent = scheduler.get_job(PATENT_SCAN_JOB_ID).next_run_time
+    next_design = scheduler.get_job(DESIGN_SCAN_JOB_ID).next_run_time
+    logger.info(
+        f"Scheduler started - next watchlist scan: {next_run}, "
+        f"next universal scan: {next_universal}, "
+        f"next cografi scan: {next_cografi}, "
+        f"next patent scan: {next_patent}, "
+        f"next design scan: {next_design}"
+    )
     return scheduler
 
 
@@ -120,8 +200,32 @@ def get_watchlist_scan_schedule_label() -> str:
 
 
 def get_universal_scan_schedule_label() -> str:
-    """Return the user-facing Opposition Radar scan schedule label."""
+    """Return the user-facing Radar scan schedule label."""
     return f"Weekly on {UNIVERSAL_SCAN_DAY_LABEL} at {UNIVERSAL_SCAN_HOUR:02d}:00"
+
+
+def get_cografi_scan_schedule_label() -> str:
+    """Return the user-facing cografi watchlist auto-scan schedule label."""
+    return (
+        f"Weekly on {COGRAFI_SCAN_DAY_LABEL} at "
+        f"{COGRAFI_SCAN_HOUR:02d}:{COGRAFI_SCAN_MINUTE:02d}"
+    )
+
+
+def get_patent_scan_schedule_label() -> str:
+    """Return the user-facing patent watchlist auto-scan schedule label."""
+    return (
+        f"Weekly on {PATENT_SCAN_DAY_LABEL} at "
+        f"{PATENT_SCAN_HOUR:02d}:{PATENT_SCAN_MINUTE:02d}"
+    )
+
+
+def get_design_scan_schedule_label() -> str:
+    """Return the user-facing design (tasarım) watchlist auto-scan schedule label."""
+    return (
+        f"Weekly on {DESIGN_SCAN_DAY_LABEL} at "
+        f"{DESIGN_SCAN_HOUR:02d}:{DESIGN_SCAN_MINUTE:02d}"
+    )
 
 
 def weekly_watchlist_scan():
@@ -243,13 +347,402 @@ def weekly_watchlist_scan():
         logger.error(f"Weekly watchlist scan failed: {e}", exc_info=True)
 
 
+def weekly_cografi_watchlist_scan():
+    """Scan active cografi watchlist items, gated by organization plan.
+
+    Mirrors ``weekly_watchlist_scan`` (trademark) shape so the two
+    weekly sweeps stay structurally aligned:
+
+    - Plan gating: free orgs (``auto_scan_max_items == 0``) are
+      skipped entirely; other plans cap items per org by their
+      ``auto_scan_max_items`` limit.
+    - Per-item ``alert_frequency`` window: ``weekly`` items are
+      skipped if scanned within the last 6 days, ``daily`` items
+      if scanned within the last 20 hours; ``immediate`` falls
+      through to the daily window for the periodic re-sweep.
+
+    Complements (does not replace) the post-ingest hook in
+    ``pipeline/ingest_cografi.py``: that hook scans against the
+    new record_ids only when fresh data lands, while this weekly
+    sweep catches drift from retroactively-added watchlist items
+    against the existing corpus.
+
+    Runs weekly on Wednesday at 02:00 (Europe/London).
+    """
+    logger.info("=== Weekly Cografi Watchlist Auto-Scan starting ===")
+
+    try:
+        from database.crud import Database
+        from services.cografi_watchlist_service import (
+            get_active_cografi_watchlist_items,
+        )
+        from services.cografi_scanner_service import scan_and_store
+        from utils.subscription import get_plan_limit
+        from psycopg2.extras import RealDictCursor
+
+        now = datetime.utcnow()
+
+        with Database() as db:
+            all_items = get_active_cografi_watchlist_items(db=db)
+
+        if not all_items:
+            logger.info("No active cografi watchlist items - nothing to scan")
+            return
+
+        # Group items by organization
+        org_items: dict = {}
+        for item in all_items:
+            org_id = str(item.get('organization_id', ''))
+            org_items.setdefault(org_id, []).append(item)
+
+        # Look up each org's plan
+        org_plans: dict = {}
+        with Database() as db:
+            cur = db.cursor(cursor_factory=RealDictCursor)
+            for org_id in org_items:
+                cur.execute("""
+                    SELECT COALESCE(sp.name, 'free') as plan_name
+                    FROM organizations o
+                    LEFT JOIN subscription_plans sp ON o.subscription_plan_id = sp.id
+                    WHERE o.id = %s
+                """, (org_id,))
+                row = cur.fetchone()
+                org_plans[org_id] = row['plan_name'] if row else 'free'
+
+        scanned = 0
+        skipped = 0
+        skipped_plan = 0
+        total_alerts = 0
+
+        for org_id, items in org_items.items():
+            plan_name = org_plans.get(org_id, 'free')
+            max_scan_items = get_plan_limit(plan_name, 'auto_scan_max_items')
+
+            # Skip orgs with no auto-scan (free)
+            if max_scan_items == 0:
+                logger.info(
+                    f"Skipping org {org_id} (plan: {plan_name}) - "
+                    "auto-scan not included"
+                )
+                skipped_plan += len(items)
+                continue
+
+            # Most recently added first, capped at the plan's limit.
+            items_sorted = sorted(
+                items,
+                key=lambda x: x.get('created_at', datetime.min),
+                reverse=True,
+            )[:max_scan_items]
+
+            if len(items) > max_scan_items:
+                logger.info(
+                    f"  Org {org_id} ({plan_name}): {len(items)} items, "
+                    f"capped to {max_scan_items}"
+                )
+
+            with Database() as db:
+                for item in items_sorted:
+                    freq = (item.get('alert_frequency') or 'daily').lower()
+                    last_scan = item.get('last_scan_at')
+
+                    # Determine minimum interval (immediate falls back to
+                    # the daily window for the periodic re-sweep — the
+                    # immediate webhook path handles per-bulletin freshness
+                    # separately).
+                    if freq == 'weekly':
+                        min_interval = timedelta(days=6)
+                    else:
+                        min_interval = timedelta(hours=20)
+
+                    if last_scan and (now - last_scan) < min_interval:
+                        skipped += 1
+                        continue
+
+                    try:
+                        result = scan_and_store(db, item)
+                        scanned += 1
+                        alerts_count = int(result.get('alerts_created') or 0)
+                        total_alerts += alerts_count
+                        if alerts_count > 0:
+                            logger.info(
+                                f"  [{item.get('label', '?')}] "
+                                f"{alerts_count} new alerts"
+                            )
+                    except Exception as e:
+                        logger.error(
+                            f"  [{item.get('label', '?')}] scan failed: {e}"
+                        )
+
+        logger.info(
+            f"=== Cografi Auto-Scan complete: {scanned} scanned, "
+            f"{skipped} skipped, {skipped_plan} skipped (plan), "
+            f"{total_alerts} alerts ==="
+        )
+
+    except Exception as e:
+        logger.error(
+            f"Weekly cografi watchlist scan failed: {e}", exc_info=True
+        )
+
+
+def _plan_gate_org(plan_name: str) -> int:
+    """Return the per-org item cap for auto-scan. 0 means skip the org."""
+    from utils.subscription import get_plan_limit
+    cap = get_plan_limit(plan_name, "auto_scan_max_items")
+    return int(cap or 0)
+
+
+def _frequency_min_interval(alert_frequency: str) -> "timedelta":
+    """Map alert_frequency to the periodic-sweep min-interval.
+
+    Mirrors the trademark + cografi scans: weekly items are skipped
+    if scanned within the last 6 days, daily items within 20 hours.
+    Immediate falls back to the daily window — the immediate webhook
+    path handles per-bulletin freshness separately.
+    """
+    if (alert_frequency or "").lower() == "weekly":
+        return timedelta(days=6)
+    return timedelta(hours=20)
+
+
+def weekly_patent_watchlist_scan():
+    """Scan active patent watchlist items, gated by organization plan.
+
+    Mirrors ``weekly_cografi_watchlist_scan`` / ``weekly_watchlist_scan``
+    so all four registry sweeps stay structurally aligned. The
+    post-ingest hook in pipeline/ingest_patents catches NEW patents;
+    this weekly sweep catches drift from retroactively-added watchlist
+    items against the existing corpus.
+
+    Runs weekly on Wednesday at 03:00 (Europe/London) — one hour
+    after the cografi sweep so the multi-registry weekly pass spreads
+    DB load.
+    """
+    logger.info("=== Weekly Patent Watchlist Auto-Scan starting ===")
+
+    try:
+        from database.crud import Database
+        from services.patent_watchlist_service import (
+            get_active_patent_watchlist_items,
+        )
+        from services.patent_scanner_service import scan_and_store
+        from psycopg2.extras import RealDictCursor
+
+        now = datetime.utcnow()
+
+        with Database() as db:
+            all_items = get_active_patent_watchlist_items(db=db)
+
+        if not all_items:
+            logger.info("No active patent watchlist items - nothing to scan")
+            return
+
+        org_items: dict = {}
+        for item in all_items:
+            org_id = str(item.get("organization_id", ""))
+            org_items.setdefault(org_id, []).append(item)
+
+        org_plans: dict = {}
+        with Database() as db:
+            cur = db.cursor(cursor_factory=RealDictCursor)
+            for org_id in org_items:
+                cur.execute("""
+                    SELECT COALESCE(sp.name, 'free') as plan_name
+                    FROM organizations o
+                    LEFT JOIN subscription_plans sp ON o.subscription_plan_id = sp.id
+                    WHERE o.id = %s
+                """, (org_id,))
+                row = cur.fetchone()
+                org_plans[org_id] = row["plan_name"] if row else "free"
+
+        scanned = 0
+        skipped = 0
+        skipped_plan = 0
+        total_alerts = 0
+
+        for org_id, items in org_items.items():
+            plan_name = org_plans.get(org_id, "free")
+            max_scan_items = _plan_gate_org(plan_name)
+            if max_scan_items == 0:
+                logger.info(
+                    f"Skipping org {org_id} (plan: {plan_name}) - "
+                    "auto-scan not included"
+                )
+                skipped_plan += len(items)
+                continue
+
+            items_sorted = sorted(
+                items,
+                key=lambda x: x.get("created_at", datetime.min),
+                reverse=True,
+            )[:max_scan_items]
+
+            if len(items) > max_scan_items:
+                logger.info(
+                    f"  Org {org_id} ({plan_name}): {len(items)} items, "
+                    f"capped to {max_scan_items}"
+                )
+
+            with Database() as db:
+                for item in items_sorted:
+                    freq = (item.get("alert_frequency") or "daily").lower()
+                    last_scan = item.get("last_scan_at")
+                    min_interval = _frequency_min_interval(freq)
+
+                    if last_scan and (now - last_scan) < min_interval:
+                        skipped += 1
+                        continue
+
+                    try:
+                        result = scan_and_store(db, item)
+                        scanned += 1
+                        alerts_count = int(result.get("alerts_created") or 0)
+                        total_alerts += alerts_count
+                        if alerts_count > 0:
+                            logger.info(
+                                f"  [{item.get('label', '?')}] "
+                                f"{alerts_count} new alerts"
+                            )
+                    except Exception as e:
+                        logger.error(
+                            f"  [{item.get('label', '?')}] scan failed: {e}"
+                        )
+
+        logger.info(
+            f"=== Patent Auto-Scan complete: {scanned} scanned, "
+            f"{skipped} skipped, {skipped_plan} skipped (plan), "
+            f"{total_alerts} alerts ==="
+        )
+
+    except Exception as e:
+        logger.error(
+            f"Weekly patent watchlist scan failed: {e}", exc_info=True
+        )
+
+
+def weekly_design_watchlist_scan():
+    """Scan active design (Tasarım) watchlist items, gated by org plan.
+
+    Mirrors the cografi + patent shape with one structural difference:
+    ``watchlist.design_scanner.scan_single_design_watchlist`` takes
+    ``item_id`` and opens its own DB connection via ``db_factory`` (rather
+    than receiving a full item dict + a shared db). The plan-gating +
+    frequency-window logic lives here; the inner call delegates the
+    actual scan + alert insert to the design scanner.
+
+    Runs weekly on Wednesday at 04:00 (Europe/London) — one hour
+    after the patent sweep.
+    """
+    logger.info("=== Weekly Design Watchlist Auto-Scan starting ===")
+
+    try:
+        from uuid import UUID
+        from database.crud import Database
+        from services.design_watchlist_service import (
+            get_active_design_watchlist_items,
+        )
+        from watchlist.design_scanner import scan_single_design_watchlist
+        from psycopg2.extras import RealDictCursor
+
+        now = datetime.utcnow()
+
+        with Database() as db:
+            all_items = get_active_design_watchlist_items(db=db)
+
+        if not all_items:
+            logger.info("No active design watchlist items - nothing to scan")
+            return
+
+        org_items: dict = {}
+        for item in all_items:
+            org_id = str(item.get("organization_id", ""))
+            org_items.setdefault(org_id, []).append(item)
+
+        org_plans: dict = {}
+        with Database() as db:
+            cur = db.cursor(cursor_factory=RealDictCursor)
+            for org_id in org_items:
+                cur.execute("""
+                    SELECT COALESCE(sp.name, 'free') as plan_name
+                    FROM organizations o
+                    LEFT JOIN subscription_plans sp ON o.subscription_plan_id = sp.id
+                    WHERE o.id = %s
+                """, (org_id,))
+                row = cur.fetchone()
+                org_plans[org_id] = row["plan_name"] if row else "free"
+
+        scanned = 0
+        skipped = 0
+        skipped_plan = 0
+        total_alerts = 0
+
+        for org_id, items in org_items.items():
+            plan_name = org_plans.get(org_id, "free")
+            max_scan_items = _plan_gate_org(plan_name)
+            if max_scan_items == 0:
+                logger.info(
+                    f"Skipping org {org_id} (plan: {plan_name}) - "
+                    "auto-scan not included"
+                )
+                skipped_plan += len(items)
+                continue
+
+            items_sorted = sorted(
+                items,
+                key=lambda x: x.get("created_at", datetime.min),
+                reverse=True,
+            )[:max_scan_items]
+
+            if len(items) > max_scan_items:
+                logger.info(
+                    f"  Org {org_id} ({plan_name}): {len(items)} items, "
+                    f"capped to {max_scan_items}"
+                )
+
+            for item in items_sorted:
+                freq = (item.get("alert_frequency") or "daily").lower()
+                last_scan = item.get("last_scan_at")
+                min_interval = _frequency_min_interval(freq)
+
+                if last_scan and (now - last_scan) < min_interval:
+                    skipped += 1
+                    continue
+
+                try:
+                    alerts_count = int(scan_single_design_watchlist(
+                        item_id=UUID(str(item["id"])),
+                    ) or 0)
+                    scanned += 1
+                    total_alerts += alerts_count
+                    if alerts_count > 0:
+                        logger.info(
+                            f"  [{item.get('product_name') or item.get('label') or '?'}] "
+                            f"{alerts_count} new alerts"
+                        )
+                except Exception as e:
+                    logger.error(
+                        f"  [{item.get('product_name') or item.get('label') or '?'}] scan failed: {e}"
+                    )
+
+        logger.info(
+            f"=== Design Auto-Scan complete: {scanned} scanned, "
+            f"{skipped} skipped, {skipped_plan} skipped (plan), "
+            f"{total_alerts} alerts ==="
+        )
+
+    except Exception as e:
+        logger.error(
+            f"Weekly design watchlist scan failed: {e}", exc_info=True
+        )
+
+
 def weekly_universal_scan():
     """
-    Scan within-deadline bulletins for opposition conflicts (Opposition Radar).
+    Scan within-deadline bulletins for opposition conflicts (Radar).
 
     Finds all bulletins with appeal_deadline >= today and runs the universal
     scanner against each one. This populates the universal_conflicts table
-    that powers the Opposition Radar lead feed.
+    that powers the Radar lead feed.
 
     Runs weekly on Tuesday at 00:00.
     """
@@ -408,9 +901,15 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Watchlist & Universal scanner scheduler")
     parser.add_argument("--run-now", action="store_true",
-                        help="Run weekly scans immediately (don't wait for schedule)")
+                        help="Run all weekly scans immediately (trademark + universal + patent + design + cografi)")
     parser.add_argument("--run-universal", action="store_true",
                         help="Run universal conflict scan immediately")
+    parser.add_argument("--run-cografi", action="store_true",
+                        help="Run cografi watchlist sweep immediately")
+    parser.add_argument("--run-patent", action="store_true",
+                        help="Run patent watchlist sweep immediately")
+    parser.add_argument("--run-design", action="store_true",
+                        help="Run design (tasarım) watchlist sweep immediately")
     parser.add_argument("--daemon", action="store_true",
                         help="Start scheduler daemon (blocks forever)")
     args = parser.parse_args()
@@ -419,9 +918,21 @@ if __name__ == "__main__":
         logger.info("Running weekly scans immediately...")
         weekly_watchlist_scan()
         weekly_universal_scan()
+        weekly_patent_watchlist_scan()
+        weekly_design_watchlist_scan()
+        weekly_cografi_watchlist_scan()
     elif args.run_universal:
         logger.info("Running universal conflict scan immediately...")
         weekly_universal_scan()
+    elif args.run_cografi:
+        logger.info("Running cografi watchlist sweep immediately...")
+        weekly_cografi_watchlist_scan()
+    elif args.run_patent:
+        logger.info("Running patent watchlist sweep immediately...")
+        weekly_patent_watchlist_scan()
+    elif args.run_design:
+        logger.info("Running design watchlist sweep immediately...")
+        weekly_design_watchlist_scan()
     elif args.daemon:
         import time
         scheduler = start_scheduler()
@@ -432,4 +943,4 @@ if __name__ == "__main__":
         except (KeyboardInterrupt, SystemExit):
             shutdown_scheduler()
     else:
-        print("Usage: python -m workers.scheduler --run-now | --daemon")
+        print("Usage: python -m workers.scheduler --run-now | --run-cografi | --run-patent | --run-design | --daemon")

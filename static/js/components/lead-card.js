@@ -1,5 +1,5 @@
 /**
- * lead-card.js - Opposition Radar lead card rendering
+ * lead-card.js - Radar lead card rendering
  * Uses shared helpers from score-badge.js
  */
 window.AppComponents = window.AppComponents || {};
@@ -96,7 +96,7 @@ window.AppComponents.renderLeadCard = function(lead) {
 };
 
 /**
- * renderLeadRow - Compact table row for Opposition Radar
+ * renderLeadRow - Compact table row for Radar
  * Renders a single <tr> for the leads table view.
  */
 window.AppComponents.renderLeadRow = function(lead) {

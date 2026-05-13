@@ -206,7 +206,6 @@ async def enhanced_search_impl(
     score_pair_fn,
     visual_similarity_fn,
     class_suggestions_handler,
-    text_embedding_getter,
     encode_query_image_handler,
     date_formatter=format_date,
     status_code_getter=get_status_code,
@@ -223,7 +222,6 @@ async def enhanced_search_impl(
         score_pair_fn=score_pair_fn,
         visual_similarity_fn=visual_similarity_fn,
         class_suggestions_handler=class_suggestions_handler,
-        text_embedding_getter=text_embedding_getter,
         encode_query_image_handler=encode_query_image_handler,
         date_formatter=date_formatter,
         status_code_getter=status_code_getter,
@@ -248,8 +246,6 @@ def register_enhanced_search_routes(
 
     @limiter.limit(rate_limit)
     async def enhanced_search(request: Request, search_request: SearchRequest):
-        from pipeline.ai import get_text_embedding_cached
-
         return await enhanced_search_impl(
             search_request=search_request,
             settings=settings,
@@ -265,7 +261,6 @@ def register_enhanced_search_routes(
                 logger=logger,
                 class_name_lookup=class_name_lookup,
             ),
-            text_embedding_getter=get_text_embedding_cached,
             encode_query_image_handler=encode_query_image_handler,
         )
 

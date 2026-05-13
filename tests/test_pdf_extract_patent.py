@@ -47,9 +47,10 @@ from pdf_extract_patent import (
     build_figure_inventory,
     detect_banner_xrefs,
     extract_record_figures,
-    figures_dirname,
+    BULLETIN_PDF_FILENAME,
+    FIGURES_DIRNAME,
     main,
-    metadata_filename,
+    PDF_METADATA_FILENAME,
     parse_argv,
     parse_pdf,
 )
@@ -57,6 +58,7 @@ from pdf_extract_patent import _metadata_is_fresh
 from pdf_extract_patent import (
     _build_global_text,
     _char_pos_to_page,
+    _dedup_pdf_pngs_against_cd_tifs,
     _find_record_boundaries,
     _normalize_appno_for_filename,
     _record_to_dict,
@@ -386,6 +388,21 @@ def test_extract_bulletin_metadata_returns_both_none_for_unrelated_page():
     assert extract_bulletin_metadata_from_text(body) == (None, None)
 
 
+def test_extract_bulletin_metadata_handles_2023_03_coptic_glyph_substitution():
+    """Cover page of 2023_03.pdf has a TPMK font glitch that rendered
+    digits as Coptic letters: ``Sayı ϮϬϮϯͲϬϯ`` / ``Ϯ1.03.202ϯ`` instead
+    of ``Sayı 2023-03`` / ``21.03.2023``. The parser must normalise
+    these glyphs to ASCII before regex matching."""
+    page = (
+        "Sayı ϮϬϮϯͲϬϯ \n"
+        "Yayım Tarihi  \n"
+        "Ϯ1.03.202ϯ \n"
+    )
+    no, date = extract_bulletin_metadata_from_text(page)
+    assert no == "2023-03"
+    assert date == "2023-03-21"
+
+
 def test_extract_bulletin_metadata_handles_none_and_empty():
     assert extract_bulletin_metadata_from_text(None) == (None, None)
     assert extract_bulletin_metadata_from_text("") == (None, None)
@@ -644,6 +661,21 @@ def test_parse_application_no_handles_missing():
     assert parse_application_no(None) is None
     assert parse_application_no("") is None
     assert parse_application_no("no app no here") is None
+
+
+def test_derive_application_no_from_publication_no_canonical_forms():
+    # Granted patents and apps both decode the same way.
+    from pdf_extract_patent import derive_application_no_from_publication_no
+    assert derive_application_no_from_publication_no("TR 2023 005859 B") == "2023/005859"
+    assert derive_application_no_from_publication_no("TR 2024 000746 A2") == "2024/000746"
+    assert derive_application_no_from_publication_no("TR 2025 010866 T4") == "2025/010866"
+
+
+def test_derive_application_no_from_publication_no_handles_missing():
+    from pdf_extract_patent import derive_application_no_from_publication_no
+    assert derive_application_no_from_publication_no(None) is None
+    assert derive_application_no_from_publication_no("") is None
+    assert derive_application_no_from_publication_no("not a publication no") is None
 
 
 # ---------------------------------------------------------------------------
@@ -1503,16 +1535,16 @@ def test_parse_pdf_real_2025_08_writes_figures(tmp_path):
 # Step 3.8 — metadata_filename + figures_dirname
 # ---------------------------------------------------------------------------
 
-def test_metadata_filename_uses_pdf_infix():
-    """The PDF JSON sidecar must be DISTINCT from the CD-side
-    {YYYY_M}_metadata.json (Stage 4 reconciler reads both)."""
-    assert metadata_filename(Path("2025_08.pdf")) == "2025_08_pdf_metadata.json"
-    assert metadata_filename(Path("/abs/2024_07.pdf")) == "2024_07_pdf_metadata.json"
+def test_pdf_metadata_filename_constant_canonical():
+    """The PDF JSON inside the bulletin parent folder is always
+    pdf_metadata.json — distinct from CD's cd_metadata.json so the
+    reconciler can read both as separate inputs."""
+    assert PDF_METADATA_FILENAME == "pdf_metadata.json"
 
 
-def test_figures_dirname():
-    assert figures_dirname(Path("2025_08.pdf")) == "2025_08_figures"
-    assert figures_dirname(Path("/abs/2024_07.pdf")) == "2024_07_figures"
+def test_figures_dirname_constant_canonical():
+    """Figures land in figures/ inside the bulletin parent folder."""
+    assert FIGURES_DIRNAME == "figures"
 
 
 # ---------------------------------------------------------------------------
@@ -1595,6 +1627,18 @@ def test_parse_argv_all_errors_on_empty_dir(tmp_path):
         parse_argv(["--all", "--bulletins-dir", str(tmp_path)])
 
 
+def test_parse_argv_all_skips_legacy_part_pdfs(tmp_path):
+    """*_legacy_partNN.pdf files are RAR archives the collector saved with
+    a .pdf extension. They belong to the deferred Stage-8 path, not Stage 3,
+    so --all must filter them out before we hand them to PyMuPDF."""
+    (tmp_path / "2025_08.pdf").write_bytes(b"")
+    (tmp_path / "1996_6_legacy_part01.pdf").write_bytes(b"Rar!\x1a\x07\x00")
+    (tmp_path / "2015_4_legacy_part10.pdf").write_bytes(b"Rar!\x1a\x07\x00")
+    args = parse_argv(["--all", "--bulletins-dir", str(tmp_path)])
+    names = [p.name for p in args.pdf_paths]
+    assert names == ["2025_08.pdf"]
+
+
 def test_parse_argv_rejects_no_input():
     with pytest.raises(SystemExit):
         parse_argv([])
@@ -1628,28 +1672,171 @@ def test_parse_argv_out_dir_defaults_to_bulletins_dir(tmp_path):
     assert args.out_dir == tmp_path
 
 
-def test_parse_argv_figures_root_defaults_to_out_dir(tmp_path):
-    pdf = tmp_path / "2025_08.pdf"
-    pdf.write_bytes(b"")
-    args = parse_argv(["--pdf", str(pdf), "--out-dir", str(tmp_path)])
-    assert args.figures_root == tmp_path
-
-
-def test_parse_argv_figures_root_explicit(tmp_path):
-    pdf = tmp_path / "src" / "2025_08.pdf"
-    pdf.parent.mkdir()
-    pdf.write_bytes(b"")
-    other = tmp_path / "fig_root"
-    args = parse_argv([
-        "--pdf", str(pdf),
-        "--figures-root", str(other),
-    ])
-    assert args.figures_root == other
-
-
 # ---------------------------------------------------------------------------
 # Step 3.8 — main returns nonzero on missing source
 # ---------------------------------------------------------------------------
+
+def test_dedup_pdf_pngs_drops_duplicates_and_removes_payload_entries(tmp_path):
+    """When a CD TIFF for app X exists in figures/, any PDF PNG with
+    matching {year}_{appno} prefix is dropped from disk AND its figure
+    entry is removed from ``record['figures']`` so DB ingest does not
+    see a stub row pointing at a non-existent file."""
+    figures = tmp_path / "figures"
+    figures.mkdir()
+    # CD TIFFs (already there from a prior cd_extract run)
+    (figures / "2017_15048.tif").write_bytes(b"TIFF")
+    (figures / "2018_13083.tif").write_bytes(b"TIFF")
+    # PDF PNGs (just written by parse_pdf)
+    duplicate_a = figures / "2017_15048_p120_2.png"
+    duplicate_a.write_bytes(b"PNG")
+    duplicate_b = figures / "2018_13083_p200_3.png"
+    duplicate_b.write_bytes(b"PNG")
+    standalone = figures / "2099_99999_p1_1.png"  # no matching CD TIFF
+    standalone.write_bytes(b"PNG")
+
+    payload = {
+        "records": [
+            {
+                "application_no": "2017/15048",
+                "figures": [
+                    # one duplicate, one standalone-on-same-record
+                    {"image_path": "figures/2017_15048_p120_2.png",
+                     "page": 120, "xref": 4204},
+                    {"image_path": "figures/2017_15048_p121_1.png",
+                     "page": 121, "xref": 4500},
+                ],
+            },
+            {
+                "application_no": "2099/99999",
+                "figures": [
+                    {"image_path": "figures/2099_99999_p1_1.png",
+                     "page": 1, "xref": 5000},
+                ],
+            },
+        ],
+    }
+    dropped = _dedup_pdf_pngs_against_cd_tifs(figures, payload)
+
+    assert dropped == 2
+    # Duplicate PNGs deleted
+    assert not duplicate_a.exists()
+    assert not duplicate_b.exists()
+    # Standalone PNG (no CD match) survives
+    assert standalone.exists()
+    # CD TIFFs untouched
+    assert (figures / "2017_15048.tif").is_file()
+    # First record: duplicate entry removed, sibling non-dup entry preserved
+    figs0 = payload["records"][0]["figures"]
+    assert len(figs0) == 1
+    assert figs0[0]["image_path"] == "figures/2017_15048_p121_1.png"
+    assert figs0[0]["page"] == 121
+    # Second record (no CD match) untouched
+    figs1 = payload["records"][1]["figures"]
+    assert len(figs1) == 1
+    assert figs1[0]["image_path"] == "figures/2099_99999_p1_1.png"
+
+
+def test_resolve_cover_collision_routes_to_filename_folder_on_conflict(tmp_path):
+    """When cover-derived folder already holds pdf_metadata.json from a
+    *different* source PDF, route to the filename-derived PT_ folder
+    AND swap bulletin_no/date to the CD-canonical values from the
+    fallback's cd_metadata.json (so Stage 4 reconcile won't reject the
+    merge as a CD/PDF mismatch). Surfaced by 2024_04.pdf whose cover
+    claims "Sayı 2024-01" but is byte-distinct from 2024_01.pdf."""
+    import json as _json
+    from pdf_extract_patent import _resolve_cover_collision
+
+    out_dir = tmp_path
+    cover_parent = out_dir / "PT_2024_1_2024-01-22"
+    cover_parent.mkdir()
+    (cover_parent / "pdf_metadata.json").write_text(
+        _json.dumps({"source_pdf": "2024_01.pdf", "records": []}),
+        encoding="utf-8",
+    )
+    fallback_parent = out_dir / "PT_2024_4_2024-04-22"
+    fallback_parent.mkdir()
+    (fallback_parent / "cd_metadata.json").write_text(
+        _json.dumps({"bulletin_no": "2024/4", "bulletin_date": "2024-04-22"}),
+        encoding="utf-8",
+    )
+
+    fake_pdf = out_dir / "2024_04.pdf"
+    fake_pdf.write_bytes(b"")
+    folder, no, date = _resolve_cover_collision(
+        cover_parent, fake_pdf, out_dir, "2024-01", "2024-01-22",
+    )
+    assert folder == fallback_parent
+    assert no == "2024/4"
+    assert date == "2024-04-22"
+
+
+def test_resolve_cover_collision_keeps_cover_when_no_conflict(tmp_path):
+    """No prior pdf_metadata.json → return the cover-derived parent
+    and the original bulletin_no/date untouched."""
+    from pdf_extract_patent import _resolve_cover_collision
+    cover_parent = tmp_path / "PT_2025_8_2025-08-21"
+    cover_parent.mkdir()
+    fake_pdf = tmp_path / "2025_08.pdf"
+    fake_pdf.write_bytes(b"")
+    folder, no, date = _resolve_cover_collision(
+        cover_parent, fake_pdf, tmp_path, "2025-08", "2025-08-21",
+    )
+    assert folder == cover_parent
+    assert no == "2025-08"
+    assert date == "2025-08-21"
+
+
+def test_resolve_cover_collision_keeps_cover_when_same_source_pdf(tmp_path):
+    """A re-run on the same PDF (force=True path) should keep the
+    cover-derived folder; not treated as a collision."""
+    import json as _json
+    from pdf_extract_patent import _resolve_cover_collision
+    cover_parent = tmp_path / "PT_2025_8_2025-08-21"
+    cover_parent.mkdir()
+    (cover_parent / "pdf_metadata.json").write_text(
+        _json.dumps({"source_pdf": "2025_08.pdf", "records": []}),
+        encoding="utf-8",
+    )
+    fake_pdf = tmp_path / "2025_08.pdf"
+    fake_pdf.write_bytes(b"")
+    folder, no, date = _resolve_cover_collision(
+        cover_parent, fake_pdf, tmp_path, "2025-08", "2025-08-21",
+    )
+    assert folder == cover_parent
+    assert (no, date) == ("2025-08", "2025-08-21")
+
+
+def test_resolve_cover_collision_keeps_cover_when_no_fallback_folder(tmp_path):
+    """If cover collides but the filename-derived PT_{Y}_{M}_* folder
+    doesn't exist (no Stage 2 run for that bulletin), keep the cover
+    route — better to overwrite than to strand data in a date-less
+    placeholder."""
+    import json as _json
+    from pdf_extract_patent import _resolve_cover_collision
+    cover_parent = tmp_path / "PT_2024_1_2024-01-22"
+    cover_parent.mkdir()
+    (cover_parent / "pdf_metadata.json").write_text(
+        _json.dumps({"source_pdf": "2024_01.pdf", "records": []}),
+        encoding="utf-8",
+    )
+    fake_pdf = tmp_path / "2024_04.pdf"
+    fake_pdf.write_bytes(b"")
+    folder, no, date = _resolve_cover_collision(
+        cover_parent, fake_pdf, tmp_path, "2024-01", "2024-01-22",
+    )
+    assert folder == cover_parent
+    assert (no, date) == ("2024-01", "2024-01-22")
+
+
+def test_dedup_pdf_pngs_returns_zero_when_no_cd_tifs(tmp_path):
+    """No CD TIFFs in the dir → no work, nothing dropped."""
+    figures = tmp_path / "figures"
+    figures.mkdir()
+    (figures / "x_p1_1.png").write_bytes(b"PNG")
+    payload = {"records": []}
+    assert _dedup_pdf_pngs_against_cd_tifs(figures, payload) == 0
+    assert (figures / "x_p1_1.png").is_file()
+
 
 def test_main_returns_nonzero_on_missing_pdf(tmp_path):
     """main() with --pdf pointing at a non-existent file logs a skip
@@ -1677,9 +1864,12 @@ def test_main_real_2025_08_smoke(tmp_path):
 
     Verifies:
       - exit code 0
-      - JSON sidecar lands at out_dir/2025_08_pdf_metadata.json
+      - bulletin parent folder lands at PT_2025_8_2025-08-21/ under out_dir
+      - pdf_metadata.json + bulletin.pdf inside; figures/ skipped due to
+        --no-images
       - sidecar size in megabyte range, valid JSON, expected stats
-      - re-running without --force is a no-op skip (exit 0, JSON unchanged mtime)
+      - re-running without --force is a no-op skip (exit 0, JSON mtime
+        unchanged)
     """
     rc = main([
         "--pdf", str(_REAL_PDF),
@@ -1688,20 +1878,31 @@ def test_main_real_2025_08_smoke(tmp_path):
     ])
     assert rc == 0
 
-    out_file = tmp_path / "2025_08_pdf_metadata.json"
-    assert out_file.is_file()
-    assert out_file.stat().st_size > 1_000_000  # several MB
-    payload = json.loads(out_file.read_text(encoding="utf-8"))
+    parent = tmp_path / "PT_2025_8_2025-08-21"
+    assert parent.is_dir()
+
+    json_path = parent / "pdf_metadata.json"
+    assert json_path.is_file()
+    assert json_path.stat().st_size > 1_000_000  # several MB
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
     assert payload["bulletin_no"] == "2025-08"
     assert payload["stats"]["records"] == 1613
 
+    # bulletin.pdf is a copy of the source
+    bulletin_pdf = parent / "bulletin.pdf"
+    assert bulletin_pdf.is_file()
+    assert bulletin_pdf.stat().st_size == _REAL_PDF.stat().st_size
+
+    # No figures/ subdir because --no-images
+    assert not (parent / "figures").exists()
+
     # Re-run: should skip-if-fresh (exit 0, JSON mtime unchanged)
-    mtime_before = out_file.stat().st_mtime
+    mtime_before = json_path.stat().st_mtime
     rc2 = main([
         "--pdf", str(_REAL_PDF),
         "--out-dir", str(tmp_path),
         "--no-images",
     ])
     assert rc2 == 0
-    mtime_after = out_file.stat().st_mtime
+    mtime_after = json_path.stat().st_mtime
     assert mtime_after == mtime_before  # not re-written

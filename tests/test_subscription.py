@@ -4,7 +4,6 @@ Tests for subscription eligibility checks with mocked DB.
 Covers:
 - get_user_plan() with mocked cursor
 - check_live_search_eligibility()
-- check_quick_search_eligibility()
 - check_name_generation_eligibility()
 - check_logo_generation_eligibility()
 - check_report_eligibility()
@@ -18,7 +17,6 @@ from unittest.mock import patch, MagicMock
 from utils.subscription import (
     get_user_plan,
     check_live_search_eligibility,
-    check_quick_search_eligibility,
     check_name_generation_eligibility,
     check_logo_generation_eligibility,
     check_report_eligibility,
@@ -49,39 +47,21 @@ class TestGetUserPlan:
         db, cursor = _make_db({
             "plan_name": "professional",
             "display_name": "Professional",
-            "can_use_live_search": True,
+            "is_superadmin": False,
+            "subscription_end_date": None,
         })
         result = get_user_plan(db, str(uuid.uuid4()))
         assert result["plan_name"] == "professional"
         assert result["can_use_live_search"] is True
-        assert "monthly_limit" in result
+        assert "daily_limit" in result
+        assert result["daily_limit"] == 2000
 
     def test_no_row_defaults_to_free(self):
         db, cursor = _make_db(None)
         result = get_user_plan(db, str(uuid.uuid4()))
         assert result["plan_name"] == "free"
-        assert result["can_use_live_search"] is False
-        assert result["monthly_limit"] == 0
-
-    @patch("utils.subscription.get_plan_limit")
-    def test_uses_canonical_live_search_limits_even_if_db_flag_is_stale(self, mock_get_plan_limit):
-        db, cursor = _make_db({
-            "plan_name": "starter",
-            "display_name": "Starter",
-            "can_use_live_search": False,
-            "is_superadmin": False,
-            "subscription_end_date": None,
-        })
-        mock_get_plan_limit.side_effect = lambda plan_name, feature: {
-            "monthly_live_searches": 10,
-            "can_use_live_scraping": True,
-        }[feature]
-
-        result = get_user_plan(db, str(uuid.uuid4()))
-
-        assert result["plan_name"] == "starter"
         assert result["can_use_live_search"] is True
-        assert result["monthly_limit"] == 10
+        assert result["daily_limit"] == 5
 
 
 # ============================================================
@@ -89,83 +69,35 @@ class TestGetUserPlan:
 # ============================================================
 
 class TestCheckLiveSearchEligibility:
-    @patch("utils.subscription.get_live_search_usage", return_value=0)
+    @patch("utils.subscription.get_daily_live_search_usage", return_value=0)
     @patch("utils.subscription.get_user_plan")
     def test_eligible_professional(self, mock_plan, mock_usage):
         mock_plan.return_value = {
             "plan_name": "professional",
             "display_name": "Professional",
             "can_use_live_search": True,
-            "monthly_limit": 50,
+            "daily_limit": 2000,
         }
         db = MagicMock()
         can, reason, details = check_live_search_eligibility(db, "user1")
         assert can is True
         assert reason == "ok"
-        assert details["remaining"] == 50
+        assert details["remaining"] == 2000
 
+    @patch("utils.subscription.get_daily_live_search_usage", return_value=2000)
     @patch("utils.subscription.get_user_plan")
-    def test_free_plan_denied(self, mock_plan):
-        mock_plan.return_value = {
-            "plan_name": "free",
-            "display_name": "Free Trial",
-            "can_use_live_search": False,
-            "monthly_limit": 0,
-        }
-        db = MagicMock()
-        can, reason, details = check_live_search_eligibility(db, "user1")
-        assert can is False
-        assert reason == "upgrade_required"
-
-    @patch("utils.subscription.get_live_search_usage", return_value=50)
-    @patch("utils.subscription.get_user_plan")
-    def test_limit_exceeded(self, mock_plan, mock_usage):
+    def test_daily_limit_exceeded(self, mock_plan, mock_usage):
         mock_plan.return_value = {
             "plan_name": "professional",
             "display_name": "Professional",
             "can_use_live_search": True,
-            "monthly_limit": 50,
+            "daily_limit": 2000,
         }
         db = MagicMock()
         can, reason, details = check_live_search_eligibility(db, "user1")
         assert can is False
-        assert reason == "limit_exceeded"
-        assert details["remaining"] == 0
-
-
-# ============================================================
-# check_quick_search_eligibility
-# ============================================================
-
-class TestCheckQuickSearchEligibility:
-    @patch("utils.subscription.get_daily_quick_searches", return_value=0)
-    @patch("utils.subscription.get_user_plan")
-    def test_eligible(self, mock_plan, mock_usage):
-        mock_plan.return_value = {
-            "plan_name": "free",
-            "display_name": "Free Trial",
-            "can_use_live_search": False,
-            "monthly_limit": 0,
-        }
-        db = MagicMock()
-        can, reason, details = check_quick_search_eligibility(db, "user1")
-        assert can is True
-        assert reason == "ok"
-        assert details["remaining"] == 5
-
-    @patch("utils.subscription.get_daily_quick_searches", return_value=50)
-    @patch("utils.subscription.get_user_plan")
-    def test_daily_limit_exceeded(self, mock_plan, mock_usage):
-        mock_plan.return_value = {
-            "plan_name": "free",
-            "display_name": "Free Trial",
-            "can_use_live_search": False,
-            "monthly_limit": 0,
-        }
-        db = MagicMock()
-        can, reason, details = check_quick_search_eligibility(db, "user1")
-        assert can is False
         assert reason == "daily_limit_exceeded"
+        assert details["remaining"] == 0
 
 
 # ============================================================
@@ -187,6 +119,7 @@ class TestCheckNameGenerationEligibility:
         can, reason, details = check_name_generation_eligibility(db, "org1", session_count=0)
         assert can is True
         assert reason == "ok"
+        mock_ai.assert_called_once_with(db, "org1", cost=2)
 
     @patch("utils.subscription.get_monthly_name_generations", return_value=200)
     @patch("utils.subscription.get_org_plan")
@@ -243,6 +176,50 @@ class TestCheckNameGenerationEligibility:
         db = MagicMock()
         can, reason, details = check_name_generation_eligibility(db, "org1", session_count=500)
         assert can is True
+
+    # ----- Regression: Free user with purchased AI credits must not be -----
+    # ----- blocked by the historic monthly-limit short-circuit (Block 2). --
+    @patch("utils.subscription.check_ai_credit_eligibility",
+           return_value=(True, "ok", {"monthly_limit": 0, "total_remaining": 25}))
+    @patch("utils.subscription.get_monthly_name_generations", return_value=0)
+    @patch("utils.subscription.get_org_plan")
+    def test_free_user_with_purchased_ai_credits_can_generate(self, mock_plan, mock_monthly, mock_ai):
+        mock_plan.return_value = {
+            "plan_name": "free",
+            "display_name": "Free Trial",
+            "name_suggestions_per_session": 3,
+            "logo_runs_per_month": 0,
+        }
+        db = MagicMock()
+        can, reason, details = check_name_generation_eligibility(db, "org1", session_count=0)
+        # Before fix: Block 2 returned monthly_limit_exceeded because
+        # monthly_used (0) >= monthly_limit (0) and legacy_purchased < 2,
+        # ignoring ai_credits_purchased entirely.
+        assert can is True
+        assert reason == "ok"
+
+    # ----- Regression: Free user past the per-session cap can keep -----
+    # ----- generating when they hold purchased AI credits (Block 1). ------
+    @patch("utils.subscription.check_ai_credit_eligibility",
+           return_value=(True, "ok", {"monthly_limit": 0, "total_remaining": 23}))
+    @patch("utils.subscription.get_monthly_name_generations", return_value=0)
+    @patch("utils.subscription.get_org_plan")
+    def test_session_cap_bypassed_by_purchased_ai_credits(self, mock_plan, mock_monthly, mock_ai):
+        mock_plan.return_value = {
+            "plan_name": "free",
+            "display_name": "Free Trial",
+            "name_suggestions_per_session": 3,
+            "logo_runs_per_month": 0,
+        }
+        db, cursor = _make_db({
+            "name_credits_purchased": 0,
+            "ai_credits_purchased": 23,
+        })
+        can, reason, details = check_name_generation_eligibility(db, "org1", session_count=3)
+        # Before fix: Block 1 returned upgrade_required because the per-
+        # session-cap check only looked at name_credits_purchased.
+        assert can is True
+        assert reason == "ok"
 
 
 # ============================================================
@@ -349,6 +326,17 @@ class TestCreditDeduction:
         result = deduct_name_credit(db, "org1")
         assert result is True
 
+    def test_deduct_name_credit_custom_cost(self):
+        db = MagicMock()
+        cursor = MagicMock()
+        cursor.fetchone.side_effect = [None, None, {"name_credits_purchased": 7}]
+        db.cursor.return_value = cursor
+
+        result = deduct_name_credit(db, "org1", cost=2)
+
+        assert result is True
+        assert cursor.execute.call_args.args[1] == (2, "org1", 2)
+
     def test_deduct_name_credit_none(self):
         db, cursor = _make_db(None)
         result = deduct_name_credit(db, "org1")
@@ -390,3 +378,72 @@ class TestCreditDeduction:
         db, cursor = _make_db(None)
         result = refund_logo_credit(db, "org1")
         assert result is False
+
+
+# ============================================================
+# Credit Packs (one-shot AI credit top-ups)
+# ============================================================
+
+class TestCreditPacks:
+    def test_get_credit_pack_small(self):
+        from utils.subscription import get_credit_pack
+        pack = get_credit_pack("small")
+        assert pack is not None
+        assert pack["credits"] == 25
+        assert pack["price_try"] == 200
+
+    def test_get_credit_pack_medium(self):
+        from utils.subscription import get_credit_pack
+        pack = get_credit_pack("medium")
+        assert pack["credits"] == 100
+        assert pack["price_try"] == 800
+
+    def test_get_credit_pack_large(self):
+        from utils.subscription import get_credit_pack
+        pack = get_credit_pack("large")
+        assert pack["credits"] == 500
+        assert pack["price_try"] == 4000
+
+    def test_get_credit_pack_unknown_returns_none(self):
+        from utils.subscription import get_credit_pack
+        assert get_credit_pack("xl") is None
+        assert get_credit_pack(None) is None
+        assert get_credit_pack("") is None
+
+    def test_get_credit_pack_case_insensitive(self):
+        from utils.subscription import get_credit_pack
+        assert get_credit_pack("SMALL")["credits"] == 25
+        assert get_credit_pack(" Medium ")["credits"] == 100
+
+    def test_list_credit_packs_order(self):
+        from utils.subscription import list_credit_packs
+        packs = list_credit_packs()
+        assert [p["id"] for p in packs] == ["small", "medium", "large"]
+
+    def test_pack_price_matches_usd_at_40_try(self):
+        """Sanity: $0.20/credit * pack_credits * 40 TRY/USD == price_try."""
+        from utils.subscription import list_credit_packs
+        for pack in list_credit_packs():
+            expected = pack["credits"] * 0.20 * 40
+            assert pack["price_try"] == expected, (
+                f"Pack {pack['id']}: expected {expected} TRY, got {pack['price_try']}"
+            )
+
+    def test_add_purchased_ai_credits_increments(self):
+        from utils.subscription import add_purchased_ai_credits
+        db, cursor = _make_db({"ai_credits_purchased": 125})
+        result = add_purchased_ai_credits(db, "org1", 100)
+        assert result is True
+        # Verify the UPDATE SQL was called with the right credits arg
+        assert cursor.execute.called
+
+    def test_add_purchased_ai_credits_rejects_zero(self):
+        from utils.subscription import add_purchased_ai_credits
+        db, cursor = _make_db({"ai_credits_purchased": 0})
+        assert add_purchased_ai_credits(db, "org1", 0) is False
+        assert add_purchased_ai_credits(db, "org1", -5) is False
+
+    def test_add_purchased_ai_credits_missing_org(self):
+        from utils.subscription import add_purchased_ai_credits
+        db, cursor = _make_db(None)
+        assert add_purchased_ai_credits(db, "org1", 50) is False

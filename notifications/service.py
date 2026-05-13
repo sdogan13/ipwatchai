@@ -557,6 +557,332 @@ View details at: {settings.app_name}/alerts/{alert['id']}
         
         return self.send_email(to_email, subject, html_body)
 
+    def send_patent_digest(
+        self,
+        to_email: str,
+        user_name: str,
+        alerts: List[Dict],
+        period: str = "daily",
+        lang: str = "tr",
+    ) -> bool:
+        """Send daily/weekly digest of patent alerts.
+
+        Sister to send_daily_digest (which is trademark-specific). Renders
+        a patent-shaped alerts table with publication_no, title, holder,
+        severity, score, and watch label. Re-uses the same SMTP plumbing.
+        """
+        if not alerts:
+            return True
+
+        critical = sum(1 for a in alerts if a.get("severity") == "critical")
+        high = sum(1 for a in alerts if a.get("severity") == "high")
+
+        # Localized subject + headings
+        is_tr = lang == "tr"
+        subject_word = "Patent Bildirim Özeti" if is_tr else "Patent Alert Digest"
+        new_word = "yeni uyarı" if is_tr else "new alert(s)"
+        critical_word = "Kritik" if is_tr else "Critical"
+        period_phrase = (
+            ("son gün" if period == "daily" else "son hafta") if is_tr
+            else ("the past day" if period == "daily" else "the past week")
+        )
+        col_watch = "Takip" if is_tr else "Watchlist"
+        col_conflict = "Çakışan Patent" if is_tr else "Conflict"
+        col_holder = "Hak Sahibi" if is_tr else "Holder"
+        col_score = "Skor" if is_tr else "Score"
+        col_severity = "Önem" if is_tr else "Severity"
+        cta_text = "Tüm Uyarıları Gör" if is_tr else "View All Alerts"
+
+        subject = f"📄 {subject_word}: {len(alerts)} {new_word}"
+        if critical:
+            subject = f"🔴 {critical} {critical_word} - {subject}"
+
+        rows = ""
+        for a in alerts[:20]:
+            sev = a.get("severity", "low")
+            color = {
+                "critical": "#dc3545", "high": "#fd7e14",
+                "medium": "#ffc107", "low": "#28a745",
+            }.get(sev, "#6c757d")
+            score = a.get("overall_similarity_score") or 0
+            try:
+                score_pct = f"{float(score) * 100:.0f}%"
+            except (TypeError, ValueError):
+                score_pct = "—"
+            pub = a.get("conflicting_publication_no") or a.get("conflicting_application_no") or ""
+            title = a.get("conflicting_title") or "—"
+            holder = a.get("conflicting_holder_name") or "—"
+            watch_label = a.get("watchlist_label") or a.get("watchlist_item_label") or "—"
+            rows += f"""
+            <tr>
+                <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: 500;">
+                    {watch_label}
+                </td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">
+                    <div style="font-weight: 500;">{title[:80]}</div>
+                    <div style="font-family: monospace; font-size: 11px; color: #6c757d;">{pub}</div>
+                </td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee; font-size: 12px;">
+                    {holder[:40]}
+                </td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee; font-family: monospace;">
+                    {score_pct}
+                </td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">
+                    <span style="background: {color}; color: white;
+                                 padding: 2px 8px; border-radius: 4px; font-size: 12px;">
+                        {sev.upper()}
+                    </span>
+                </td>
+            </tr>
+            """
+
+        truncated_note = ""
+        if len(alerts) > 20:
+            truncated_note = (
+                f'<p style="color: #666;">İlk 20 uyarı gösteriliyor (toplam {len(alerts)}).</p>'
+                if is_tr
+                else f'<p style="color: #666;">Showing first 20 of {len(alerts)} alerts.</p>'
+            )
+
+        period_title = ("Günlük" if period == "daily" else "Haftalık") if is_tr \
+            else period.title()
+        hi = "Merhaba" if is_tr else "Hi"
+        intro = (
+            f"Geçtiğimiz {period_phrase} oluşan patent uyarılarınızın özeti:"
+            if is_tr
+            else f"Here's a summary of patent alerts from {period_phrase}:"
+        )
+
+        html_body = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto;">
+            <div style="background: #f8f9fa; padding: 20px; border-radius: 8px;">
+                <h2 style="color: #333;">{period_title} {subject_word}</h2>
+                <p>{hi} {user_name},</p>
+                <p>{intro}</p>
+
+                <div style="background: white; padding: 15px; border-radius: 4px; margin: 20px 0;">
+                    <p>
+                        <strong>{'Toplam' if is_tr else 'Total'}:</strong> {len(alerts)}<br>
+                        <strong>{critical_word}:</strong> {critical}<br>
+                        <strong>{'Yüksek' if is_tr else 'High'}:</strong> {high}
+                    </p>
+                </div>
+
+                <table style="width: 100%; border-collapse: collapse; background: white;">
+                    <thead>
+                        <tr style="background: #f1f1f1;">
+                            <th style="padding: 10px; text-align: left;">{col_watch}</th>
+                            <th style="padding: 10px; text-align: left;">{col_conflict}</th>
+                            <th style="padding: 10px; text-align: left;">{col_holder}</th>
+                            <th style="padding: 10px; text-align: left;">{col_score}</th>
+                            <th style="padding: 10px; text-align: left;">{col_severity}</th>
+                        </tr>
+                    </thead>
+                    <tbody>{rows}</tbody>
+                </table>
+
+                {truncated_note}
+
+                <p style="margin-top: 20px;">
+                    <a href="https://ipwatchai.com/dashboard?tab=watchlist"
+                       style="background: #007bff; color: white; padding: 10px 20px;
+                              text-decoration: none; border-radius: 4px;">
+                        {cta_text}
+                    </a>
+                </p>
+
+                <p style="font-size: 11px; color: #6c757d; margin-top: 24px;">
+                    &copy; 2026 IP Watch AI &mdash; ipwatchai.com
+                </p>
+            </div>
+        </body>
+        </html>
+        """
+        return self.send_email(to_email, subject, html_body)
+
+    # ---------------------------------------------------------------
+    # Coğrafi İşaret digest — sister to send_patent_digest. Renders a
+    # cografi-shaped alerts table with name, region, gi_type, watch
+    # label, severity, score. Re-uses the same SMTP plumbing.
+    # ---------------------------------------------------------------
+
+    def send_cografi_digest(
+        self,
+        to_email: str,
+        user_name: str,
+        alerts: List[Dict],
+        period: str = "daily",
+        lang: str = "tr",
+    ) -> bool:
+        """Send daily/weekly digest of cografi alerts.
+
+        Cografi watches have four ``watch_type`` values (holder /
+        reference / region / lifecycle); the digest surfaces one
+        column ("Eşleşme") that summarises whichever signal is
+        primary for that match (region for region/lifecycle watches,
+        holder name for holder watches, reference label for reference
+        watches). The bulletin no + date stay in their own column for
+        date-driven triage.
+        """
+        if not alerts:
+            return True
+
+        critical = sum(1 for a in alerts if a.get("severity") == "critical")
+        high = sum(1 for a in alerts if a.get("severity") == "high")
+
+        is_tr = lang == "tr"
+        subject_word = "Coğrafi İşaret Bildirim Özeti" if is_tr else "Cografi GI Alert Digest"
+        new_word = "yeni uyarı" if is_tr else "new alert(s)"
+        critical_word = "Kritik" if is_tr else "Critical"
+        period_phrase = (
+            ("son gün" if period == "daily" else "son hafta") if is_tr
+            else ("the past day" if period == "daily" else "the past week")
+        )
+        col_watch = "Takip" if is_tr else "Watchlist"
+        col_record = "Coğrafi İşaret" if is_tr else "Geographical Indication"
+        col_match = "Eşleşme" if is_tr else "Match"
+        col_score = "Skor" if is_tr else "Score"
+        col_severity = "Önem" if is_tr else "Severity"
+        cta_text = "Tüm Uyarıları Gör" if is_tr else "View All Alerts"
+
+        subject = f"🌐 {subject_word}: {len(alerts)} {new_word}"
+        if critical:
+            subject = f"🔴 {critical} {critical_word} - {subject}"
+
+        rows = ""
+        for a in alerts[:20]:
+            sev = a.get("severity", "low")
+            color = {
+                "critical": "#dc3545", "high": "#fd7e14",
+                "medium": "#ffc107", "low": "#28a745",
+            }.get(sev, "#6c757d")
+            score = a.get("overall_similarity_score") or 0
+            try:
+                score_pct = f"{float(score) * 100:.0f}%"
+            except (TypeError, ValueError):
+                score_pct = "—"
+            name = a.get("conflicting_name") or "—"
+            region = a.get("conflicting_geographical_boundary") or "—"
+            gi_type = a.get("conflicting_gi_type") or "—"
+            match_type = a.get("match_type") or ""
+            watch_label = a.get("watchlist_label") or a.get("watchlist_item_label") or "—"
+            # Match column: prioritises the most informative per-watch_type
+            # signal so users can scan the digest quickly.
+            if match_type == "holder":
+                match_summary = a.get("watchlist_holder_name") or "—"
+            elif match_type.startswith("lifecycle"):
+                reg = a.get("conflicting_existing_registration_no") \
+                    or a.get("conflicting_registration_no")
+                match_summary = (
+                    f"{'Tescil' if is_tr else 'Reg'} #{reg}"
+                    if reg else (match_type.replace("lifecycle_", "").title())
+                )
+            elif match_type == "region":
+                match_summary = region
+            else:
+                match_summary = ("Benzerlik" if is_tr else "Similarity")
+            bulletin_no = a.get("conflicting_bulletin_no")
+            bulletin_date = a.get("conflicting_bulletin_date")
+            bulletin_iso = (
+                bulletin_date.isoformat() if hasattr(bulletin_date, "isoformat")
+                else (bulletin_date or "")
+            )
+            rows += f"""
+            <tr>
+                <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: 500;">
+                    {watch_label}
+                </td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">
+                    <div style="font-weight: 500;">{name[:80]}</div>
+                    <div style="font-size: 11px; color: #6c757d;">
+                        {gi_type} &middot; {region[:60]}
+                    </div>
+                    <div style="font-family: monospace; font-size: 11px; color: #6c757d;">
+                        {('Bülten' if is_tr else 'Bulletin')} #{bulletin_no or '—'} &middot; {bulletin_iso}
+                    </div>
+                </td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee; font-size: 12px;">
+                    {match_summary[:60] if isinstance(match_summary, str) else match_summary}
+                </td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee; font-family: monospace;">
+                    {score_pct}
+                </td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">
+                    <span style="background: {color}; color: white;
+                                 padding: 2px 8px; border-radius: 4px; font-size: 12px;">
+                        {sev.upper()}
+                    </span>
+                </td>
+            </tr>
+            """
+
+        truncated_note = ""
+        if len(alerts) > 20:
+            truncated_note = (
+                f'<p style="color: #666;">İlk 20 uyarı gösteriliyor (toplam {len(alerts)}).</p>'
+                if is_tr
+                else f'<p style="color: #666;">Showing first 20 of {len(alerts)} alerts.</p>'
+            )
+
+        period_title = ("Günlük" if period == "daily" else "Haftalık") if is_tr \
+            else period.title()
+        hi = "Merhaba" if is_tr else "Hi"
+        intro = (
+            f"Geçtiğimiz {period_phrase} oluşan coğrafi işaret uyarılarınızın özeti:"
+            if is_tr
+            else f"Here's a summary of cografi GI alerts from {period_phrase}:"
+        )
+
+        html_body = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto;">
+            <div style="background: #f8f9fa; padding: 20px; border-radius: 8px;">
+                <h2 style="color: #333;">{period_title} {subject_word}</h2>
+                <p>{hi} {user_name},</p>
+                <p>{intro}</p>
+
+                <div style="background: white; padding: 15px; border-radius: 4px; margin: 20px 0;">
+                    <p>
+                        <strong>{'Toplam' if is_tr else 'Total'}:</strong> {len(alerts)}<br>
+                        <strong>{critical_word}:</strong> {critical}<br>
+                        <strong>{'Yüksek' if is_tr else 'High'}:</strong> {high}
+                    </p>
+                </div>
+
+                <table style="width: 100%; border-collapse: collapse; background: white;">
+                    <thead>
+                        <tr style="background: #f1f1f1;">
+                            <th style="padding: 10px; text-align: left;">{col_watch}</th>
+                            <th style="padding: 10px; text-align: left;">{col_record}</th>
+                            <th style="padding: 10px; text-align: left;">{col_match}</th>
+                            <th style="padding: 10px; text-align: left;">{col_score}</th>
+                            <th style="padding: 10px; text-align: left;">{col_severity}</th>
+                        </tr>
+                    </thead>
+                    <tbody>{rows}</tbody>
+                </table>
+
+                {truncated_note}
+
+                <p style="margin-top: 20px;">
+                    <a href="https://ipwatchai.com/dashboard?tab=watchlist&registry=cografi"
+                       style="background: #007bff; color: white; padding: 10px 20px;
+                              text-decoration: none; border-radius: 4px;">
+                        {cta_text}
+                    </a>
+                </p>
+
+                <p style="font-size: 11px; color: #6c757d; margin-top: 24px;">
+                    &copy; 2026 IP Watch AI &mdash; ipwatchai.com
+                </p>
+            </div>
+        </body>
+        </html>
+        """
+        return self.send_email(to_email, subject, html_body)
+
 
 class WebhookService:
     """Webhook notification service"""
@@ -625,7 +951,179 @@ class WebhookService:
                 }
             }
         }
-        
+
+        return WebhookService.send_webhook(url, payload)
+
+    @staticmethod
+    def send_patent_alert_webhook(
+        url: str,
+        alert: Dict,
+        watchlist_item: Dict,
+    ) -> bool:
+        """Send a patent alert via webhook.
+
+        Payload shape mirrors send_alert_webhook (trademark) but uses
+        patent-specific fields. ``alert`` is a row from patent_alerts_mt
+        (joined with patent_watchlist_mt for the watch context);
+        ``watchlist_item`` carries the watch_type + identity (holder
+        name/id/tpe OR reference).
+        """
+        watch_type = watchlist_item.get("watch_type") or "holder"
+        watched: Dict = {
+            "watch_type": watch_type,
+            "label": watchlist_item.get("label"),
+        }
+        if watch_type == "holder":
+            watched["holder"] = {
+                "name": watchlist_item.get("holder_name"),
+                "id": str(watchlist_item["holder_id"]) if watchlist_item.get("holder_id") else None,
+                "tpe_client_id": watchlist_item.get("holder_tpe_client_id"),
+            }
+        else:
+            watched["reference"] = {
+                "patent_id": (
+                    str(watchlist_item["reference_patent_id"])
+                    if watchlist_item.get("reference_patent_id") else None
+                ),
+                "query": watchlist_item.get("reference_query"),
+            }
+        if watchlist_item.get("ipc_classes"):
+            watched["ipc_classes"] = list(watchlist_item["ipc_classes"])
+
+        bd = alert.get("bulletin_date")
+        bd_iso = bd.isoformat() if hasattr(bd, "isoformat") else (bd if bd else None)
+
+        payload = {
+            "event": "patent.alert.new",
+            "timestamp": datetime.utcnow().isoformat(),
+            "data": {
+                "alert_id": str(alert["id"]),
+                "severity": alert.get("severity"),
+                "status": alert.get("status"),
+                "similarity_score": float(alert.get("overall_similarity_score") or 0.0),
+                "match_type": alert.get("match_type"),
+                "watched": watched,
+                "conflicting_patent": {
+                    "patent_id": (
+                        str(alert["conflicting_patent_id"])
+                        if alert.get("conflicting_patent_id") else None
+                    ),
+                    "application_no": alert.get("conflicting_application_no"),
+                    "publication_no": alert.get("conflicting_publication_no"),
+                    "kind_code": alert.get("conflicting_kind_code"),
+                    "title": alert.get("conflicting_title"),
+                    "ipc_classes": list(alert.get("conflicting_ipc_classes") or []),
+                    "holder": {
+                        "name": alert.get("conflicting_holder_name"),
+                        "country": alert.get("conflicting_holder_country"),
+                    },
+                    "bulletin": {
+                        "no": alert.get("conflicting_bulletin_no"),
+                        "date": bd_iso,
+                    },
+                },
+                "scores": {
+                    "text_similarity": alert.get("text_similarity_score"),
+                    "embedding_similarity": alert.get("embedding_similarity_score"),
+                },
+                "overlapping_ipc_classes": list(alert.get("overlapping_ipc_classes") or []),
+            },
+        }
+        return WebhookService.send_webhook(url, payload)
+
+    @staticmethod
+    def send_cografi_alert_webhook(
+        url: str,
+        alert: Dict,
+        watchlist_item: Dict,
+    ) -> bool:
+        """Send a cografi alert via webhook.
+
+        Payload mirrors send_patent_alert_webhook but uses cografi-
+        specific fields. The ``watched`` discriminator captures all four
+        watch_types (holder / reference / region / lifecycle), so an
+        integrator can branch on ``data.watched.watch_type`` rather
+        than parsing free-text labels.
+        """
+        watch_type = watchlist_item.get("watch_type") or "holder"
+        watched: Dict = {
+            "watch_type": watch_type,
+            "label": watchlist_item.get("label"),
+        }
+        if watch_type == "holder":
+            watched["holder"] = {
+                "name": watchlist_item.get("holder_name"),
+                "id": (
+                    str(watchlist_item["holder_id"])
+                    if watchlist_item.get("holder_id") else None
+                ),
+                "tpe_client_id": watchlist_item.get("holder_tpe_client_id"),
+            }
+        elif watch_type == "reference":
+            watched["reference"] = {
+                "record_id": (
+                    str(watchlist_item["reference_record_id"])
+                    if watchlist_item.get("reference_record_id") else None
+                ),
+                "query": watchlist_item.get("reference_query"),
+            }
+        elif watch_type == "region":
+            watched["region"] = {
+                "query": watchlist_item.get("region_query"),
+                "terms": list(watchlist_item.get("region_terms") or []),
+            }
+        elif watch_type == "lifecycle":
+            watched["registration_no"] = watchlist_item.get("lifecycle_registration_no")
+        if watchlist_item.get("section_keys"):
+            watched["section_keys"] = list(watchlist_item["section_keys"])
+        if watchlist_item.get("gi_type"):
+            watched["gi_type"] = watchlist_item["gi_type"]
+
+        bd = alert.get("bulletin_date") or alert.get("conflicting_bulletin_date")
+        bd_iso = bd.isoformat() if hasattr(bd, "isoformat") else (bd if bd else None)
+        ad = alert.get("conflicting_application_date")
+        ad_iso = ad.isoformat() if hasattr(ad, "isoformat") else (ad if ad else None)
+        rd = alert.get("conflicting_registration_date")
+        rd_iso = rd.isoformat() if hasattr(rd, "isoformat") else (rd if rd else None)
+
+        payload = {
+            "event": "cografi.alert.new",
+            "timestamp": datetime.utcnow().isoformat(),
+            "data": {
+                "alert_id": str(alert["id"]),
+                "severity": alert.get("severity"),
+                "status": alert.get("status"),
+                "similarity_score": float(alert.get("overall_similarity_score") or 0.0),
+                "match_type": alert.get("match_type"),
+                "watched": watched,
+                "conflicting_record": {
+                    "record_id": (
+                        str(alert["conflicting_record_id"])
+                        if alert.get("conflicting_record_id") else None
+                    ),
+                    "section_key": alert.get("conflicting_section_key"),
+                    "record_type": alert.get("conflicting_record_type"),
+                    "name": alert.get("conflicting_name"),
+                    "application_no": alert.get("conflicting_application_no"),
+                    "registration_no": alert.get("conflicting_registration_no"),
+                    "existing_registration_no": alert.get("conflicting_existing_registration_no"),
+                    "gi_type": alert.get("conflicting_gi_type"),
+                    "geographical_boundary": alert.get("conflicting_geographical_boundary"),
+                    "bulletin": {
+                        "no": alert.get("conflicting_bulletin_no"),
+                        "date": bd_iso,
+                    },
+                    "application_date": ad_iso,
+                    "registration_date": rd_iso,
+                },
+                "scores": {
+                    "text_similarity": alert.get("text_similarity_score"),
+                    "embedding_similarity": alert.get("embedding_similarity_score"),
+                    "region_similarity": alert.get("region_similarity_score"),
+                },
+                "overlapping_section_keys": list(alert.get("overlapping_section_keys") or []),
+            },
+        }
         return WebhookService.send_webhook(url, payload)
 
 
@@ -763,22 +1261,428 @@ class NotificationWorker:
         
         logger.info("Weekly digest processing complete")
     
+    # ---------------------------------------------------------------
+    # Patent digests — sister to the trademark digests above.
+    # Joins patent_alerts_mt with patent_watchlist_mt + users, groups
+    # by user, sends a patent-shaped digest, and marks email_sent.
+    # ---------------------------------------------------------------
+
+    def _patent_digest_query(self, *, frequency: str, since_interval: str) -> str:
+        """SQL for a digest run. Selects (user, organization, alert_ids,
+        alert_payload) rows for users who have unsent patent alerts of
+        the given frequency in the given window.
+
+        Pulls the alert payload denormalized into a single SELECT so we
+        don't N+1 by alert_id (the patent_alerts_mt table already has
+        every field the email needs)."""
+        return f"""
+            SELECT
+                u.id           AS user_id,
+                u.email        AS email,
+                u.first_name   AS first_name,
+                u.preferred_language AS lang,
+                w.organization_id AS organization_id,
+                w.label        AS watchlist_label,
+                a.id           AS alert_id,
+                a.severity, a.overall_similarity_score,
+                a.conflicting_publication_no, a.conflicting_application_no,
+                a.conflicting_title, a.conflicting_holder_name,
+                a.conflicting_kind_code, a.conflicting_bulletin_no,
+                a.conflicting_bulletin_date,
+                a.created_at
+            FROM patent_alerts_mt a
+            JOIN patent_watchlist_mt w ON a.watchlist_item_id = w.id
+            JOIN users u ON w.user_id = u.id
+            WHERE a.created_at > NOW() - INTERVAL '{since_interval}'
+              AND a.email_sent = FALSE
+              AND w.alert_email = TRUE
+              AND w.alert_frequency = %s
+            ORDER BY u.id, a.severity DESC, a.overall_similarity_score DESC NULLS LAST, a.created_at DESC
+        """
+
+    def _process_patent_digest(self, *, frequency: str, since_interval: str, period_label: str):
+        """Shared digest implementation for daily/weekly patent runs."""
+        logger.info("Processing patent %s digest...", period_label)
+
+        cur = self.db.cursor()
+        cur.execute(self._patent_digest_query(
+            frequency=frequency, since_interval=since_interval,
+        ), (frequency,))
+        rows = cur.fetchall()
+        if not rows:
+            logger.info("Patent %s digest: nothing to send", period_label)
+            return
+
+        # Group by user
+        from collections import defaultdict
+        by_user: dict = defaultdict(list)
+        for row in rows:
+            by_user[row["user_id"]].append(row)
+
+        sent_count = 0
+        failed_count = 0
+        marked_count = 0
+        for user_id, user_alerts in by_user.items():
+            row0 = user_alerts[0]
+            email = row0["email"]
+            name = row0["first_name"] or "User"
+            lang = (row0.get("lang") or "tr") if isinstance(row0, dict) else "tr"
+            try:
+                ok = self.email_service.send_patent_digest(
+                    to_email=email,
+                    user_name=name,
+                    alerts=[dict(r) for r in user_alerts],
+                    period=period_label,
+                    lang=lang if lang in ("tr", "en") else "tr",
+                )
+                if ok:
+                    sent_count += 1
+                    # Mark each alert as email_sent
+                    cur.execute(
+                        "UPDATE patent_alerts_mt SET email_sent = TRUE, email_sent_at = NOW() "
+                        "WHERE id = ANY(%s::uuid[])",
+                        ([str(a["alert_id"]) for a in user_alerts],),
+                    )
+                    marked_count += len(user_alerts)
+                else:
+                    failed_count += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Patent %s digest failed for %s: %r",
+                                 period_label, email, exc)
+                failed_count += 1
+        self.db.commit()
+
+        logger.info(
+            "Patent %s digest: sent=%d failed=%d marked_alerts=%d",
+            period_label, sent_count, failed_count, marked_count,
+        )
+
+    def process_patent_immediate_webhooks(self, *, max_per_run: int = 200):
+        """Send pending patent alert webhooks.
+
+        Selects unsent alerts whose watchlist has alert_webhook=TRUE +
+        webhook_url set, fires one HTTPS POST per alert via
+        WebhookService.send_patent_alert_webhook, marks webhook_sent=
+        TRUE on success. Failures are logged but never break the loop;
+        the alert stays unsent so the next run retries.
+
+        ``max_per_run`` caps the batch so a misconfigured user with a
+        flood of alerts can't monopolize the worker.
+        """
+        logger.info("Processing patent webhooks...")
+
+        cur = self.db.cursor()
+        cur.execute("""
+            SELECT
+                a.id, a.severity, a.status, a.overall_similarity_score,
+                a.text_similarity_score, a.embedding_similarity_score,
+                a.match_type,
+                a.conflicting_patent_id, a.conflicting_application_no,
+                a.conflicting_publication_no, a.conflicting_kind_code,
+                a.conflicting_title, a.conflicting_ipc_classes,
+                a.conflicting_holder_name, a.conflicting_holder_country,
+                a.conflicting_bulletin_no, a.bulletin_date_alias,
+                a.overlapping_ipc_classes,
+                w.id AS watchlist_item_id, w.watch_type, w.label,
+                w.holder_name, w.holder_id, w.holder_tpe_client_id,
+                w.reference_patent_id, w.reference_query, w.ipc_classes,
+                w.webhook_url
+            FROM (
+                SELECT
+                    a.*,
+                    a.conflicting_bulletin_date AS bulletin_date_alias
+                FROM patent_alerts_mt a
+                WHERE a.webhook_sent = FALSE
+            ) a
+            JOIN patent_watchlist_mt w ON a.watchlist_item_id = w.id
+            WHERE w.is_active = TRUE
+              AND w.alert_webhook = TRUE
+              AND w.webhook_url IS NOT NULL
+              AND w.webhook_url <> ''
+            ORDER BY a.severity DESC, a.overall_similarity_score DESC NULLS LAST,
+                     a.created_at ASC
+            LIMIT %s
+        """, (max_per_run,))
+
+        rows = cur.fetchall()
+        if not rows:
+            logger.info("Patent webhooks: nothing to send")
+            return
+
+        sent = 0
+        failed = 0
+        for row in rows:
+            row_d = dict(row)
+            url = row_d.get("webhook_url")
+            if not url:
+                continue
+            # Reshape: alert and watchlist halves for the payload builder
+            alert_d = dict(row_d)
+            alert_d["bulletin_date"] = row_d.get("bulletin_date_alias")
+            wl_d = {
+                "watch_type": row_d.get("watch_type"),
+                "label": row_d.get("label"),
+                "holder_name": row_d.get("holder_name"),
+                "holder_id": row_d.get("holder_id"),
+                "holder_tpe_client_id": row_d.get("holder_tpe_client_id"),
+                "reference_patent_id": row_d.get("reference_patent_id"),
+                "reference_query": row_d.get("reference_query"),
+                "ipc_classes": row_d.get("ipc_classes"),
+            }
+            try:
+                ok = WebhookService.send_patent_alert_webhook(url, alert_d, wl_d)
+            except Exception:
+                logger.exception("Webhook send raised for alert %s", row_d.get("id"))
+                ok = False
+            if ok:
+                cur.execute(
+                    "UPDATE patent_alerts_mt SET webhook_sent = TRUE, webhook_sent_at = NOW() "
+                    "WHERE id = %s",
+                    (str(row_d["id"]),),
+                )
+                sent += 1
+            else:
+                failed += 1
+        self.db.commit()
+        logger.info("Patent webhooks: sent=%d failed=%d (will retry next run)",
+                    sent, failed)
+
+    def process_patent_daily_digest(self):
+        self._process_patent_digest(
+            frequency="daily", since_interval="24 hours", period_label="daily",
+        )
+
+    def process_patent_weekly_digest(self):
+        self._process_patent_digest(
+            frequency="weekly", since_interval="7 days", period_label="weekly",
+        )
+
+    # ---------------------------------------------------------------
+    # Coğrafi İşaret digests — sister to the patent digests above.
+    # Joins cografi_alerts_mt with cografi_watchlist_mt + users,
+    # groups by user, sends a cografi-shaped digest, and marks
+    # email_sent.
+    # ---------------------------------------------------------------
+
+    def _cografi_digest_query(self, *, frequency: str, since_interval: str) -> str:
+        """SQL for a cografi digest run.
+
+        Pulls the alert payload denormalised into a single SELECT so we
+        don't N+1 by alert_id (the cografi_alerts_mt table already has
+        every field the email needs). watchlist_label + watchlist_holder_name
+        come from a join so the email's "Eşleşme" column can show the
+        right per-watch_type signal.
+        """
+        return f"""
+            SELECT
+                u.id           AS user_id,
+                u.email        AS email,
+                u.first_name   AS first_name,
+                u.preferred_language AS lang,
+                w.organization_id AS organization_id,
+                w.label        AS watchlist_label,
+                w.watch_type   AS watchlist_watch_type,
+                w.holder_name  AS watchlist_holder_name,
+                a.id           AS alert_id,
+                a.severity, a.overall_similarity_score, a.match_type,
+                a.conflicting_name, a.conflicting_application_no,
+                a.conflicting_registration_no,
+                a.conflicting_existing_registration_no,
+                a.conflicting_gi_type, a.conflicting_geographical_boundary,
+                a.conflicting_section_key, a.conflicting_record_type,
+                a.conflicting_bulletin_no, a.conflicting_bulletin_date,
+                a.created_at
+            FROM cografi_alerts_mt a
+            JOIN cografi_watchlist_mt w ON a.watchlist_item_id = w.id
+            JOIN users u ON w.user_id = u.id
+            WHERE a.created_at > NOW() - INTERVAL '{since_interval}'
+              AND a.email_sent = FALSE
+              AND w.alert_email = TRUE
+              AND w.alert_frequency = %s
+            ORDER BY u.id, a.severity DESC, a.overall_similarity_score DESC NULLS LAST,
+                     a.created_at DESC
+        """
+
+    def _process_cografi_digest(self, *, frequency: str, since_interval: str, period_label: str):
+        """Shared digest implementation for daily/weekly cografi runs."""
+        logger.info("Processing cografi %s digest...", period_label)
+
+        cur = self.db.cursor()
+        cur.execute(self._cografi_digest_query(
+            frequency=frequency, since_interval=since_interval,
+        ), (frequency,))
+        rows = cur.fetchall()
+        if not rows:
+            logger.info("Cografi %s digest: nothing to send", period_label)
+            return
+
+        from collections import defaultdict
+        by_user: dict = defaultdict(list)
+        for row in rows:
+            by_user[row["user_id"]].append(row)
+
+        sent_count = 0
+        failed_count = 0
+        marked_count = 0
+        for user_id, user_alerts in by_user.items():
+            row0 = user_alerts[0]
+            email = row0["email"]
+            name = row0["first_name"] or "User"
+            lang = (row0.get("lang") or "tr") if isinstance(row0, dict) else "tr"
+            try:
+                ok = self.email_service.send_cografi_digest(
+                    to_email=email,
+                    user_name=name,
+                    alerts=[dict(r) for r in user_alerts],
+                    period=period_label,
+                    lang=lang if lang in ("tr", "en") else "tr",
+                )
+                if ok:
+                    sent_count += 1
+                    cur.execute(
+                        "UPDATE cografi_alerts_mt SET email_sent = TRUE, email_sent_at = NOW() "
+                        "WHERE id = ANY(%s::uuid[])",
+                        ([str(a["alert_id"]) for a in user_alerts],),
+                    )
+                    marked_count += len(user_alerts)
+                else:
+                    failed_count += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Cografi %s digest failed for %s: %r",
+                                 period_label, email, exc)
+                failed_count += 1
+        self.db.commit()
+
+        logger.info(
+            "Cografi %s digest: sent=%d failed=%d marked_alerts=%d",
+            period_label, sent_count, failed_count, marked_count,
+        )
+
+    def process_cografi_immediate_webhooks(self, *, max_per_run: int = 200):
+        """Send pending cografi alert webhooks.
+
+        Sister to ``process_patent_immediate_webhooks``. Selects unsent
+        alerts whose watchlist has alert_webhook=TRUE + webhook_url
+        set, fires one HTTPS POST per alert via
+        WebhookService.send_cografi_alert_webhook, marks
+        webhook_sent=TRUE on success. Failures are logged but never
+        break the loop; the alert stays unsent so the next run retries.
+        """
+        logger.info("Processing cografi webhooks...")
+
+        cur = self.db.cursor()
+        cur.execute("""
+            SELECT
+                a.id, a.severity, a.status, a.overall_similarity_score,
+                a.text_similarity_score, a.embedding_similarity_score,
+                a.region_similarity_score, a.match_type,
+                a.conflicting_record_id, a.conflicting_section_key, a.conflicting_record_type,
+                a.conflicting_application_no, a.conflicting_registration_no,
+                a.conflicting_existing_registration_no, a.conflicting_name,
+                a.conflicting_gi_type, a.conflicting_geographical_boundary,
+                a.conflicting_bulletin_no, a.conflicting_bulletin_date,
+                a.conflicting_application_date, a.conflicting_registration_date,
+                a.overlapping_section_keys,
+                w.id AS watchlist_item_id, w.watch_type, w.label,
+                w.holder_name, w.holder_id, w.holder_tpe_client_id,
+                w.reference_record_id, w.reference_query,
+                w.region_query, w.region_terms,
+                w.lifecycle_registration_no,
+                w.section_keys, w.gi_type,
+                w.webhook_url
+            FROM cografi_alerts_mt a
+            JOIN cografi_watchlist_mt w ON a.watchlist_item_id = w.id
+            WHERE a.webhook_sent = FALSE
+              AND w.is_active = TRUE
+              AND w.alert_webhook = TRUE
+              AND w.webhook_url IS NOT NULL
+              AND w.webhook_url <> ''
+            ORDER BY a.severity DESC, a.overall_similarity_score DESC NULLS LAST,
+                     a.created_at ASC
+            LIMIT %s
+        """, (max_per_run,))
+
+        rows = cur.fetchall()
+        if not rows:
+            logger.info("Cografi webhooks: nothing to send")
+            return
+
+        sent = 0
+        failed = 0
+        for row in rows:
+            row_d = dict(row)
+            url = row_d.get("webhook_url")
+            if not url:
+                continue
+            alert_d = dict(row_d)
+            wl_d = {
+                "watch_type": row_d.get("watch_type"),
+                "label": row_d.get("label"),
+                "holder_name": row_d.get("holder_name"),
+                "holder_id": row_d.get("holder_id"),
+                "holder_tpe_client_id": row_d.get("holder_tpe_client_id"),
+                "reference_record_id": row_d.get("reference_record_id"),
+                "reference_query": row_d.get("reference_query"),
+                "region_query": row_d.get("region_query"),
+                "region_terms": row_d.get("region_terms"),
+                "lifecycle_registration_no": row_d.get("lifecycle_registration_no"),
+                "section_keys": row_d.get("section_keys"),
+                "gi_type": row_d.get("gi_type"),
+            }
+            try:
+                ok = WebhookService.send_cografi_alert_webhook(url, alert_d, wl_d)
+            except Exception:
+                logger.exception("Webhook send raised for cografi alert %s", row_d.get("id"))
+                ok = False
+            if ok:
+                cur.execute(
+                    "UPDATE cografi_alerts_mt SET webhook_sent = TRUE, webhook_sent_at = NOW() "
+                    "WHERE id = %s",
+                    (str(row_d["id"]),),
+                )
+                sent += 1
+            else:
+                failed += 1
+        self.db.commit()
+        logger.info("Cografi webhooks: sent=%d failed=%d (will retry next run)",
+                    sent, failed)
+
+    def process_cografi_daily_digest(self):
+        self._process_cografi_digest(
+            frequency="daily", since_interval="24 hours", period_label="daily",
+        )
+
+    def process_cografi_weekly_digest(self):
+        self._process_cografi_digest(
+            frequency="weekly", since_interval="7 days", period_label="weekly",
+        )
+
     def run(self):
         """Run notification worker (called by scheduler)"""
         import schedule
         import time
-        
-        # Immediate notifications every minute
+
+        # Immediate notifications every minute (trademark email path
+        # + patent webhook path + cografi webhook path; trademark/
+        # patent/cografi emails go through the daily/weekly digests
+        # below, not the immediate channel).
         schedule.every(1).minutes.do(self.process_immediate_notifications)
-        
-        # Daily digest at 9 AM
+        schedule.every(1).minutes.do(self.process_patent_immediate_webhooks)
+        schedule.every(1).minutes.do(self.process_cografi_immediate_webhooks)
+
+        # Daily digest at 9 AM, staggered by 5 min per registry to
+        # spread the SMTP load.
         schedule.every().day.at("09:00").do(self.process_daily_digest)
-        
-        # Weekly digest on Monday at 9 AM
+        schedule.every().day.at("09:05").do(self.process_patent_daily_digest)
+        schedule.every().day.at("09:10").do(self.process_cografi_daily_digest)
+
+        # Weekly digest on Monday at 9 AM, same stagger.
         schedule.every().monday.at("09:00").do(self.process_weekly_digest)
-        
+        schedule.every().monday.at("09:05").do(self.process_patent_weekly_digest)
+        schedule.every().monday.at("09:10").do(self.process_cografi_weekly_digest)
+
         logger.info("Notification worker started")
-        
+
         while True:
             schedule.run_pending()
             time.sleep(30)
@@ -795,5 +1699,28 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "worker":
         worker = NotificationWorker()
         worker.run()
+    elif len(sys.argv) > 1 and sys.argv[1] == "patent-daily-digest":
+        # One-shot run for cron / manual testing.
+        worker = NotificationWorker()
+        worker.process_patent_daily_digest()
+    elif len(sys.argv) > 1 and sys.argv[1] == "patent-weekly-digest":
+        worker = NotificationWorker()
+        worker.process_patent_weekly_digest()
+    elif len(sys.argv) > 1 and sys.argv[1] == "patent-webhooks":
+        worker = NotificationWorker()
+        worker.process_patent_immediate_webhooks()
+    elif len(sys.argv) > 1 and sys.argv[1] == "cografi-daily-digest":
+        worker = NotificationWorker()
+        worker.process_cografi_daily_digest()
+    elif len(sys.argv) > 1 and sys.argv[1] == "cografi-weekly-digest":
+        worker = NotificationWorker()
+        worker.process_cografi_weekly_digest()
+    elif len(sys.argv) > 1 and sys.argv[1] == "cografi-webhooks":
+        worker = NotificationWorker()
+        worker.process_cografi_immediate_webhooks()
     else:
-        print("Usage: python -m notifications.service worker")
+        print(
+            "Usage: python -m notifications.service "
+            "[worker | patent-daily-digest | patent-weekly-digest | patent-webhooks "
+            "| cografi-daily-digest | cografi-weekly-digest | cografi-webhooks]"
+        )

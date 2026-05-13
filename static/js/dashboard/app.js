@@ -62,7 +62,6 @@ var currentHolderTpeId = null;
 var _storedSearchResults = [];
 var _lastSearchBannerHtml = '';
 var currentSearchTotal = 0;
-var currentSearchType = 'quick';
 
 // Watchlist cache — tracks which application_nos are already monitored
 var userWatchlistAppNos = {};  // using object as Set for IE compat
@@ -87,11 +86,12 @@ function dashboard() {
         // ===== Search state =====
         dbCount: 0,
         designCount: 0,
+        patentCount: 0,
+        cografiCount: 0,
         searchQuery: '',
         searchResults: [],
         searchLoading: false,
         searchError: '',
-        searchType: 'quick',
         searchMeta: {},
         expandedResult: null,
         lightboxImage: '',
@@ -319,13 +319,36 @@ function dashboard() {
                 body: JSON.stringify({ description: desc, top_k: 5, lang: self.currentLang || 'tr' })
             })
                 .then(function (res) {
-                    if (!res.ok) throw new Error('Suggestion failed');
-                    return res.json();
+                    if (res.ok) return res.json().then(function (d) { return { ok: true, data: d }; });
+                    return res.json().catch(function () { return {}; }).then(function (d) {
+                        return { ok: false, status: res.status, detail: d && d.detail };
+                    });
                 })
-                .then(function (data) {
-                    self.suggestedClasses = data.suggestions || [];
-                    if (self.suggestedClasses.length === 0) {
-                        self.classError = self.t('search.no_class_suggestions');
+                .then(function (r) {
+                    if (r.ok) {
+                        self.suggestedClasses = r.data.suggestions || [];
+                        if (self.suggestedClasses.length === 0) {
+                            self.classError = self.t('search.no_class_suggestions');
+                        }
+                        return;
+                    }
+                    self.suggestedClasses = [];
+                    if (r.status === 401 || r.status === 402 || r.status === 403) {
+                        var d = r.detail || {};
+                        var handled = window.AppUpgradeModal
+                            && typeof window.AppUpgradeModal.maybeHandle === 'function'
+                            && window.AppUpgradeModal.maybeHandle(d, 'class_suggestions');
+                        if (!handled) {
+                            var msg = (window.AppI18n && window.AppI18n.locale === 'en')
+                                ? (d.message_en || d.message)
+                                : (d.message || d.message_en);
+                            self.classError = msg || self.t('search.class_suggestion_upgrade_required');
+                        } else {
+                            // Modal is showing — clear inline error so it's not duplicated.
+                            self.classError = '';
+                        }
+                    } else {
+                        self.classError = self.t('search.class_suggestion_failed');
                     }
                 })
                 .catch(function () {
@@ -440,88 +463,7 @@ function dashboard() {
         },
 
         // ==================== SEARCH ====================
-        async dashboardQuickSearch() {
-            var query = this.searchQuery.trim();
-            if (!query && !this.selectedImage) {
-                showToast(this.t('search.enter_brand_name'), 'error');
-                return;
-            }
-
-            this.searchLoading = true;
-            this.searchError = '';
-            this.searchType = 'quick';
-            this.searchResults = [];
-            this.expandedResult = null;
-            this.clearRiskReportState();
-
-            var classes = this.selectedClasses;
-            var token = getAuthToken();
-
-            try {
-                var res;
-                if (this.selectedImage) {
-                    // POST with FormData for image
-                    var formData = new FormData();
-                    if (query) formData.append('query', query);
-                    formData.append('image', this.selectedImage);
-                    if (classes.length) formData.append('classes', classes.join(','));
-
-                    res = await fetch('/api/v1/search/quick', {
-                        method: 'POST',
-                        headers: { 'Authorization': 'Bearer ' + token },
-                        body: formData
-                    });
-                } else {
-                    // GET text-only
-                    var url = '/api/v1/search/quick?query=' + encodeURIComponent(query);
-                    if (classes.length) url += '&classes=' + classes.join(',');
-
-                    res = await fetch(url, {
-                        headers: { 'Authorization': 'Bearer ' + token }
-                    });
-                }
-
-                if (res.status === 401) { showToast(this.t('auth.session_expired'), 'error'); return; }
-                if (res.status === 429) {
-                    var errData = await res.json().catch(function () { return {}; });
-                    var detail = errData.detail || errData;
-                    if (window.AppUpgradeModal && typeof window.AppUpgradeModal.maybeHandle === 'function'
-                        && window.AppUpgradeModal.maybeHandle(detail, 'quick_search')) {
-                        return;
-                    }
-                    this.searchError = this.t('search.rate_limited');
-                    showToast(this.searchError, 'warning');
-                    return;
-                }
-                if (!res.ok) throw new Error(this.t('search.search_failed'));
-
-                var data = await res.json();
-                this.searchResults = (data.results || []).slice(0, DASHBOARD_SEARCH_RESULT_LIMIT);
-                this.searchMeta = {
-                    total: Math.min(data.total || 0, DASHBOARD_SEARCH_RESULT_LIMIT),
-                    scrape_triggered: false,
-                    image_used: data.image_used || false,
-                    elapsed_seconds: data.elapsed_seconds || null,
-                    source: 'database'
-                };
-                this.expandedResult = null;
-                this.sortResults();
-
-                currentSearchTotal = data.total || 0;
-                currentSearchType = 'quick';
-
-                this.saveSearchQuery(query);
-                this.showSearchHistory = false;
-                showToast(this.t('search.results_found_db', { count: Math.min(data.total || 0, DASHBOARD_SEARCH_RESULT_LIMIT) }), 'success');
-            } catch (e) {
-                console.error('Quick search error:', e);
-                this.searchError = e.message || this.t('search.search_failed');
-            } finally {
-                this.searchLoading = false;
-            }
-        },
-
-        async dashboardLiveSearch() {
+        async dashboardAgenticSearch() {
             var query = this.searchQuery.trim();
             if (!query) {
                 showToast(this.t('search.live_search_name_required'), 'warning');
@@ -530,7 +472,6 @@ function dashboard() {
 
             this.searchLoading = true;
             this.searchError = '';
-            this.searchType = 'intelligent';
             this.searchResults = [];
             this.expandedResult = null;
             this.clearRiskReportState();
@@ -550,14 +491,14 @@ function dashboard() {
                     formData.append('image', this.selectedImage);
                     if (classes.length) formData.append('classes', classes.join(','));
 
-                    res = await fetch('/api/v1/search/intelligent', {
+                    res = await fetch('/api/v1/search', {
                         method: 'POST',
                         headers: { 'Authorization': 'Bearer ' + token },
                         body: formData,
                         signal: signal
                     });
                 } else {
-                    var url = '/api/v1/search/intelligent?query=' + encodeURIComponent(query);
+                    var url = '/api/v1/search?query=' + encodeURIComponent(query);
                     if (classes.length) url += '&classes=' + classes.join(',');
 
                     res = await fetch(url, {
@@ -569,8 +510,17 @@ function dashboard() {
                 if (agenticSearchAborted) return;
                 var data = await res.json();
 
-                if (res.status === 403) { hideAgenticLoadingModal(); showUpgradeModal(data.detail || data, 'live_search'); return; }
-                if (res.status === 402) { hideAgenticLoadingModal(); showUpgradeModal(data.detail || data, 'live_search'); return; }
+                if (res.status === 429) {
+                    hideAgenticLoadingModal();
+                    var detail = (data && data.detail) ? data.detail : data;
+                    if (window.AppUpgradeModal && typeof window.AppUpgradeModal.maybeHandle === 'function'
+                        && window.AppUpgradeModal.maybeHandle(detail, 'agentic_search')) {
+                        return;
+                    }
+                    this.searchError = this.t('search.rate_limited');
+                    showToast(this.searchError, 'warning');
+                    return;
+                }
                 if (res.status === 401) { hideAgenticLoadingModal(); showToast(this.t('auth.session_expired'), 'error'); return; }
                 if (!res.ok) throw new Error((data.detail && data.detail.message) || data.detail || this.t('search.search_failed'));
 
@@ -589,7 +539,6 @@ function dashboard() {
                 this.sortResults();
 
                 currentSearchTotal = data.total || 0;
-                currentSearchType = 'intelligent';
 
                 this.saveSearchQuery(query);
                 this.showSearchHistory = false;
@@ -725,7 +674,6 @@ function dashboard() {
 
             this.riskReportLoading = true;
             this.searchLoading = true;
-            this.searchType = 'intelligent';
             this.searchResults = [];
             this.expandedResult = null;
             this.searchError = '';
@@ -923,8 +871,47 @@ function dashboard() {
             this.showPortfolio = true;
 
             var self = this;
-            var param = type === 'holder' ? 'holder_id' : 'attorney_no';
-            fetch('/api/v1/portfolio/public?' + param + '=' + encodeURIComponent(id))
+            // Pick the right backend endpoint per portfolio type. Design
+            // holders hit /portfolio/public/designs; design designers
+            // hit /portfolio/public/designers (matched by normalized
+            // name via the functional GIN index). Trademark holder +
+            // attorney keep the existing /portfolio/public.
+            var url;
+            if (type === 'design-holder') {
+                url = '/api/v1/portfolio/public/designs?holder_id=' + encodeURIComponent(id);
+            } else if (type === 'design-designer') {
+                url = '/api/v1/portfolio/public/designers?name=' + encodeURIComponent(id);
+            } else if (type === 'design-attorney') {
+                // id is a JSON blob {name, firm} — unpack into separate
+                // query params so the backend can match the pair.
+                var parsed = (function () {
+                    try { return JSON.parse(id); } catch (_) { return null; }
+                })();
+                var nm = parsed && parsed.name ? String(parsed.name) : '';
+                var fm = parsed && parsed.firm ? String(parsed.firm) : '';
+                url = '/api/v1/portfolio/public/attorneys?name=' + encodeURIComponent(nm);
+                if (fm) url += '&firm=' + encodeURIComponent(fm);
+            } else if (type === 'patent-holder') {
+                url = '/api/v1/portfolio/public/patents?holder_id=' + encodeURIComponent(id);
+            } else if (type === 'patent-inventor') {
+                url = '/api/v1/portfolio/public/patent-inventors?name=' + encodeURIComponent(id);
+            } else if (type === 'patent-attorney') {
+                var parsedP = (function () {
+                    try { return JSON.parse(id); } catch (_) { return null; }
+                })();
+                var nmP = parsedP && parsedP.name ? String(parsedP.name) : '';
+                var fmP = parsedP && parsedP.firm ? String(parsedP.firm) : '';
+                url = '/api/v1/portfolio/public/patent-attorneys?name=' + encodeURIComponent(nmP);
+                if (fmP) url += '&firm=' + encodeURIComponent(fmP);
+            } else if (type === 'cografi-applicant') {
+                url = '/api/v1/portfolio/public/cografi-applicants?holder_id=' + encodeURIComponent(id);
+            } else if (type === 'cografi-agent') {
+                url = '/api/v1/portfolio/public/cografi-agents?name=' + encodeURIComponent(id);
+            } else {
+                var param = type === 'holder' ? 'holder_id' : 'attorney_no';
+                url = '/api/v1/portfolio/public?' + param + '=' + encodeURIComponent(id);
+            }
+            fetch(url)
                 .then(function (res) {
                     if (res.status === 429) {
                         self.searchError = self.t('search.rate_limited');
@@ -940,7 +927,24 @@ function dashboard() {
                         self._portfolioAllResults = all;
                         self.portfolioTotalCount = (data.total_count != null) ? data.total_count : all.length;
                         self.portfolioResults = all.slice(0, 5);
-                        self.portfolioName = data.entity_name || name || id;
+                        var rawName = data.entity_name || name || id;
+                        // For design + patent holder/designer/inventor
+                        // entity names, strip any address that was
+                        // concatenated at ingest. Trademark + attorney
+                        // sides are clean.
+                        var stripAddr = (
+                            type === 'design-holder' ||
+                            type === 'design-designer' ||
+                            type === 'patent-holder' ||
+                            type === 'patent-inventor' ||
+                            type === 'cografi-applicant' ||
+                            type === 'cografi-agent'
+                        );
+                        self.portfolioName = stripAddr
+                            ? (window._stripTurkishAddress
+                                ? window._stripTurkishAddress(rawName)
+                                : rawName)
+                            : rawName;
                     }
                 })
                 .catch(function () {
@@ -978,8 +982,52 @@ function dashboard() {
                 }, 'portfolio_download');
                 return;
             }
-            var param = type === 'holder' ? 'holder_id' : 'attorney_no';
-            var csvUrl = '/api/v1/portfolio/public/csv?' + param + '=' + encodeURIComponent(id);
+            // Branch CSV endpoint per portfolio type. Design holders +
+            // designers each have their own CSV route; trademark
+            // holder + attorney share the existing /portfolio/public/csv.
+            var csvUrl;
+            var fileLabel;
+            if (type === 'design-holder') {
+                csvUrl = '/api/v1/portfolio/public/designs/csv?holder_id=' + encodeURIComponent(id);
+                fileLabel = 'tasarim_sahibi';
+            } else if (type === 'design-designer') {
+                csvUrl = '/api/v1/portfolio/public/designers/csv?name=' + encodeURIComponent(id);
+                fileLabel = 'tasarimci';
+            } else if (type === 'design-attorney') {
+                var parsed = (function () {
+                    try { return JSON.parse(id); } catch (_) { return null; }
+                })();
+                var nm = parsed && parsed.name ? String(parsed.name) : '';
+                var fm = parsed && parsed.firm ? String(parsed.firm) : '';
+                csvUrl = '/api/v1/portfolio/public/attorneys/csv?name=' + encodeURIComponent(nm);
+                if (fm) csvUrl += '&firm=' + encodeURIComponent(fm);
+                fileLabel = 'tasarim_vekili';
+            } else if (type === 'patent-holder') {
+                csvUrl = '/api/v1/portfolio/public/patents/csv?holder_id=' + encodeURIComponent(id);
+                fileLabel = 'patent_sahibi';
+            } else if (type === 'patent-inventor') {
+                csvUrl = '/api/v1/portfolio/public/patent-inventors/csv?name=' + encodeURIComponent(id);
+                fileLabel = 'bulus_sahibi';
+            } else if (type === 'patent-attorney') {
+                var parsedP = (function () {
+                    try { return JSON.parse(id); } catch (_) { return null; }
+                })();
+                var nmP = parsedP && parsedP.name ? String(parsedP.name) : '';
+                var fmP = parsedP && parsedP.firm ? String(parsedP.firm) : '';
+                csvUrl = '/api/v1/portfolio/public/patent-attorneys/csv?name=' + encodeURIComponent(nmP);
+                if (fmP) csvUrl += '&firm=' + encodeURIComponent(fmP);
+                fileLabel = 'patent_vekili';
+            } else if (type === 'cografi-applicant') {
+                csvUrl = '/api/v1/portfolio/public/cografi-applicants/csv?holder_id=' + encodeURIComponent(id);
+                fileLabel = 'cografi_basvuru_sahibi';
+            } else if (type === 'cografi-agent') {
+                csvUrl = '/api/v1/portfolio/public/cografi-agents/csv?name=' + encodeURIComponent(id);
+                fileLabel = 'cografi_vekili';
+            } else {
+                var param = type === 'holder' ? 'holder_id' : 'attorney_no';
+                csvUrl = '/api/v1/portfolio/public/csv?' + param + '=' + encodeURIComponent(id);
+                fileLabel = type === 'holder' ? 'sahip' : 'vekil';
+            }
             fetch(csvUrl, { headers: { 'Authorization': 'Bearer ' + token } })
                 .then(function (res) {
                     if (res.status === 401) {
@@ -999,7 +1047,7 @@ function dashboard() {
                     var url = URL.createObjectURL(blob);
                     var a = document.createElement('a');
                     a.href = url;
-                    a.download = (type === 'holder' ? 'sahip' : 'vekil') + '_' + id + '_portfolio.csv';
+                    a.download = fileLabel + '_' + id + '_portfolio.csv';
                     document.body.appendChild(a);
                     a.click();
                     document.body.removeChild(a);
@@ -1063,6 +1111,9 @@ function dashboard() {
                     _setScanInProgress(_getScanDurationMs(1), 'item');
                 }
                 if (typeof refreshWatchlistAndStats === 'function') refreshWatchlistAndStats();
+                // Land the user on the Watchlist tab so they immediately see
+                // the new row (toast persists across tab switches).
+                if (typeof showDashboardTab === 'function') showDashboardTab('watchlist');
             } catch (e) {
                 if (e.status === 409) {
                     showToast(this.t('watchlist.already_watching'), 'info');
@@ -1430,17 +1481,8 @@ function dashboard() {
                     function _fmtLimit(val) { return val >= 999999 ? '∞' : val; }
                     function _fmtPct(used, limit) { return limit >= 999999 ? 0 : (limit > 0 ? Math.min(100, Math.round(used / limit * 100)) : 0); }
 
-                    // Quick searches
-                    var qs = usage.daily_quick_searches || {};
-                    var qsEl = document.getElementById('usage-quick-text');
-                    var qsBar = document.getElementById('usage-quick-bar');
-                    var qsRing = document.getElementById('usage-quick-ring');
-                    if (qsEl) qsEl.textContent = (qs.used || 0) + ' / ' + _fmtLimit(qs.limit || 0);
-                    if (qsBar && qs.limit) qsBar.style.width = _fmtPct(qs.used || 0, qs.limit) + '%';
-                    if (qsRing && qs.limit) qsRing.innerHTML = window.AppComponents.renderUsageRing(qs.used || 0, qs.limit >= 999999 ? 1 : qs.limit, 'var(--color-primary)');
-
-                    // Agentic Search credits
-                    var ls = usage.monthly_live_searches || {};
+                    // Agentic Search daily credits
+                    var ls = usage.daily_live_searches || {};
                     var lsEl = document.getElementById('usage-live-text');
                     var lsBar = document.getElementById('usage-live-bar');
                     var lsRing = document.getElementById('usage-live-ring');
@@ -1521,6 +1563,8 @@ function dashboard() {
                     var sysStats = statusData.statistics || {};
                     this.dbCount = sysStats.total_trademarks || 0;
                     this.designCount = sysStats.total_designs || 0;
+                    this.patentCount = sysStats.total_patents || 0;
+                    this.cografiCount = sysStats.total_cografi || 0;
                     var tmEl = document.getElementById('sys-total-trademarks');
                     if (tmEl) tmEl.textContent = this.dbCount.toLocaleString();
                     var bulletinEl = document.getElementById('sys-last-bulletin');
@@ -2270,8 +2314,26 @@ function buyCredits(amount) {
 // TAB SWITCHING
 // ============================================
 function showDashboardTab(tabId) {
+    // Backwards-compat: 'design-watchlist' is now a sub-view of the unified
+    // Watchlist tab. Redirect callers (deep-links, post-add navigation in
+    // design_search.js) to the merged tab and select the Tasarım sub-view
+    // via two cooperating mechanisms:
+    //   * cold-load / deep-link path — set localStorage so Alpine consumes
+    //     it on init (cleared after read in _watchlist_panel.html x-data),
+    //   * same-page navigation path — Alpine is already inited, so flip
+    //     watchlistView on the live state directly. Either path lands on
+    //     Tasarım without persisting the choice for the next app open.
+    if (tabId === 'design-watchlist') {
+        try { localStorage.setItem('watchlistView', 'design'); } catch (_) {}
+        tabId = 'watchlist';
+        var wlEl = document.getElementById('tab-content-watchlist');
+        if (wlEl && wlEl._x_dataStack && wlEl._x_dataStack[0]) {
+            try { wlEl._x_dataStack[0].watchlistView = 'design'; } catch (_) {}
+        }
+    }
+
     // Hide ALL tab content panels
-    var panels = ['overview', 'watchlist', 'search', 'design-watchlist', 'opposition-radar', 'ai-studio', 'reports', 'applications'];
+    var panels = ['overview', 'watchlist', 'search', 'radar', 'ai-studio', 'reports', 'applications'];
     panels.forEach(function (id) {
         var el = document.getElementById('tab-content-' + id);
         if (el) el.classList.add('hidden');
@@ -2302,17 +2364,19 @@ function showDashboardTab(tabId) {
     if (typeof updateBottomTabActive === 'function') updateBottomTabActive(tabId);
 
     // Update page title
-    var tabTitles = { 'overview': 'Dashboard', 'watchlist': 'Watchlist', 'search': 'Search', 'opposition-radar': 'Opposition Radar', 'ai-studio': 'AI Studio', 'reports': 'Reports', 'applications': 'Applications' };
+    var tabTitles = { 'overview': 'Dashboard', 'watchlist': 'Watchlist', 'search': 'Search', 'radar': 'Radar', 'ai-studio': 'AI Studio', 'reports': 'Reports', 'applications': 'Applications' };
     document.title = 'IPWatchAI' + (tabTitles[tabId] ? ' \u2014 ' + tabTitles[tabId] : '');
 
-    // Only clear search results when leaving the search tab
+    // Only clear search results when leaving the search tab. Patent
+    // search now lives inside the unified Search tab as a sub-view, so
+    // the same check covers it.
     if (tabId !== 'search') {
         clearSearchResults();
     }
 
     // Lazy-initialize tab content on first visit
-    if (tabId === 'opposition-radar') {
-        initOppositionRadar();
+    if (tabId === 'radar') {
+        initRadar();
     }
     if (tabId === 'ai-studio') {
         initAIStudio();
@@ -2321,6 +2385,17 @@ function showDashboardTab(tabId) {
     }
     if (tabId === 'watchlist') {
         initWatchlistTab();
+        // Lazy-init the Tasarım list when the Watchlist tab opens with the
+        // design sub-view active. Read from the live Alpine state — that's
+        // the source of truth (the redirect above + x-data init both write
+        // to it).
+        var wlEl2 = document.getElementById('tab-content-watchlist');
+        var liveView = wlEl2 && wlEl2._x_dataStack && wlEl2._x_dataStack[0]
+            ? wlEl2._x_dataStack[0].watchlistView
+            : '';
+        if (liveView === 'design' && typeof window.initDesignWatchlistTab === 'function') {
+            window.initDesignWatchlistTab();
+        }
     }
     if (tabId === 'overview') {
         // Pull fresh stats so any change made elsewhere in the dashboard
@@ -2352,16 +2427,15 @@ function showDashboardTab(tabId) {
     if (tabId === 'search' && typeof window.initDesignSearchTab === 'function') {
         window.initDesignSearchTab();
     }
-    // Lazy-init design watchlist tab on first activation
-    if (tabId === 'design-watchlist' && typeof window.initDesignWatchlistTab === 'function') {
-        window.initDesignWatchlistTab();
-    }
+    // (Legacy 'design-watchlist' tab id is redirected to the merged
+    // Watchlist tab above; the design init runs from the watchlist branch
+    // when the saved sub-view is 'design'.)
 }
 
 // ============================================
-// OPPOSITION RADAR INIT
+// RADAR INIT
 // ============================================
-function initOppositionRadar() {
+function initRadar() {
     if (radarInitialized) return;
     radarInitialized = true;
     loadLeadStats();
@@ -3362,9 +3436,11 @@ function initAIStudio() {
     populateStudioNiceClasses('studio-logo-classes');
     updateStudioClassSummary('studio-name-classes');
     updateStudioClassSummary('studio-logo-classes');
+    bindStudioNameRequiredInputs();
     initStudioColorSwatches();
     updateStudioCredits();
     updateStudioModeMeta();
+    updateStudioNameButtonState();
     checkCreativeSuiteStatus();
     loadStudioUsageSummary();
     loadStudioHistory();
@@ -3393,7 +3469,9 @@ function applyStudioAvailability(mode, toolStatus) {
     var available = !toolStatus || toolStatus.available !== false;
     var translatedReason = translateStudioStatusReason(toolStatus && toolStatus.reason);
 
-    if (btn) {
+    if (mode === 'name') {
+        updateStudioNameButtonState();
+    } else if (btn) {
         btn.disabled = !available;
         btn.classList.toggle('opacity-50', !available);
         btn.classList.toggle('cursor-not-allowed', !available);
@@ -3471,6 +3549,7 @@ function populateStudioNiceClasses(selectId) {
                 var selected = this.getAttribute('aria-pressed') === 'true';
                 setStudioClassChipSelected(this, !selected);
                 updateStudioClassSummary(selectId);
+                if (selectId === 'studio-name-classes') updateStudioNameButtonState();
             };
             select.appendChild(chip);
         }
@@ -3524,11 +3603,13 @@ function updateStudioClassSummary(selectId) {
     var values = getStudioNiceClasses(selectId);
     if (!values.length) {
         summary.textContent = t('studio.no_classes_selected');
+        if (selectId === 'studio-name-classes') updateStudioNameButtonState();
         return;
     }
     var preview = values.slice(0, 4).join(', ');
     if (values.length > 4) preview += ' +' + (values.length - 4);
     summary.textContent = t('studio.classes_selected', { count: values.length }) + ' (' + preview + ')';
+    if (selectId === 'studio-name-classes') updateStudioNameButtonState();
 }
 
 function toggleStudioClassPicker(selectId) {
@@ -3584,6 +3665,49 @@ function refreshStudioColorSwatches() {
     }
 }
 
+function bindStudioNameRequiredInputs() {
+    ['studio-name-query', 'studio-name-industry', 'studio-name-language', 'studio-name-style'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (!el || el.dataset.studioRequiredBound === '1') return;
+        el.dataset.studioRequiredBound = '1';
+        el.addEventListener('input', updateStudioNameButtonState);
+        el.addEventListener('change', updateStudioNameButtonState);
+    });
+}
+
+function getStudioNameRequiredMissingFields() {
+    var queryEl = document.getElementById('studio-name-query');
+    var industryEl = document.getElementById('studio-name-industry');
+    var languageEl = document.getElementById('studio-name-language');
+    var styleEl = document.getElementById('studio-name-style');
+    var missing = [];
+    if (!queryEl || !(queryEl.value || '').trim()) missing.push('query');
+    if (!getStudioNiceClasses('studio-name-classes').length) missing.push('nice_classes');
+    if (!industryEl || !(industryEl.value || '').trim()) missing.push('industry');
+    if (!languageEl || !(languageEl.value || '').trim()) missing.push('language');
+    if (!styleEl || !(styleEl.value || '').trim()) missing.push('style');
+    return missing;
+}
+
+function updateStudioNameButtonState() {
+    var btn = document.getElementById('studio-name-btn');
+    if (!btn) return;
+    var toolStatus = studioStatus && studioStatus.name_generator;
+    var available = !toolStatus || toolStatus.available !== false;
+    var formComplete = getStudioNameRequiredMissingFields().length === 0;
+    var disabled = studioNameLoading || !available;
+    btn.disabled = disabled;
+    btn.classList.toggle('opacity-50', disabled);
+    btn.classList.toggle('cursor-not-allowed', disabled);
+    if (!available) {
+        btn.title = translateStudioStatusReason(toolStatus && toolStatus.reason) || t('studio.service_unavailable');
+    } else if (!formComplete) {
+        btn.title = t('studio.complete_required_fields');
+    } else {
+        btn.title = '';
+    }
+}
+
 function updateStudioModeMeta() {
     var statusEl = document.getElementById('studio-active-status');
     var costEl = document.getElementById('studio-run-cost');
@@ -3599,8 +3723,17 @@ function updateStudioModeMeta() {
         statusEl.title = available ? '' : (translateStudioStatusReason(toolStatus && toolStatus.reason) || t('studio.service_unavailable'));
     }
     if (costEl) {
-        costEl.textContent = t('studio.run_cost', { cost: studioActiveMode === 'logo' ? 5 : 1 });
+        costEl.textContent = t('studio.run_cost', { cost: getStudioRunCost(studioActiveMode) });
     }
+}
+
+function getStudioRunCost(mode) {
+    var toolStatus = mode === 'logo'
+        ? (studioStatus && studioStatus.logo_studio)
+        : (studioStatus && studioStatus.name_generator);
+    var fallback = mode === 'logo' ? 5 : 2;
+    var parsed = Number(toolStatus && toolStatus.cost);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function updateStudioCredits() {
@@ -3641,8 +3774,8 @@ async function loadStudioUsageSummary() {
             monthly_remaining: credits.remaining || 0,
             purchased_remaining: 0,
             monthly_limit: credits.limit || 0,
-            cost: studioActiveMode === 'logo' ? 5 : 1
-        }, studioActiveMode === 'logo' ? 5 : 1);
+            cost: getStudioRunCost(studioActiveMode)
+        }, getStudioRunCost(studioActiveMode));
         updateStudioCredits();
         updateLogoCreditsDisplay();
     } catch (e) {
@@ -3673,6 +3806,7 @@ function switchStudioMode(mode) {
     }
     updateStudioCredits();
     updateStudioModeMeta();
+    updateStudioNameButtonState();
 }
 
 // ============================================
@@ -3680,7 +3814,11 @@ function switchStudioMode(mode) {
 // ============================================
 async function generateNames() {
     var query = (document.getElementById('studio-name-query').value || '').trim();
-    if (!query) { showToast(t('search.enter_brand_name'), 'error'); return; }
+    if (getStudioNameRequiredMissingFields().length) {
+        updateStudioNameButtonState();
+        showToast(t('studio.complete_required_fields'), 'error');
+        return;
+    }
     if (studioStatus && studioStatus.name_generator && studioStatus.name_generator.available === false) {
         showToast(translateStudioStatusReason(studioStatus.name_generator.reason) || t('studio.service_unavailable'), 'error');
         return;
@@ -3688,9 +3826,12 @@ async function generateNames() {
 
     if (studioNameLoading) return;
     studioNameLoading = true;
+    updateStudioNameButtonState();
 
     var classes = getStudioNiceClasses('studio-name-classes');
     var industry = (document.getElementById('studio-name-industry').value || '').trim();
+    var languageEl = document.getElementById('studio-name-language');
+    var language = languageEl ? (languageEl.value || 'mixed') : 'mixed';
     var style = document.getElementById('studio-name-style').value || 'modern';
 
     // Show loading, hide others
@@ -3701,17 +3842,13 @@ async function generateNames() {
     document.getElementById('studio-name-empty').classList.add('hidden');
     document.getElementById('studio-name-error').classList.add('hidden');
 
-    // Disable button
-    var btn = document.getElementById('studio-name-btn');
-    if (btn) { btn.disabled = true; btn.classList.add('opacity-50'); }
-
     try {
         var data = await generateNamesAPI({
             query: query,
             nice_classes: classes,
             industry: industry,
             style: style,
-            language: 'tr',
+            language: language,
             avoid_names: []
         });
         studioLastNameResult = data;
@@ -3735,7 +3872,7 @@ async function generateNames() {
         }
     } finally {
         studioNameLoading = false;
-        if (btn) { btn.disabled = false; btn.classList.remove('opacity-50'); }
+        updateStudioNameButtonState();
         if (studioStatus && studioStatus.name_generator) {
             applyStudioAvailability('name', studioStatus.name_generator);
         }
@@ -4235,7 +4372,268 @@ function toggleLogoDetail(imageId) {
 // LOGO CREDITS EXHAUSTED MODAL
 // ============================================
 function showLogoCreditsExhausted(detail) {
-    showUpgradeModal(detail || { error: 'credits_exhausted' }, 'ai_credits');
+    if (typeof openBuyCreditsModal === 'function') {
+        openBuyCreditsModal(detail || { error: 'credits_exhausted' });
+    } else {
+        showUpgradeModal(detail || { error: 'credits_exhausted' }, 'ai_credits');
+    }
+}
+
+// ============================================
+// BUY CREDITS MODAL (one-shot AI credit packs)
+// ============================================
+var _buyCreditsState = {
+    selectedPackId: null,
+    packs: [],
+    loading: false,
+    detail: null,
+    catalog: null,
+    region: 'UK'
+};
+
+// Plans shown in the left "Upgrade plan" column of the combined modal.
+// Prices and monthly credit allowances mirror PLAN_FEATURES on the server
+// (utils/subscription.py). Free is intentionally omitted — the modal only
+// opens for users who already need more credits.
+var _BUY_CREDITS_UPGRADE_PLANS = [
+    { id: 'starter',      price_try:  499, monthly_ai_credits:  10 },
+    { id: 'professional', price_try: 1999, monthly_ai_credits:  50 },
+    { id: 'enterprise',   price_try: 4999, monthly_ai_credits: 500 }
+];
+
+function _normalizeBillingRegion(region) {
+    region = String(region || '').toUpperCase();
+    return ['UK', 'EU', 'TR'].indexOf(region) >= 0 ? region : 'UK';
+}
+
+function _storedBillingRegion() {
+    try {
+        var urlRegion = new URLSearchParams(window.location.search).get('region');
+        var storedRegion = window.localStorage ? window.localStorage.getItem('billing_region') : null;
+        return _normalizeBillingRegion(urlRegion || storedRegion || _buyCreditsState.region);
+    } catch (_) {
+        return _normalizeBillingRegion(_buyCreditsState.region);
+    }
+}
+
+function _formatBillingAmount(amount, currency) {
+    var locale = window.AppI18n ? window.AppI18n.getLocale() : 'tr';
+    var numberLocale = locale === 'ar' ? 'ar-SA' : (locale === 'en' ? 'en-US' : 'tr-TR');
+    var value = Number(amount || 0);
+    currency = currency || ((_buyCreditsState.catalog && _buyCreditsState.catalog.currency) || 'TRY');
+    try {
+        return new Intl.NumberFormat(numberLocale, {
+            style: 'currency',
+            currency: currency,
+            maximumFractionDigits: value % 1 === 0 ? 0 : 2
+        }).format(value);
+    } catch (_) {
+        return currency + ' ' + value.toLocaleString(numberLocale);
+    }
+}
+
+function _buyCreditsCatalogPlan(planId) {
+    var plans = (_buyCreditsState.catalog && _buyCreditsState.catalog.plans) || {};
+    return plans[planId] || {};
+}
+
+function openBuyCreditsModal(detail) {
+    var modal = document.getElementById('buy-credits-modal');
+    if (!modal) return;
+    _buyCreditsState.selectedPackId = null;
+    _buyCreditsState.detail = detail || null;
+    _buyCreditsState.region = _storedBillingRegion();
+    var regionSelect = document.getElementById('buy-credits-region');
+    if (regionSelect) regionSelect.value = _buyCreditsState.region;
+    var submit = document.getElementById('buy-credits-submit');
+    if (submit) submit.disabled = true;
+    var err = document.getElementById('buy-credits-error');
+    if (err) { err.classList.add('hidden'); err.textContent = ''; }
+    var discount = document.getElementById('buy-credits-discount');
+    if (discount) discount.value = '';
+    var picker = document.getElementById('buy-credits-picker');
+    if (picker) picker.classList.remove('hidden');
+    var iyzico = document.getElementById('buy-credits-iyzico');
+    if (iyzico) { iyzico.classList.add('hidden'); iyzico.innerHTML = ''; }
+    modal.classList.remove('hidden');
+    if (typeof lockBodyScroll === 'function') lockBodyScroll();
+    _renderBuyCreditsPlans();
+    _loadBuyCreditsCatalog();
+}
+
+function closeBuyCreditsModal() {
+    var modal = document.getElementById('buy-credits-modal');
+    if (modal) modal.classList.add('hidden');
+    if (typeof unlockBodyScroll === 'function') unlockBodyScroll();
+}
+
+function _renderBuyCreditsPlans() {
+    var container = document.getElementById('buy-credits-plans');
+    if (!container) return;
+    var detail = _buyCreditsState.detail || {};
+    var currentPlan = String(detail.current_plan || '').toLowerCase();
+    var plans = _BUY_CREDITS_UPGRADE_PLANS.filter(function (p) {
+        return p.id !== currentPlan;
+    });
+    container.innerHTML = plans.map(function (plan) {
+        var name = t('pricing.' + plan.id + '_name');
+        var creditsLine = plan.monthly_ai_credits + ' '
+            + t('studio.buy_credits.monthly_credits');
+        var catalogPlan = _buyCreditsCatalogPlan(plan.id);
+        var currency = (_buyCreditsState.catalog && _buyCreditsState.catalog.currency) || 'TRY';
+        var price = _formatBillingAmount(catalogPlan.price_monthly || plan.price_try, currency) + ' / '
+            + t('studio.buy_credits.per_month');
+        return '<button type="button"'
+            + ' onclick="upgradeFromBuyCredits(\'' + plan.id + '\')"'
+            + ' class="w-full text-left rounded-lg px-3 py-2 bg-gray-900 border border-purple-500/20'
+            + ' hover:border-purple-400 hover:bg-gray-900/80 transition-colors">'
+            + '<div class="flex items-center justify-between gap-3">'
+            + '<div class="min-w-0">'
+            + '<div class="text-sm font-semibold text-white">' + name + '</div>'
+            + '<div class="text-[11px] text-gray-400">' + creditsLine + '</div>'
+            + '</div>'
+            + '<div class="text-xs font-medium whitespace-nowrap text-purple-300">' + price + '</div>'
+            + '</div>'
+            + '</button>';
+    }).join('');
+}
+
+function upgradeFromBuyCredits(planId) {
+    closeBuyCreditsModal();
+    window.location.href = '/checkout?plan=' + encodeURIComponent(planId)
+        + '&billing=monthly&region=' + encodeURIComponent(_buyCreditsState.region || 'UK');
+}
+
+async function _loadBuyCreditsCatalog() {
+    var container = document.getElementById('buy-credits-packs');
+    if (!container) return;
+    container.innerHTML = '<div class="text-sm text-gray-400">' + t('common.loading') + '</div>';
+    try {
+        var res = await fetch('/api/v1/billing/catalog?region=' + encodeURIComponent(_buyCreditsState.region || 'UK'));
+        if (!res.ok) throw new Error('failed');
+        var data = await res.json();
+        _buyCreditsState.catalog = data;
+        _buyCreditsState.region = _normalizeBillingRegion(data.region || _buyCreditsState.region);
+        _buyCreditsState.packs = data.credit_packs || [];
+        try {
+            if (window.localStorage) window.localStorage.setItem('billing_region', _buyCreditsState.region);
+        } catch (_) {}
+        var regionSelect = document.getElementById('buy-credits-region');
+        if (regionSelect) regionSelect.value = _buyCreditsState.region;
+        _renderBuyCreditsPlans();
+        _renderBuyCreditsPacks();
+    } catch (_) {
+        container.innerHTML = '<div class="text-sm text-red-400">'
+            + t('studio.buy_credits.load_failed') + '</div>';
+    }
+}
+
+function setBuyCreditsRegion(region) {
+    _buyCreditsState.region = _normalizeBillingRegion(region);
+    _buyCreditsState.selectedPackId = null;
+    var submit = document.getElementById('buy-credits-submit');
+    if (submit) submit.disabled = true;
+    _loadBuyCreditsCatalog();
+}
+
+function _renderBuyCreditsPacks() {
+    var container = document.getElementById('buy-credits-packs');
+    if (!container) return;
+    var packs = _buyCreditsState.packs;
+    if (!packs.length) {
+        container.innerHTML = '';
+        return;
+    }
+    container.innerHTML = packs.map(function (pack) {
+        var selected = _buyCreditsState.selectedPackId === pack.id;
+        var creditsLabel = pack.credits + ' ' + t('studio.buy_credits.credits_word');
+        var priceLine = _formatBillingAmount(pack.price, (_buyCreditsState.catalog && _buyCreditsState.catalog.currency) || 'TRY');
+        var classes = selected
+            ? 'border-purple-400 bg-purple-500/15'
+            : 'border-purple-500/20 bg-gray-900 hover:border-purple-400 hover:bg-gray-900/80';
+        return '<button type="button" data-pack-id="' + pack.id + '"'
+            + ' onclick="selectBuyCreditsPack(\'' + pack.id + '\')"'
+            + ' class="w-full text-left rounded-lg px-3 py-2 border transition-colors ' + classes + '">'
+            + '<div class="flex items-center justify-between gap-3">'
+            + '<div class="text-sm font-semibold text-white">' + creditsLabel + '</div>'
+            + '<div class="text-xs font-medium text-purple-300">' + priceLine + '</div>'
+            + '</div>'
+            + '</button>';
+    }).join('');
+}
+
+function selectBuyCreditsPack(packId) {
+    _buyCreditsState.selectedPackId = packId;
+    _renderBuyCreditsPacks();
+    var submit = document.getElementById('buy-credits-submit');
+    if (submit) submit.disabled = false;
+}
+
+async function submitBuyCredits() {
+    if (_buyCreditsState.loading) return;
+    var packId = _buyCreditsState.selectedPackId;
+    if (!packId) return;
+    var discountEl = document.getElementById('buy-credits-discount');
+    var discountCode = (discountEl && discountEl.value || '').trim();
+    var errEl = document.getElementById('buy-credits-error');
+    if (errEl) { errEl.classList.add('hidden'); errEl.textContent = ''; }
+
+    _buyCreditsState.loading = true;
+    var submit = document.getElementById('buy-credits-submit');
+    if (submit) submit.disabled = true;
+
+    try {
+        var body = { pack_id: packId, region: _buyCreditsState.region || 'UK' };
+        if (discountCode) body.discount_code = discountCode;
+        var res = await fetch('/api/v1/billing/purchase-credits', {
+            method: 'POST',
+            headers: {
+                'Authorization': 'Bearer ' + getAuthToken(),
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(body)
+        });
+        var data = await res.json();
+        if (!res.ok) {
+            var msg = (data && data.detail) || t('studio.buy_credits.failure');
+            if (errEl) { errEl.textContent = msg; errEl.classList.remove('hidden'); }
+            if (submit) submit.disabled = false;
+            return;
+        }
+        if (data.checkout_url) {
+            window.location.href = data.checkout_url;
+            return;
+        }
+        var html = data.checkout_form_content || '';
+        if (!html) {
+            if (errEl) { errEl.textContent = t('studio.buy_credits.failure'); errEl.classList.remove('hidden'); }
+            if (submit) submit.disabled = false;
+            return;
+        }
+        var picker = document.getElementById('buy-credits-picker');
+        var iyzico = document.getElementById('buy-credits-iyzico');
+        if (picker) picker.classList.add('hidden');
+        if (iyzico) {
+            iyzico.classList.remove('hidden');
+            iyzico.innerHTML = html;
+            // iyzico's embedded <script> tags don't auto-execute when set via
+            // innerHTML — replace each one to trigger execution.
+            iyzico.querySelectorAll('script').forEach(function (oldScript) {
+                var newScript = document.createElement('script');
+                if (oldScript.src) {
+                    newScript.src = oldScript.src;
+                } else {
+                    newScript.textContent = oldScript.textContent;
+                }
+                oldScript.parentNode.replaceChild(newScript, oldScript);
+            });
+        }
+    } catch (_) {
+        if (errEl) { errEl.textContent = t('studio.buy_credits.failure'); errEl.classList.remove('hidden'); }
+        if (submit) submit.disabled = false;
+    } finally {
+        _buyCreditsState.loading = false;
+    }
 }
 
 function refreshStudioDynamicTranslations() {
@@ -4249,6 +4647,11 @@ function refreshStudioDynamicTranslations() {
     updateStudioModeMeta();
     refreshStudioNameResultsText();
     refreshStudioLogoResultsText();
+    var buyCreditsModal = document.getElementById('buy-credits-modal');
+    if (buyCreditsModal && !buyCreditsModal.classList.contains('hidden')) {
+        _renderBuyCreditsPlans();
+        _renderBuyCreditsPacks();
+    }
     loadStudioHistory();
 }
 
@@ -4448,7 +4851,9 @@ function applyNameHistoryToForm(item) {
     if (document.getElementById('studio-name-query')) document.getElementById('studio-name-query').value = params.query || '';
     if (document.getElementById('studio-name-industry')) document.getElementById('studio-name-industry').value = params.industry || '';
     if (document.getElementById('studio-name-style') && params.style) document.getElementById('studio-name-style').value = params.style;
+    if (document.getElementById('studio-name-language') && params.language) document.getElementById('studio-name-language').value = params.language;
     setStudioSelectValues('studio-name-classes', params.nice_classes || []);
+    updateStudioNameButtonState();
 }
 
 function applyLogoHistoryToForm(item) {
@@ -4581,6 +4986,7 @@ function openStudioWithContext(mode, context) {
         if (context.nice_classes && context.nice_classes.length > 0) {
             setStudioSelectValues('studio-name-classes', context.nice_classes);
         }
+        updateStudioNameButtonState();
     } else if (mode === 'logo' && context.query) {
         document.getElementById('studio-logo-name').value = context.query;
         if (context.nice_classes && context.nice_classes.length > 0) {
@@ -5591,27 +5997,51 @@ function _inlineRiskColor(score) {
     return 'var(--color-risk-low-text)';
 }
 
-// Map raw Turkish DB status values (final_status column) to translated strings.
-// DB stores Turkish labels; this converts them to the active locale via landing.status_* keys.
+// Map raw Turkish DB status values (final_status column on trademarks,
+// current_status on designs) plus the enum codes used by patent and
+// cografi result rows to translated strings. DB stores fixed labels;
+// this converts them to the active locale via the listed i18n keys.
+//
+// The trademark + design block uses the shared `landing.status_*`
+// keys (they overlap with the landing-page facet labels). The patent
+// + cografi record_type enums are registry-specific concepts and
+// live under their own namespaces.
 var _STATUS_KEY_MAP = {
-    'Başvuruldu':   'landing.status_pending',
-    'Yayında':      'landing.status_published',
-    'Yayınlandı':   'landing.status_published',
-    'Tescil Edildi':'landing.status_registered',
-    'Reddedildi':   'landing.status_rejected',
-    'Geri Çekildi': 'landing.status_withdrawn',
-    'İtiraz Edildi':'landing.status_opposed',
-    'Süresi Doldu': 'landing.status_expired',
-    'Kısmi Red':    'landing.status_partial_refusal',
-    'Yenilendi':    'landing.status_renewed',
-    'Devredildi':   'landing.status_transferred',
-    'İptal Edildi': 'landing.status_cancelled',
+    // Trademark final_status + design current_status (shared shapes)
+    'Başvuruldu':       'landing.status_pending',
+    'Yayında':          'landing.status_published',
+    'Yayınlandı':       'landing.status_published',
+    'Yayım Ertelendi':  'landing.status_publication_postponed',
+    'Tescil Edildi':    'landing.status_registered',
+    'Reddedildi':       'landing.status_rejected',
+    'Geri Çekildi':     'landing.status_withdrawn',
+    'İtiraz Edildi':    'landing.status_opposed',
+    'Süresi Doldu':     'landing.status_expired',
+    'Kısmi Red':        'landing.status_partial_refusal',
+    'Yenilendi':        'landing.status_renewed',
+    'Devredildi':       'landing.status_transferred',
+    'İptal Edildi':     'landing.status_cancelled',
+    // Patent record_type enum (kind_code-derived)
+    'GRANTED_PATENT':   'patent_search.record_type_granted_patent',
+    'GRANTED_UM':       'patent_search.record_type_granted_um',
+    'PUBLISHED_APP':    'patent_search.record_type_published_app',
+    'PUBLISHED_UM_APP': 'patent_search.record_type_published_um_app',
+    // Cografi record_type enum
+    'GI':               'cografi_search.record_type_gi',
+    'TPN':              'cografi_search.record_type_tpn',
+    // Shared unknown bucket (patent + cografi both ship UNKNOWN)
+    'UNKNOWN':          'landing.status_unknown',
 };
 function translateStatus(rawStatus) {
     if (!rawStatus) return '';
     var key = _STATUS_KEY_MAP[rawStatus];
     return key ? t(key) : rawStatus;
 }
+
+// Expose the helper to the vanilla-JS registry card scripts
+// (design_search.js / patent_search.js / cografi_search.js) which
+// can't reach into the Alpine root.
+window.translateStatus = translateStatus;
 
 function toggleInlineAlertDetail(alertId) {
     var detail = document.getElementById('inline-alert-detail-' + alertId);
@@ -6835,6 +7265,12 @@ function submitBulkUpload() {
             _setScanInProgress(_getScanDurationMs(queuedScans), 'bulk');
         }
         refreshWatchlistAndStats();
+        // Land the user on the Watchlist tab so they see the new rows when
+        // they close the upload modal. Don't auto-close the modal — they
+        // may want to read the skipped / error counts.
+        if ((s.added || 0) > 0 && typeof showDashboardTab === 'function') {
+            showDashboardTab('watchlist');
+        }
     }).catch(function (e) {
         if (e && e.status === 403) {
             var stepTwoVisible = !document.getElementById('upload-wl-step-2').classList.contains('hidden');
@@ -6964,7 +7400,7 @@ function renderReportsList(data) {
 
         var statusBadge = '';
         var downloadBtn = '';
-        var deleteBtn = '<button onclick="deleteReport(decodeURIComponent(\'' + encodedId + '\'), decodeURIComponent(\'' + encodedTitle + '\'))" '
+        var deleteBtn = '<button onclick="event.stopPropagation(); deleteReport(decodeURIComponent(\'' + encodedId + '\'), decodeURIComponent(\'' + encodedTitle + '\'))" '
             + 'title="' + escapeHtml(t('reports.delete_report')) + '" '
             + 'class="p-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg transition-colors flex items-center justify-center" '
             + 'aria-label="' + escapeHtml(t('reports.delete_report')) + '">'
@@ -6973,7 +7409,8 @@ function renderReportsList(data) {
             + '</svg></button>';
         if (report.status === 'completed') {
             statusBadge = '<span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">' + t('reports.status_completed') + '</span>';
-            downloadBtn = '<button onclick="handleReportDownload(\'' + report.id + '\')" '
+            downloadBtn = '<button onclick="event.stopPropagation(); handleReportDownload(\'' + report.id + '\')" '
+                + 'title="' + escapeHtml(t('reports.download_btn')) + '" '
                 + 'class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded-lg transition-colors flex items-center gap-1">'
                 + '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">'
                 + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>'
@@ -6989,7 +7426,18 @@ function renderReportsList(data) {
             sizeStr = '<span class="text-xs text-gray-400 ml-2">' + formatFileSize(report.file_size_bytes) + '</span>';
         }
 
-        html += '<div class="bg-white rounded-xl p-4 border border-gray-100 shadow-sm flex items-center gap-4">'
+        var isViewable = report.status === 'completed';
+        var rowAttrs = isViewable
+            ? ' role="button" tabindex="0" '
+                + 'onclick="handleReportView(\'' + report.id + '\')" '
+                + 'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();handleReportView(\'' + report.id + '\');}" '
+                + 'title="' + escapeHtml(t('reports.view_report')) + '" '
+                + 'aria-label="' + escapeHtml(t('reports.view_report')) + ': ' + title + '"'
+            : '';
+        var rowClass = 'bg-white rounded-xl p-4 border border-gray-100 shadow-sm flex items-center gap-4'
+            + (isViewable ? ' cursor-pointer hover:bg-blue-50/40 hover:border-blue-200 transition-colors' : '');
+
+        html += '<div class="' + rowClass + '"' + rowAttrs + '>'
             + '<div class="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">'
             + '<svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">'
             + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>'
@@ -7170,7 +7618,7 @@ function submitReportGeneration() {
 }
 
 // ============================================
-// REPORT DOWNLOAD
+// REPORT DOWNLOAD / VIEW
 // ============================================
 function handleReportDownload(reportId) {
     downloadReportAPI(reportId).then(function (blob) {
@@ -7185,6 +7633,25 @@ function handleReportDownload(reportId) {
         window.URL.revokeObjectURL(url);
     }).catch(function (err) {
         showToast(t('reports.download_failed') + ': ' + err.message, 'error');
+    });
+}
+
+function handleReportView(reportId) {
+    // Open placeholder synchronously so the popup blocker treats this as a
+    // user-gesture navigation; we redirect it once the auth'd fetch resolves.
+    var viewerTab = window.open('about:blank', '_blank');
+
+    downloadReportAPI(reportId).then(function (blob) {
+        var url = window.URL.createObjectURL(blob);
+        if (viewerTab && !viewerTab.closed) {
+            viewerTab.location.href = url;
+        } else {
+            window.location.href = url;
+        }
+        setTimeout(function () { window.URL.revokeObjectURL(url); }, 60000);
+    }).catch(function (err) {
+        if (viewerTab && !viewerTab.closed) viewerTab.close();
+        showToast(t('reports.view_failed') + ': ' + ((err && err.message) || ''), 'error');
     });
 }
 
@@ -8061,3 +8528,201 @@ function openApplicationWithContext(brandName, classes) {
     showDashboardTab('applications');
     setTimeout(function () { showApplicationForm(); }, 100);
 }
+
+// Window-level shim that the design_search.js card invokes when the
+// user clicks "Sahip" on a Tasarım result. Resolves the Alpine root
+// and delegates to loadPortfolio('design-holder', ...). The button
+// element is forwarded so the shim can pull the holder display name
+// out of its visible text — keeps design_search.js (vanilla JS, no
+// Alpine access) cleanly decoupled from the modal layer.
+window.openHolderPortfolio = function (holderTpe, button) {
+    if (!holderTpe) return;
+    var holderName = '';
+    if (button && button.textContent) {
+        holderName = String(button.textContent || '').trim();
+    }
+    try {
+        var root = document.querySelector('[x-data="dashboard()"]') || document.body;
+        if (root && window.Alpine && typeof window.Alpine.$data === 'function') {
+            var dash = window.Alpine.$data(root);
+            if (dash && typeof dash.loadPortfolio === 'function') {
+                dash.loadPortfolio('design-holder', String(holderTpe), holderName);
+                return;
+            }
+        }
+    } catch (_) { /* swallow — modal is best-effort */ }
+};
+
+// Many design rows ship a name with the address concatenated:
+// e.g. "DİDEM GÖKGÖZ Merkez Mah. Perihan Sok. No:116 ... TÜRKİYE".
+// This trims everything from the first Turkish address keyword so
+// the card + modal show just the personal/company name. The full
+// string is still passed to the backend for portfolio matching —
+// the backend uses normalize_designer_name on the stored column,
+// not on this display string, so search behaviour is unaffected.
+window._stripTurkishAddress = function (name) {
+    if (!name) return '';
+    var s = String(name).trim();
+    var words = s.split(/\s+/);
+    var ADDR = /^(Mah\.|Mahallesi|Cad\.|Caddesi|Sok\.|Sokak|Bulv\.|Bulvarı|Apt\.|Apartmanı|Blok|Kat:|Daire:)$/i;
+    for (var i = 1; i < words.length; i++) {
+        if (ADDR.test(words[i]) || /^No:/i.test(words[i]) || /^D:\d/i.test(words[i])) {
+            // Address starts at the word BEFORE the keyword (e.g.
+            // "Merkez Mah." — drop "Merkez" too).
+            return words.slice(0, Math.max(1, i - 1)).join(' ').trim();
+        }
+    }
+    return s;
+};
+
+// Sister shim for designer-chip clicks on the Tasarım card.
+// Designers have no canonical id in our schema, so the name itself
+// is the round-tripped identifier; the backend resolves via the
+// conservative-normalization GIN index on designs.designers.
+// portfolioType is 'design-designer' so the modal renders the right
+// label + the bulk-add modal posts {designer_name: ...} to
+// /api/v1/design-watchlist/bulk-from-portfolio.
+window.openDesignerPortfolio = function (designerName, _button) {
+    if (!designerName) return;
+    var name = String(designerName || '').trim();
+    if (!name) return;
+    try {
+        var root = document.querySelector('[x-data="dashboard()"]') || document.body;
+        if (root && window.Alpine && typeof window.Alpine.$data === 'function') {
+            var dash = window.Alpine.$data(root);
+            if (dash && typeof dash.loadPortfolio === 'function') {
+                dash.loadPortfolio('design-designer', name, name);
+                return;
+            }
+        }
+    } catch (_) { /* swallow — modal is best-effort */ }
+};
+
+// Attorney click: the lookup needs (name, firm) together to match
+// the backend's stricter name+firm rule. The portfolio modal's
+// _portfolioEntityId state holds a single string, so we JSON-encode
+// both fields and the URL-builder + bulk-confirm modal decode it.
+// Firm may be empty — backend matches NULL-firm rows then.
+window.openAttorneyPortfolio = function (attorneyName, attorneyFirm, _button) {
+    if (!attorneyName) return;
+    var nm = String(attorneyName || '').trim();
+    if (!nm) return;
+    var fm = String(attorneyFirm || '').trim();
+    var encoded = JSON.stringify({ name: nm, firm: fm });
+    // Many design rows embed the firm in the attorney_name itself
+    // (e.g. "ALPER AKSU (SEMBOL PATENT ...)") and still carry it on
+    // attorney_firm — skip the dash-join when it would duplicate.
+    var firmInName = fm && nm.toLowerCase().indexOf(fm.toLowerCase()) !== -1;
+    var display = (fm && !firmInName) ? (nm + ' — ' + fm) : nm;
+    try {
+        var root = document.querySelector('[x-data="dashboard()"]') || document.body;
+        if (root && window.Alpine && typeof window.Alpine.$data === 'function') {
+            var dash = window.Alpine.$data(root);
+            if (dash && typeof dash.loadPortfolio === 'function') {
+                dash.loadPortfolio('design-attorney', encoded, display);
+                return;
+            }
+        }
+    } catch (_) { /* swallow — modal is best-effort */ }
+};
+
+// ===== Patent click-through shims (Phase 2) =====
+// Holder: same shape as design-holder, but uses /portfolio/public/patents
+// behind the scenes. Accepts either a TPE client id or the internal
+// holders.id UUID (backend resolver handles both).
+window.openPatentHolderPortfolio = function (holderId, button) {
+    if (!holderId) return;
+    var holderName = '';
+    if (button && button.textContent) {
+        holderName = String(button.textContent || '').trim();
+    }
+    try {
+        var root = document.querySelector('[x-data="dashboard()"]') || document.body;
+        if (root && window.Alpine && typeof window.Alpine.$data === 'function') {
+            var dash = window.Alpine.$data(root);
+            if (dash && typeof dash.loadPortfolio === 'function') {
+                dash.loadPortfolio('patent-holder', String(holderId), holderName);
+                return;
+            }
+        }
+    } catch (_) { /* swallow — modal is best-effort */ }
+};
+
+// Inventor: name only. Backend resolves via normalize_designer_name +
+// idx_pinv_normalized_name.
+window.openInventorPortfolio = function (inventorName, _button) {
+    if (!inventorName) return;
+    var name = String(inventorName || '').trim();
+    if (!name) return;
+    try {
+        var root = document.querySelector('[x-data="dashboard()"]') || document.body;
+        if (root && window.Alpine && typeof window.Alpine.$data === 'function') {
+            var dash = window.Alpine.$data(root);
+            if (dash && typeof dash.loadPortfolio === 'function') {
+                dash.loadPortfolio('patent-inventor', name, name);
+                return;
+            }
+        }
+    } catch (_) { /* swallow — modal is best-effort */ }
+};
+
+// ===== Cografi click-through shims (Phase 3) =====
+// Applicant: same shape as patent-holder. Accepts TPE id or
+// internal holders.id UUID; backend resolver handles both.
+window.openCografiApplicantPortfolio = function (holderId, button) {
+    if (!holderId) return;
+    var applicantName = '';
+    if (button && button.textContent) {
+        applicantName = String(button.textContent || '').trim();
+    }
+    try {
+        var root = document.querySelector('[x-data="dashboard()"]') || document.body;
+        if (root && window.Alpine && typeof window.Alpine.$data === 'function') {
+            var dash = window.Alpine.$data(root);
+            if (dash && typeof dash.loadPortfolio === 'function') {
+                dash.loadPortfolio('cografi-applicant', String(holderId), applicantName);
+                return;
+            }
+        }
+    } catch (_) { /* swallow — modal is best-effort */ }
+};
+
+// Cografi agent: name-only (sparse text column on cografi_records).
+// Backend resolves via normalize_designer_name + idx_cog_agent_normalized.
+window.openCografiAgentPortfolio = function (agentName, _button) {
+    if (!agentName) return;
+    var name = String(agentName || '').trim();
+    if (!name) return;
+    try {
+        var root = document.querySelector('[x-data="dashboard()"]') || document.body;
+        if (root && window.Alpine && typeof window.Alpine.$data === 'function') {
+            var dash = window.Alpine.$data(root);
+            if (dash && typeof dash.loadPortfolio === 'function') {
+                dash.loadPortfolio('cografi-agent', name, name);
+                return;
+            }
+        }
+    } catch (_) { /* swallow — modal is best-effort */ }
+};
+
+// Patent attorney: (name, firm) pair. Same JSON-blob round-trip the
+// design attorney shim uses.
+window.openPatentAttorneyPortfolio = function (attorneyName, attorneyFirm, _button) {
+    if (!attorneyName) return;
+    var nm = String(attorneyName || '').trim();
+    if (!nm) return;
+    var fm = String(attorneyFirm || '').trim();
+    var encoded = JSON.stringify({ name: nm, firm: fm });
+    var firmInName = fm && nm.toLowerCase().indexOf(fm.toLowerCase()) !== -1;
+    var display = (fm && !firmInName) ? (nm + ' — ' + fm) : nm;
+    try {
+        var root = document.querySelector('[x-data="dashboard()"]') || document.body;
+        if (root && window.Alpine && typeof window.Alpine.$data === 'function') {
+            var dash = window.Alpine.$data(root);
+            if (dash && typeof dash.loadPortfolio === 'function') {
+                dash.loadPortfolio('patent-attorney', encoded, display);
+                return;
+            }
+        }
+    } catch (_) { /* swallow — modal is best-effort */ }
+};

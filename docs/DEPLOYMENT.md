@@ -1,4 +1,4 @@
-# IP Watch AI Deployment
+﻿# IP Watch AI Deployment
 
 Last updated: 2026-04-19
 Status: Current
@@ -72,6 +72,20 @@ AI Studio:
 - after changing `.env.production`, recreate the backend with `docker compose up -d --force-recreate backend`; restarting an existing container does not apply newly added environment variables
 - `GET /api/v1/tools/status` should report Name Lab and Logo Studio as available before exposing the dashboard tab to users
 
+Billing:
+- set `BILLING_REGION_CATALOG_JSON` with UK/EU Stripe Price IDs and TR display prices before enabling paid checkout
+- set `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_SUCCESS_URL`, `STRIPE_CANCEL_URL`, and keep `STRIPE_AUTOMATIC_TAX=true` for UK/EU payments
+- set Stripe webhook forwarding to `POST /api/v1/payments/stripe/webhook`
+- keep `IYZICO_API_KEY`, `IYZICO_SECRET_KEY`, `IYZICO_CALLBACK_URL`, and `IYZICO_WEBHOOK_URL` configured for Turkey payments
+- after pulling this billing change, rebuild the backend image so the `stripe` Python package is installed, then recreate the backend after env changes
+
+EUIPO (EU Trade Mark data collection):
+- set `EUIPO_API_KEY` and `EUIPO_API_SECRET` in `.env.production` before running `data_collection_eutm.py`
+- obtain credentials by registering at `https://dev.euipo.europa.eu` and subscribing to the **Trademark search** product (free, "Default Plan" gives 25,000 requests per rate-limit period)
+- keep `EUIPO_API_BASE=https://api-sandbox.euipo.europa.eu` during initial backfill validation; flip to production endpoint by passing `--production` on the CLI once verified
+- the collector is idempotent, resumable per-window, and rate-limit aware; if cron runs it daily, the default mode is a delta over yesterday's `updateDate`
+- field reference and harvest strategy live in `docs/EUIPO_DATA_NOTES.md`
+
 Start the stack:
 
 ```powershell
@@ -87,7 +101,7 @@ Useful endpoints:
 Notes:
 - Docker bootstraps the database from `deploy/schema.sql`
 - the base local stack exposes PostgreSQL on host port `5433`
-- the current validated backend default is `WORKERS=1`; the previous four-worker default caused intermittent dropped responses on `/api/v1/search/quick` and `/api/v1/search/intelligent`
+- the current validated backend default is `WORKERS=1`; the previous four-worker default caused intermittent dropped responses on `/api/v1/search` and `/api/v1/search`
 - the local Docker backend bind-mounts `education/` and `migrations/`, so landing Education materials and the Education progress startup check stay aligned with the workspace
 
 ## Prod-Style Deploy Path
@@ -126,7 +140,7 @@ Additional schema evolution lives in:
 - `migrations/`
 
 Notable migration-backed areas include:
-- payments
+- payments (`migrations/payments.sql`, `migrations/credit_packs.sql`, `migrations/regional_payment_providers.sql`)
 - creative suite tables
 - trademark applications
 - trademark events
@@ -151,7 +165,7 @@ curl http://127.0.0.1:8080/health
 - the backend container runs `uvicorn main:app`
 - pipeline trigger routes and `workers/pipeline_scheduler.py` now spawn detached `python -m workers.pipeline_worker` child processes, so the backend or scheduler runtime must be allowed to launch child Python processes from the repo root
 - detached pipeline workers survive parent web or scheduler process exits, but they do not survive a full host or container restart
-- `/api/v1/pipeline/trigger-step?step=repair` can launch the repair step as a detached worker; live repair progress is resumable through `repair_live_trademark_checks`
+- `/api/v1/pipeline/trigger-step?step=repair` can launch the repair step as a detached worker; live repair progress is resumable through `repair_live_trademark_checks`. For long-running CLI live repair, `scripts/run_live_repair_until_done.py` freezes the live-status exclusive bulletin-date cutoff at startup, or accepts `--status-max-bulletin-date YYYY-MM-DD` for an explicit high-water mark.
 - `data_collection.py` incremental mode now verifies recent issues by canonical issue-folder completeness instead of raw file presence; an issue only counts as present when its `BLT_...` or `GZ_...` folder contains both `metadata.json` and `events.json`
 - raw collector downloads now use the canonical issue stem, for example `BLT_490_2026-04-13.pdf` or `GZ_500_2026-03-31.zip`
 - extraction accepts those canonical raw BLT/GZ filenames alongside the older legacy raw filenames

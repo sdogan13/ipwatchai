@@ -2552,7 +2552,9 @@ def _score_textual_path_v2(
     use_translated_idf: bool = False,
 ) -> Tuple[float, Dict]:
     text_sim = _clamp_score(text_sim)
-    semantic_sim = _clamp_score(semantic_sim)
+    # Trademark text-semantic embeddings were removed from the risk engine. Keep
+    # the field/argument for API compatibility, but do not let it affect scores.
+    semantic_sim = 0.0
     phonetic_sim = _clamp_score(phonetic_sim)
     visual_sim = _clamp_score(visual_sim)
 
@@ -2897,11 +2899,6 @@ def _score_textual_path_v2(
         char_support_score = min(0.45, char_similarity * 0.55)
 
     semantic_support_score = 0.0
-    if semantic_sim >= 0.65:
-        if lexical_anchor:
-            semantic_support_score = min(0.75, max(token_score, containment_score) + (semantic_sim * 0.08))
-        else:
-            semantic_support_score = min(0.45, semantic_sim * 0.60)
 
     name_phonetic = max(phonetic_sim, calculate_phonetic_similarity(q_norm, t_norm))
     phonetic_support_score = 0.0

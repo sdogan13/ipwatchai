@@ -120,10 +120,10 @@ def add_to_scan_queue(conn, trademark_ids: list, bulletin_no: str = None,
             queued_count = cur.rowcount
             conn.commit()
             if queued_count > 0:
-                logging.info(f"   Queued {queued_count} trademarks for Opposition Radar scan")
+                logging.info(f"   Queued {queued_count} trademarks for Radar scan")
             return queued_count
     except Exception as e:
-        logging.warning(f"   Failed to queue for Opposition Radar scan: {e}")
+        logging.warning(f"   Failed to queue for Radar scan: {e}")
         return 0
 
 
@@ -236,7 +236,6 @@ _SHARED_FIELDS = [
     ('image_path',            'v.img_path'),
     ('image_embedding',       'v.img_emb::halfvec(512)'),
     ('dinov2_embedding',      'v.dino_emb::halfvec(768)'),
-    ('text_embedding',        'v.txt_emb::halfvec(384)'),
     ('color_histogram',       'v.color_emb::halfvec(512)'),
     ('logo_ocr_text',         'v.ocr_text'),
 ]
@@ -300,7 +299,7 @@ def _build_update_sql(source):
                 FROM (VALUES %s) AS v(
                     name, status, nice_classes, goods, last_date, appeal, expiry,
                     b_no, b_date, g_no, g_date, img_path,
-                    app_date, reg_date, img_emb, dino_emb, txt_emb, color_emb,
+                    app_date, reg_date, img_emb, dino_emb, color_emb,
                     ocr_text,
                     name_tr, detected_lang,
                     holder_name, holder_tpe_client_id,
@@ -325,7 +324,6 @@ def sanitize(val):
     if isinstance(val, dict) and len(val) == 0: return None
     return val
 
-_TEXT_EMBEDDING_SOURCE_NAME_KEY = "text_embedding_source_name"
 _TRANSLATION_SOURCE_NAME_KEY = "name_tr_source_name"
 
 
@@ -339,10 +337,7 @@ def _raw_name_was_materially_cleaned(raw_name, cleaned_name) -> bool:
 def _metadata_text_features_are_from_clean_name(rec: dict, cleaned_name: str | None) -> bool:
     if not cleaned_name:
         return False
-    return (
-        rec.get(_TEXT_EMBEDDING_SOURCE_NAME_KEY) == cleaned_name
-        and rec.get(_TRANSLATION_SOURCE_NAME_KEY) == cleaned_name
-    )
+    return rec.get(_TRANSLATION_SOURCE_NAME_KEY) == cleaned_name
 
 
 def _trunc(val, max_len):
@@ -606,7 +601,7 @@ def check_and_migrate_schema(conn):
             ("gazette_no", "VARCHAR(255)"), ("gazette_date", "DATE"),
             ("appeal_deadline", "DATE"), ("expiry_date", "DATE"),
             ("image_path", "TEXT"), ("image_embedding", "halfvec(512)"),
-            ("dinov2_embedding", "halfvec(768)"), ("text_embedding", "halfvec(384)"),
+            ("dinov2_embedding", "halfvec(768)"),
             ("color_histogram", "halfvec(512)"), ("logo_ocr_text", "TEXT"),
             ("name_tr", "VARCHAR(500)"), ("detected_lang", "VARCHAR(10)"),
             ("holder_name", "VARCHAR(500)"), ("holder_tpe_client_id", "VARCHAR(50)"),
@@ -775,7 +770,6 @@ _INSERT_COLUMNS = [
     "image_path",
     "image_embedding",
     "dinov2_embedding",
-    "text_embedding",
     "color_histogram",
     "logo_ocr_text",
     "name_tr",
@@ -802,7 +796,6 @@ def _build_insert_sql():
                     appeal_deadline = COALESCE(EXCLUDED.appeal_deadline, trademarks.appeal_deadline),
                     image_embedding = COALESCE(EXCLUDED.image_embedding, trademarks.image_embedding),
                     dinov2_embedding = COALESCE(EXCLUDED.dinov2_embedding, trademarks.dinov2_embedding),
-                    text_embedding = COALESCE(EXCLUDED.text_embedding, trademarks.text_embedding),
                     color_histogram = COALESCE(EXCLUDED.color_histogram, trademarks.color_histogram),
                     logo_ocr_text = COALESCE(EXCLUDED.logo_ocr_text, trademarks.logo_ocr_text),
                     name_tr = COALESCE(EXCLUDED.name_tr, trademarks.name_tr),
@@ -961,7 +954,6 @@ def process_file_batch(conn, file_path, force=False):
                     and not _metadata_text_features_are_from_clean_name(rec, tm_name)
                 )
             )
-            txt_emb = None if name_features_are_stale else embedding_to_halfvec(rec.get("text_embedding"), 384)
             color_emb = embedding_to_halfvec(rec.get("color_histogram"), 512)
             img_path = _resolve_image_path(folder_name, rec.get("IMAGE"), ROOT_DIR)
             ocr_text = rec.get("logo_ocr_text")
@@ -1012,7 +1004,7 @@ def process_file_batch(conn, file_path, force=False):
                     sanitize(insert_bulletin_no), insert_bulletin_date,
                     sanitize(folder_gazette_no if is_gazette_source else tm.get("GAZETTE_NO")), gazette_date_val,
                     appeal_dl, new_expiry_date, img_path,
-                    img_emb, dino_emb, txt_emb, color_emb, sanitize(ocr_text),
+                    img_emb, dino_emb, color_emb, sanitize(ocr_text),
                     name_tr, detected_lang, holder_name, holder_tpe_client_id,
                     attorney_name, attorney_no, source_tag
                 ))
@@ -1076,7 +1068,7 @@ def process_file_batch(conn, file_path, force=False):
                         sanitize(tm.get("BULLETIN_NO")), bulletin_date_val,
                         sanitize(folder_gazette_no if is_gazette_source else tm.get("GAZETTE_NO")), gazette_date_val,
                         img_path, app_date, reg_date,
-                        img_emb, dino_emb, txt_emb, color_emb, sanitize(ocr_text),
+                        img_emb, dino_emb, color_emb, sanitize(ocr_text),
                         name_tr, detected_lang, None, None, None,
                         holder_name, holder_tpe_client_id,
                         attorney_name, attorney_no,
@@ -1142,7 +1134,15 @@ def process_file_batch(conn, file_path, force=False):
                 try:
                     from watchlist.scanner import trigger_watchlist_scan
                     trigger_watchlist_scan(new_trademark_ids, 'bulletin' if is_bulletin_source else ('gazette' if is_gazette_source else 'application'), folder_name)
-                except Exception: pass
+                except Exception as exc:
+                    # Mirror the patent/design/cografi post-ingest hooks:
+                    # log scan failures so an observability gap doesn't
+                    # swallow missed alerts. Never re-raise — a failed
+                    # scan must not poison a successful ingest commit.
+                    logging.warning(
+                        f"   Watchlist scan failed for {folder_name} "
+                        f"({len(new_trademark_ids)} new trademarks): {exc!r}"
+                    )
 
             if new_trademark_ids and is_bulletin_source:
                 queue_bulletin_no, queue_bulletin_date = extract_bulletin_info(folder_name)
@@ -1517,8 +1517,7 @@ def cleanup_sekil_names(conn, batch_size: int = 5000) -> int:
         OR (
             COALESCE(NULLIF(BTRIM(name), ''), NULLIF(BTRIM(name_tr), '')) IS NULL
             AND (
-                text_embedding IS NOT NULL
-                OR detected_lang IS NOT NULL
+                detected_lang IS NOT NULL
                 OR name_tr_backend IS NOT NULL
                 OR name_tr_model IS NOT NULL
                 OR name_tr_updated_at IS NOT NULL
@@ -1545,7 +1544,6 @@ def cleanup_sekil_names(conn, batch_size: int = 5000) -> int:
                         str(tm_id),
                         sanitize(cleaned_name),
                         None if clear_translation else sanitize(cleaned_name_tr),
-                        name_changed or logo_only_after_cleanup,
                         clear_translation,
                     )
                 )
@@ -1556,14 +1554,13 @@ def cleanup_sekil_names(conn, batch_size: int = 5000) -> int:
                 """
                 UPDATE trademarks AS tm
                 SET name = v.name::text,
-                    text_embedding = CASE WHEN v.clear_text_embedding THEN NULL ELSE tm.text_embedding END,
                     name_tr = v.name_tr::text,
                     detected_lang = CASE WHEN v.clear_translation THEN NULL ELSE tm.detected_lang END,
                     name_tr_backend = CASE WHEN v.clear_translation THEN NULL ELSE tm.name_tr_backend END,
                     name_tr_model = CASE WHEN v.clear_translation THEN NULL ELSE tm.name_tr_model END,
                     name_tr_updated_at = CASE WHEN v.clear_translation THEN NULL ELSE tm.name_tr_updated_at END,
                     updated_at = NOW()
-                FROM (VALUES %s) AS v(id, name, name_tr, clear_text_embedding, clear_translation)
+                FROM (VALUES %s) AS v(id, name, name_tr, clear_translation)
                 WHERE tm.id = v.id::uuid
                 """,
                 updates,

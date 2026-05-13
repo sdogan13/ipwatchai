@@ -1494,13 +1494,16 @@ class TestIDFWaterfall:
         assert score_with > score_without
         assert score_with <= 0.45
 
-    def test_semantic_only_cap(self):
-        """Semantic-only evidence is capped when there is no lexical anchor."""
+    def test_semantic_input_is_ignored(self):
+        """Semantic input is retained as a compatibility argument but scores as zero."""
         score, breakdown = compute_idf_weighted_score(
             query="NIKE", target="KAPLAN", text_sim=0.0, semantic_sim=1.0, phonetic_sim=0.0,
         )
-        assert score <= 0.45
-        assert "semantic_or_phonetic_without_lexical_anchor_cap" in "|".join(breakdown["caps_applied"])
+        baseline_score, _ = compute_idf_weighted_score(
+            query="NIKE", target="KAPLAN", text_sim=0.0, semantic_sim=0.0, phonetic_sim=0.0,
+        )
+        assert score == baseline_score
+        assert breakdown["semantic_similarity"] == 0.0
 
 
 # ============================================================
@@ -1906,18 +1909,48 @@ class TestRiskEngineSqlNormalization:
         assert "nice_class_numbers && %s::integer[]" in source
         assert source.count("apply_common_filters(") >= 8
 
-    def test_semantic_retrieval_requires_real_trademark_text(self):
+    def test_text_semantic_retrieval_removed_from_risk_engine(self):
         import risk_engine
 
         prescreen_source = inspect.getsource(risk_engine.RiskEngine.pre_screen_candidates)
         hybrid_source = inspect.getsource(risk_engine.RiskEngine.calculate_hybrid_risk)
+        vector_source = inspect.getsource(risk_engine.RiskEngine.get_query_vectors)
+        collect_source = inspect.getsource(risk_engine.RiskEngine.collect_risk_candidates)
 
-        assert "WHERE text_embedding IS NOT NULL" in prescreen_source
-        assert "NULLIF(BTRIM(name), '')" in prescreen_source
-        assert "NULLIF(BTRIM(name_tr), '')" in prescreen_source
-        assert "ELSE 0.0" in hybrid_source
-        assert "NULLIF(BTRIM(t.name), '')" in hybrid_source
-        assert "NULLIF(BTRIM(t.name_tr), '')" in hybrid_source
+        assert "text_embedding" not in prescreen_source
+        assert "score_semantic" not in hybrid_source
+        assert "text_model.encode(name" not in vector_source
+        assert "text_vec = None" in vector_source
+        assert 'screen_name = name if name.strip() else ""' in collect_source
+
+    def test_prescreen_keeps_translation_name_tr_retrieval(self):
+        import risk_engine
+
+        source = inspect.getsource(risk_engine.RiskEngine.pre_screen_candidates)
+
+        assert "auto_translate_to_turkish" in source
+        assert 'add_query_variant("translated"' in source
+        assert "name_tr_norm_expr" in source
+        assert "name_tr_phonetic" in source
+
+    def test_collect_risk_candidates_uses_prescreen_and_hybrid_scoring(self):
+        import risk_engine
+
+        engine = object.__new__(risk_engine.RiskEngine)
+        engine.get_query_vectors = MagicMock(return_value=(None, None, None, None, ""))
+        engine.pre_screen_candidates = MagicMock(return_value=[("tm-1",)])
+        engine.calculate_hybrid_risk = MagicMock(
+            return_value=[
+                {"name": "innovels", "scores": {"total": 0.91}},
+                {"name": "innova", "scores": {"total": 0.42}},
+            ]
+        )
+
+        results = engine.collect_risk_candidates("Innoveil", target_classes=[9, 42], limit=1)
+
+        engine.pre_screen_candidates.assert_called_once()
+        engine.calculate_hybrid_risk.assert_called_once()
+        assert results == [{"name": "innovels", "scores": {"total": 0.91}}]
 
     def test_retrieval_metadata_merges_sources_for_same_candidate(self):
         import risk_engine
@@ -3090,7 +3123,7 @@ class TestRegressionKnownPairs:
         assert result["total"] <= 0.45
         assert "missing_dominant_anchor_cap:0.62" in result["caps_applied"]
 
-    def test_semantic_only_weak_text_blocks_moderate_visual_domination(self):
+    def test_weak_text_blocks_moderate_visual_domination_without_semantic_support(self):
         TestIDFWaterfall._seed_distinctive_tokens("oksipital", "okuluko")
 
         result = score_pair(
@@ -3102,7 +3135,8 @@ class TestRegressionKnownPairs:
         )
 
         assert result["total"] <= 0.45
-        assert "semantic_or_phonetic_without_lexical_anchor_cap:0.45" in result["caps_applied"]
+        assert result["semantic_similarity"] == 0.0
+        assert "weak_text_visual_low_cap:0.45" in result["caps_applied"]
 
     def test_ocr_disagreement_pair_uses_general_weak_text_visual_cap(self):
         TestIDFWaterfall._seed_distinctive_tokens("oksipital", "qorvital")

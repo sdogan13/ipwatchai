@@ -6,7 +6,7 @@
 window.AppComponents = window.AppComponents || {};
 
 // ============================================
-// A0) Similarity category — 4-bucket scheme used by Opposition Radar and search results.
+// A0) Similarity category — 4-bucket scheme used by Radar and search results.
 //     very_high >= 90, high 70-89, medium 50-69, low < 50.
 //     Kept separate from getScoreRiskLevel (5-bucket) to give a simpler text-only UI.
 //     The top bucket is 'very_high' (not 'critical') so radar urgency badges that use

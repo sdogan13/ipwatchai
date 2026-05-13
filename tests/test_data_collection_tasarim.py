@@ -28,6 +28,7 @@ from data_collection_tasarim import (
     safe_filename_keep_text,
     slugify,
 )
+from data_collection_tasarim import _find_existing_issue_folder
 
 
 TEST_TEMP_ROOT = Path(__file__).resolve().parent.parent / ".tmp_pytest_tasarim"
@@ -178,6 +179,95 @@ def test_check_local_existence_returns_false_when_root_missing():
         assert check_local_existence(str(ghost), "483", card_date="2026-04-24") is False
 
 
+def test_check_local_existence_drift_folder_match():
+    """Drift case: page reports card_date='2026-04-24' for bulletin 240
+    but the existing folder is TS_240_2016-03-09/ (the real publication
+    date from the CD's idbulletin.inf). check_local_existence must still
+    return True via the _find_existing_issue_folder fallback so the
+    incremental tracker doesn't redownload an already-complete bulletin."""
+    with temp_dir() as tmp:
+        category = tmp / "Tasarim"
+        drifted = category / "TS_240_2016-03-09"
+        drifted.mkdir(parents=True)
+        (drifted / "bulletin.pdf").write_bytes(b"existing-PDF")
+        # Page is reporting today's date, not 2016-03-09.
+        assert check_local_existence(
+            str(category), "240", card_date="2026-04-24"
+        ) is True
+
+
+def test_check_local_existence_returns_false_on_multimatch():
+    """Multi-match is treated as ambiguous from the existence-check
+    perspective — return False so process_card surfaces the issue."""
+    with temp_dir() as tmp:
+        category = tmp / "Tasarim"
+        for date in ("2016-03-09", "2026-04-24"):
+            folder = category / f"TS_240_{date}"
+            folder.mkdir(parents=True)
+            (folder / "bulletin.pdf").write_bytes(b"")
+        assert check_local_existence(
+            str(category), "240", card_date="2026-04-24"
+        ) is False
+
+
+# ---------------------------------------------------------------------------
+# _find_existing_issue_folder (P.1-equivalent)
+# ---------------------------------------------------------------------------
+
+def test_find_existing_issue_folder_no_match():
+    with temp_dir() as tmp:
+        assert _find_existing_issue_folder(tmp, "240") is None
+
+
+def test_find_existing_issue_folder_exact_match():
+    with temp_dir() as tmp:
+        folder = tmp / "TS_240_2016-03-09"
+        folder.mkdir()
+        assert _find_existing_issue_folder(tmp, "240") == folder
+
+
+def test_find_existing_issue_folder_drift_match():
+    """The whole point: an existing TS_{N}_*/ folder with a different
+    date suffix than the page-reported card_date still counts as a
+    match. Real-world drift case from bulletin 240."""
+    with temp_dir() as tmp:
+        drift = tmp / "TS_240_2016-03-09"
+        drift.mkdir()
+        (drift / "cd_metadata.json").write_text("{}", encoding="utf-8")
+        # Page would compute target as TS_240_2026-04-24, but the helper
+        # returns the existing 2016-03-09 folder instead.
+        assert _find_existing_issue_folder(tmp, "240") == drift
+
+
+def test_find_existing_issue_folder_multimatch_raises():
+    with temp_dir() as tmp:
+        (tmp / "TS_240_2016-03-09").mkdir()
+        (tmp / "TS_240_2026-04-24").mkdir()
+        with pytest.raises(RuntimeError, match=r"multiple TS_240_\* folders"):
+            _find_existing_issue_folder(tmp, "240")
+
+
+def test_find_existing_issue_folder_unrelated_dirs_ignored():
+    """Other-bulletin folders, files, and stray dirs don't pollute the match."""
+    with temp_dir() as tmp:
+        (tmp / "TS_241_2016-03-24").mkdir()  # different bulletin
+        (tmp / "TS_240_2016-03-09").write_text("file not dir")  # file
+        (tmp / "junk_dir").mkdir()
+        assert _find_existing_issue_folder(tmp, "240") is None
+
+
+def test_find_existing_issue_folder_missing_root():
+    with temp_dir() as tmp:
+        assert _find_existing_issue_folder(tmp / "no_such_root", "240") is None
+
+
+def test_find_existing_issue_folder_empty_card_id():
+    with temp_dir() as tmp:
+        (tmp / "TS_240_2016-03-09").mkdir()
+        assert _find_existing_issue_folder(tmp, "") is None
+        assert _find_existing_issue_folder(tmp, None) is None  # type: ignore[arg-type]
+
+
 # ---------------------------------------------------------------------------
 # IncrementalScanTracker
 # ---------------------------------------------------------------------------
@@ -224,6 +314,14 @@ def test_parse_argv_defaults():
     assert args.limit is None
     assert args.headless is True
     assert args.bulletins_root.name == "Tasarim"
+    assert args.force is False
+
+
+def test_parse_argv_force_flag():
+    """``--force`` makes process_card re-download a bulletin's PDF even
+    when the target folder is already complete on disk."""
+    args = parse_argv(["--force"])
+    assert args.force is True
 
 
 def test_parse_argv_full_and_limit_and_headless_off():
@@ -248,6 +346,34 @@ def test_parse_argv_headless_invalid_raises():
 def test_parse_argv_custom_bulletins_root(tmp_path):
     args = parse_argv(["--bulletins-root", str(tmp_path / "elsewhere")])
     assert args.bulletins_root == tmp_path / "elsewhere"
+
+
+def test_parse_argv_issue_implies_full():
+    """``--issue NNN`` must force --full=True so the incremental tracker
+    doesn't stop walking the archive before reaching old bulletins."""
+    args = parse_argv(["--issue", "240"])
+    assert args.issue == "240"
+    assert args.full is True
+
+
+def test_parse_argv_issue_combined_with_full_explicit():
+    """Passing --full alongside --issue is fine (both same effect)."""
+    args = parse_argv(["--issue", "240", "--full"])
+    assert args.issue == "240"
+    assert args.full is True
+
+
+def test_parse_argv_issue_strips_whitespace():
+    """``--issue " 240 "`` -> issue=='240' so users can paste-with-spaces."""
+    args = parse_argv(["--issue", "  240  "])
+    assert args.issue == "240"
+
+
+def test_parse_argv_issue_default_is_none():
+    """Without --issue, the field is None and full follows its own default."""
+    args = parse_argv([])
+    assert args.issue is None
+    assert args.full is False
 
 
 # ---------------------------------------------------------------------------

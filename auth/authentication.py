@@ -289,6 +289,24 @@ async def get_current_active_user(
     return current_user
 
 
+_optional_security = HTTPBearer(auto_error=False)
+
+
+async def get_current_user_optional(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_optional_security),
+) -> Optional[CurrentUser]:
+    """Like ``get_current_user`` but returns ``None`` for unauthenticated calls
+    instead of raising 401. Routes that grant a small amount of anonymous
+    access (e.g. tasting an AI feature) depend on this and apply their own
+    anon-quota policy in the handler."""
+    if credentials is None:
+        return None
+    try:
+        return await get_current_user(credentials=credentials)
+    except HTTPException:
+        return None
+
+
 def require_role(allowed_roles: list):
     """
     Dependency factory to require specific roles.

@@ -142,25 +142,11 @@
 
     <!-- Plan Usage & Credits Row -->
     <div id="plan-usage-row" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-        <!-- Quick Search Credits -->
+        <!-- Agentic Search Credits (daily) -->
         <div class="rounded-xl shadow-sm p-4 border" style="background:var(--color-bg-card);border-color:var(--color-border)">
             <div class="flex items-center justify-between gap-2">
-                <div class="text-xs font-medium truncate" style="color:var(--color-text-muted)" x-text="t('dashboard.quick_searches')">Quick Searches</div>
+                <div class="text-xs font-medium truncate" style="color:var(--color-text-muted)" x-text="t('dashboard.live_searches')">Agentic Searches</div>
                 <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide flex-shrink-0" style="background:var(--color-bg-muted);color:var(--color-text-faint)" x-text="t('dashboard.period_daily')">Daily</span>
-            </div>
-            <div class="flex items-center justify-between mt-1">
-                <span id="usage-quick-text" class="text-lg font-bold" style="color:var(--color-text-primary)">-</span>
-                <div id="usage-quick-ring" class="flex-shrink-0"></div>
-            </div>
-            <div class="w-full h-1.5 rounded-full mt-2" style="background:var(--color-border)">
-                <div id="usage-quick-bar" class="h-full rounded-full transition-all" style="background:var(--color-primary);width:0%"></div>
-            </div>
-        </div>
-        <!-- Live Search Credits -->
-        <div class="rounded-xl shadow-sm p-4 border" style="background:var(--color-bg-card);border-color:var(--color-border)">
-            <div class="flex items-center justify-between gap-2">
-                <div class="text-xs font-medium truncate" style="color:var(--color-text-muted)" x-text="t('dashboard.live_searches')">Live Searches</div>
-                <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide flex-shrink-0" style="background:var(--color-bg-muted);color:var(--color-text-faint)" x-text="t('dashboard.period_monthly')">Monthly</span>
             </div>
             <div class="flex items-center justify-between mt-1">
                 <span id="usage-live-text" class="text-lg font-bold" style="color:var(--color-text-primary)">-</span>

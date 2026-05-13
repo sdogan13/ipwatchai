@@ -1,7 +1,7 @@
-"""Tasarım (industrial design) search routes.
+﻿"""Tasarım (industrial design) search routes.
 
 Three endpoints:
-  * ``POST /api/v1/design-search/quick``  — authenticated, full results
+  * ``POST /api/v1/design-search``  — authenticated, full results
   * ``GET/POST /api/v1/design-search/public`` — anonymous, max 10 results
   * ``GET /api/v1/design-image/{path:path}`` — serve view JPEGs
 
@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from PIL import Image
 
@@ -82,14 +82,36 @@ def _parse_locarno_param(raw: Optional[str]) -> Optional[List[str]]:
 def _resolve_design_image(image_path: str) -> Optional[str]:
     if not image_path or ".." in image_path:
         return None
-    candidate = (DESIGN_BULLETINS_ROOT / image_path.replace("/", os.sep)).resolve()
-    try:
-        candidate.relative_to(DESIGN_BULLETINS_ROOT.resolve())
-    except ValueError:
-        return None
-    if not candidate.is_file():
-        return None
-    return str(candidate)
+    root = DESIGN_BULLETINS_ROOT.resolve()
+
+    def _check(rel: str) -> Optional[str]:
+        candidate = (DESIGN_BULLETINS_ROOT / rel.replace("/", os.sep)).resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            return None
+        return str(candidate) if candidate.is_file() else None
+
+    # 1. Literal lookup (works for rows whose image_path already includes
+    # the correct subdir prefix).
+    hit = _check(image_path)
+    if hit:
+        return hit
+
+    # 2. Fallback for rows ingested before the D.1 CD-first refactor
+    # (commit a8de7f3e), where image_path was stored without the
+    # cd_images/ or images/ subdir prefix. DB-stored paths look like
+    # "{source_folder}/{design_id}/{view}.jpg"; the real files live at
+    # "{source_folder}/cd_images/{design_id}/{view}.jpg" (CD-sourced)
+    # or "{source_folder}/images/{design_id}/{view}.jpg" (PDF-sourced).
+    parts = image_path.split("/", 1)
+    if len(parts) == 2:
+        source_folder, rest = parts
+        for subdir in ("cd_images", "images"):
+            hit = _check(f"{source_folder}/{subdir}/{rest}")
+            if hit:
+                return hit
+    return None
 
 
 def design_image_response(image_path: str) -> FileResponse:
@@ -131,7 +153,7 @@ async def _do_design_search(
         )
 
 
-async def design_search_quick(
+async def design_search_authenticated(
     *,
     query: Optional[str],
     image: Optional[UploadFile],
@@ -142,7 +164,7 @@ async def design_search_quick(
 ) -> dict:
     """Authenticated full-detail search.
 
-    Counts against the same daily ``max_daily_quick_searches`` quota the
+    Counts against the same daily ``max_daily_live_searches`` quota the
     trademark quick search uses. Over-limit returns 429 with the upgrade-hint
     payload. Increment happens AFTER a successful search so failed retrievals
     don't burn the user's quota.
@@ -152,12 +174,12 @@ async def design_search_quick(
     if not (has_image or has_query):
         raise HTTPException(status_code=422, detail="Provide a product name (min 2 chars) or upload a design image")
 
-    # Daily quota check (mirrors agentic_search.py:954-961)
+    # Daily quota check — consumes from the unified daily Agentic Search budget
     if user_id:
         from database.crud import Database
-        from utils.subscription import check_quick_search_eligibility
+        from utils.subscription import check_live_search_eligibility
         with Database() as db:
-            can_search, reason, details = check_quick_search_eligibility(db, user_id)
+            can_search, reason, details = check_live_search_eligibility(db, user_id)
             if not can_search:
                 raise HTTPException(status_code=429, detail=details)
 
@@ -185,9 +207,9 @@ async def design_search_quick(
     # Increment AFTER successful retrieval — failed searches don't burn quota
     if user_id:
         from database.crud import Database
-        from utils.subscription import increment_quick_search_usage
+        from utils.subscription import increment_live_search_usage
         with Database() as db:
-            increment_quick_search_usage(db, user_id, organization_id)
+            increment_live_search_usage(db, user_id, organization_id)
 
     return result
 
@@ -195,18 +217,44 @@ async def design_search_quick(
 async def design_search_public(
     *,
     query: Optional[str],
-    locarno: Optional[str],
+    image: Optional[UploadFile] = None,
+    locarno: Optional[str] = None,
 ) -> dict:
-    """Public anonymous text-only search. Capped at 10 results."""
-    if not query or len(query.strip()) < 2:
-        raise HTTPException(status_code=422, detail="Provide a product name (min 2 chars)")
-    return await _do_design_search(
-        query=query.strip(),
-        image_temp_path=None,
-        locarno_classes=_parse_locarno_param(locarno),
-        limit=10,
-        public=True,
-    )
+    """Public anonymous design search. Capped at 10 results.
+
+    Mirrors the authenticated quick endpoint's input surface (text +
+    image + Locarno chips) so landing-page searches behave identically
+    to the dashboard. Visual-dominant ranking via DINOv2 + CLIP + HSV
+    runs the same way on the public path.
+    """
+    has_image = image is not None and image.filename
+    has_query = bool(query and query.strip())
+    if not has_query and not has_image:
+        raise HTTPException(
+            status_code=422,
+            detail="Provide a product name (min 2 chars) or upload a design image",
+        )
+
+    temp_path: Optional[str] = None
+    if has_image:
+        if image.content_type not in ALLOWED_IMAGE_TYPES:
+            raise HTTPException(status_code=400, detail="Invalid image type")
+        content = await image.read()
+        temp_path = _save_upload_to_temp(content)
+    try:
+        return await _do_design_search(
+            query=query.strip() if has_query else None,
+            image_temp_path=temp_path,
+            locarno_classes=_parse_locarno_param(locarno),
+            limit=10,
+            public=True,
+        )
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +268,10 @@ def register_design_search_routes(app, limiter):
     Auth is wired internally via ``Depends(get_current_user)`` from
     ``auth.authentication`` to match the existing trademark-route conventions.
     """
+    from app_public_search_quota import (
+        enforce_public_search_quota,
+        record_public_search_usage,
+    )
     from auth.authentication import get_current_user
 
     @app.get("/api/v1/design-image/{image_path:path}", tags=["Design Search"])
@@ -230,23 +282,34 @@ def register_design_search_routes(app, limiter):
     @limiter.limit("10/minute")
     async def public_design_search_get(
         request: Request,
+        response: Response,
         query: str = Query(..., min_length=2, max_length=100),
         locarno: Optional[str] = Query(None),
     ):
-        return await design_search_public(query=query, locarno=locarno)
+        client_id = enforce_public_search_quota(request, response)
+        payload = await design_search_public(query=query, locarno=locarno)
+        record_public_search_usage(client_id)
+        return payload
 
     @app.post("/api/v1/design-search/public", tags=["Design Search"])
     @limiter.limit("10/minute")
     async def public_design_search_post(
         request: Request,
+        response: Response,
         query: Optional[str] = Form(None),
+        image: Optional[UploadFile] = File(None),
         locarno: Optional[str] = Form(None),
     ):
-        return await design_search_public(query=query, locarno=locarno)
+        client_id = enforce_public_search_quota(request, response)
+        payload = await design_search_public(
+            query=query, image=image, locarno=locarno,
+        )
+        record_public_search_usage(client_id)
+        return payload
 
-    @app.post("/api/v1/design-search/quick", tags=["Design Search"])
+    @app.post("/api/v1/design-search", tags=["Design Search"])
     @limiter.limit("60/minute")
-    async def quick_design_search(
+    async def design_search(
         request: Request,
         query: Optional[str] = Form(None),
         image: Optional[UploadFile] = File(None),
@@ -261,7 +324,7 @@ def register_design_search_routes(app, limiter):
             user_id = str(uid) if uid is not None else None
             oid = getattr(current_user, "organization_id", None)
             org_id = str(oid) if oid is not None else None
-        return await design_search_quick(
+        return await design_search_authenticated(
             query=query, image=image, locarno=locarno, limit=limit,
             user_id=user_id, organization_id=org_id,
         )
@@ -296,16 +359,51 @@ def register_design_search_routes(app, limiter):
             })
         return {"items": items, "total": len(items)}
 
+    from auth.authentication import get_current_user_optional
+    from utils.anon_quota import (
+        ANON_CLASS_SUGGEST_DAILY_LIMIT,
+        _client_ip_from_request,
+        check_and_consume_anon_class_suggest,
+    )
+
     @app.post("/api/v1/tools/suggest-locarno-classes", tags=["Design Search"])
     @limiter.limit("20/minute")
     async def suggest_locarno_classes_route(
         request: Request,
-        current_user=Depends(get_current_user),
+        current_user=Depends(get_current_user_optional),
     ):
+        """Locarno class suggestion. Mirrors the Nice public path:
+          * Anonymous: ANON_CLASS_SUGGEST_DAILY_LIMIT calls per IP per day,
+            then 401 with an upgrade-context payload.
+          * Authenticated: AI-credits gate inside the service (1 credit per
+            call from the shared monthly_ai_credits pool).
+        """
         from services.locarno_suggest_service import (
             LocarnoSuggestionRequest,
             suggest_locarno_classes_data,
         )
+
+        if current_user is None:
+            ip = _client_ip_from_request(request)
+            allowed, _remaining = check_and_consume_anon_class_suggest(ip)
+            if not allowed:
+                raise HTTPException(
+                    status_code=401,
+                    detail={
+                        "error": "anon_limit_reached",
+                        "upgrade_context": "class_suggestions",
+                        "anon_daily_limit": ANON_CLASS_SUGGEST_DAILY_LIMIT,
+                        "message": (
+                            "Ücretsiz Locarno öneri hakkınız bugün için doldu. "
+                            "Devam etmek için giriş yapın veya bir plana abone olun."
+                        ),
+                        "message_en": (
+                            f"Anonymous daily limit ({ANON_CLASS_SUGGEST_DAILY_LIMIT}) "
+                            "reached. Sign in or subscribe to a plan to continue."
+                        ),
+                    },
+                )
+
         body = await request.json()
         try:
             payload = LocarnoSuggestionRequest(**body)

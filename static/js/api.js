@@ -24,48 +24,7 @@ function _buildApiError(response, data, fallbackMessage) {
 }
 
 // ============================================
-// QUICK (DB-ONLY) SEARCH
-// ============================================
-window.AppAPI.handleQuickSearch = async function () {
-    var input = document.getElementById('search-input');
-    var query = (input && input.value || '').trim();
-    if (!query) { showToast(t('search.enter_brand_name'), 'error'); return; }
-
-    var classes = getSelectedNiceClasses();
-    var attorneyEl = document.getElementById('attorney-filter-value');
-    var attorneyVal = attorneyEl ? attorneyEl.value : '';
-    var url = '/api/v1/search/quick?query=' + encodeURIComponent(query);
-    if (classes.length) url += '&classes=' + classes.join(',');
-    if (attorneyVal) url += '&attorney_no=' + encodeURIComponent(attorneyVal);
-
-    try {
-        var res = await fetch(url, {
-            headers: { 'Authorization': 'Bearer ' + getAuthToken() }
-        });
-        if (res.status === 401) { showToast(t('auth.session_expired'), 'error'); return; }
-        if (res.status === 429) {
-            var errData = await _readApiErrorData(res);
-            var detail = errData.detail || errData;
-            if (window.AppUpgradeModal && typeof window.AppUpgradeModal.maybeHandle === 'function'
-                && window.AppUpgradeModal.maybeHandle(detail, 'quick_search')) {
-                return;
-            }
-            showToast(t('search.rate_limited'), 'warning');
-            return;
-        }
-        if (!res.ok) throw new Error(t('search.search_failed'));
-        var data = await res.json();
-        currentSearchType = 'quick';
-        displayAgenticResults(data);
-        showToast(t('search.results_found_db', { count: Math.min(data.total || 0, 30) }), 'success');
-    } catch (e) {
-        console.error('Quick search error:', e);
-        showToast(t('common.error') + ': ' + e.message, 'error');
-    }
-};
-
-// ============================================
-// AGENTIC (LIVE) SEARCH
+// AGENTIC SEARCH (the only search mode)
 // ============================================
 window.AppAPI.handleAgenticSearch = async function () {
     var input = document.getElementById('search-input');
@@ -94,15 +53,15 @@ window.AppAPI.handleAgenticSearch = async function () {
             if (classes.length) formData.append('classes', classes.join(','));
             if (attorneyVal) formData.append('attorney_no', attorneyVal);
 
-            res = await fetch('/api/v1/search/intelligent', {
+            res = await fetch('/api/v1/search', {
                 method: 'POST',
                 headers: { 'Authorization': 'Bearer ' + getAuthToken() },
                 body: formData,
                 signal: signal
             });
         } else {
-            // GET without image (backward compatible)
-            var url = '/api/v1/search/intelligent?query=' + encodeURIComponent(query);
+            // GET without image
+            var url = '/api/v1/search?query=' + encodeURIComponent(query);
             if (classes.length) url += '&classes=' + classes.join(',');
             if (attorneyVal) url += '&attorney_no=' + encodeURIComponent(attorneyVal);
 
@@ -115,13 +74,20 @@ window.AppAPI.handleAgenticSearch = async function () {
         if (agenticSearchAborted) return;
         var data = await res.json();
 
-        if (res.status === 403) { hideAgenticLoadingModal(); showUpgradeModal(data.detail || data, 'live_search'); return; }
-        if (res.status === 402) { hideAgenticLoadingModal(); showUpgradeModal(data.detail || data, 'live_search'); return; }
+        if (res.status === 429) {
+            hideAgenticLoadingModal();
+            var detail = (data && data.detail) ? data.detail : data;
+            if (window.AppUpgradeModal && typeof window.AppUpgradeModal.maybeHandle === 'function'
+                && window.AppUpgradeModal.maybeHandle(detail, 'agentic_search')) {
+                return;
+            }
+            showToast(t('search.rate_limited'), 'warning');
+            return;
+        }
         if (res.status === 401) { hideAgenticLoadingModal(); showToast(t('auth.session_expired'), 'error'); return; }
         if (!res.ok) throw new Error(data.detail?.message || data.detail || t('search.search_failed'));
 
         hideAgenticLoadingModal();
-        currentSearchType = 'intelligent';
         displayAgenticResults(data);
 
         var creditsMsg = data.scrape_triggered
@@ -142,7 +108,7 @@ window.AppAPI.handleAgenticSearch = async function () {
 };
 
 // ============================================
-// OPPOSITION RADAR - LEADS
+// RADAR - LEADS
 // ============================================
 window.AppAPI.loadLeadStats = async function () {
     try {
@@ -330,6 +296,8 @@ var currentTransferPage = 1;
 var currentBankruptcyPage = 1;
 var currentRadarMode = 'conflicts';
 
+// Sub-mode switcher within the Marka registry. Patent is now a registry-level
+// view handled by the Alpine x-data on #tab-content-radar.
 window.AppAPI.switchRadarMode = function (mode) {
     currentRadarMode = mode;
     var modes = {
@@ -1241,7 +1209,15 @@ window.AppAPI.generateNames = async function (params) {
         throw new Error('upgrade_required');
     }
     if (res.status === 402) {
-        showUpgradeModal(data.detail || data, 'ai_credits');
+        // Single combined modal: left column lets the user upgrade their
+        // plan (recurring monthly credits + features), right column lets
+        // them buy a one-shot credit pack. Fall back to the upgrade modal
+        // only if the combined modal isn't loaded yet (cold-cache).
+        if (typeof openBuyCreditsModal === 'function') {
+            openBuyCreditsModal(data.detail || data);
+        } else {
+            showUpgradeModal(data.detail || data, 'ai_credits');
+        }
         throw new Error('credits_exhausted');
     }
     if (res.status === 401) {
@@ -1276,7 +1252,15 @@ window.AppAPI.generateLogos = async function (params) {
         throw new Error('upgrade_required');
     }
     if (res.status === 402) {
-        showUpgradeModal(data.detail || data, 'ai_credits');
+        // Single combined modal: left column lets the user upgrade their
+        // plan (recurring monthly credits + features), right column lets
+        // them buy a one-shot credit pack. Fall back to the upgrade modal
+        // only if the combined modal isn't loaded yet (cold-cache).
+        if (typeof openBuyCreditsModal === 'function') {
+            openBuyCreditsModal(data.detail || data);
+        } else {
+            showUpgradeModal(data.detail || data, 'ai_credits');
+        }
         throw new Error('credits_exhausted');
     }
     if (res.status === 401) {
@@ -1762,7 +1746,6 @@ window.AppAPI.loadExtractedGoods = async function (applicationNo) {
 };
 
 // Expose as globals for inline onclick handlers
-var handleQuickSearch = window.AppAPI.handleQuickSearch;
 var handleAgenticSearch = window.AppAPI.handleAgenticSearch;
 var loadLeadStats = window.AppAPI.loadLeadStats;
 var loadLeadCredits = window.AppAPI.loadLeadCredits;

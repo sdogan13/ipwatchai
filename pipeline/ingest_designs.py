@@ -22,7 +22,7 @@ import json
 import logging
 import os
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -162,13 +162,13 @@ def resolve_holder_id(cur, applicant: Optional[Dict[str, Any]]) -> Optional[str]
         )
         return cur.fetchone()[0]
 
-    cur.execute(
-        "SELECT id FROM holders WHERE LOWER(name) = LOWER(%s) AND tpe_client_id IS NULL LIMIT 1",
-        (name,),
-    )
-    row = cur.fetchone()
-    if row:
-        return row[0]
+    # Conservative-normalization dedup (lower + strip punct + collapse
+    # spaces). Plain LOWER(name)=LOWER(%s) used to leak duplicates for
+    # "CO. LTD." vs "CO.  LTD." etc. — see holders_consolidate_dups_no_tpe.
+    from pipeline.holder_helpers import find_holder_id_by_normalized_name
+    existing_id = find_holder_id_by_normalized_name(cur, name)
+    if existing_id:
+        return existing_id
 
     cur.execute(
         "INSERT INTO holders (name, address, country) VALUES (%s, %s, %s) RETURNING id",
@@ -180,6 +180,26 @@ def resolve_holder_id(cur, applicant: Optional[Dict[str, Any]]) -> Optional[str]
 # ---------------------------------------------------------------------------
 # Design upsert
 # ---------------------------------------------------------------------------
+
+_PRODUCT_NAME_MAX_LEN = 500
+
+
+def _truncate_500(value: Optional[str]) -> Optional[str]:
+    """Trim a product_name string to fit the VARCHAR(500) column.
+
+    Hague designs sometimes ship comma-joined multi-part descriptions
+    (e.g. "Hood for vehicle, Radiator grille for vehicle, Front bumper
+    for vehicle, ...") that easily exceed 500 chars. Returns None for
+    None/empty input. Truncation preserves the leading prefix; the full
+    string is still kept in merged_metadata.json for downstream export.
+    """
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    return stripped[:_PRODUCT_NAME_MAX_LEN]
+
 
 DESIGN_UPSERT_COLS = (
     "registry_type",
@@ -202,8 +222,18 @@ def _design_row(
     *,
     holder_id: Optional[str],
     source_folder: str,
+    doc_bulletin_no: Any = None,
+    doc_bulletin_date: Any = None,
 ) -> Dict[str, Any]:
-    bulletin_date = record.get("bulletin_date")
+    # bulletin_no / bulletin_date live at the doc level in pdf_extract_tasarim's
+    # output (payload["bulletin_no"], payload["bulletin_date"]) — the per-record
+    # dicts don't carry them. Without falling back to the doc level, every
+    # design row in the DB ends up with NULL bulletin_no/_date, which makes
+    # SQL queries by bulletin impossible and forces string-matching on
+    # source_issue_folder. Real-data finding from the Phase-1 end-to-end
+    # ingest: 410K rows shipped with NULL bulletin_no.
+    bulletin_no = record.get("bulletin_no") or doc_bulletin_no
+    bulletin_date = record.get("bulletin_date") or doc_bulletin_date
     opp_end = opposition_end_date(bulletin_date)
     page_range = record.get("page_range") or [None, None]
     designers = [d.get("name") for d in (record.get("designers") or []) if d.get("name")]
@@ -219,11 +249,18 @@ def _design_row(
         "application_date": parse_date_safe(record.get("filing_date")),
         "filing_date": parse_date_safe(record.get("filing_date")),
         "registration_date": parse_date_safe(record.get("registration_date")),
-        "bulletin_no": str(record.get("bulletin_no")) if record.get("bulletin_no") else None,
+        "bulletin_no": str(bulletin_no) if bulletin_no else None,
         "bulletin_date": parse_date_safe(bulletin_date),
         "opposition_end": opp_end,
-        "product_name_tr": design.get("product_name_tr"),
-        "product_name_en": (record.get("hague_reference") or {}).get("product_name_en"),
+        # Both product_name_* columns are VARCHAR(500). Hague records whose
+        # WIPO entry describes a multi-part design ship a comma-joined list
+        # that can run to 1300+ chars (e.g. "Hood, Radiator grille, Bumper,
+        # …"). Truncate so the row is insertable; the merged_metadata.json
+        # still preserves the full string for later display/export.
+        "product_name_tr": _truncate_500(design.get("product_name_tr")),
+        "product_name_en": _truncate_500(
+            (record.get("hague_reference") or {}).get("product_name_en")
+        ),
         "locarno_classes": list(record.get("locarno_classes") or []),
         "design_count": int(record.get("design_count") or 1),
         "holder_id": holder_id,
@@ -421,10 +458,65 @@ def upsert_event(cur, event: Dict[str, Any], *, bulletin_no: Optional[str], bull
 # Issue-level orchestration
 # ---------------------------------------------------------------------------
 
-def ingest_issue(conn, issue_folder: Path, *, skip_events: bool = False, run_watchlist_scan: bool = True) -> Dict[str, Any]:
+def _folder_already_ingested(cur, folder_name: str, latest_input_mtime: datetime) -> bool:
+    """Return True iff every existing design row for this folder was
+    ingested after ``latest_input_mtime`` (the most recent mtime among
+    the folder's input files: ``metadata.json`` and ``events.json``).
+
+    Used by ``ingest_issue`` to skip folders whose DB state is already
+    up-to-date — avoids 450K of pointless UPSERTs on idempotent re-runs.
+
+    Returns False when:
+      - no rows exist for the folder yet (must ingest)
+      - any row was last updated before ``latest_input_mtime`` (inputs
+        are newer than DB → re-ingest needed)
+    """
+    cur.execute(
+        "SELECT COUNT(*), MIN(updated_at) FROM designs WHERE source_issue_folder = %s",
+        (folder_name,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return False
+    count, min_updated = row[0], row[1]
+    if not count or min_updated is None:
+        return False
+    # Postgres ``TIMESTAMP`` columns (without TZ) come back as naive
+    # datetimes via psycopg2. ``Path.stat().st_mtime`` yields a tz-aware
+    # UTC datetime. Normalize both sides to tz-aware UTC before comparing
+    # so re-runs don't crash with "offset-naive vs offset-aware".
+    if min_updated.tzinfo is None:
+        min_updated = min_updated.replace(tzinfo=timezone.utc)
+    if latest_input_mtime.tzinfo is None:
+        latest_input_mtime = latest_input_mtime.replace(tzinfo=timezone.utc)
+    return min_updated >= latest_input_mtime
+
+
+def ingest_issue(conn, issue_folder: Path, *, skip_events: bool = False,
+                 run_watchlist_scan: bool = True, force: bool = False) -> Dict[str, Any]:
     metadata_path = issue_folder / "metadata.json"
     if not metadata_path.is_file():
         return {"status": "no_metadata", "issue": issue_folder.name}
+
+    if not force:
+        latest_mtime = datetime.fromtimestamp(
+            metadata_path.stat().st_mtime, tz=timezone.utc,
+        )
+        events_path = issue_folder / "events.json"
+        if events_path.is_file():
+            ev_mtime = datetime.fromtimestamp(
+                events_path.stat().st_mtime, tz=timezone.utc,
+            )
+            if ev_mtime > latest_mtime:
+                latest_mtime = ev_mtime
+        with conn.cursor() as cur:
+            if _folder_already_ingested(cur, issue_folder.name, latest_mtime):
+                logger.info(
+                    "[=] %s: already ingested (inputs unchanged since "
+                    "last ingest), skipping", issue_folder.name,
+                )
+                return {"status": "skipped", "issue": issue_folder.name,
+                        "reason": "db-current"}
 
     payload = json.loads(metadata_path.read_text(encoding="utf-8"))
     designs_inserted = 0
@@ -452,7 +544,13 @@ def ingest_issue(conn, issue_folder: Path, *, skip_events: bool = False, run_wat
                     "design_aggregates": {},
                 }]
             for design in designs_in_record:
-                row = _design_row(record, design, holder_id=holder, source_folder=issue_folder.name)
+                row = _design_row(
+                    record, design,
+                    holder_id=holder,
+                    source_folder=issue_folder.name,
+                    doc_bulletin_no=payload.get("bulletin_no"),
+                    doc_bulletin_date=payload.get("bulletin_date"),
+                )
                 design_id = upsert_design(cur, row)
                 designs_inserted += 1
                 inserted_design_ids.append(str(design_id))
@@ -463,9 +561,38 @@ def ingest_issue(conn, issue_folder: Path, *, skip_events: bool = False, run_wat
             if events_path.is_file():
                 events_payload = json.loads(events_path.read_text(encoding="utf-8"))
                 events_seen = len(events_payload.get("events") or [])
+                affected_app_nos: set = set()
+                affected_reg_nos: set = set()
                 for event in events_payload.get("events") or []:
                     if upsert_event(cur, event, bulletin_no=bulletin_no, bulletin_date=bulletin_date):
                         events_inserted += 1
+                        if event.get("application_no"):
+                            affected_app_nos.add(event["application_no"])
+                        if event.get("registration_no"):
+                            affected_reg_nos.add(event["registration_no"])
+                # Recompute current_status for every design touched by
+                # this bulletin: the designs we just inserted PLUS any
+                # older design that an event referenced. Same
+                # transaction so a failed recompute rolls the whole
+                # ingest back. Idempotent.
+                affected_ids: set = {*inserted_design_ids}
+                if affected_app_nos:
+                    cur.execute(
+                        "SELECT id::text FROM designs WHERE application_no = ANY(%s)",
+                        (list(affected_app_nos),),
+                    )
+                    affected_ids.update(row[0] for row in cur.fetchall())
+                if affected_reg_nos:
+                    cur.execute(
+                        "SELECT id::text FROM designs WHERE registration_no = ANY(%s)",
+                        (list(affected_reg_nos),),
+                    )
+                    affected_ids.update(row[0] for row in cur.fetchall())
+                if affected_ids:
+                    from pipeline.design_status_derivation import (
+                        recompute_design_current_status,
+                    )
+                    recompute_design_current_status(cur, list(affected_ids))
     conn.commit()
 
     if run_watchlist_scan and inserted_design_ids:
@@ -515,6 +642,10 @@ def parse_argv(argv=None) -> argparse.Namespace:
     p.add_argument("--bulletins-root", type=Path, default=_LOCAL_DEFAULT_BULLETINS_DIR)
     p.add_argument("--skip-events", action="store_true",
                    help="ingest designs+views only, skip events.json")
+    p.add_argument("--force", action="store_true",
+                   help="re-UPSERT all rows even if the folder's DB rows are "
+                        "newer than its metadata.json/events.json (default: "
+                        "skip folders whose DB state is already current)")
     return p.parse_args(argv)
 
 
@@ -530,7 +661,8 @@ def main(argv=None) -> int:
     with _connect() as conn:
         for folder in folders:
             try:
-                ingest_issue(conn, folder, skip_events=args.skip_events)
+                ingest_issue(conn, folder, skip_events=args.skip_events,
+                              force=args.force)
             except Exception as e:
                 logger.exception("issue %s failed: %r", folder.name, e)
                 conn.rollback()

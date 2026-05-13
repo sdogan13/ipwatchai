@@ -1,5 +1,5 @@
 -- ============================================
--- OPPOSITION RADAR: Universal Conflicts Table
+-- RADAR: Universal Conflicts Table
 -- ============================================
 -- Stores conflicts between NEW applications (aggressors)
 -- and EXISTING registrations (victims/potential clients)

@@ -19,6 +19,8 @@ Primary bootstrap:
 
 Important migration add-ons:
 - `migrations/payments.sql`
+- `migrations/credit_packs.sql` — extends `payments` with `kind` (`subscription` | `credit_pack`), `pack_id`, `credits_amount`, `discount_code`; relaxes `plan_name`/`billing_period` to NULLable so credit-pack rows can store their own metadata
+- `migrations/regional_payment_providers.sql` — extends `payments` with provider/region metadata and Stripe lookup fields (`provider`, `region`, `billing_country`, `stripe_checkout_session_id`, `stripe_customer_id`, `stripe_subscription_id`, `stripe_payment_intent_id`, `stripe_raw_response`); existing rows default to `provider='iyzico'`
 - `migrations/trademark_applications.sql`
 - `migrations/trademark_events.sql`
 - `migrations/add_universal_conflicts.sql`
@@ -45,13 +47,14 @@ Notes:
 - `trademarks` is the main search corpus
 - translation-side fields on `trademarks` now include `name_tr`, `detected_lang`, and provenance fields `name_tr_backend`, `name_tr_model`, and `name_tr_updated_at`
 - scoring engine V2 uses `word_idf`, `word_idf_tr`, and `trademarks.name_tr`; the IDF tables include corpus-derived descriptor columns `descriptor_like`, `descriptor_score`, and `descriptor_stats` populated by `compute_idf.py --source both`
+- trademark text-semantic embeddings are no longer part of the trademark retrieval/scoring source of truth; `migrations/remove_trademark_text_embedding.sql` drops the stale `trademarks.text_embedding` column and vector indexes while name retrieval stays on normalized lexical, fuzzy, phonetic, and translation-aware paths
 - V2 scores are similarity-risk diagnostics only and intentionally exclude legal factors such as status, Nice-class relatedness, seniority, and enforceability
 - historical MADLAD refresh runs now consume `trademarks` newest-first by `application_date DESC NULLS LAST, id DESC`, backed by an `application_date/id` btree index so campaign reruns can skip already-watermarked rows efficiently
 - `trademark_history` is partitioned by date range in the bootstrap schema
 - vector similarity support depends on `pgvector`
 - ingest runtime prerequisites for `processed_files`, `nice_classes_lookup`, `tm_status`, and ingest-owned `trademarks` columns now come from `migrations/ingest_runtime.sql` plus `migrations/run_ingest_runtime_migration.py`, not opportunistic schema mutation during `pipeline/ingest.py` runs
 - ingest owns `trademarks.current_status` and `status_source`; APP source updates preserve existing BLT/GZ status unless APP supplies explicit recognized strong status text or blank status with a valid registration number, and APP Nice-class updates cannot shrink or replace existing classes with the live grid's suspicious six-class list
-- the post-ingest `repair` step can fix known DB data pollution, including APP-applied status downgrades, `sekil`/`şekil` shape descriptors in `trademarks.name` and `trademarks.name_tr`, six-class scraper truncation in `trademarks.nice_class_numbers` when BLT/GZ metadata proves more classes, and batched live TURKPATENT status/class checks tracked in `repair_live_trademark_checks`
+- the post-ingest `repair` step can fix known DB data pollution, including APP-applied status downgrades, `sekil`/`şekil` shape descriptors in `trademarks.name` and `trademarks.name_tr`, six-class scraper truncation in `trademarks.nice_class_numbers` when BLT/GZ metadata proves more classes, and batched live TURKPATENT status/class checks tracked in `repair_live_trademark_checks`. Long-running live status repair can use a frozen exclusive bulletin-date cutoff so resumed batches keep moving toward older records instead of re-prioritizing newly eligible recent records each day.
 - live status repair may temporarily mark unchecked `Yayında` rows older than 1 year as `Reddedildi` with `status_source='LIVE_PROV'`; these rows stay eligible for the live checker, and original status fields are audited in `repair_live_provisional_status_marks`
 
 ### Multi-Tenant And Auth
@@ -68,7 +71,7 @@ Settings and commercial support:
 - `app_settings`
 - `discount_codes`
 - `discount_code_usage`
-- `payments`
+- `payments` — unified store for plan subscriptions and one-shot AI credit-pack purchases. `provider` distinguishes `iyzico` and `stripe`; `region` stores `UK`, `EU`, or `TR`; `billing_country` records the resolved organization/request country when available. The `kind` column (`subscription` | `credit_pack`) drives fulfillment. Credit-pack rows carry `pack_id`, `credits_amount`, and the optional `discount_code`. Stripe rows additionally store checkout session, customer, subscription, payment-intent, and raw webhook response IDs for idempotent lookup. Successful credit-pack payments increment `organizations.ai_credits_purchased` (never-expiring pool).
 
 ### Monitoring And Alerts
 

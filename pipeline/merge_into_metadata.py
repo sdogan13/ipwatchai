@@ -1,0 +1,928 @@
+"""Tasarım — merge cd_metadata.json into metadata.json (PDF-shape).
+
+Stage-3 follow-up: where the original reconcile_tasarim writes a separate
+``merged_metadata.json`` (canonical-shape), this module writes the merge
+result back into ``metadata.json`` itself, in the **PDF-extracted shape**
+that ``ingest_designs`` already knows how to parse.
+
+Why this exists:
+  - ``ingest_designs`` and ``embeddings_tasarim`` only read ``metadata.json``.
+  - CD-only folders (no PDF) had no ``metadata.json`` -> 14 folders × ~3K
+    designs each were not in DB and had no embeddings.
+  - PDF+CD folders had ``metadata.json`` from the PDF parse, so DB ended
+    up with PDF-derived field values even where CD had cleaner ones.
+
+Overwriting ``metadata.json`` with a merged document closes both gaps in
+one shot: ingest and embeddings keep their current code, but read a
+file that already carries CD-prefered field values plus the CD-only
+folders' synthesized records.
+
+Top-level + per-record shape mirrors what ``pdf_extract_tasarim`` produces.
+Embeddings are preserved across the merge by indexing the existing
+``metadata.json`` by canonical ``image_path`` (the canonical
+``{appno_norm}/{d}_{v}.jpg`` key — unique per issue).
+
+Built incrementally. Each helper has its own unit-test block.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import re
+import sys
+import time
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+
+from pipeline.reconcile_tasarim import (  # noqa: E402
+    _clean_str,
+    _dmy_to_iso,
+    _normalise_registration_no,
+    _parse_design_count,
+    _utcnow_iso,
+)
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - [TASARIM-MERGE-META] - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger("turkpatent.tasarim_merge_meta")
+
+
+# ---------------------------------------------------------------------------
+# Per-row field translators: CD shape -> PDF shape
+# ---------------------------------------------------------------------------
+
+def _cd_holder_to_pdf_applicant(holder: Dict[str, Any]) -> Dict[str, Any]:
+    """Translate one CD ``holders[]`` entry into a PDF ``applicants[]`` entry.
+
+    PDF applicants ship ``{name, id, address, country}``; CD holders ship
+    ``{client_no, title, address, city, country}``. Mapping:
+
+      ``title``     -> ``name``           (CD's entity-name field)
+      ``client_no`` -> ``id``             (TPECLIENT id, same field on both)
+      ``address``   -> ``address``        (concat with city when both present)
+      ``country``   -> ``country``
+
+    CD's ``city`` field has no PDF counterpart at the design level.
+    Append it to ``address`` (comma-separated) so the data isn't lost
+    when the row gets ingested into the trademarks-side ``holders``
+    table where it might still be useful for entity dedup.
+    """
+    if not isinstance(holder, dict):
+        return {}
+    parts = [_clean_str(holder.get("address")), _clean_str(holder.get("city"))]
+    address = ", ".join(p for p in parts if p) or None
+    return {
+        "name":    _clean_str(holder.get("title")),
+        "id":      _clean_str(holder.get("client_no")),
+        "address": address,
+        "country": _clean_str(holder.get("country")),
+    }
+
+
+def _cd_designer_to_pdf_designer(designer: Dict[str, Any]) -> Dict[str, Any]:
+    """Translate one CD ``designers[]`` entry to PDF ``designers[]``.
+
+    PDF designers are ``{name}``-only (the only field
+    ``pdf_extract_tasarim`` parses). CD ships address + country as well
+    but those don't have a corresponding PDF field, so they're dropped
+    here — the canonical ``designers`` column in the DB is ``TEXT[]``
+    of names, no per-designer detail is stored downstream.
+    """
+    if not isinstance(designer, dict):
+        return {}
+    return {"name": _clean_str(designer.get("name"))}
+
+
+def _cd_attorney_to_pdf_attorney(
+    attorney: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Translate a CD attorney ``{no, name, title, address}`` block to
+    PDF's ``{name, firm}`` shape.
+
+    CD's IDDOSSIER ATTORNEYNAME is denormalized — usually the natural
+    person's name with the firm in trailing parens, e.g.
+    ``"IŞIK ÖZDOĞAN (MOROĞLU ARSEVEN DANIŞMANLIK A.Ş.)"``. We don't
+    parse the firm out here; instead the merge-with-PDF case lets PDF's
+    pre-split (name, firm) win, so this synthesis path only runs for
+    CD-only records where there's no cleaner PDF parse to defer to.
+
+    Returns ``None`` when the attorney block is missing or has no
+    usable name field (avoids decorating the record with an empty
+    ``"attorney": {"name": null}`` block).
+    """
+    if not isinstance(attorney, dict):
+        return None
+    name = _clean_str(attorney.get("name"))
+    if not name:
+        return None
+    return {"name": name, "firm": None}
+
+
+def _cd_view_to_pdf_view(view: Dict[str, Any]) -> Dict[str, Any]:
+    """Translate one CD view ``{view_no, image_path}`` to PDF view shape.
+
+    PDF views carry PyMuPDF artefacts (``page``, ``image_xref``,
+    ``bbox``) that don't exist on the CD side. Set them to ``None``.
+    The canonical ``image_path`` and the ``image_source="cd"`` tag are
+    preserved exactly so D.1's resolve_view_image_path keeps working
+    and embeddings get carried over by ``_index_existing_embeddings``.
+    """
+    if not isinstance(view, dict):
+        return {}
+    image_path = _clean_str(view.get("image_path"))
+    return {
+        "view_index":   int(view.get("view_no") or 1),
+        "page":         None,
+        "image_xref":   None,
+        "bbox":         None,
+        "image_path":   image_path,
+        "image_source": "cd" if image_path else None,
+    }
+
+
+def _cd_design_to_pdf_design(design: Dict[str, Any]) -> Dict[str, Any]:
+    """Translate one CD design dict to PDF design shape.
+
+    Field renames:
+      ``no``           -> ``design_index`` (str -> int)
+      ``product_name`` -> ``product_name_tr`` (trailing whitespace stripped)
+      ``views``        -> ``views`` (each translated by ``_cd_view_to_pdf_view``)
+    """
+    if not isinstance(design, dict):
+        return {}
+    return {
+        "design_index":    int(design.get("no") or 1),
+        "product_name_tr": (_clean_str(design.get("product_name")) or ""),
+        "views": [
+            _cd_view_to_pdf_view(v)
+            for v in (design.get("views") or [])
+            if isinstance(v, dict)
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# CD-only synthesis: build a PDF-shape record from a CD dossier
+# ---------------------------------------------------------------------------
+
+def synthesize_cd_record_in_pdf_shape(
+    cd_dossier: Dict[str, Any],
+    *,
+    record_index: int,
+) -> Dict[str, Any]:
+    """Convert one CD ``dossiers[]`` entry into a PDF-shape ``records[]`` entry.
+
+    Used when CD ships a dossier the PDF doesn't (the CD-only-folder
+    case, plus CD dossiers with no PDF counterpart in a paired bulletin).
+
+    ``section`` is derived from ``application_no``: ``"hague"`` for
+    ``DM/...`` shapes, ``"tr_native"`` otherwise. PDF Hague records also
+    populate a ``hague_reference`` block; the CD side has no equivalent
+    structured data, so that field is omitted (downstream is fine — the
+    DB column is JSONB nullable).
+
+    The synthesized record carries:
+      - all scalar dossier fields (renamed)
+      - locarno codes (renamed locarno_codes -> locarno_classes)
+      - applicants / designers / attorney (translated)
+      - designs (with views; each view tagged image_source="cd")
+      - empty priorities (CD ships none)
+      - empty page_range (CD has no PDF page knowledge)
+
+    Returns a dict ready to drop into ``payload["records"]``.
+    """
+    appno = (cd_dossier.get("application_no") or "").strip()
+    is_hague = appno.upper().startswith("DM/")
+    section = "hague" if is_hague else "tr_native"
+
+    out: Dict[str, Any] = {
+        "section":       section,
+        "record_index":  record_index,
+        "application_no":   appno or None,
+        "registration_no":  _clean_str(cd_dossier.get("register_no")),
+        "filing_date":      _dmy_to_iso(cd_dossier.get("application_date")),
+        "registration_date": _dmy_to_iso(cd_dossier.get("register_date")),
+        "design_count":     _parse_design_count(cd_dossier.get("design_count")) or 1,
+        "locarno_classes":  list(cd_dossier.get("locarno_codes") or []),
+        "applicants": [
+            a for a in (
+                _cd_holder_to_pdf_applicant(h)
+                for h in (cd_dossier.get("holders") or [])
+                if isinstance(h, dict)
+            ) if a.get("name") or a.get("id")
+        ],
+        "designers": [
+            d for d in (
+                _cd_designer_to_pdf_designer(item)
+                for item in (cd_dossier.get("designers") or [])
+                if isinstance(item, dict)
+            ) if d.get("name")
+        ],
+        "attorney":   _cd_attorney_to_pdf_attorney(cd_dossier.get("attorney")),
+        "priorities": [],
+        "designs": [
+            _cd_design_to_pdf_design(d)
+            for d in (cd_dossier.get("designs") or [])
+            if isinstance(d, dict)
+        ],
+        "page_range": [],
+    }
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Top-level merge: paired (PDF, CD) records and the BOTH-folder orchestrator
+# ---------------------------------------------------------------------------
+
+def _merge_design_views(
+    pdf_views: List[Dict[str, Any]],
+    cd_views: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Merge two view lists for the same design. CD wins on duplicate
+    ``view_index``; PDF-only views are kept; output sorted numerically.
+
+    CD views are translated to PDF shape on insertion so the consumer
+    sees a uniform view dict regardless of source.
+    """
+    by_idx: Dict[int, Dict[str, Any]] = {}
+    for v in pdf_views or []:
+        if not isinstance(v, dict):
+            continue
+        idx = v.get("view_index")
+        if isinstance(idx, int):
+            by_idx[idx] = v
+    for v in cd_views or []:
+        if not isinstance(v, dict):
+            continue
+        try:
+            cd_idx = int(v.get("view_no") or 0)
+        except (ValueError, TypeError):
+            continue
+        if cd_idx > 0:
+            by_idx[cd_idx] = _cd_view_to_pdf_view(v)  # CD wins on overlap
+    return [by_idx[k] for k in sorted(by_idx)]
+
+
+def _merge_designs(
+    pdf_designs: List[Dict[str, Any]],
+    cd_designs: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Merge per-design lists by ``design_index``.
+
+    Per-design rules:
+      - Both sides present: keep PDF's design dict, override product_name_tr
+        with CD's product_name when CD's is non-empty (CD's IDDESIGN.PRODUCTNAME
+        is the authoritative HSQLDB value), and union views via _merge_design_views.
+      - PDF only: kept verbatim.
+      - CD only: translated via _cd_design_to_pdf_design.
+
+    Output sorted by design_index.
+    """
+    pdf_by_idx: Dict[int, Dict[str, Any]] = {}
+    for d in pdf_designs or []:
+        if not isinstance(d, dict):
+            continue
+        idx = d.get("design_index")
+        if isinstance(idx, int):
+            pdf_by_idx[idx] = d
+
+    cd_by_idx: Dict[int, Dict[str, Any]] = {}
+    for d in cd_designs or []:
+        if not isinstance(d, dict):
+            continue
+        try:
+            cd_idx = int(d.get("no") or 0)
+        except (ValueError, TypeError):
+            continue
+        if cd_idx > 0:
+            cd_by_idx[cd_idx] = d
+
+    out: List[Dict[str, Any]] = []
+    for idx in sorted(set(pdf_by_idx) | set(cd_by_idx)):
+        pdf_d = pdf_by_idx.get(idx)
+        cd_d = cd_by_idx.get(idx)
+        if pdf_d and cd_d:
+            cd_name = _clean_str(cd_d.get("product_name"))
+            merged = dict(pdf_d)
+            if cd_name:
+                merged["product_name_tr"] = cd_name
+            merged["views"] = _merge_design_views(
+                pdf_d.get("views") or [], cd_d.get("views") or [],
+            )
+            out.append(merged)
+        elif pdf_d:
+            out.append(pdf_d)
+        else:
+            out.append(_cd_design_to_pdf_design(cd_d))  # type: ignore[arg-type]
+    return out
+
+
+def merge_pdf_record_with_cd_dossier(
+    pdf_record: Dict[str, Any],
+    cd_dossier: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Apply CD-wins precedence to a paired (PDF, CD) record.
+
+    Output is PDF-shape (so ingest_designs keeps reading without a
+    code change). Caller must guarantee the inputs describe the same
+    application — pair detection happens in ``merge_to_pdf_shape``.
+
+    Precedence rules (CD wins where present and non-empty; PDF retained
+    otherwise):
+      - registration_no, filing_date, registration_date, design_count
+      - locarno_classes (CD's clean list overrides PDF's regex parse)
+      - applicants (CD's HSQLDB rows are cleaner than PDF's regex parse)
+      - designers (same reason)
+      - attorney: CD's name + PDF's firm. CD's name is the cleaner
+        IDDOSSIER.ATTORNEYNAME; PDF's firm comes from the bulletin's
+        pre-split parens form, which CD doesn't preserve, so we keep it.
+      - designs (per-design merge via _merge_designs; CD wins on shared
+        product_name and on shared view_index)
+
+    PDF-only fields preserved from pdf_record verbatim:
+      - section, record_index, page_range, hague_reference,
+        deferred_publication, priorities
+    """
+    out = dict(pdf_record)
+
+    cd_reg = _clean_str(cd_dossier.get("register_no"))
+    if cd_reg:
+        out["registration_no"] = cd_reg
+
+    cd_filing = _dmy_to_iso(cd_dossier.get("application_date"))
+    if cd_filing:
+        out["filing_date"] = cd_filing
+
+    cd_reg_date = _dmy_to_iso(cd_dossier.get("register_date"))
+    if cd_reg_date:
+        out["registration_date"] = cd_reg_date
+
+    cd_count = _parse_design_count(cd_dossier.get("design_count"))
+    if cd_count is not None:
+        out["design_count"] = cd_count
+
+    cd_locarno = list(cd_dossier.get("locarno_codes") or [])
+    if cd_locarno:
+        out["locarno_classes"] = cd_locarno
+
+    cd_applicants = [
+        a for a in (
+            _cd_holder_to_pdf_applicant(h)
+            for h in (cd_dossier.get("holders") or [])
+            if isinstance(h, dict)
+        ) if a.get("name") or a.get("id")
+    ]
+    if cd_applicants:
+        out["applicants"] = cd_applicants
+
+    cd_designers = [
+        d for d in (
+            _cd_designer_to_pdf_designer(item)
+            for item in (cd_dossier.get("designers") or [])
+            if isinstance(item, dict)
+        ) if d.get("name")
+    ]
+    if cd_designers:
+        out["designers"] = cd_designers
+
+    cd_attorney = cd_dossier.get("attorney") or {}
+    cd_atty_name = _clean_str(cd_attorney.get("name")) if isinstance(cd_attorney, dict) else None
+    if cd_atty_name:
+        pdf_attorney = pdf_record.get("attorney") or {}
+        pdf_firm = pdf_attorney.get("firm") if isinstance(pdf_attorney, dict) else None
+        out["attorney"] = {"name": cd_atty_name, "firm": pdf_firm}
+
+    out["designs"] = _merge_designs(
+        pdf_record.get("designs") or [],
+        cd_dossier.get("designs") or [],
+    )
+    return out
+
+
+def _coerce_bulletin_no(value: Any) -> Any:
+    """CD ships bulletin_no as ``"240"`` (str); PDF as ``240`` (int).
+    For consistency in the merged top-level field, coerce digit-strings
+    to int but pass anything else through untouched."""
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return value
+
+
+def merge_to_pdf_shape(
+    pdf_doc: Optional[Dict[str, Any]] = None,
+    cd_doc: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Merge a per-issue (PDF, CD) doc pair into one PDF-shape document.
+
+    Either input may be ``None`` for single-side merge:
+      - ``pdf_doc=None``: synthesize records from CD dossiers (CD-only folder)
+      - ``cd_doc=None``:  pass PDF through unchanged but tag merge_source
+
+    Pairing key inside an issue:
+      - TR records: ``application_no``
+      - Hague:      normalised ``registration_no`` (whitespace/case insensitive)
+
+    The output adds three top-level fields beyond the PDF shape:
+      - ``merge_source``: ``"pdf_only"`` | ``"cd_only"`` | ``"both"``
+      - ``merged_at``:    ISO timestamp the merge was performed
+
+    Raises ``ValueError`` when both inputs are ``None``.
+    """
+    if pdf_doc is None and cd_doc is None:
+        raise ValueError(
+            "merge_to_pdf_shape requires at least one of pdf_doc / cd_doc"
+        )
+
+    merged_at = _utcnow_iso()
+
+    if pdf_doc is None:
+        cd_doc = cd_doc or {}
+        records = [
+            synthesize_cd_record_in_pdf_shape(d, record_index=i + 1)
+            for i, d in enumerate(cd_doc.get("dossiers") or [])
+            if isinstance(d, dict)
+        ]
+        return {
+            "bulletin_no":   _coerce_bulletin_no(cd_doc.get("bulletin_no")),
+            "bulletin_date": cd_doc.get("bulletin_date"),
+            "source":        cd_doc.get("source_archive"),
+            "page_count":    0,
+            "record_count":  len(records),
+            "records":       records,
+            "merge_source":  "cd_only",
+            "merged_at":     merged_at,
+        }
+
+    if cd_doc is None:
+        out = dict(pdf_doc)
+        out["merge_source"] = "pdf_only"
+        out["merged_at"]    = merged_at
+        return out
+
+    # BOTH case — pair by app_no (TR) or normalised registration_no (Hague)
+    cd_by_key: Dict[str, Dict[str, Any]] = {}
+    for d in (cd_doc.get("dossiers") or []):
+        if not isinstance(d, dict):
+            continue
+        appno = (d.get("application_no") or "").strip()
+        is_hague = appno.upper().startswith("DM/")
+        key = (
+            _normalise_registration_no(d.get("register_no"))
+            if is_hague
+            else appno
+        )
+        if key:
+            cd_by_key[key] = d
+
+    matched_keys: set = set()
+    out_records: List[Dict[str, Any]] = []
+
+    for pdf_rec in (pdf_doc.get("records") or []):
+        if not isinstance(pdf_rec, dict):
+            continue
+        if pdf_rec.get("section") == "hague":
+            key = _normalise_registration_no(pdf_rec.get("registration_no"))
+        else:
+            key = pdf_rec.get("application_no")
+        cd_match = cd_by_key.get(key) if key else None
+        if cd_match is not None:
+            out_records.append(merge_pdf_record_with_cd_dossier(pdf_rec, cd_match))
+            matched_keys.add(key)
+        else:
+            out_records.append(pdf_rec)
+
+    next_idx = max(
+        (r.get("record_index", 0) for r in out_records if isinstance(r, dict)),
+        default=0,
+    ) + 1
+    for cd_d in (cd_doc.get("dossiers") or []):
+        if not isinstance(cd_d, dict):
+            continue
+        appno = (cd_d.get("application_no") or "").strip()
+        is_hague = appno.upper().startswith("DM/")
+        key = (
+            _normalise_registration_no(cd_d.get("register_no"))
+            if is_hague
+            else appno
+        )
+        if key in matched_keys:
+            continue
+        out_records.append(synthesize_cd_record_in_pdf_shape(cd_d, record_index=next_idx))
+        next_idx += 1
+
+    out = dict(pdf_doc)
+    # Top-level CD-wins on bulletin metadata: idbulletin.inf is the
+    # authoritative source. PDF's FOOTER_BULLETIN_RE sometimes can't
+    # parse old (pre-2018) bulletin formats and ships bulletin_no=None;
+    # without this override the merged metadata.json's top-level field
+    # stays None and ~50 folders' worth of rows ingest with
+    # bulletin_no=NULL even after the doc-level-fallback fix in
+    # ingest_designs landed.
+    cd_bn = _coerce_bulletin_no(cd_doc.get("bulletin_no"))
+    if cd_bn is not None:
+        out["bulletin_no"] = cd_bn
+    cd_bd = cd_doc.get("bulletin_date")
+    if cd_bd:
+        out["bulletin_date"] = cd_bd
+    out["records"]       = out_records
+    out["record_count"]  = len(out_records)
+    out["merge_source"]  = "both"
+    out["merged_at"]     = merged_at
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Embedding preservation across merge
+# ---------------------------------------------------------------------------
+
+def _index_existing_embeddings(pdf_doc: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Build an ``image_path -> embeddings`` index from an existing
+    metadata.json so the merge can preserve previously-computed
+    embeddings without forcing a full re-embed.
+
+    The canonical ``image_path`` shape ``{appno_norm}/{d}_{v}.{ext}`` is
+    unique per issue and survives the merge unchanged (CD and PDF agree
+    on this key by design), so it's a reliable bridge between the
+    pre-merge view and its post-merge counterpart even when
+    ``application_no`` / ``design_index`` / ``view_index`` change shape
+    (e.g. PDF Hague records have null ``application_no``).
+    """
+    out: Dict[str, Dict[str, Any]] = {}
+    if not isinstance(pdf_doc, dict):
+        return out
+    for r in pdf_doc.get("records") or []:
+        if not isinstance(r, dict):
+            continue
+        for d in r.get("designs") or []:
+            if not isinstance(d, dict):
+                continue
+            for v in d.get("views") or []:
+                if not isinstance(v, dict):
+                    continue
+                ip = v.get("image_path")
+                emb = v.get("embeddings")
+                if ip and isinstance(emb, dict) and emb:
+                    out[ip] = emb
+    return out
+
+
+def _attach_existing_embeddings(
+    merged_doc: Dict[str, Any],
+    embeddings_by_image_path: Dict[str, Dict[str, Any]],
+) -> int:
+    """Re-attach embeddings to merged-doc views by ``image_path`` lookup.
+
+    Mutates ``merged_doc`` in place. Returns the number of views that
+    received an embedding (useful for the CLI report so the operator
+    can see how many embeddings carried through unchanged vs how many
+    will need fresh computation in stage 5).
+    """
+    if not embeddings_by_image_path:
+        return 0
+    attached = 0
+    for r in merged_doc.get("records") or []:
+        if not isinstance(r, dict):
+            continue
+        for d in r.get("designs") or []:
+            if not isinstance(d, dict):
+                continue
+            for v in d.get("views") or []:
+                if not isinstance(v, dict):
+                    continue
+                ip = v.get("image_path")
+                if ip and ip in embeddings_by_image_path:
+                    v["embeddings"] = embeddings_by_image_path[ip]
+                    attached += 1
+    return attached
+
+
+# ---------------------------------------------------------------------------
+# CLI entrypoint
+# ---------------------------------------------------------------------------
+
+_LOCAL_DEFAULT_BULLETINS_DIR = PROJECT_ROOT / "bulletins" / "Tasarim"
+METADATA_FILENAME = "metadata.json"
+CD_METADATA_FILENAME = "cd_metadata.json"
+MERGED_METADATA_FILENAME = "merged_metadata.json"
+BACKUP_SUFFIX = "_pre_merge.json.bak"
+
+
+@dataclass
+class CLIArgs:
+    issue_folders: List[Path]
+    backup: bool
+    drop_merged_metadata: bool
+    preserve_embeddings: bool
+    force: bool
+
+
+def parse_argv(argv: Optional[List[str]] = None) -> CLIArgs:
+    """Parse CLI arguments for the metadata-merger entrypoint."""
+    parser = argparse.ArgumentParser(
+        prog="merge_into_metadata",
+        description=(
+            "Merge cd_metadata.json into metadata.json (PDF-shape) so "
+            "ingest_designs and embeddings_tasarim pick up CD-prefered "
+            "field values + previously-missing CD-only folders."
+        ),
+    )
+    parser.add_argument(
+        "--issue",
+        type=str,
+        default=None,
+        help="Single issue folder name under --bulletins-root.",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Process every TS_*/ folder under --bulletins-root.",
+    )
+    parser.add_argument(
+        "--bulletins-root",
+        type=Path,
+        default=_LOCAL_DEFAULT_BULLETINS_DIR,
+        help=f"Bulletins root (default: {_LOCAL_DEFAULT_BULLETINS_DIR}).",
+    )
+    parser.add_argument(
+        "--no-backup",
+        action="store_true",
+        help="Skip writing metadata_pre_merge.json.bak before overwrite "
+             "(default: backup is written for safety).",
+    )
+    parser.add_argument(
+        "--keep-merged-metadata",
+        action="store_true",
+        help="Leave the now-redundant merged_metadata.json on disk "
+             "(default: delete it after a successful write — metadata.json "
+             "is the canonical merged file going forward).",
+    )
+    parser.add_argument(
+        "--no-preserve-embeddings",
+        action="store_true",
+        help="Drop existing per-view embeddings during merge (default: "
+             "preserve them by image_path lookup so stage 5 only embeds "
+             "newly-added views).",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-merge even if metadata.json already carries a current "
+             "merge_source tag (default: skip folders whose merge is "
+             "already up-to-date with their cd_metadata.json + PDF "
+             "extract).",
+    )
+    ns = parser.parse_args(argv)
+
+    if ns.all and ns.issue:
+        parser.error("--issue and --all are mutually exclusive")
+
+    if ns.all:
+        if not ns.bulletins_root.is_dir():
+            parser.error(f"--bulletins-root not found: {ns.bulletins_root}")
+        folders = sorted(
+            p for p in ns.bulletins_root.glob("TS_*") if p.is_dir()
+        )
+        if not folders:
+            parser.error(f"--all matched no TS_* folders in {ns.bulletins_root}")
+        return CLIArgs(
+            issue_folders=folders,
+            backup=not ns.no_backup,
+            drop_merged_metadata=not ns.keep_merged_metadata,
+            preserve_embeddings=not ns.no_preserve_embeddings,
+            force=ns.force,
+        )
+
+    if ns.issue:
+        folder = ns.bulletins_root / ns.issue
+        if not folder.is_dir():
+            parser.error(f"issue folder not found: {folder}")
+        return CLIArgs(
+            issue_folders=[folder],
+            backup=not ns.no_backup,
+            drop_merged_metadata=not ns.keep_merged_metadata,
+            preserve_embeddings=not ns.no_preserve_embeddings,
+            force=ns.force,
+        )
+
+    parser.error("provide --issue or --all")
+    raise SystemExit(2)  # unreachable
+
+
+def _load_json_or_none(path: Path) -> Optional[Dict[str, Any]]:
+    """Read a JSON file if it exists; return ``None`` if it doesn't.
+
+    Raises any JSON-parse error so the caller surfaces it as a per-folder
+    failure rather than silently skipping a corrupt file.
+    """
+    if not path.is_file():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+_MERGE_SOURCE_RE  = re.compile(rb'"merge_source"\s*:\s*"([^"]*)"')
+_MERGED_AT_RE    = re.compile(rb'"merged_at"\s*:\s*"([^"]*)"')
+_EXTRACTED_AT_RE = re.compile(rb'"extracted_at"\s*:\s*"([^"]*)"')
+
+# Real metadata.json files are 100+ MB (embeddings inline). Parsing the
+# whole file just to read 3 top-level fields would take ~5s per folder ×
+# 247 folders = ~20 min for an "idempotent re-run" check. A bounded
+# head+tail byte scan finds the same fields in <1ms regardless of file
+# size. The fields sit at the end of the doc (after ``records``) but we
+# also scan the head as a safety net in case the writer order changes.
+_METADATA_HEAD_BYTES = 4096
+_METADATA_TAIL_BYTES = 16384
+
+
+def _read_head_and_tail(path: Path, head_n: int, tail_n: int) -> bytes:
+    """Return up to ``head_n`` bytes from the start + ``tail_n`` from the
+    end of ``path``, joined with a newline. Files smaller than the sum
+    are read whole."""
+    size = path.stat().st_size
+    if size <= head_n + tail_n:
+        return path.read_bytes()
+    with path.open("rb") as f:
+        head = f.read(head_n)
+        f.seek(size - tail_n)
+        tail = f.read(tail_n)
+    return head + b"\n" + tail
+
+
+def _is_merge_current(folder: Path) -> bool:
+    """Return True iff metadata.json already reflects an up-to-date merge
+    with the folder's source files.
+
+    Used by ``_process_folder`` to skip folders on idempotent ``--all``
+    re-runs without ``--force``.
+
+    All conditions must hold:
+      - metadata.json exists and a byte scan finds a non-empty
+        ``merge_source`` field (proves the file is a post-merge output,
+        not a raw pdf_extract output)
+      - cd_metadata.json mtime <= metadata.json mtime (no fresher CD
+        bundle has landed since the merge), OR cd_metadata.json absent
+      - the doc's ``extracted_at`` <= ``merged_at`` if both present (so
+        a later ``pdf_extract_tasarim --force`` invalidates the merge)
+
+    Scans only the first 4 KB + last 16 KB of metadata.json to avoid
+    parsing a 100+ MB file with inlined embeddings on every re-run.
+    """
+    md = folder / METADATA_FILENAME
+    if not md.is_file():
+        return False
+    try:
+        scan = _read_head_and_tail(md, _METADATA_HEAD_BYTES, _METADATA_TAIL_BYTES)
+    except Exception:
+        return False
+
+    m_src = _MERGE_SOURCE_RE.search(scan)
+    if not m_src or not m_src.group(1):
+        return False
+
+    cd = folder / CD_METADATA_FILENAME
+    if cd.is_file() and cd.stat().st_mtime > md.stat().st_mtime:
+        return False
+
+    m_merged = _MERGED_AT_RE.search(scan)
+    m_ext    = _EXTRACTED_AT_RE.search(scan)
+    if m_merged and m_ext and m_ext.group(1) > m_merged.group(1):
+        return False
+
+    return True
+
+
+def _process_folder(
+    folder: Path,
+    *,
+    backup: bool,
+    drop_merged_metadata: bool,
+    preserve_embeddings: bool,
+    force: bool = False,
+) -> Dict[str, Any]:
+    """Merge cd_metadata.json + metadata.json -> metadata.json (PDF-shape).
+
+    Returns ``{"folder", "merge_source", "embeddings_attached",
+    "skipped"}``. ``skipped=True`` when:
+      - the folder has neither source file (nothing to merge), or
+      - the merge is already current (``_is_merge_current`` True) and
+        ``force`` is False — in that case ``reason='merge-current'``.
+    """
+    if not force and _is_merge_current(folder):
+        logger.info("[=] %s: merge already current, skipping", folder.name)
+        return {"folder": folder.name, "skipped": True, "reason": "merge-current"}
+
+    pdf_path     = folder / METADATA_FILENAME
+    cd_path      = folder / CD_METADATA_FILENAME
+    merged_path  = folder / MERGED_METADATA_FILENAME
+
+    pdf_doc = _load_json_or_none(pdf_path)
+    cd_doc  = _load_json_or_none(cd_path)
+
+    if pdf_doc is None and cd_doc is None:
+        logger.warning(
+            "[skip] %s: neither metadata.json nor cd_metadata.json present",
+            folder.name,
+        )
+        return {"folder": folder.name, "skipped": True}
+
+    existing_embeddings: Dict[str, Dict[str, Any]] = {}
+    if preserve_embeddings and pdf_doc is not None:
+        existing_embeddings = _index_existing_embeddings(pdf_doc)
+
+    merged = merge_to_pdf_shape(pdf_doc=pdf_doc, cd_doc=cd_doc)
+    attached = _attach_existing_embeddings(merged, existing_embeddings)
+
+    if backup and pdf_path.is_file():
+        backup_path = pdf_path.with_name(METADATA_FILENAME.replace(".json", "") + BACKUP_SUFFIX)
+        # ``Path.replace`` atomically overwrites the destination — required
+        # because Windows ``rename`` raises FileExistsError on second
+        # ``--force`` runs (the .bak from the prior run is still there).
+        pdf_path.replace(backup_path)
+
+    pdf_path.write_text(
+        json.dumps(merged, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    if drop_merged_metadata and merged_path.is_file():
+        merged_path.unlink()
+
+    return {
+        "folder":              folder.name,
+        "merge_source":        merged.get("merge_source", "unknown"),
+        "record_count":        merged.get("record_count", 0),
+        "embeddings_attached": attached,
+        "skipped":             False,
+    }
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    """CLI entrypoint. Returns 0 unless any folder raised an exception.
+
+    A skipped folder (neither metadata.json nor cd_metadata.json) is NOT
+    a failure — it's an idempotent no-op for any TS folder that's an
+    empty stub.
+    """
+    args = parse_argv(argv)
+
+    started = time.time()
+    succeeded: List[str] = []
+    skipped:   List[str] = []
+    failed:    List[Tuple[str, str]] = []
+    by_source: Dict[str, int] = {"pdf_only": 0, "cd_only": 0, "both": 0}
+
+    for folder in args.issue_folders:
+        try:
+            result = _process_folder(
+                folder,
+                backup=args.backup,
+                drop_merged_metadata=args.drop_merged_metadata,
+                preserve_embeddings=args.preserve_embeddings,
+                force=args.force,
+            )
+        except Exception as e:
+            failed.append((folder.name, repr(e)))
+            logger.error("[!] %s: %r", folder.name, e)
+            continue
+
+        if result.get("skipped"):
+            skipped.append(folder.name)
+            continue
+
+        succeeded.append(folder.name)
+        src = result["merge_source"]
+        by_source[src] = by_source.get(src, 0) + 1
+        logger.info(
+            "[+] %s: merge=%s, records=%d, embeddings_carried=%d",
+            folder.name, src, result["record_count"],
+            result["embeddings_attached"],
+        )
+
+    duration = time.time() - started
+    logger.info(
+        "Done in %.1fs: %d succeeded (cd_only=%d pdf_only=%d both=%d), "
+        "%d skipped, %d failed",
+        duration, len(succeeded),
+        by_source.get("cd_only", 0), by_source.get("pdf_only", 0),
+        by_source.get("both", 0),
+        len(skipped), len(failed),
+    )
+    return 0 if not failed else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

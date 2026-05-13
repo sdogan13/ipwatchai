@@ -1,0 +1,145 @@
+{# ==========================================================
+   Patent detail modal — opens from search/watchlist/alerts/leads
+   result cards. Hydrates from /api/v1/patents/{id} via
+   static/js/dashboard/patent_detail.js.
+   ========================================================== #}
+<div id="patent-detail-modal"
+     class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-mobile-fullscreen"
+     style="background:rgba(0,0,0,0.5)">
+  <div class="rounded-xl shadow-xl border max-w-3xl w-full max-h-[90vh] overflow-y-auto"
+       style="background:var(--color-bg-card);border-color:var(--color-border)">
+
+    {# Header #}
+    <div class="flex items-start justify-between gap-3 px-5 py-4 sticky top-0 z-10"
+         style="background:var(--color-bg-card);border-bottom:1px solid var(--color-border)">
+      <div class="min-w-0 flex-1">
+        <div class="flex items-center gap-2 flex-wrap mb-1">
+          <span id="pd-record-type-badge"
+                class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                style="background:var(--color-bg-muted);color:var(--color-text-muted)"></span>
+          <span id="pd-kind-badge"
+                class="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono"
+                style="background:var(--color-bg-muted);color:var(--color-text-muted)"></span>
+          <span id="pd-publication-no" class="text-xs font-mono"
+                style="color:var(--color-text-muted)"></span>
+        </div>
+        <h2 id="pd-title" class="text-lg font-semibold leading-snug"
+            style="color:var(--color-text-primary)">—</h2>
+      </div>
+      <button id="pd-close" type="button"
+              class="shrink-0 p-1 rounded hover:opacity-70"
+              style="color:var(--color-text-faint)">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+
+    {# Loading state #}
+    <div id="pd-loading" class="hidden px-5 py-12 text-center">
+      <p class="text-sm" style="color:var(--color-text-faint)"
+         x-text="t('patent_detail.loading')">Loading…</p>
+    </div>
+
+    {# Body #}
+    <div id="pd-body" class="hidden p-5 space-y-5">
+
+      {# Dates row #}
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+        <div>
+          <p class="font-medium" style="color:var(--color-text-faint)"
+             x-text="t('patent_detail.application_date')">Application date</p>
+          <p id="pd-application-date" class="mt-0.5" style="color:var(--color-text-primary)">—</p>
+        </div>
+        <div>
+          <p class="font-medium" style="color:var(--color-text-faint)"
+             x-text="t('patent_detail.publication_date')">Publication date</p>
+          <p id="pd-publication-date" class="mt-0.5" style="color:var(--color-text-primary)">—</p>
+        </div>
+        <div>
+          <p class="font-medium" style="color:var(--color-text-faint)"
+             x-text="t('patent_detail.grant_date')">Grant date</p>
+          <p id="pd-grant-date" class="mt-0.5" style="color:var(--color-text-primary)">—</p>
+        </div>
+        <div>
+          <p class="font-medium" style="color:var(--color-text-faint)"
+             x-text="t('patent_detail.bulletin')">Bulletin</p>
+          <p id="pd-bulletin" class="mt-0.5" style="color:var(--color-text-primary)">—</p>
+        </div>
+      </div>
+
+      {# Abstract #}
+      <div>
+        <h3 class="text-xs font-medium mb-1" style="color:var(--color-text-faint)"
+            x-text="t('patent_detail.abstract')">Abstract</h3>
+        <p id="pd-abstract" class="text-sm leading-relaxed"
+           style="color:var(--color-text-primary)">—</p>
+      </div>
+
+      {# IPC chips #}
+      <div>
+        <h3 class="text-xs font-medium mb-1" style="color:var(--color-text-faint)"
+            x-text="t('patent_detail.ipc_classes')">IPC classes</h3>
+        <div id="pd-ipc-chips" class="flex flex-wrap gap-1.5"></div>
+      </div>
+
+      {# Figures grid — thumbnails open the shared lightbox on click.
+         Hidden by default; renderFigures shows the block only when
+         there's at least one image_url. #}
+      <div id="pd-figures-block" class="hidden">
+        <h3 class="text-xs font-medium mb-1.5" style="color:var(--color-text-faint)"
+            x-text="t('patent_detail.figures')">Figures</h3>
+        <div id="pd-figures" class="grid grid-cols-3 sm:grid-cols-4 gap-2"></div>
+      </div>
+
+      {# Two-column grid: holders | inventors #}
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+        <div>
+          <h3 class="text-xs font-medium mb-1.5" style="color:var(--color-text-faint)"
+              x-text="t('patent_detail.holders')">Holders</h3>
+          <div id="pd-holders" class="space-y-1.5"></div>
+        </div>
+        <div>
+          <h3 class="text-xs font-medium mb-1.5" style="color:var(--color-text-faint)"
+              x-text="t('patent_detail.inventors')">Inventors</h3>
+          <div id="pd-inventors" class="space-y-1.5"></div>
+        </div>
+      </div>
+
+      {# Two-column grid: attorneys | priorities #}
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+        <div>
+          <h3 class="text-xs font-medium mb-1.5" style="color:var(--color-text-faint)"
+              x-text="t('patent_detail.attorneys')">Attorneys</h3>
+          <div id="pd-attorneys" class="space-y-1.5"></div>
+        </div>
+        <div>
+          <h3 class="text-xs font-medium mb-1.5" style="color:var(--color-text-faint)"
+              x-text="t('patent_detail.priorities')">Priorities</h3>
+          <div id="pd-priorities" class="space-y-1.5"></div>
+        </div>
+      </div>
+
+      {# Recent events #}
+      <div>
+        <h3 class="text-xs font-medium mb-1.5" style="color:var(--color-text-faint)"
+            x-text="t('patent_detail.recent_events')">Recent events</h3>
+        <div id="pd-events" class="space-y-1"></div>
+      </div>
+
+      {# Source provenance #}
+      <div class="text-[10px] pt-3"
+           style="color:var(--color-text-faint);border-top:1px solid var(--color-border)">
+        <span x-text="t('patent_detail.source_format')">Source</span>:
+        <span id="pd-source" class="font-mono">—</span>
+      </div>
+    </div>
+
+    {# Error state #}
+    <div id="pd-error" class="hidden p-5 text-center">
+      <p class="text-sm" id="pd-error-msg"
+         style="color:var(--color-text-error,#dc2626)"></p>
+    </div>
+  </div>
+</div>

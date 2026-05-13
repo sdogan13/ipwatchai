@@ -1,7 +1,8 @@
-"""Trademark application repository operations."""
+"""Application repository operations (polymorphic across registries)."""
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 from uuid import UUID, uuid4
 
@@ -14,13 +15,37 @@ if TYPE_CHECKING:
 class ApplicationCRUD:
     @staticmethod
     def create(db: Database, org_id: UUID, user_id: UUID, data: TrademarkApplicationCreate) -> Dict:
-        """Create a new trademark application."""
+        """Create a new application (polymorphic: trademark / design / patent / cografi).
+
+        registry_kind on the payload selects the registry. classification_codes
+        is the canonical multi-registry classification list (NICE / Locarno /
+        IPC). For backwards compatibility, when registry_kind=='trademark' we
+        also persist nice_class_numbers so legacy readers keep working.
+        """
         cur = db.cursor()
         app_id = uuid4()
+        registry_kind = getattr(data, "registry_kind", "trademark") or "trademark"
+        classification_codes = list(getattr(data, "classification_codes", []) or [])
+        details = getattr(data, "details", {}) or {}
+
+        # For trademark, mirror classification_codes into nice_class_numbers (int[])
+        # so the existing trademark UI/CSV exports keep working untouched.
+        nice_classes = list(getattr(data, "nice_class_numbers", []) or [])
+        if registry_kind == "trademark" and not nice_classes and classification_codes:
+            nice_classes = [int(c) for c in classification_codes if c.isdigit()]
+        if registry_kind == "trademark" and nice_classes and not classification_codes:
+            classification_codes = [str(n) for n in nice_classes]
+
+        mark_type_val = getattr(data, "mark_type", None)
+        mark_type_str = mark_type_val.value if hasattr(mark_type_val, "value") else (mark_type_val or "word")
+        # Non-trademark registries don't use mark_type; default to 'word' to
+        # satisfy the existing ENUM NOT NULL column.
+
         cur.execute(
             """
             INSERT INTO trademark_applications_mt (
                 id, organization_id, user_id, status, application_type,
+                registry_kind, classification_codes, details,
                 brand_name, mark_type, nice_class_numbers, goods_services_description,
                 applicant_full_name, applicant_id_no, applicant_id_type,
                 applicant_address, applicant_phone, applicant_email,
@@ -30,6 +55,7 @@ class ApplicationCRUD:
                 opposition_target_classes, opposition_grounds
             ) VALUES (
                 %s, %s, %s, 'draft', %s,
+                %s, %s, %s::jsonb,
                 %s, %s, %s, %s,
                 %s, %s, %s,
                 %s, %s, %s,
@@ -44,9 +70,12 @@ class ApplicationCRUD:
                 str(org_id),
                 str(user_id),
                 data.application_type.value,
+                registry_kind,
+                classification_codes,
+                json.dumps(details),
                 data.brand_name,
-                data.mark_type.value,
-                data.nice_class_numbers,
+                mark_type_str,
+                nice_classes,
                 data.goods_services_description,
                 data.applicant_full_name,
                 data.applicant_id_no,
@@ -89,13 +118,23 @@ class ApplicationCRUD:
         org_id: UUID,
         status: Optional[str] = None,
         application_type: Optional[str] = None,
+        registry_kind: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> Tuple[List[Dict], int]:
-        """Get paginated applications for an organization."""
+        """Get paginated applications for an organization.
+
+        registry_kind defaults to 'trademark' when omitted so legacy
+        callers that don't pass a registry continue to see only the
+        trademark applications they expect.
+        """
         cur = db.cursor()
         where = "WHERE organization_id = %s"
         params: list = [str(org_id)]
+
+        effective_kind = registry_kind if registry_kind is not None else "trademark"
+        where += " AND registry_kind = %s"
+        params.append(effective_kind)
 
         if status:
             where += " AND status = %s"
@@ -141,9 +180,19 @@ class ApplicationCRUD:
         updates = []
         params = []
         for field, value in data.dict(exclude_unset=True).items():
-            if value is not None:
+            if value is None:
+                continue
+            if field == "details":
+                # JSONB column — serialize dict to a JSON string and cast in-SQL
+                updates.append("details = %s::jsonb")
+                params.append(json.dumps(value))
+                continue
+            if field in ("mark_type", "application_type") and hasattr(value, "value"):
                 updates.append(f"{field} = %s")
-                params.append(value.value if field in ("mark_type", "application_type") and hasattr(value, "value") else value)
+                params.append(value.value)
+                continue
+            updates.append(f"{field} = %s")
+            params.append(value)
 
         if not updates:
             return ApplicationCRUD.get_by_id(db, app_id, org_id)

@@ -176,6 +176,185 @@
 </div>
 
 <!-- ============================================ -->
+<!-- DESIGN WATCHLIST EDIT MODAL                  -->
+<!-- Mirrors watchlist-edit-modal but adapted to  -->
+<!-- the DesignWatchlistUpdate Pydantic model:    -->
+<!-- product_name, locarno, threshold, desc,      -->
+<!-- alert_frequency, monitor_text, monitor_visual-->
+<!-- (no phonetic — designs are visual+Locarno).  -->
+<!-- ============================================ -->
+<div id="design-watchlist-edit-modal" class="hidden fixed inset-0 flex items-center justify-center p-4 modal-mobile-fullscreen"
+     style="background:var(--color-bg-overlay);z-index:var(--z-modal)"
+     onclick="if(event.target===this && typeof closeEditDesignWatchlistModal === 'function') closeEditDesignWatchlistModal()">
+    <div class="rounded-xl shadow-xl max-w-md w-full overflow-hidden"
+         style="background:var(--color-bg-card);border:1px solid var(--color-border)" onclick="event.stopPropagation()">
+        <div class="px-6 py-4 flex items-center justify-between" style="border-bottom:1px solid var(--color-border)">
+            <h3 class="text-lg font-semibold" style="color:var(--color-text-primary)"
+                x-text="t('design_watchlist.edit_title')">Düzenle</h3>
+            <button onclick="if(typeof closeEditDesignWatchlistModal === 'function') closeEditDesignWatchlistModal()"
+                    class="text-2xl leading-none min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg"
+                    style="color:var(--color-text-faint)">&times;</button>
+        </div>
+        <div class="p-6 space-y-3">
+            <div>
+                <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)"
+                       x-text="t('design_watchlist.product_name_label')">Ürün Adı</label>
+                <input id="edit-dwl-product-name" type="text" class="w-full px-3 py-2 rounded-lg text-sm"
+                       style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)"
+                       x-text="t('design_watchlist.locarno_label')">Locarno Sınıfları</label>
+                <input id="edit-dwl-locarno" type="text" placeholder="06-01, 26-05"
+                       class="w-full px-3 py-2 rounded-lg text-sm"
+                       style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
+                <p class="text-xs mt-1" style="color:var(--color-text-faint)"
+                   x-text="t('design_watchlist.locarno_hint')"></p>
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)"
+                       x-text="t('design_watchlist.similarity_threshold')">Benzerlik Eşiği</label>
+                <select id="edit-dwl-threshold" class="w-full px-3 py-2 rounded-lg text-sm"
+                        style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
+                    <option value="0.5" selected x-text="t('design_watchlist.threshold_50')">50%</option>
+                    <option value="0.6" x-text="t('design_watchlist.threshold_60')">60%</option>
+                    <option value="0.7" x-text="t('design_watchlist.threshold_70')">70%</option>
+                    <option value="0.8" x-text="t('design_watchlist.threshold_80')">80%</option>
+                    <option value="0.9" x-text="t('design_watchlist.threshold_90')">90%</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)"
+                       x-text="t('design_watchlist.description')">Açıklama</label>
+                <input id="edit-dwl-description" type="text" class="w-full px-3 py-2 rounded-lg text-sm"
+                       style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-1" style="color:var(--color-text-secondary)"
+                       x-text="t('design_watchlist.alert_frequency_label')">Bildirim Sıklığı</label>
+                <select id="edit-dwl-frequency" class="w-full px-3 py-2 rounded-lg text-sm"
+                        style="border:1px solid var(--color-border-input);color:var(--color-text-primary);background:var(--color-bg-input)">
+                    <option value="daily" x-text="t('design_watchlist.freq_daily')">Günlük</option>
+                    <option value="weekly" x-text="t('design_watchlist.freq_weekly')">Haftalık</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium mb-2" style="color:var(--color-text-secondary)"
+                       x-text="t('design_watchlist.monitoring_scope')">İzleme Kapsamı</label>
+                <div class="flex flex-wrap gap-4">
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input id="edit-dwl-monitor-text" type="checkbox" class="rounded border-gray-300">
+                        <span class="text-sm" style="color:var(--color-text-primary)"
+                              x-text="t('design_watchlist.scope_text')">Metin</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input id="edit-dwl-monitor-visual" type="checkbox" class="rounded border-gray-300">
+                        <span class="text-sm" style="color:var(--color-text-primary)"
+                              x-text="t('design_watchlist.scope_visual')">Görsel</span>
+                    </label>
+                </div>
+            </div>
+            <div class="flex justify-end gap-3 mt-4 pt-3" style="border-top:1px solid var(--color-border)">
+                <button onclick="if(typeof closeEditDesignWatchlistModal === 'function') closeEditDesignWatchlistModal()"
+                        class="px-4 py-2 text-sm rounded-lg transition" style="color:var(--color-text-secondary)"
+                        x-text="t('design_watchlist.cancel')">İptal</button>
+                <button id="edit-dwl-submit-btn"
+                        onclick="if(typeof submitEditDesignWatchlist === 'function') submitEditDesignWatchlist()"
+                        class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition disabled:opacity-50"
+                        x-text="t('design_watchlist.save_changes')">Kaydet</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================ -->
+<!-- DESIGN WATCHLIST BULK UPLOAD MODAL (CSV)     -->
+<!-- 3-step flow mirroring watchlist-upload-modal -->
+<!-- but CSV-only and with design-namespace IDs.  -->
+<!-- ============================================ -->
+<div id="design-watchlist-upload-modal" class="hidden fixed inset-0 flex items-center justify-center p-4 modal-mobile-fullscreen"
+     style="background:var(--color-bg-overlay);z-index:var(--z-modal)"
+     onclick="if(event.target===this && typeof closeDesignBulkUploadModal === 'function') closeDesignBulkUploadModal()">
+    <div class="rounded-xl shadow-xl max-w-lg w-full overflow-hidden"
+         style="background:var(--color-bg-card);border:1px solid var(--color-border)" onclick="event.stopPropagation()">
+        <div class="px-6 py-4 flex items-center justify-between" style="border-bottom:1px solid var(--color-border)">
+            <h3 class="text-lg font-semibold" style="color:var(--color-text-primary)"
+                x-text="t('design_watchlist.upload_title')">Toplu Yükle</h3>
+            <button onclick="if(typeof closeDesignBulkUploadModal === 'function') closeDesignBulkUploadModal()"
+                    class="text-2xl leading-none min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg"
+                    style="color:var(--color-text-faint)">&times;</button>
+        </div>
+        <div class="p-6">
+            <!-- Step 1: file pick + template download -->
+            <div id="dwl-upload-step-1">
+                <p class="text-sm mb-4" style="color:var(--color-text-muted)"
+                   x-text="t('design_watchlist.upload_description')">Upload a CSV file with your design watchlist items.</p>
+                <div class="mb-4">
+                    <button onclick="if(typeof downloadDesignWatchlistTemplate === 'function') downloadDesignWatchlistTemplate()"
+                            class="text-sm text-blue-600 hover:text-blue-800 underline flex items-center gap-1">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                        </svg>
+                        <span x-text="t('design_watchlist.upload_download_template')">Şablon İndir</span>
+                    </button>
+                </div>
+                <div class="border-2 border-dashed rounded-lg p-6 text-center" style="border-color:var(--color-border)">
+                    <svg class="w-10 h-10 mx-auto mb-2" style="color:var(--color-text-faint)" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                              d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                    </svg>
+                    <label class="cursor-pointer">
+                        <span class="text-sm font-medium text-blue-600 hover:text-blue-800"
+                              x-text="t('design_watchlist.upload_choose_file')">Dosya Seç</span>
+                        <input id="dwl-upload-file" type="file" accept=".csv" class="hidden"
+                               onchange="if(typeof onDesignUploadFilePicked === 'function') onDesignUploadFilePicked(this)"/>
+                    </label>
+                    <p class="text-xs mt-1" style="color:var(--color-text-faint)">CSV (UTF-8)</p>
+                    <p id="dwl-upload-filename" class="hidden text-sm font-medium mt-2" style="color:var(--color-text-primary)"></p>
+                </div>
+                <div class="flex justify-end gap-3 mt-4">
+                    <button onclick="if(typeof closeDesignBulkUploadModal === 'function') closeDesignBulkUploadModal()"
+                            class="px-4 py-2 text-sm rounded-lg" style="color:var(--color-text-secondary)"
+                            x-text="t('design_watchlist.cancel')">İptal</button>
+                    <button id="dwl-upload-detect-btn"
+                            onclick="if(typeof detectDesignUploadColumns === 'function') detectDesignUploadColumns()"
+                            class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition disabled:opacity-50"
+                            x-text="t('design_watchlist.upload_detect_columns')">Kolonları Algıla</button>
+                </div>
+            </div>
+
+            <!-- Step 2: column mapping -->
+            <div id="dwl-upload-step-2" class="hidden">
+                <p class="text-sm mb-3" style="color:var(--color-text-muted)"
+                   x-text="t('design_watchlist.upload_map_columns_desc')">Map CSV columns to fields.</p>
+                <div id="dwl-upload-mapping" class="space-y-2"></div>
+                <p id="dwl-upload-row-count" class="text-xs mt-3" style="color:var(--color-text-faint)"></p>
+                <div class="flex justify-end gap-3 mt-4">
+                    <button onclick="if(typeof showDesignUploadStepOne === 'function') showDesignUploadStepOne()"
+                            class="px-4 py-2 text-sm rounded-lg" style="color:var(--color-text-secondary)"
+                            x-text="t('common.back')">Geri</button>
+                    <button id="dwl-upload-submit-btn"
+                            onclick="if(typeof submitDesignBulkUpload === 'function') submitDesignBulkUpload()"
+                            class="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition disabled:opacity-50"
+                            x-text="t('design_watchlist.upload_now')">Yükle</button>
+                </div>
+            </div>
+
+            <!-- Step 3: result -->
+            <div id="dwl-upload-result" class="hidden">
+                <div id="dwl-upload-result-body" class="text-sm" style="color:var(--color-text-primary)"></div>
+                <div class="flex justify-end mt-4">
+                    <button onclick="if(typeof closeDesignBulkUploadModal === 'function') closeDesignBulkUploadModal()"
+                            class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg"
+                            x-text="t('common.close')">Kapat</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================ -->
 <!-- AGENTIC SEARCH LOADING MODAL                -->
 <!-- ============================================ -->
 {% include 'shared/_upgrade_modal.html' %}
@@ -498,10 +677,34 @@
             this.submitting = true;
             try {
                 var token = getAuthToken();
-                var payload = this.portfolioType === 'holder'
-                    ? { holder_id: this.entityId }
-                    : { attorney_no: this.entityId };
-                var res = await fetch('/api/v1/watchlist/bulk-from-portfolio', {
+                // Branch endpoint + payload per portfolio type. Design
+                // holder hits the new /api/v1/design-watchlist/bulk-
+                // from-portfolio (mirrors the trademark route shape).
+                var endpoint;
+                var payload;
+                if (this.portfolioType === 'design-holder') {
+                    endpoint = '/api/v1/design-watchlist/bulk-from-portfolio';
+                    payload = { holder_id: this.entityId };
+                } else if (this.portfolioType === 'design-designer') {
+                    endpoint = '/api/v1/design-watchlist/bulk-from-portfolio';
+                    payload = { designer_name: this.entityId };
+                } else if (this.portfolioType === 'design-attorney') {
+                    endpoint = '/api/v1/design-watchlist/bulk-from-portfolio';
+                    // entityId is JSON {name, firm} — unpack for the API.
+                    var parsed;
+                    try { parsed = JSON.parse(this.entityId); } catch (_) { parsed = {}; }
+                    payload = {
+                        attorney_name: parsed && parsed.name ? String(parsed.name) : '',
+                        attorney_firm: parsed && parsed.firm ? String(parsed.firm) : '',
+                    };
+                } else if (this.portfolioType === 'holder') {
+                    endpoint = '/api/v1/watchlist/bulk-from-portfolio';
+                    payload = { holder_id: this.entityId };
+                } else {
+                    endpoint = '/api/v1/watchlist/bulk-from-portfolio';
+                    payload = { attorney_no: this.entityId };
+                }
+                var res = await fetch(endpoint, {
                     method: 'POST',
                     headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
@@ -543,12 +746,20 @@
                     if (data.created > 0 || data.skipped > 0) {
                         _showBulkResultBanner(data.created, data.total, 'success', data.skipped);
                     }
+                    // Modal stays open here so the user can see the upgrade
+                    // offer; don't switch tabs unless something actually got
+                    // added.
+                    if ((data.created || 0) > 0 && typeof showDashboardTab === 'function') {
+                        showDashboardTab('watchlist');
+                    }
                 } else if (data.created > 0 || data.skipped > 0) {
                     this.open = false;
                     _showBulkResultBanner(data.created, data.total, 'success', data.skipped);
+                    if (typeof showDashboardTab === 'function') showDashboardTab('watchlist');
                 } else if (data.created === 0 && data.total > 0 && !data.skipped) {
                     this.open = false;
                     _showBulkResultBanner(0, data.total, 'info', 0);
+                    if (typeof showDashboardTab === 'function') showDashboardTab('watchlist');
                 }
                 var queuedScans = typeof _coerceQueuedScanCount === 'function'
                     ? _coerceQueuedScanCount(data, data.created || 0)
@@ -1243,7 +1454,7 @@
 <!-- EVENTS TIMELINE MODAL                            -->
 <!-- ================================================ -->
 <div id="events-timeline-modal" role="dialog" aria-modal="true"
-     class="fixed inset-0 z-[70] flex items-center justify-center hidden"
+     class="fixed inset-0 z-[70] flex items-center justify-center hidden modal-mobile-fullscreen"
      style="background:rgba(0,0,0,0.5)">
     <div class="w-full max-w-3xl max-h-[90vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col"
          style="background:var(--color-bg-card)">

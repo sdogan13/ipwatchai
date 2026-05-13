@@ -98,15 +98,11 @@ def register_public_search_routes(
     rate_limit_getter=None,
 ):
     """Register the extracted public search routes on the app."""
-    from database.crud import Database
-    from services.search_service import (
-        PUBLIC_SEARCH_CLIENT_COOKIE,
-        PUBLIC_SEARCH_COOKIE_MAX_AGE_SECONDS,
-        check_public_search_eligibility,
-        get_public_search_daily_limit,
-        increment_public_search_usage,
-        resolve_public_search_client_id,
+    from app_public_search_quota import (
+        enforce_public_search_quota as _enforce_public_search_limit,
+        record_public_search_usage as _record_public_search_usage,
     )
+    from services.search_service import get_public_search_daily_limit
 
     def _public_rate_limit() -> str:
         configured = "10/minute"
@@ -120,33 +116,6 @@ def register_public_search_routes(
 
         minimum_count = max(10, get_public_search_daily_limit() + 1)
         return f"{max(configured_count, minimum_count)}/minute"
-
-    def _set_public_search_cookie(response: Response, client_id: str) -> None:
-        response.set_cookie(
-            key=PUBLIC_SEARCH_CLIENT_COOKIE,
-            value=client_id,
-            max_age=PUBLIC_SEARCH_COOKIE_MAX_AGE_SECONDS,
-            httponly=True,
-            samesite="lax",
-            path="/",
-        )
-
-    def _enforce_public_search_limit(request: Request, response: Response):
-        client_id, should_set_cookie = resolve_public_search_client_id(request)
-        if should_set_cookie:
-            _set_public_search_cookie(response, client_id)
-
-        with Database() as db:
-            allowed, _, detail = check_public_search_eligibility(db, client_id)
-
-        if not allowed:
-            raise HTTPException(status_code=429, detail=detail)
-
-        return client_id
-
-    def _record_public_search_usage(client_id: str) -> None:
-        with Database() as db:
-            increment_public_search_usage(db, client_id)
 
     async def _do_public_search(
         query: str,

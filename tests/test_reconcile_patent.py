@@ -12,8 +12,11 @@ from pathlib import Path
 import pytest
 
 from pipeline.reconcile_patent import (
+    CD_METADATA_FILENAME,
     CLIArgs,
     CanonicalRecord,
+    PDF_METADATA_FILENAME,
+    UNIFIED_METADATA_FILENAME,
     _build_stats,
     _cd_figures,
     _dmy_to_iso,
@@ -28,7 +31,6 @@ from pipeline.reconcile_patent import (
     _normalize_pdf_party,
     _normalize_pdf_priority,
     _page_range_or_none,
-    _pick_longer_title,
     _process_one,
     _record_to_dict,
     classify_metadata_json,
@@ -40,7 +42,6 @@ from pipeline.reconcile_patent import (
     normalize_pdf_record,
     parse_argv,
     reconcile_metadata,
-    unified_filename,
 )
 
 
@@ -554,23 +555,8 @@ def test_normalize_pdf_record_drops_holder_address_null() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Step 4.4 — merge_records (CD ↔ PDF precedence)
+# Step 4.4 — merge_records (CD-first precedence)
 # ---------------------------------------------------------------------------
-
-
-def test_pick_longer_title_pdf_wins_when_longer() -> None:
-    assert _pick_longer_title("Short", "Much longer title text") == "Much longer title text"
-
-
-def test_pick_longer_title_cd_wins_on_tie() -> None:
-    """Equal-length titles -> CD (it's the typed source)."""
-    assert _pick_longer_title("ABCDE", "VWXYZ") == "ABCDE"
-
-
-def test_pick_longer_title_falls_back_to_present_side() -> None:
-    assert _pick_longer_title("CD only", None) == "CD only"
-    assert _pick_longer_title(None, "PDF only") == "PDF only"
-    assert _pick_longer_title(None, None) is None
 
 
 def test_merge_figures_concats_with_dedup() -> None:
@@ -648,8 +634,8 @@ def _pdf_canonical() -> CanonicalRecord:
     )
 
 
-def test_merge_records_full_precedence() -> None:
-    """Walks the precedence table: every rule fires on a single record."""
+def test_merge_records_cd_first_precedence() -> None:
+    """CD wins on every overlapping field; PDF supplies only PDF-only ones."""
     merged = merge_records(_cd_canonical(), _pdf_canonical())
 
     # Structured fields -> CD wins
@@ -663,12 +649,18 @@ def test_merge_records_full_precedence() -> None:
     assert merged.attorneys == [{"no": "361", "name": "ERDEM KAYA"}]
     assert merged.priorities[0]["priority_no"] == "X"
 
-    # Title: PDF longer -> PDF wins
-    assert merged.title == "EMNİYET BELİRTEÇLİ ENJEKTÖR KİLİDİ VE KİLİTLEME YÖNTEMİ"
-    # Abstract: PDF wins (CD truncated)
-    assert merged.abstract.startswith("Full PDF abstract")
+    # CD-first: title and abstract come from CD even though PDF is longer.
+    # Rationale: PyMuPDF text extraction is noisy; CD's truncated-but-clean
+    # beats PDF's full-but-possibly-noisy. See patent_cd_first_precedence.
+    assert merged.title == "EMNİYET BELİRTEÇLİ ENJEKTÖR KİLİDİ"   # CD's shorter
+    assert merged.abstract == "CD truncated abstract..."           # CD's truncated
 
-    # PDF-only fields preserved
+    # CD-first on classification too (both happen to be UNKNOWN here, but
+    # the precedence direction matters for the next test).
+    assert merged.kind_code == "U3"
+    assert merged.record_type == "UNKNOWN"
+
+    # PDF-only fields preserved (CD doesn't carry these)
     assert merged.grant_date == "2025-12-22"
     assert merged.page_range == [120, 121]
 
@@ -682,6 +674,17 @@ def test_merge_records_full_precedence() -> None:
 
     # Source flag flipped
     assert merged.source_format == "BOTH"
+
+
+def test_merge_records_pdf_fills_when_cd_title_blank() -> None:
+    """CD-first means PDF DOES win when CD's value is empty/None."""
+    cd = _cd_canonical()
+    cd.title = None
+    cd.abstract = None
+    pdf = _pdf_canonical()
+    merged = merge_records(cd, pdf)
+    assert merged.title == "EMNİYET BELİRTEÇLİ ENJEKTÖR KİLİDİ VE KİLİTLEME YÖNTEMİ"
+    assert merged.abstract.startswith("Full PDF abstract")
 
 
 def test_merge_records_pdf_attorney_used_when_cd_empty() -> None:
@@ -869,11 +872,11 @@ def test_reconcile_metadata_pairs_overlap_on_application_no() -> None:
     app_nos = [r["application_no"] for r in doc["records"]]
     assert app_nos == ["2017/15048", "2018/22222", "2019/33333"]
 
-    # Spot-check the merged record
+    # Spot-check the merged record (CD-first precedence)
     both = doc["records"][0]
     assert both["source_format"] == "BOTH"
-    assert both["title"] == "PDF title is much longer than CD title"   # PDF longer
-    assert both["abstract"] == "Long PDF abstract."                     # PDF wins
+    assert both["title"] == "CD title"                  # CD wins (CD non-empty)
+    assert both["abstract"] == "Long PDF abstract."     # PDF fills (CD record had no abstract)
 
 
 def test_reconcile_metadata_raises_on_bulletin_mismatch() -> None:
@@ -1038,102 +1041,130 @@ def test_reconcile_metadata_one_side_empty_records_list_still_pairs() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Step 4.7 — CLI entrypoint + filename derivation
+# Step 4.7 — CLI entrypoint + Marka-style folder layout
 # ---------------------------------------------------------------------------
 
 
-def test_unified_filename_canonical_cases() -> None:
-    """bulletin_no -> canonical {YYYY_MM}_metadata.json filename."""
-    assert unified_filename("2025/8") == "2025_08_metadata.json"
-    assert unified_filename("2025-08") == "2025_08_metadata.json"
-    assert unified_filename("2025/12") == "2025_12_metadata.json"
-    assert unified_filename("2025-12") == "2025_12_metadata.json"
+def test_canonical_metadata_filenames() -> None:
+    """Each kind of metadata.json has a fixed canonical name inside the
+    bulletin's PT_{Y}_{M}_{date}/ parent folder. Stage 5 ingest reads
+    metadata.json from each folder."""
+    assert CD_METADATA_FILENAME == "cd_metadata.json"
+    assert PDF_METADATA_FILENAME == "pdf_metadata.json"
+    assert UNIFIED_METADATA_FILENAME == "metadata.json"
 
 
-def test_unified_filename_raises_on_invalid() -> None:
-    with pytest.raises(ValueError, match="cannot derive filename"):
-        unified_filename(None)
-    with pytest.raises(ValueError, match="cannot derive filename"):
-        unified_filename("")
-    with pytest.raises(ValueError, match="cannot derive filename"):
-        unified_filename("not-a-bulletin")
-
-
-def test_classify_metadata_json_distinguishes_kinds(tmp_path: Path) -> None:
-    cd_path = _write_json(tmp_path, "x_metadata.json", {
-        "bulletin_no": "2025/8",
-        "bulletin_date": "2025-08-21",
-        "patents": [],
-        "stats": {},
-    })
-    pdf_path = _write_json(tmp_path, "x_pdf_metadata.json", {
-        "bulletin_no": "2025-08",
-        "bulletin_date": "2025-08-21",
-        "records": [],
-        "stats": {},
-    })
-    unified_path = _write_json(tmp_path, "x_unified_metadata.json", {
-        "bulletin_no": "2025/8",
-        "records": [],
-        "reconciled_at": "2026-05-08T22:00:00+00:00",
-        "stats": {},
-    })
+def test_classify_metadata_json_recognises_canonical_names(tmp_path: Path) -> None:
+    cd_path = tmp_path / "cd_metadata.json"
+    pdf_path = tmp_path / "pdf_metadata.json"
+    unified_path = tmp_path / "metadata.json"
+    for p in (cd_path, pdf_path, unified_path):
+        p.write_text("{}", encoding="utf-8")
 
     assert classify_metadata_json(cd_path) == "cd"
-    assert classify_metadata_json(pdf_path) == "pdf"     # by suffix
+    assert classify_metadata_json(pdf_path) == "pdf"
     assert classify_metadata_json(unified_path) == "unified"
 
 
-def test_classify_metadata_json_raises_on_unknown_shape(tmp_path: Path) -> None:
-    bad = _write_json(tmp_path, "weird_metadata.json", {"unrelated": True})
-    with pytest.raises(ValueError, match="not a recognised"):
-        classify_metadata_json(bad)
+def test_classify_metadata_json_raises_on_legacy_flat_layout(tmp_path: Path) -> None:
+    """Pre-refactor flat-layout filenames must fail loudly so users
+    know to migrate."""
+    legacy_pdf = tmp_path / "2025_08_pdf_metadata.json"
+    legacy_pdf.write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="not a canonical metadata filename"):
+        classify_metadata_json(legacy_pdf)
 
 
-def test_group_by_bulletin_pairs_cd_and_pdf(tmp_path: Path) -> None:
-    """The headline --all behaviour: pair across filename offset by bulletin_no."""
-    # Mimic the real disk shape: 2025_07_metadata.json IS bulletin 2025/8.
-    _write_json(tmp_path, "2025_07_metadata.json", {
-        "bulletin_no": "2025/8",
-        "bulletin_date": "2025-08-21",
-        "patents": [],
-        "stats": {},
-    })
-    _write_json(tmp_path, "2025_08_pdf_metadata.json", {
-        "bulletin_no": "2025-08",        # different format, same bulletin
-        "bulletin_date": "2025-08-21",
-        "records": [],
-        "stats": {},
-    })
-    # Plus a CD-only month.
-    _write_json(tmp_path, "2025_11_metadata.json", {
-        "bulletin_no": "2025/12",
-        "bulletin_date": "2025-12-22",
-        "patents": [],
-        "stats": {},
-    })
-    # Plus a stray unified output from a prior run — must be skipped.
-    _write_json(tmp_path, "2025_08_metadata.json", {
-        "bulletin_no": "2025/8",
-        "records": [],
-        "reconciled_at": "2026-05-08T22:00:00+00:00",
-        "stats": {},
-    })
+def _make_pt_folder(
+    tmp_path: Path,
+    bulletin_no: str,
+    bulletin_date: str,
+    *,
+    cd: dict | None = None,
+    pdf: dict | None = None,
+    unified: dict | None = None,
+) -> Path:
+    """Create a PT_{Y}_{M}_{date}/ folder under tmp_path with the
+    requested canonical files."""
+    from patent_paths import bulletin_folder_name
+    parent = tmp_path / bulletin_folder_name(bulletin_no, bulletin_date)
+    parent.mkdir(parents=True, exist_ok=True)
+    if cd is not None:
+        (parent / CD_METADATA_FILENAME).write_text(
+            json.dumps(cd), encoding="utf-8"
+        )
+    if pdf is not None:
+        (parent / PDF_METADATA_FILENAME).write_text(
+            json.dumps(pdf), encoding="utf-8"
+        )
+    if unified is not None:
+        (parent / UNIFIED_METADATA_FILENAME).write_text(
+            json.dumps(unified), encoding="utf-8"
+        )
+    return parent
+
+
+def test_group_by_bulletin_walks_pt_folders(tmp_path: Path) -> None:
+    """--all walks every PT_*/ folder under bulletins_dir, loading
+    cd_metadata.json + pdf_metadata.json. Pre-existing unified files
+    are skipped (re-running --all should not feed unified back as
+    input)."""
+    _make_pt_folder(tmp_path, "2025/8", "2025-08-21",
+        cd={"bulletin_no": "2025/8", "bulletin_date": "2025-08-21",
+            "patents": [], "stats": {}},
+        pdf={"bulletin_no": "2025-08", "bulletin_date": "2025-08-21",
+             "records": [], "stats": {}},
+        unified={"bulletin_no": "2025/8", "records": [],
+                 "reconciled_at": "x", "stats": {}},
+    )
+    _make_pt_folder(tmp_path, "2025/12", "2025-12-22",
+        cd={"bulletin_no": "2025/12", "bulletin_date": "2025-12-22",
+            "patents": [], "stats": {}},
+    )
+    # A non-PT folder + a stray flat file at the root: both must be
+    # ignored.
+    (tmp_path / "scratch").mkdir()
+    (tmp_path / "stray_metadata.json").write_text("{}", encoding="utf-8")
 
     groups = _group_by_bulletin(tmp_path)
 
-    assert "2025/8" in groups
-    assert "cd" in groups["2025/8"]
-    assert "pdf" in groups["2025/8"]
-    assert groups["2025/8"]["cd"].name == "2025_07_metadata.json"
-    assert groups["2025/8"]["pdf"].name == "2025_08_pdf_metadata.json"
-    assert "2025/12" in groups
+    assert set(groups.keys()) == {"2025/8", "2025/12"}
+    assert "cd" in groups["2025/8"] and "pdf" in groups["2025/8"]
+    assert groups["2025/8"]["cd"]["bulletin_no"] == "2025/8"
+    assert groups["2025/8"]["pdf"]["bulletin_no"] == "2025-08"
     assert "cd" in groups["2025/12"]
     assert "pdf" not in groups["2025/12"]
 
 
-def test_process_one_writes_unified_with_canonical_filename(tmp_path: Path) -> None:
-    cd_path = _write_json(tmp_path, "2025_07_metadata.json", {
+def test_group_by_bulletin_survives_in_flight_unified_write(tmp_path: Path) -> None:
+    """Regression for the path-vs-doc snapshotting issue: --all writes
+    metadata.json into each PT_ folder during processing. Since the
+    snapshot is by parsed-doc (not by path), a write to a sibling
+    PT_ folder's metadata.json doesn't invalidate the in-memory CD
+    docs."""
+    parent = _make_pt_folder(tmp_path, "2025/8", "2025-08-21",
+        cd={"bulletin_no": "2025/8", "bulletin_date": "2025-08-21",
+            "patents": [{"application_no": "X1"}], "stats": {"patents": 1}},
+    )
+
+    groups = _group_by_bulletin(tmp_path)
+
+    # Simulate --all writing the unified output mid-loop.
+    (parent / UNIFIED_METADATA_FILENAME).write_text(
+        json.dumps({"bulletin_no": "2025/8", "records": [],
+                    "reconciled_at": "x", "stats": {}}),
+        encoding="utf-8",
+    )
+
+    # Snapshot must still hold the ORIGINAL CD doc.
+    assert "2025/8" in groups
+    assert groups["2025/8"]["cd"]["patents"][0]["application_no"] == "X1"
+
+
+def test_process_one_writes_metadata_json_into_pt_folder(tmp_path: Path) -> None:
+    """Single-pair CLI mode (--cd-json + --pdf-json + --out-dir) writes
+    the unified output into out_dir/PT_{Y}_{M}_{date}/metadata.json."""
+    cd_path = _write_json(tmp_path, "any_cd_input.json", {
         "bulletin_no": "2025/8",
         "bulletin_date": "2025-08-21",
         "source_archive": "2025_07_CD.rar",
@@ -1145,7 +1176,7 @@ def test_process_one_writes_unified_with_canonical_filename(tmp_path: Path) -> N
         }],
         "stats": {},
     })
-    pdf_path = _write_json(tmp_path, "2025_08_pdf_metadata.json", {
+    pdf_path = _write_json(tmp_path, "any_pdf_input.json", {
         "bulletin_no": "2025-08",
         "bulletin_date": "2025-08-21",
         "source_pdf": "2025_08.pdf",
@@ -1160,42 +1191,78 @@ def test_process_one_writes_unified_with_canonical_filename(tmp_path: Path) -> N
 
     result = _process_one(cd_path, pdf_path, tmp_path, force=False)
 
-    out_path = tmp_path / "2025_08_metadata.json"
-    assert out_path.exists()
-    assert result["out"] == "2025_08_metadata.json"        # filename comes from bulletin_no
+    parent = tmp_path / "PT_2025_8_2025-08-21"
+    out_path = parent / "metadata.json"
+    assert out_path.is_file()
+    assert result["out"] == "PT_2025_8_2025-08-21/metadata.json"
     assert result["bulletin_no"] == "2025/8"
     payload = json.loads(out_path.read_text(encoding="utf-8"))
     assert payload["stats"]["records"] == 1
     assert payload["stats"]["by_source_format"]["BOTH"] == 1
 
 
-def test_process_one_refuses_to_overwrite_without_force(tmp_path: Path) -> None:
-    """Overwriting the CD intermediate (or any prior unified) needs --force."""
-    pdf_path = _write_json(tmp_path, "2025_08_pdf_metadata.json", {
+def test_process_one_skips_when_unified_fresh(tmp_path: Path) -> None:
+    """When unified metadata.json already exists and is at least as
+    recent as every cd_/pdf_metadata.json sibling, the run is a no-op
+    (idempotent). No more FileExistsError without --force — the gate is
+    freshness, not existence."""
+    pdf_path = _write_json(tmp_path, "in_pdf.json", {
         "bulletin_no": "2025-08",
         "bulletin_date": "2025-08-21",
         "records": [],
         "stats": {},
     })
-    # Pre-create the would-be output to simulate a prior run.
-    target = tmp_path / "2025_08_metadata.json"
+    parent = tmp_path / "PT_2025_8_2025-08-21"
+    parent.mkdir()
+    target = parent / "metadata.json"
     target.write_text("{}", encoding="utf-8")
 
-    with pytest.raises(FileExistsError, match="--force"):
-        _process_one(None, pdf_path, tmp_path, force=False)
+    result = _process_one(None, pdf_path, tmp_path, force=False)
+    assert result["status"] == "skipped"
+    # File untouched.
+    assert target.read_text(encoding="utf-8") == "{}"
+
+
+def test_process_one_overwrites_when_inputs_newer(tmp_path: Path) -> None:
+    """If a cd_metadata.json sibling is newer than the existing unified
+    metadata.json, the source has changed since the last reconcile and
+    the run regenerates without needing --force."""
+    import time as _time
+    pdf_path = _write_json(tmp_path, "in_pdf.json", {
+        "bulletin_no": "2025-08",
+        "bulletin_date": "2025-08-21",
+        "records": [],
+        "stats": {},
+    })
+    parent = tmp_path / "PT_2025_8_2025-08-21"
+    parent.mkdir()
+    target = parent / "metadata.json"
+    target.write_text("STALE", encoding="utf-8")
+    # Make a sibling cd_metadata.json that's newer than the unified.
+    _time.sleep(0.05)
+    (parent / "cd_metadata.json").write_text("{}", encoding="utf-8")
+
+    result = _process_one(None, pdf_path, tmp_path, force=False)
+    assert result["status"] == "ok"
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert payload["bulletin_no"] == "2025/8"
 
 
 def test_process_one_overwrites_with_force(tmp_path: Path) -> None:
-    pdf_path = _write_json(tmp_path, "2025_08_pdf_metadata.json", {
+    """--force overrides the freshness check and always rewrites."""
+    pdf_path = _write_json(tmp_path, "in_pdf.json", {
         "bulletin_no": "2025-08",
         "bulletin_date": "2025-08-21",
         "records": [],
         "stats": {},
     })
-    target = tmp_path / "2025_08_metadata.json"
+    parent = tmp_path / "PT_2025_8_2025-08-21"
+    parent.mkdir()
+    target = parent / "metadata.json"
     target.write_text("STALE", encoding="utf-8")
 
-    _process_one(None, pdf_path, tmp_path, force=True)
+    result = _process_one(None, pdf_path, tmp_path, force=True)
+    assert result["status"] == "ok"
     payload = json.loads(target.read_text(encoding="utf-8"))
     assert payload["bulletin_no"] == "2025/8"
 
@@ -1231,13 +1298,13 @@ def test_parse_argv_all_and_pair_mutex() -> None:
 
 def test_main_returns_zero_on_success(tmp_path: Path) -> None:
     """End-to-end: CLI args -> file written -> exit 0."""
-    cd_path = _write_json(tmp_path, "2025_07_metadata.json", {
+    cd_path = _write_json(tmp_path, "in_cd.json", {
         "bulletin_no": "2025/8",
         "bulletin_date": "2025-08-21",
         "patents": [],
         "stats": {},
     })
-    pdf_path = _write_json(tmp_path, "2025_08_pdf_metadata.json", {
+    pdf_path = _write_json(tmp_path, "in_pdf.json", {
         "bulletin_no": "2025-08",
         "bulletin_date": "2025-08-21",
         "records": [],
@@ -1250,7 +1317,7 @@ def test_main_returns_zero_on_success(tmp_path: Path) -> None:
         "--out-dir", str(tmp_path),
     ])
     assert rc == 0
-    assert (tmp_path / "2025_08_metadata.json").exists()
+    assert (tmp_path / "PT_2025_8_2025-08-21" / "metadata.json").is_file()
 
 
 def test_main_returns_one_on_failure(tmp_path: Path) -> None:
@@ -1275,8 +1342,12 @@ def test_main_returns_one_on_failure(tmp_path: Path) -> None:
 _BULLETINS_DIR = (
     Path(__file__).resolve().parent.parent / "bulletins" / "Patent__Faydali_Model"
 )
-_REAL_CD_JSON = _BULLETINS_DIR / "2025_07_metadata.json"
-_REAL_PDF_JSON = _BULLETINS_DIR / "2025_08_pdf_metadata.json"
+# After the Marka-style folder refactor (2026-05-09): all per-bulletin
+# artifacts live inside PT_{Y}_{M}_{date}/ folders. Bulletin 2025/8 is
+# the canonical paired-month smoke target.
+_BULLETIN_2025_8_DIR = _BULLETINS_DIR / "PT_2025_8_2025-08-21"
+_REAL_CD_JSON = _BULLETIN_2025_8_DIR / "cd_metadata.json"
+_REAL_PDF_JSON = _BULLETIN_2025_8_DIR / "pdf_metadata.json"
 
 
 @pytest.mark.skipif(
