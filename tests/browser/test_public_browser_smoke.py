@@ -1,4 +1,4 @@
-"""
+﻿"""
 Browser smoke suite for public-facing journeys.
 
 Run directly:
@@ -1016,7 +1016,7 @@ def main() -> None:
                         starterApi: window.AppUpgradeModal.resolveOffer({ current_plan: 'starter' }, 'api_access').recommendedPlan,
                         freeWatchlistLogo: window.AppUpgradeModal.resolveOffer({ current_plan: 'free' }, 'watchlist_logo').recommendedPlan,
                         quickCopyMatches: (() => {
-                            const offer = window.AppUpgradeModal.resolveOffer({ current_plan: 'free' }, 'quick_search');
+                            const offer = window.AppUpgradeModal.resolveOffer({ current_plan: 'free' }, 'agentic_search');
                             return offer.title === window.AppI18n.t('upgrade.search_limit_title')
                                 && offer.description === window.AppI18n.t('upgrade.search_limit_description');
                         })(),
@@ -1035,11 +1035,11 @@ def main() -> None:
                             return offer.title === window.AppI18n.t('upgrade.leads_title')
                                 && offer.description === window.AppI18n.t('upgrade.leads_description');
                         })(),
-                        dailyLimitHandled: window.AppUpgradeModal.maybeHandle({ error: 'daily_limit_exceeded', current_plan: 'free' }, 'quick_search'),
+                        dailyLimitHandled: window.AppUpgradeModal.maybeHandle({ error: 'daily_limit_exceeded', current_plan: 'free' }, 'agentic_search'),
                         dailyLimitPlan: (document.getElementById('upgrade-plan-code')?.textContent || '').trim().toLowerCase(),
                         genericRateHandled: (() => {
                             hideUpgradeModal();
-                            return window.AppUpgradeModal.maybeHandle({ message: 'Rate limit exceeded' }, 'quick_search');
+                            return window.AppUpgradeModal.maybeHandle({ message: 'Rate limit exceeded' }, 'agentic_search');
                         })(),
                         modalVisibleAfterGenericRate: !!(document.getElementById('upgrade-modal') && !document.getElementById('upgrade-modal').classList.contains('hidden'))
                     })"""

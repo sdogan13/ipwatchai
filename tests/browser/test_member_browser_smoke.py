@@ -131,8 +131,8 @@ def _get_dashboard_overview_contract(page):
                 highRisk: String(stats.critical_alerts || 0),
                 pendingDeadlines: String(stats.active_deadline_count || 0),
                 recentActivity: String(stats.alerts_this_week || 0),
-                quickUsage: fmtUsage(usage.daily_quick_searches),
-                liveUsage: fmtUsage(usage.monthly_live_searches),
+                quickUsage: fmtUsage(usage.daily_live_searches),
+                liveUsage: fmtUsage(usage.daily_live_searches),
                 watchlistUsage: fmtUsage(usage.watchlist_items),
                 totalTrademarks: Number(systemStats.total_trademarks || 0).toLocaleString(),
                 creditResetDate: credits.resets_on
@@ -320,12 +320,12 @@ def main() -> None:
                 dashboard_overview_contract,
             )
 
-            def quick_search() -> None:
+            def agentic_search() -> None:
                 page.click("#tab-btn-search")
                 page.locator("#tab-content-search").wait_for(state="visible")
                 with page.expect_response(lambda response: "/api/v1/search" in response.url, timeout=CONFIG.timeout_ms) as response_info:
-                    page.fill('input[name="trademark-search"]', "wosen")
-                    page.press('input[name="trademark-search"]', "Enter")
+                    page.fill('#search-input', "wosen")
+                    page.press('#search-input', "Enter")
                 response = response_info.value
                 if response.status == 429:
                     monitor.request_failures = [
@@ -352,7 +352,7 @@ def main() -> None:
                 page,
                 monitor,
                 CONFIG,
-                quick_search,
+                agentic_search,
             )
 
             def watchlist_tab() -> None:

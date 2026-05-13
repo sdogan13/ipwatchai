@@ -95,7 +95,7 @@ def test_public_pages():
         REPORTER.expect_status(f"GET {path}", CLIENT.get(path, token=False), 200, record_pass=True)
 
 
-def test_quick_search_auth_gate():
+def test_agentic_search_auth_gate():
     name = "GET /api/v1/search requires auth"
     response = CLIENT.get("/api/v1/search", params={"query": "wosen"}, token=False)
     if response.status_code in (401, 403):
@@ -183,7 +183,7 @@ def main() -> None:
     test_health()
     test_api_info()
     test_public_pages()
-    test_quick_search_auth_gate()
+    test_agentic_search_auth_gate()
     test_public_search()
     test_public_search_with_class_filter()
     test_public_search_with_image_upload()

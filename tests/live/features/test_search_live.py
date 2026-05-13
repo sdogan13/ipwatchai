@@ -105,7 +105,7 @@ def ensure_paid_session() -> PersonaSession | None:
     return PAID_SESSION
 
 
-def test_quick_search_auth_gate():
+def test_agentic_search_auth_gate():
     name = "GET /api/v1/search requires auth"
     response = LiveClient(CONFIG).get("/api/v1/search", params={"query": "wosen"}, token=False)
     if response.status_code in (401, 403):
@@ -151,7 +151,7 @@ def test_public_search_missing_query_validation():
     REPORTER.record(name, False, response.text[:200])
 
 
-def test_quick_search_missing_query_validation():
+def test_agentic_search_missing_query_validation():
     client = ensure_default_client()
     if client is None:
         return
@@ -167,7 +167,7 @@ def test_quick_search_missing_query_validation():
     REPORTER.record(name, False, response.text[:200])
 
 
-def test_quick_search_text_happy_path():
+def test_agentic_search_text_happy_path():
     client = ensure_default_client()
     if client is None:
         return
@@ -192,7 +192,7 @@ def test_quick_search_text_happy_path():
     REPORTER.record(name, False, "results is not a list")
 
 
-def test_quick_search_class_filter():
+def test_agentic_search_class_filter():
     client = ensure_default_client()
     if client is None:
         return
@@ -216,7 +216,7 @@ def test_quick_search_class_filter():
     REPORTER.record(name, False, "results is not a list")
 
 
-def test_quick_search_image_happy_path():
+def test_agentic_search_image_happy_path():
     client = ensure_default_client()
     if client is None:
         return
@@ -285,7 +285,7 @@ def test_free_plan_live_search_gate():
     REPORTER.record(name, False, str(payload))
 
 
-def test_free_quick_search_usage_shape():
+def test_free_agentic_search_usage_shape():
     global FREE_QUICK_SEARCH_LIMIT
 
     session = ensure_free_session()
@@ -304,10 +304,10 @@ def test_free_quick_search_usage_shape():
         return
 
     plan_name = canonical_plan_name(payload.get("plan"))
-    quick_usage = payload.get("usage", {}).get("daily_quick_searches", {})
+    quick_usage = payload.get("usage", {}).get("daily_live_searches", {})
     used = quick_usage.get("used")
     limit = quick_usage.get("limit")
-    expected_limit = PLAN_FEATURES["free"]["max_daily_quick_searches"]
+    expected_limit = PLAN_FEATURES["free"]["max_daily_live_searches"]
     if plan_name == "free" and limit == expected_limit and used == 0:
         FREE_QUICK_SEARCH_LIMIT = limit
         REPORTER.ok(f"{name} -> plan=free, used={used}, limit={limit}")
@@ -318,7 +318,7 @@ def test_free_quick_search_usage_shape():
     REPORTER.record(name, False, str(payload))
 
 
-def test_free_quick_search_text_happy_path():
+def test_free_agentic_search_text_happy_path():
     session = ensure_free_session()
     if session is None:
         return
@@ -343,7 +343,7 @@ def test_free_quick_search_text_happy_path():
     REPORTER.record(name, False, "results is not a list")
 
 
-def test_paid_quick_search_usage_shape():
+def test_paid_agentic_search_usage_shape():
     session = ensure_paid_session()
     if session is None:
         return
@@ -354,10 +354,10 @@ def test_paid_quick_search_usage_shape():
         return
 
     plan_name = canonical_plan_name(payload.get("plan"))
-    quick_usage = payload.get("usage", {}).get("daily_quick_searches", {})
+    quick_usage = payload.get("usage", {}).get("daily_live_searches", {})
     used = quick_usage.get("used")
     limit = quick_usage.get("limit")
-    expected_limit = PLAN_FEATURES[plan_name]["max_daily_quick_searches"] if plan_name in PLAN_FEATURES else None
+    expected_limit = PLAN_FEATURES[plan_name]["max_daily_live_searches"] if plan_name in PLAN_FEATURES else None
     if (
         plan_name in PAID_PLANS
         and isinstance(used, int)
@@ -377,7 +377,7 @@ def test_paid_quick_search_usage_shape():
     REPORTER.record(name, False, str(payload))
 
 
-def test_free_quick_search_daily_limit_gate():
+def test_free_agentic_search_daily_limit_gate():
     session = ensure_free_session()
     if session is None:
         return
@@ -390,7 +390,7 @@ def test_free_quick_search_daily_limit_gate():
 
     name = "GET /api/v1/search (free daily limit gate)"
     try:
-        expected_limit = PLAN_FEATURES["free"]["max_daily_quick_searches"]
+        expected_limit = PLAN_FEATURES["free"]["max_daily_live_searches"]
         for attempt in range(expected_limit + 1):
             response = session.client.get("/api/v1/search", params={"query": "wosen"})
             if attempt < expected_limit:
@@ -428,7 +428,7 @@ def test_free_quick_search_daily_limit_gate():
         )
 
 
-def test_paid_quick_search_text_happy_path():
+def test_paid_agentic_search_text_happy_path():
     session = ensure_paid_session()
     if session is None:
         return
@@ -453,7 +453,7 @@ def test_paid_quick_search_text_happy_path():
     REPORTER.record(name, False, "results is not a list")
 
 
-def test_paid_quick_search_image_happy_path():
+def test_paid_agentic_search_image_happy_path():
     session = ensure_paid_session()
     if session is None:
         return
@@ -486,21 +486,21 @@ def test_paid_quick_search_image_happy_path():
 def main() -> None:
     REPORTER.print_heading("SEARCH FEATURE LIVE SUITE", server=CONFIG.base_url, user=CONFIG.email)
 
-    test_quick_search_auth_gate()
+    test_agentic_search_auth_gate()
     test_public_search_happy_path()
     test_public_search_missing_query_validation()
-    test_quick_search_missing_query_validation()
-    test_quick_search_text_happy_path()
-    test_quick_search_class_filter()
-    test_quick_search_image_happy_path()
+    test_agentic_search_missing_query_validation()
+    test_agentic_search_text_happy_path()
+    test_agentic_search_class_filter()
+    test_agentic_search_image_happy_path()
     test_search_credits_shape()
     test_free_plan_live_search_gate()
-    test_free_quick_search_usage_shape()
-    test_free_quick_search_text_happy_path()
-    test_free_quick_search_daily_limit_gate()
-    test_paid_quick_search_usage_shape()
-    test_paid_quick_search_text_happy_path()
-    test_paid_quick_search_image_happy_path()
+    test_free_agentic_search_usage_shape()
+    test_free_agentic_search_text_happy_path()
+    test_free_agentic_search_daily_limit_gate()
+    test_paid_agentic_search_usage_shape()
+    test_paid_agentic_search_text_happy_path()
+    test_paid_agentic_search_image_happy_path()
 
     sys.exit(0 if REPORTER.summary("SEARCH FEATURE SUMMARY") == 0 else 1)
 

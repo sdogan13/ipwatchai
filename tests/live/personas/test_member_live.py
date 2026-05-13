@@ -79,7 +79,7 @@ def test_usage_summary():
     if REPORTER.expect_status(name, response, 200):
         payload = response.json()
         usage = payload.get("usage", {})
-        required = ["daily_quick_searches", "monthly_live_searches", "watchlist_items"]
+        required = ["daily_live_searches", "daily_live_searches", "watchlist_items"]
         missing = [key for key in required if key not in usage]
         if missing:
             REPORTER.fail(f"{name} -> missing usage keys: {missing}")
@@ -102,7 +102,7 @@ def test_search_credits():
             REPORTER.record(name, True)
 
 
-def test_quick_search_text():
+def test_agentic_search_text():
     name = "GET /api/v1/search"
     response = CLIENT.get("/api/v1/search", params={"query": "wosen"})
     if _record_daily_limit_skip(name, response):
@@ -117,7 +117,7 @@ def test_quick_search_text():
         REPORTER.record(name, True)
 
 
-def test_quick_search_with_classes():
+def test_agentic_search_with_classes():
     name = "GET /api/v1/search with classes"
     response = CLIENT.get("/api/v1/search", params={"query": "wosen", "classes": "9,35"})
     if _record_daily_limit_skip(name, response):
@@ -128,7 +128,7 @@ def test_quick_search_with_classes():
         REPORTER.record(name, True)
 
 
-def test_quick_search_with_image():
+def test_agentic_search_with_image():
     name = "POST /api/v1/search with image"
     files = {"image": ("test.png", io.BytesIO(PNG_1X1), "image/png")}
     response = CLIENT.post(
@@ -153,9 +153,9 @@ def main() -> None:
     test_dashboard_stats()
     test_usage_summary()
     test_search_credits()
-    test_quick_search_text()
-    test_quick_search_with_classes()
-    test_quick_search_with_image()
+    test_agentic_search_text()
+    test_agentic_search_with_classes()
+    test_agentic_search_with_image()
 
     sys.exit(0 if REPORTER.summary("MEMBER PERSONA SUMMARY") == 0 else 1)
 

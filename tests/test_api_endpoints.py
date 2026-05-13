@@ -613,8 +613,7 @@ class TestPublicEndpoints:
                 "plan": "professional",
                 "display_name": "Professional",
                 "usage": {
-                    "daily_quick_searches": {"used": 1, "limit": 10},
-                    "monthly_live_searches": {"used": 2, "limit": 50},
+                    "daily_live_searches": {"used": 2, "limit": 50},
                     "monthly_ai_credits": {"remaining": 18, "limit": 20},
                     "monthly_name_generations": {"used": 4, "limit": 20},
                     "monthly_name_generations_used": 4,
@@ -8053,8 +8052,7 @@ async def test_usage_service_get_usage_summary_data_aggregates_limits_and_counts
     mock_cursor.fetchone.side_effect = [{"cnt": 7}, {"ai_used": 9}]
 
     plan_limit_values = {
-        "max_daily_quick_searches": 10,
-        "monthly_live_searches": 50,
+        "max_daily_live_searches": 50,
         "monthly_ai_credits": 20,
         "monthly_reports": 15,
         "monthly_applications": 25,
@@ -8069,8 +8067,7 @@ async def test_usage_service_get_usage_summary_data_aggregates_limits_and_counts
             return_value={"plan_name": "professional", "display_name": "Professional"}
         ),
         plan_limit_getter=MagicMock(side_effect=lambda plan_name, feature: plan_limit_values[feature]),
-        daily_quick_searches_getter=MagicMock(return_value=3),
-        live_search_usage_getter=MagicMock(return_value=4),
+        daily_live_search_usage_getter=MagicMock(return_value=4),
         ai_credit_eligibility_checker=MagicMock(return_value=(True, None, {"total_remaining": 18})),
         report_eligibility_checker=MagicMock(
             return_value={
@@ -8089,8 +8086,7 @@ async def test_usage_service_get_usage_summary_data_aggregates_limits_and_counts
         "plan": "professional",
         "display_name": "Professional",
         "usage": {
-            "daily_quick_searches": {"used": 3, "limit": 10},
-            "monthly_live_searches": {"used": 4, "limit": 50},
+            "daily_live_searches": {"used": 4, "limit": 50},
             "monthly_ai_credits": {"remaining": 18, "limit": 20, "used": 9},
             "monthly_reports": {
                 "used": 3,
@@ -8139,8 +8135,7 @@ async def test_usage_service_get_usage_summary_data_superadmin_uses_superadmin_a
     mock_cursor.fetchone.side_effect = [{"cnt": 7}, {"ai_used": 12}]
 
     plan_limit_values = {
-        "max_daily_quick_searches": 999999,
-        "monthly_live_searches": 999999,
+        "max_daily_live_searches": 999999,
         "monthly_ai_credits": 999999,
         "monthly_applications": 999999,
         "can_track_logos": True,
@@ -8157,8 +8152,7 @@ async def test_usage_service_get_usage_summary_data_superadmin_uses_superadmin_a
             return_value={"plan_name": "superadmin", "display_name": "Super Admin"}
         ),
         plan_limit_getter=MagicMock(side_effect=lambda plan_name, feature: plan_limit_values[feature]),
-        daily_quick_searches_getter=MagicMock(return_value=3),
-        live_search_usage_getter=MagicMock(return_value=4),
+        daily_live_search_usage_getter=MagicMock(return_value=4),
         ai_credit_eligibility_checker=ai_credit_eligibility_checker,
         report_eligibility_checker=MagicMock(
             return_value={
@@ -8241,8 +8235,7 @@ async def test_dashboard_service_get_dashboard_stats_data_aggregates_sections():
     plan_limit_values = {
         "max_watchlist_items": 100,
         "max_users": 10,
-        "max_daily_quick_searches": 20,
-        "monthly_live_searches": 50,
+        "max_daily_live_searches": 50,
         "monthly_reports": 15,
     }
 
@@ -14568,7 +14561,7 @@ async def test_auth_service_get_current_user_profile_data_maps_verified_and_supe
         plan_features_getter=lambda: {
             "superadmin": {
                 "max_watchlist_items": 999,
-                "monthly_live_searches": 5000,
+                "max_daily_live_searches": 5000,
                 "max_users": 250,
             }
         },
@@ -17785,11 +17778,12 @@ async def test_report_service_build_report_download_response_returns_file_respon
         "file_format": "pdf",
     }
 
-    def fake_file_response_factory(path, media_type, filename):
+    def fake_file_response_factory(path, media_type, filename, content_disposition_type=None):
         return {
             "path": path,
             "media_type": media_type,
             "filename": filename,
+            "content_disposition_type": content_disposition_type,
         }
 
     response = await build_report_download_response(
@@ -17804,6 +17798,7 @@ async def test_report_service_build_report_download_response_returns_file_respon
         "path": "C:/tmp/weekly.pdf",
         "media_type": "application/pdf",
         "filename": "Weekly Digest.pdf",
+        "content_disposition_type": "inline",
     }
     assert mock_db.commit.call_count == 1
 

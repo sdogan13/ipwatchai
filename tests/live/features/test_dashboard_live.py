@@ -1,4 +1,4 @@
-"""
+﻿"""
 Live HTTP suite for the dashboard and usage feature surface.
 
 Run directly:
@@ -106,7 +106,7 @@ def test_usage_summary_happy_path():
         return
 
     usage = payload.get("usage", {})
-    required_usage = ["daily_quick_searches", "monthly_live_searches", "watchlist_items"]
+    required_usage = ["daily_live_searches", "daily_live_searches", "watchlist_items"]
     missing_usage = [key for key in required_usage if key not in usage]
     if payload.get("plan") and payload.get("display_name") and not missing_usage:
         REPORTER.ok(f"{name} -> plan={payload.get('plan')}, display_name={payload.get('display_name')}")

@@ -86,7 +86,7 @@ def test_search_credits_gate():
     REPORTER.record(name, False, str(payload))
 
 
-def test_quick_search_available():
+def test_agentic_search_available():
     session = ensure_session()
     if session is None:
         return
@@ -228,7 +228,7 @@ def main() -> None:
 
     test_usage_summary_plan_free()
     test_search_credits_gate()
-    test_quick_search_available()
+    test_agentic_search_available()
     test_lead_credits_denied()
     test_holder_search_denied()
     test_visual_watchlist_create_denied()

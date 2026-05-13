@@ -207,9 +207,10 @@ def test_checkout_feature_page_translates_unlimited_summary_limits():
     assert "summaryFeatureText('watchlist')" in checkout_html
     assert "summaryFeatureText('live')" in checkout_html
     assert "isUnlimitedLimit(value)" in checkout_html
+    # Post-Quick-removal: `search` and `live` both render via `pricing.f_unlimited_searches`
+    # (a single Agentic budget); the legacy `pricing.f_unlimited_live` key is no longer used.
     assert "pricing.f_unlimited_searches" in checkout_html
     assert "pricing.f_unlimited_watchlist" in checkout_html
-    assert "pricing.f_unlimited_live" in checkout_html
 
 
 def test_ai_studio_credit_exhaustion_uses_shared_upgrade_modal():
@@ -444,7 +445,7 @@ def test_dashboard_feature_bundle_contains_dashboard_bootstrap():
     assert "slice(0, 30)" not in script
     assert "Math.min(data.total || 0, 30)" not in script
     assert "Math.min(data.total || results.length, 30)" not in script
-    assert "window.AppUpgradeModal.maybeHandle(detail, 'quick_search')" in script
+    assert "window.AppUpgradeModal.maybeHandle(detail, 'agentic_search')" in script
     assert "this.t('search.rate_limited')" in script
     assert "this.t('watchlist.added_toast')" in script
     assert "this.t('watchlist.added_success')" not in script
@@ -593,10 +594,9 @@ def test_shared_upgrade_modal_bundle_keeps_plan_handoff_logic():
     assert "window.AppUpgradeModal" in script
     assert "resolveOffer" in script
     assert "csv_export: { feature: 'can_export_csv_leads', kind: 'boolean' }" in script
-    assert "public_search: { feature: 'max_daily_quick_searches', kind: 'numeric' }" in script
+    assert "agentic_search: { feature: 'max_daily_live_searches', kind: 'numeric' }" in script
     assert "leads: { feature: 'daily_lead_views', kind: 'numeric' }" in script
     assert "function copyForContext(context)" in script
-    assert "upgrade.search_limit_title" in script
     assert "upgrade.watchlist_title" in script
     assert "upgrade.live_search_title" in script
     assert "upgrade.leads_title" in script
