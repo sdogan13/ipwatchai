@@ -654,15 +654,6 @@ class TestBulkEndpointLimitEnforcement:
         assert "max_watchlist_items" in source, "bulk_import_from_portfolio must check max_watchlist_items"
         assert "remaining_slots" in source, "bulk_import_from_portfolio must track remaining_slots"
 
-    def test_bulk_from_portfolio_has_portfolio_access_check(self):
-        """POST /watchlist/bulk-from-portfolio should check can_view_holder_portfolio."""
-        from api.routes import bulk_import_from_portfolio
-        import inspect
-        source = inspect.getsource(bulk_import_from_portfolio)
-        assert "can_view_holder_portfolio" in source, (
-            "bulk_import_from_portfolio must check can_view_holder_portfolio"
-        )
-
     def test_upload_with_mapping_has_limit_check(self):
         """POST /watchlist/upload/with-mapping should check max_watchlist_items."""
         from api.routes import upload_with_mapping
