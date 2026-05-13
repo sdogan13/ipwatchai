@@ -66,6 +66,15 @@ def register_asset_routes(app, templates, static_dir):
             headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
         )
 
+    @app.get("/.well-known/security.txt", tags=["Root"], include_in_schema=False)
+    async def serve_security_txt():
+        """RFC 9116 security disclosure file. Nginx has an explicit allow rule
+        for this path; the global `~ /\\.` deny would otherwise block it."""
+        return FileResponse(
+            static_dir / ".well-known" / "security.txt",
+            media_type="text/plain",
+        )
+
     @app.get("/static/sw.js", tags=["Root"], include_in_schema=False)
     async def serve_service_worker():
         """Serve SW with no-cache headers so browsers always check for updates."""

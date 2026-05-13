@@ -1,0 +1,4 @@
+Contact: mailto:security@ipwatchai.com
+Expires: 2027-05-13T00:00:00Z
+Preferred-Languages: en, tr
+Canonical: https://ipwatchai.com/.well-known/security.txt
