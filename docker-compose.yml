@@ -400,7 +400,7 @@ services:
     container_name: ipwatch_pgadmin
     profiles: [ "dev" ]
     environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@ipwatchai.com}
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-info@ipwatchai.com}
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
     ports:
       - "127.0.0.1:5050:80"

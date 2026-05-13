@@ -230,7 +230,7 @@ class EmailSettings(BaseSettings):
     smtp_password: str = Field(default="", alias="SMTP_PASSWORD")
     smtp_tls: bool = Field(default=True, alias="SMTP_TLS")
 
-    from_email: str = Field(default="noreply@trademark-system.com", alias="FROM_EMAIL")
+    from_email: str = Field(default="info@ipwatchai.com", alias="FROM_EMAIL")
     from_name: str = Field(default="Trademark Risk System", alias="FROM_NAME")
 
     # Templates

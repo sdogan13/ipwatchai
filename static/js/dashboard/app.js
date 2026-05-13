@@ -2305,7 +2305,7 @@ function hideCreditsModal() {
 }
 function buyCredits(amount) {
     hideCreditsModal();
-    window.location.href = 'mailto:sales@ipwatchdog.com.tr?subject='
+    window.location.href = 'mailto:info@ipwatchai.com?subject='
         + encodeURIComponent(t('credits.buy_subject', { amount: amount }))
         + '&body=' + encodeURIComponent(t('credits.buy_body', { amount: amount }));
 }
