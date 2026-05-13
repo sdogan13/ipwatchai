@@ -1680,16 +1680,6 @@
     "error_activation_failed": "Plan activation failed.",
     "annual_save_inline": "-20%"
   },
-  "bookmarklet": {
-    "title": "One-click TurkPatent lookup",
-    "description": "Drag the button below to your bookmarks bar. Then click 'TURKPATENT' on any result card — on the opened page, click your bookmark and the application number is auto-filled.",
-    "button_label": "TurkPatent Sorgula",
-    "drag_hint": "Drag this button to your bookmarks bar",
-    "drag_toast": "Drag this button to your bookmarks bar!",
-    "step1": "Drag this button to your bookmarks bar",
-    "step2": "Click TURKPATENT on a result card",
-    "step3": "Click the bookmark on the opened page — auto-search runs"
-  },
   "applications": {
     "title": "Applications",
     "subtitle": "Manage your trademark registration applications",

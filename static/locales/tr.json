@@ -1685,16 +1685,6 @@
     "summary_billing_label": "Faturalama",
     "annual_save_inline": "-20%"
   },
-  "bookmarklet": {
-    "title": "Tek tıkla Türk Patent sorgusu",
-    "description": "Aşağıdaki butonu sürükleyip yer imlerinize bırakın. Sonra herhangi bir sonuç kartında 'TÜRKPATENT' butonuna tıklayın — açılan sayfada yer iminize tıklayın, başvuru numarası otomatik doldurulur.",
-    "button_label": "TÜRKPATENT Sorgula",
-    "drag_hint": "Bu butonu yer imleri çubuğunuza sürükleyin",
-    "drag_toast": "Bu butonu yer imleri çubuğunuza sürükleyin!",
-    "step1": "Bu butonu yer imleri çubuğunuza sürükleyin",
-    "step2": "Sonuç kartında TÜRKPATENT butonuna tıklayın",
-    "step3": "Açılan sayfada yer iminize tıklayın — otomatik sorgulama yapılır"
-  },
   "applications": {
     "title": "Başvurular",
     "subtitle": "Marka tescil başvurularınızı yönetin",
