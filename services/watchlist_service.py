@@ -597,7 +597,7 @@ async def create_watchlist_item_record(
                     """
                     SELECT image_path,
                            image_embedding::text, dinov2_embedding::text,
-                           color_histogram::text, logo_ocr_text
+                           logo_ocr_text
                     FROM trademarks
                     WHERE application_no = %s
                     LIMIT 1
@@ -615,9 +615,6 @@ async def create_watchlist_item_record(
                     logo_embedding=_parse_embedding_vector(tm_ai.get("image_embedding")),
                     logo_dinov2_embedding=_parse_embedding_vector(
                         tm_ai.get("dinov2_embedding")
-                    ),
-                    logo_color_histogram=_parse_embedding_vector(
-                        tm_ai.get("color_histogram")
                     ),
                     logo_ocr_text=tm_ai.get("logo_ocr_text"),
                 )
@@ -1146,7 +1143,7 @@ async def import_watchlist_items_from_portfolio(
                 """
             SELECT application_no, name, nice_class_numbers, image_path,
                    image_embedding::text, dinov2_embedding::text,
-                   color_histogram::text, logo_ocr_text
+                   logo_ocr_text
             FROM trademarks
             WHERE {} = %s
             ORDER BY application_date DESC NULLS LAST
@@ -1226,9 +1223,6 @@ async def import_watchlist_items_from_portfolio(
                     logo_embedding=_parse_embedding_vector(trademark.get("image_embedding")),
                     logo_dinov2_embedding=_parse_embedding_vector(
                         trademark.get("dinov2_embedding")
-                    ),
-                    logo_color_histogram=_parse_embedding_vector(
-                        trademark.get("color_histogram")
                     ),
                     logo_ocr_text=trademark.get("logo_ocr_text"),
                     auto_commit=False,
@@ -1489,7 +1483,7 @@ def _load_linked_trademark_visual_payload(db, application_no):
     cur.execute(
         """
         SELECT image_embedding::text, dinov2_embedding::text,
-               color_histogram::text, logo_ocr_text
+               logo_ocr_text
         FROM trademarks
         WHERE application_no = %s
         LIMIT 1
@@ -1503,7 +1497,6 @@ def _load_linked_trademark_visual_payload(db, application_no):
     payload = {
         "logo_embedding": _parse_embedding_vector(row.get("image_embedding")),
         "dino_embedding": _parse_embedding_vector(row.get("dinov2_embedding")),
-        "color_histogram": _parse_embedding_vector(row.get("color_histogram")),
         "logo_ocr_text": row.get("logo_ocr_text"),
     }
     if any(value is not None for value in payload.values()):
@@ -1669,7 +1662,6 @@ def process_watchlist_logo_embeddings(
                 logo_path=filepath,
                 logo_embedding=result.get("clip_embedding"),
                 dino_embedding=result.get("dino_embedding"),
-                color_histogram=result.get("color_histogram"),
                 logo_ocr_text=result.get("ocr_text"),
             )
 

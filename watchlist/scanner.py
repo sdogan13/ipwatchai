@@ -46,8 +46,8 @@ CONFLICT_GENERATION_FLOOR = 0.50
 
 def generate_logo_embeddings(logo_path: str) -> Optional[Dict]:
     """
-    Generate all visual embeddings for a logo image file.
-    Returns dict with clip_embedding, dino_embedding, color_histogram, ocr_text
+    Generate visual embeddings for a logo image file.
+    Returns dict with clip_embedding, dino_embedding, ocr_text
     or None if the file cannot be processed.
     """
     import os
@@ -58,7 +58,6 @@ def generate_logo_embeddings(logo_path: str) -> Optional[Dict]:
     try:
         from PIL import Image
         import torch
-        import cv2
 
         img = Image.open(logo_path).convert('RGB')
         result: Dict[str, Any] = {}
@@ -86,18 +85,6 @@ def generate_logo_embeddings(logo_path: str) -> Optional[Dict]:
             result['dino_embedding'] = dino_emb.float().cpu().squeeze().tolist()
         except Exception as e:
             logger.warning(f"DINOv2 embedding failed: {e}")
-
-        # Color histogram (512-dim: HSV 8x8x8 = 512 bins, matching trademarks table)
-        try:
-            img_cv = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
-            hsv = cv2.cvtColor(img_cv, cv2.COLOR_BGR2HSV)
-            hist = cv2.calcHist([hsv], [0, 1, 2], None, [8, 8, 8], [0, 180, 0, 256, 0, 256]).flatten()
-            norm = np.linalg.norm(hist)
-            if norm > 0:
-                hist = hist / norm
-            result['color_histogram'] = hist.tolist()
-        except Exception as e:
-            logger.warning(f"Color histogram failed: {e}")
 
         # OCR text
         try:
@@ -425,7 +412,7 @@ class WatchlistScanner:
         scoring_result = calculate_comprehensive_score(wl_name, tm_name)
         text_sim = scoring_result['final_score']
 
-        # 2c. Visual similarity (combined CLIP/DINOv2/OCR — logo text vs logo text)
+        # 2b. Visual similarity (combined CLIP/DINOv2/OCR — logo text vs logo text)
         visual_sim, visual_breakdown = self._compute_visual_breakdown(
             trademark,
             watchlist_item,
@@ -519,13 +506,8 @@ class WatchlistScanner:
         if trademark.get('dinov2_embedding') and wl_dino:
             dino_sim = cos(trademark['dinov2_embedding'], wl_dino)
 
-        color_sim = 0.0
-        wl_color = watchlist_item.get('logo_color_histogram') or watchlist_item.get('color_embedding')
-        if trademark.get('color_histogram') and wl_color:
-            color_sim = cos(trademark['color_histogram'], wl_color)
-
         # If no embedding overlap exists on either side, skip — nothing to compare
-        if clip_sim == 0.0 and dino_sim == 0.0 and color_sim == 0.0:
+        if clip_sim == 0.0 and dino_sim == 0.0:
             return 0.0, {
                 "total": 0.0,
                 "active_components": [],
@@ -551,7 +533,6 @@ class WatchlistScanner:
         score, breakdown = _calculate_visual_breakdown(
             clip_sim=clip_sim,
             dinov2_sim=dino_sim,
-            color_sim=color_sim,
             ocr_text_a=wl_ocr,
             ocr_text_b=tm_ocr,
             logo_profile_a=wl_profile,
@@ -603,20 +584,21 @@ class WatchlistScanner:
     def _update_watchlist_embedding(self, watchlist_item: Dict):
         """Generate and store missing visual embeddings for a watchlist logo."""
         logo_path = watchlist_item.get('logo_path')
+        if not logo_path:
+            return
 
-        if logo_path:
-            logo_result = generate_logo_embeddings(logo_path)
-            if logo_result:
-                # Store full visual embeddings
-                WatchlistCRUD.update_logo(
-                    self.db,
-                    UUID(watchlist_item['id']),
-                    logo_path=logo_path,
-                    logo_embedding=logo_result.get('clip_embedding'),
-                    dino_embedding=logo_result.get('dino_embedding'),
-                    color_histogram=logo_result.get('color_histogram'),
-                    logo_ocr_text=logo_result.get('ocr_text'),
-                )
+        logo_result = generate_logo_embeddings(logo_path)
+        if not logo_result:
+            return
+
+        WatchlistCRUD.update_logo(
+            self.db,
+            UUID(watchlist_item['id']),
+            logo_path=logo_path,
+            logo_embedding=logo_result.get('clip_embedding'),
+            dino_embedding=logo_result.get('dino_embedding'),
+            logo_ocr_text=logo_result.get('ocr_text'),
+        )
 
 
 # ==========================================
